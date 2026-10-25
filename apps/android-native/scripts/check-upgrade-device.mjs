@@ -145,6 +145,8 @@ const PROMPT_STATE = 'mindwtr:local-user-prompts:v1';
 const RN_CHECKPOINT = 'files/SQLite/RKStorage.prewrite';
 // RN's reminder alarm map (core's REMINDER_ALARM_MAP_STORAGE_KEY): the native app's reminder alarms clear RN's and keep theirs there.
 const ALARM_MAP = 'mindwtr:local:alarms:v1';
+// Core's session restore (pass O2b): the native app stores the screen on show under RN's key, so an RN build over it resumes too.
+const LAST_ROUTE = 'mindwtr:session:lastRoute';
 const AUTO_CLEAN_LABEL = 'Clean up quick add text'; // RN v1.3.2 English label of settings.quickAddAutoClean
 const TMP = '/data/local/tmp/mindwtr-upgradetest';
 const DB = 'files/SQLite/mindwtr.db';
@@ -649,12 +651,17 @@ const scenarioUpgrade = async () => {
     const imported = rows(post, TASK_SQL).filter((task) => task.title === t.queued && !task.deletedAt);
     check(imported.length === 1 && imported[0].id === queued.id && !after.has(queuedPath), '(1) the native boot imported the capture RN left queued once, under its id, and removed its file');
     // The RKStorage writes the native app makes here on purpose: the reminder alarms clear RN's alarm map and keep their own under
-    // RN's key, and the first paint counts today in RN's prompt state, after the boot's byte copy of RKStorage. No other row may change.
-    const asyncChanged = (() => {
-        const postAsync = asyncStorage('1-post-rkstorage');
-        return [...new Set([...preAsync.keys(), ...postAsync.keys()])].filter((name) => preAsync.get(name) !== postAsync.get(name));
-    })();
-    check(asyncChanged.every((name) => name === ALARM_MAP || name === PROMPT_STATE), `(1) RKStorage: only RN's alarm map ${ALARM_MAP} and RN's prompt state changed${shortList(asyncChanged)}`);
+    // RN's key, the first paint counts today in RN's prompt state, after the boot's byte copy of RKStorage, and each screen shown
+    // is stored as RN's last route (core's snapshot: a path and its time, `at`). No other row may change.
+    const postAsync = asyncStorage('1-post-rkstorage');
+    const asyncChanged = [...new Set([...preAsync.keys(), ...postAsync.keys()])].filter((name) => preAsync.get(name) !== postAsync.get(name));
+    check(asyncChanged.every((name) => name === ALARM_MAP || name === PROMPT_STATE || name === LAST_ROUTE),
+        `(1) RKStorage: only RN's alarm map ${ALARM_MAP}, RN's prompt state and RN's last route changed${shortList(asyncChanged)}`);
+    if (asyncChanged.includes(LAST_ROUTE)) {
+        const route = JSON.parse(postAsync.get(LAST_ROUTE) ?? 'null');
+        check(typeof route?.pathname === 'string' && route.pathname.startsWith('/') && Number.isFinite(route.at),
+            `(1) RN's last route holds core's snapshot of a screen the native app showed: ${route?.pathname}`);
+    }
     // Pass O1: the native first paint counted today as RN's does, on RN's state: RN's first-seen time and days kept, today added.
     const postAbout = asyncStorage('1-post-about');
     const prompts = JSON.parse(postAbout.get(PROMPT_STATE) ?? '{}');

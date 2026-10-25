@@ -330,21 +330,23 @@ const toCard = async () => {
     return waitFor('the Pomodoro card', card, 30_000);
 };
 const clock = (nodes) => tagged(nodes, 'pomodoro-clock')?.text;
+/** A card control once it takes taps: the card's controls are off while a transition and its alarm plan run (RN's busy rule). */
+const control = async (tag) => tagged(await waitFor(`${tag} enabled`, (current) => tagged(current, tag)?.enabled === 'true', 30_000), tag);
 const primary = (nodes) => tagged(nodes, 'pomodoro-primary')?.['content-desc'];
 /** The card at rest on Focus at the 1/1 preset's full 01:00 (Reset first, and Switch to Focus while on the break). */
 const idleCard = async () => {
     let nodes = await toCard();
-    if (primary(nodes) === en['common.pause']) nodes = await tapExpecting(tagged(nodes, 'pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
+    if (primary(nodes) === en['common.pause']) nodes = await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
     if (withDescription(nodes, en['pomodoro.switchToFocus'])) {
-        nodes = await tapExpecting(tagged(nodes, 'pomodoro-switch'), (current) => Boolean(withDescription(current, en['pomodoro.switchToBreak'])), 'Switch to Focus');
+        nodes = await tapExpecting(await control('pomodoro-switch'), (current) => Boolean(withDescription(current, en['pomodoro.switchToBreak'])), 'Switch to Focus');
     }
-    nodes = await tapExpecting(tagged(nodes, 'pomodoro-preset-custom') ?? fail('no 1/1 preset'), (current) => clock(current) === '01:00' || Boolean(tagged(current, 'pomodoro-reset')), 'the 1/1 preset');
-    if (clock(nodes) !== '01:00') nodes = await tapExpecting(tagged(nodes, 'pomodoro-reset'), (current) => clock(current) === '01:00', 'Reset');
+    nodes = await tapExpecting(await control('pomodoro-preset-custom'), (current) => clock(current) === '01:00' || Boolean(tagged(current, 'pomodoro-reset')), 'the 1/1 preset');
+    if (clock(nodes) !== '01:00') nodes = await tapExpecting(await control('pomodoro-reset'), (current) => clock(current) === '01:00', 'Reset');
     return nodes;
 };
 /** Start on the idle card: the session runs, and core's record names the focus alert (its time is the stored phase end). */
 const startFocus = async (nodes) => {
-    await tapExpecting(tagged(nodes, 'pomodoro-primary'), (current) => primary(current) === en['common.pause'], 'Start');
+    await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.pause'], 'Start');
     const state = await waitUntil('the running session stored', () => { const { state: s } = pomodoro(); return s?.session?.timerState?.isRunning && s; }, 15_000);
     const alert = { sessionID: state.sessionID, phase: 'focus', fireAtMs: Date.parse(state.session.phaseEndsAt) };
     await waitUntil('core\'s record of the focus alert', () => { const { alarm } = book(); return alarm?.fireAtMs === alert.fireAtMs && alarm.phase === 'focus'; }, 15_000);
@@ -366,7 +368,7 @@ const restore = async () => {
             if (found.pomodoro && settings().features?.pomodoro === true) {
                 // The timer at rest, so no alert of this check fires later.
                 const nodes = await toCard();
-                if (primary(nodes) === en['common.pause']) await tapExpecting(tagged(nodes, 'pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
+                if (primary(nodes) === en['common.pause']) await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
                 await waitUntil('no Pomodoro alarm left', () => pomodoroAlarms().length === 0, 15_000);
             }
             await openNotifications();
@@ -557,7 +559,7 @@ try {
     nodes = await idleCard();
     await waitUntil('the journal to empty', () => journal().length === 0, 20_000);
     setProp('journal_stop', 'before:pomodoroTransitionCommit');
-    await tap(tagged(nodes, 'pomodoro-primary'));
+    await tap(await control('pomodoro-primary'));
     await waitUntil('the process to stop at the journaled Start', () => !pid(), 20_000);
     setProp('journal_stop', '');
     check(journal().length === 1 && pomodoro().state?.session?.timerState?.isRunning !== true, '(4) the Start is in the journal and core never committed it');
@@ -572,7 +574,7 @@ try {
     await waitUntil('the replayed Start\'s alarm', () => armedAt(replayAlert) === 1, 15_000);
     check(pomodoroAlarms().length === 1 && book().armed.some((entry) => entry.id === pomodoroId(replayAlert)), '(4) one alarm is armed, and the journal is empty');
     nodes = await screen();
-    await tapExpecting(tagged(nodes, 'pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
+    await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
     await waitUntil('the alarm to go', () => pomodoroAlarms().length === 0, 15_000);
     check(true, '(4) Pause cancels it');
 
@@ -601,7 +603,7 @@ try {
     await waitUntil('the alarm armed again', () => armedAt(stopped) === 1, 20_000);
     check(pomodoroAlarms().length === 1 && book().alarm?.fireAtMs === stopped.fireAtMs, '(7) the next start arms the same alert again, at the same time');
     nodes = await toCard();
-    await tapExpecting(tagged(nodes, 'pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
+    await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
     await waitUntil('the alarm to go', () => pomodoroAlarms().length === 0, 15_000);
 
     // (5) Auto-start breaks with the app open: the focus alert still shows when the break starts at once.
@@ -619,7 +621,7 @@ try {
     check(openBreak.id !== open.id && book().armed.some((entry) => entry.id === openBreak.id) && pomodoroAlarms().length === 1,
         '(5) the break\'s alarm is armed at its end under another id');
     nodes = await toCard();
-    await tapExpecting(tagged(nodes, 'pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
+    await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
     await waitUntil('the break\'s alarm to go', () => pomodoroAlarms().length === 0, 15_000);
     check(true, '(5) Pause cancels the break\'s alarm');
 
@@ -650,9 +652,9 @@ try {
     await openGtd(true);
     await setPomodoroSwitch(POMODORO.linkTask, true);
     nodes = await idleCard();
-    nodes = await tapExpecting(tagged(nodes, 'pomodoro-link'), (current) => Boolean(tagged(current, 'pomodoro-picker')), 'the task picker');
+    nodes = await tapExpecting(await control('pomodoro-link'), (current) => Boolean(tagged(current, 'pomodoro-picker')), 'the task picker');
     nodes = await waitFor('a Focus task in the picker', (current) => Boolean(tagged(current, 'pomodoro-task')), 20_000);
-    await tapExpecting(tagged(nodes, 'pomodoro-task'), (current) => !tagged(current, 'pomodoro-picker') && Boolean(tagged(current, 'pomodoro-done')), 'the first Focus task');
+    await tapExpecting(await control('pomodoro-task'), (current) => !tagged(current, 'pomodoro-picker') && Boolean(tagged(current, 'pomodoro-done')), 'the first Focus task');
     const linked = await waitUntil('the linked task stored', () => pomodoro().state?.session?.selectedTaskId, 15_000);
     const before = pomodoro(linked).minutes ?? fail('the linked task is not in the database');
     nodes = await waitFor('the card', card, 15_000);
@@ -675,8 +677,8 @@ try {
     await sleep(3000);
     check(pomodoro(linked).minutes === before + 1, '(9) a further restart gives nothing more');
     nodes = await idleCard();
-    nodes = await tapExpecting(tagged(nodes, 'pomodoro-link'), (current) => Boolean(tagged(current, 'pomodoro-picker')), 'the task picker');
-    await tapExpecting(tagged(nodes, 'pomodoro-timer-only'), (current) => !tagged(current, 'pomodoro-picker') && !tagged(current, 'pomodoro-done'), 'Timer only');
+    nodes = await tapExpecting(await control('pomodoro-link'), (current) => Boolean(tagged(current, 'pomodoro-picker')), 'the task picker');
+    await tapExpecting(await control('pomodoro-timer-only'), (current) => !tagged(current, 'pomodoro-picker') && !tagged(current, 'pomodoro-done'), 'Timer only');
     closeShade();
 
     console.log('Notifications device check passed');
