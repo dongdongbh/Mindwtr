@@ -484,32 +484,27 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
         dir.deleteRecursively()
     }
 
-    /** The document a stale React Native record names: gone, or its name and bytes judged (up to [RN_EXPORT_CHECK_BYTES]). */
-    private fun inspectRnExport(uri: String): RnExportFile {
+    /**
+     * The document a stale React Native record names, judged by [inspectRnExportStream] from its name, its size and one pass over
+     * its bytes; null when the provider cannot say (no row, no size), so the record stays for the next start.
+     */
+    private fun inspectRnExport(uri: String): RnExportFile? {
         val document = Uri.parse(uri)
-        val name = try {
-            resolver.query(document, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { row ->
-                if (row.moveToFirst()) row.getString(0) ?: "" else null
-            } ?: return RnExportFile.GONE
-        } catch (_: java.io.FileNotFoundException) { return RnExportFile.GONE }
-        val bytes = (resolver.openInputStream(document) ?: throw IOException("The backup cannot be read")).use { input ->
-            val out = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(64 * 1024)
-            while (true) {
-                val read = input.read(buffer)
-                if (read < 0) break
-                out.write(buffer, 0, read)
-                if (out.size() > RN_EXPORT_CHECK_BYTES) return RnExportFile.UNCHECKED
+        val row = try {
+            resolver.query(document, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { row ->
+                if (!row.moveToFirst()) null
+                else (row.getString(0) ?: "") to row.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !row.isNull(it) }?.let(row::getLong)
             }
-            out.toByteArray()
-        }
-        return judgeRnExport(name, bytes)
+        } catch (_: java.io.FileNotFoundException) { return RnExportFile.GONE }
+        // DocumentsProvider answers no row for a vanished document and for a failed query alike; only an open says which.
+        if (row == null) return try { resolver.openInputStream(document)?.close(); null } catch (_: java.io.FileNotFoundException) { RnExportFile.GONE }
+        return inspectRnExportStream(row.first, row.second) { resolver.openInputStream(document) ?: throw IOException("The backup cannot be read") }
     }
 
     /** At start, before any export: a folder document whose write never finished is deleted (the persisted grant allows it). */
     private fun cleanupInterruptedExport(runtime: CoreHost) {
-        cleanupRnExportRecord(rnExportPending, ::deleteDocument, ::documentExists, ::inspectRnExport)?.let { outcome ->
-            runtime.logLine("Native Android interrupted React Native export removed releaseCheck=v1.3.8/android-rn-export-cleanup", JSONObject().put("releaseCheck", "v1.3.8/android-rn-export-cleanup").put("outcome", outcome))
+        for (outcome in cleanupRnExportRecord(rnExportPending, ::deleteDocument, ::documentExists, ::inspectRnExport)) {
+            runtime.logLine("Native Android stale React Native export record handled releaseCheck=v1.3.8/android-rn-export-cleanup", JSONObject().put("releaseCheck", "v1.3.8/android-rn-export-cleanup").put("outcome", outcome))
         }
         val outcome = cleanupExportRecord(exportPending, ::deleteDocument, ::documentExists) ?: return
         runtime.logLine("Native Android interrupted export removed releaseCheck=v1.3.5/android-export-cleanup", JSONObject().put("releaseCheck", "v1.3.5/android-export-cleanup").put("outcome", outcome))
@@ -632,7 +627,10 @@ internal val EXPORT_OWNER: String = UUID.randomUUID().toString()
 /** A test seam: runs in [cleanupExportRecord] after it read the list. */
 @Volatile internal var exportCleanupPause: () -> Unit = {}
 
-private fun exportEntries(record: File): List<ExportEntry> = runCatching {
+private fun exportEntries(record: File): List<ExportEntry> = exportEntriesOrNull(record) ?: emptyList()
+
+/** [record]'s list, or null when it is no whole list (missing, cut short, another shape). The older `{ uri }` form is read too. */
+private fun exportEntriesOrNull(record: File): List<ExportEntry>? = if (!record.isFile) null else runCatching {
     val parsed = JSONObject(record.readText())
     if (parsed.has("uri")) return@runCatching listOf(ExportEntry(uri = parsed.getString("uri")))
     val list = parsed.getJSONArray("pending")
@@ -643,7 +641,7 @@ private fun exportEntries(record: File): List<ExportEntry> = runCatching {
             else -> null
         }
     }.filterNotNull()
-}.getOrDefault(emptyList())
+}.getOrNull()
 
 /** [record]'s list after [change]; throws when it cannot be written (the caller then treats its write as failed). */
 private fun updateExportRecord(record: File, change: (List<ExportEntry>) -> List<ExportEntry>) {
@@ -706,101 +704,159 @@ internal enum class RnExportFile { GONE, TRUNCATED, COMPLETE, UNCHECKED }
 /** RN's export names: core's createBackupFileName with RN's format suffix; a provider may add " (1)" before the extension. */
 private val RN_EXPORT_NAME = Regex("""^mindwtr-backup-.*\.(json|csv|zip)$""", RegexOption.IGNORE_CASE)
 
-/** The largest RN export a start reads whole to judge it; a larger one is kept unchecked. */
+/** The largest RN export a start reads to judge it; a larger one is kept unchecked. */
 internal const val RN_EXPORT_CHECK_BYTES = 64L * 1024 * 1024
 
 /**
- * Whether [bytes] are a whole RN export named [name]: core's JSON backup parses to its end, a TaskNotes ZIP ends in a valid
- * end-of-central-directory record, a Mindwtr CSV is strict UTF-8 with closed quotes and the header's column count on every row.
- * An empty file was cut short. A name that is none of RN's exports is never judged. Known limit: a CSV cut inside its last
- * field (Recurrence, empty on most rows) or between two rows still reads as whole, so it is kept.
+ * Whether the RN export named [name], [size] bytes as its provider reports, is whole, judged in one pass over [open]'s stream with
+ * a small, fixed memory: core's JSON backup closes its one top-level object with nothing after it; a Mindwtr CSV closes its
+ * quotes and every row has the header's column count; both are strict UTF-8, a leading BOM allowed. A TaskNotes ZIP ends in a
+ * valid end-of-central-directory record (only its last 64 KiB are kept). An empty file was cut short. A name that is none of
+ * RN's exports, or a size over [limit], is never judged. Null when the provider cannot say: no size, a read that failed, or a
+ * stream that ended before [size] (a provider's short read must never make a whole file look cut short). Known limit: a CSV
+ * cut between two rows, inside a non-empty last field, or inside its header line (an export with no tasks is one line) reads as
+ * whole and is kept.
  */
-internal fun judgeRnExport(name: String, bytes: ByteArray): RnExportFile {
+internal fun inspectRnExportStream(name: String, size: Long?, limit: Long = RN_EXPORT_CHECK_BYTES, open: () -> InputStream): RnExportFile? {
     val kind = RN_EXPORT_NAME.find(name)?.groupValues?.get(1)?.lowercase() ?: return RnExportFile.UNCHECKED
-    if (bytes.isEmpty()) return RnExportFile.TRUNCATED
-    val whole = when (kind) {
-        "zip" -> zipEnds(bytes)
-        "json" -> strictUtf8(bytes)?.let(::jsonEnds) ?: false
-        else -> strictUtf8(bytes)?.let(::csvEnds) ?: false
-    }
-    return if (whole) RnExportFile.COMPLETE else RnExportFile.TRUNCATED
+    if (size == null) return null
+    if (size > limit) return RnExportFile.UNCHECKED
+    if (size == 0L) return RnExportFile.TRUNCATED
+    return try {
+        open().use { input ->
+            val counted = CountingInput(input)
+            val whole = if (kind == "zip") zipEnds(counted) else textEnds(counted, csv = kind == "csv")
+            // The judge stops early on a cut; read the rest so the length is known either way.
+            counted.skipRest()
+            if (counted.count != size) null else if (whole) RnExportFile.COMPLETE else RnExportFile.TRUNCATED
+        }
+    } catch (_: IOException) { null }
 }
 
-private fun strictUtf8(bytes: ByteArray): String? = try {
-    Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString()
-} catch (_: java.nio.charset.CharacterCodingException) { null }
+/** One pass over the bytes, counted. */
+private class CountingInput(private val input: InputStream) {
+    var count = 0L; private set
+    private val buffer = ByteArray(64 * 1024)
+    fun read(into: ByteArray): Int = input.read(into).also { if (it > 0) count += it }
+    fun skipRest() { while (read(buffer) >= 0) Unit }
+    fun stream(): InputStream = object : InputStream() {
+        override fun read(): Int = input.read().also { if (it >= 0) count += 1 }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = input.read(b, off, len).also { if (it > 0) count += it }
+    }
+}
 
-private fun jsonEnds(text: String): Boolean = try {
-    val tokener = org.json.JSONTokener(text)
-    tokener.nextValue() is JSONObject && tokener.nextClean() == 0.toChar()
-} catch (_: org.json.JSONException) { false }
-
-private fun csvEnds(text: String): Boolean {
+/** A JSON backup (one top-level object, by depth and quotes) or a CSV (closed quotes, equal column counts), strict UTF-8. */
+private fun textEnds(input: CountingInput, csv: Boolean): Boolean {
+    val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+        .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+    val reader = java.io.InputStreamReader(input.stream(), decoder).buffered(64 * 1024)
+    var first = true
+    var quoted = false
+    var escaped = false
+    var depth = 0
+    var closed = false
     var columns = -1
     var fields = 1
-    var quoted = false
-    var empty = true
-    var index = 0
-    val endRow = { -> if (columns < 0) columns = fields; columns == fields }
-    while (index < text.length) {
-        val char = text[index]
-        if (quoted) {
-            if (char == '"') { if (text.getOrNull(index + 1) == '"') index += 1 else quoted = false }
-        } else when (char) {
-            '"' -> quoted = true
-            ',' -> fields += 1
-            '\n' -> { if (!endRow()) return false; fields = 1; empty = true; index += 1; continue }
+    var rowEmpty = true
+    try {
+        while (true) {
+            val code = reader.read()
+            if (code < 0) break
+            val char = code.toChar()
+            if (first) { first = false; if (char == '﻿') continue }
+            if (!csv) {
+                when {
+                    closed -> if (!char.isWhitespace()) return false
+                    quoted -> if (escaped) escaped = false else if (char == '\\') escaped = true else if (char == '"') quoted = false
+                    char == '"' -> quoted = true
+                    char == '{' || char == '[' -> depth += 1
+                    char == '}' || char == ']' -> { depth -= 1; if (depth == 0) closed = true; if (depth < 0) return false }
+                    depth == 0 && !char.isWhitespace() -> return false
+                }
+                continue
+            }
+            if (quoted) { if (char == '"') quoted = false; continue }
+            when (char) {
+                '"' -> quoted = true
+                ',' -> fields += 1
+                '\n' -> { if (columns < 0) columns = fields else if (fields != columns) return false; fields = 1; rowEmpty = true; continue }
+            }
+            if (char != '\r') rowEmpty = false
         }
-        if (char != '\r') empty = false
-        index += 1
-    }
-    return !quoted && (empty && columns > 1 || endRow() && columns > 1)
+    } catch (_: java.nio.charset.CharacterCodingException) { return false }
+    // A doubled quote inside a quoted CSV field closes and reopens it, which the scan above counts the same way.
+    if (!csv) return closed
+    if (quoted) return false
+    if (rowEmpty) return columns > 1
+    return (if (columns < 0) fields else columns) > 1 && (columns < 0 || fields == columns)
 }
 
-private fun zipEnds(bytes: ByteArray): Boolean {
-    fun u16(at: Int) = (bytes[at].toInt() and 0xff) or ((bytes[at + 1].toInt() and 0xff) shl 8)
+/** A ZIP's end-of-central-directory record, checked in the stream's last 64 KiB plus the record. */
+private fun zipEnds(input: CountingInput): Boolean {
+    val keep = 22 + 0xffff
+    val tail = ByteArray(keep)
+    var filled = 0
+    val chunk = ByteArray(64 * 1024)
+    while (true) {
+        val read = input.read(chunk)
+        if (read < 0) break
+        if (read >= keep) { System.arraycopy(chunk, read - keep, tail, 0, keep); filled = keep; continue }
+        val shift = maxOf(0, filled + read - keep)
+        if (shift > 0) { System.arraycopy(tail, shift, tail, 0, filled - shift); filled -= shift }
+        System.arraycopy(chunk, 0, tail, filled, read)
+        filled += read
+    }
+    val base = input.count - filled
+    fun u16(at: Int) = (tail[at].toInt() and 0xff) or ((tail[at + 1].toInt() and 0xff) shl 8)
     fun u32(at: Int) = u16(at).toLong() or (u16(at + 2).toLong() shl 16)
-    for (at in bytes.size - 22 downTo maxOf(0, bytes.size - 22 - 0xffff)) {
-        if (u32(at) != 0x06054b50L || at + 22 + u16(at + 20) != bytes.size) continue
+    for (at in filled - 22 downTo 0) {
+        if (u32(at) != 0x06054b50L || at + 22 + u16(at + 20) != filled) continue
         val size = u32(at + 12)
         val offset = u32(at + 16)
         // ZIP64 keeps its real offsets elsewhere; its end record was written, so the writer finished.
         if (offset == 0xffffffffL || size == 0xffffffffL) return true
-        if (offset + size != at.toLong()) continue
-        return size == 0L || u32(offset.toInt()) == 0x02014b50L
+        if (offset + size != base + at) continue
+        val local = offset - base
+        return size == 0L || local < 0 || u32(local.toInt()) == 0x02014b50L
     }
     return false
 }
 
 /**
- * React Native's own record (`files/export-pending.json`, dd6f93626): one `{"uri": ...}` written once the picked folder made the
- * document and deleted once its write closed, so one left over names a backup a death likely cut short. [inspect] reads that
- * document: one cut short is deleted by that URI, as RN's next export or Data visit would; a complete export is kept (RN's
- * record could outlive a finished write when its own delete failed), and so is one that is not RN's or too large to judge. The
- * record goes once nothing is left in it; a refused delete, or a provider that cannot say, keeps it for the next start. Only a
- * folder's `content://` document is ever read or deleted; anything else, or a record cut short, is dropped. The outcome is
- * "deleted" (cut short and removed, or already gone), "kept-complete", "kept-unchecked", "kept" (left for the next start), or
- * null when there was nothing to clean.
+ * React Native's own record (`files/export-pending.json`, dd6f93626, v1.3.7's `{"pending": [{"uri", "owner"}]}` or the older
+ * `{"uri"}`), and the whole pending list RN writes beside it before it replaces the record (`.pending`: a death between those
+ * steps leaves only that, the newest list, which RN reads first). Each `content://` document it names was listed before RN's
+ * first byte and unlisted once its write closed, so it was most likely cut short. [inspect] judges it: one cut short is deleted
+ * by that URI, as RN's next export or Data visit would; a complete export is kept (RN's record can outlive a finished write when
+ * its own delete failed), and so is one that is not RN's or too large to judge. An entry leaves once settled; a refused delete,
+ * or a provider that cannot say ([inspect] null or failing), keeps it for the next start. Anything that is not a folder
+ * document, or a list cut short, is dropped untouched. Both files go once nothing is left. One outcome per entry: "deleted" (cut
+ * short and removed, or already gone), "kept-complete", "kept-unchecked", or "kept" (left for the next start).
  */
 internal fun cleanupRnExportRecord(record: File, delete: (String) -> Boolean, exists: (String) -> Boolean?,
-                                   inspect: (String) -> RnExportFile): String? {
-    if (!record.isFile) return null
-    var outcome: String? = null
-    for (entry in exportEntries(record).filter { it.uri.startsWith("content://") }) {
-        val state = runCatching { inspect(entry.uri) }.getOrNull()
-        val (done, said) = when (state) {
+                                   inspect: (String) -> RnExportFile?): List<String> {
+    val pending = File(record.parentFile, record.name + ".pending")
+    if (!record.isFile && !pending.isFile) return emptyList()
+    val listed = (exportEntriesOrNull(pending) ?: exportEntriesOrNull(record) ?: emptyList()).filter { it.uri.startsWith("content://") }
+    val left = mutableListOf<ExportEntry>()
+    val outcomes = listed.map { entry ->
+        val (settled, outcome) = when (runCatching { inspect(entry.uri) }.getOrNull()) {
             RnExportFile.GONE -> true to "deleted"
             RnExportFile.TRUNCATED -> documentGone(entry.uri, delete, exists).let { gone -> gone to if (gone) "deleted" else "kept" }
             RnExportFile.COMPLETE -> true to "kept-complete"
             RnExportFile.UNCHECKED -> true to "kept-unchecked"
             null -> false to "kept"
         }
-        outcome = said
-        if (done) runCatching { updateExportRecord(record) { it - entry } }
+        if (!settled) left += entry
+        outcome
     }
-    if (exportEntries(record).none { it.uri.startsWith("content://") }) record.delete()
-    return outcome
+    if (left.isEmpty()) {
+        pending.delete()
+        record.delete()
+    } else if (left != exportEntriesOrNull(record) || pending.isFile) {
+        runCatching { updateExportRecord(record) { left } }
+    }
+    return outcomes
 }
 
 /** The transfer limit check (design §4.1): the picked file and the library together, before anything is decoded or parsed. */

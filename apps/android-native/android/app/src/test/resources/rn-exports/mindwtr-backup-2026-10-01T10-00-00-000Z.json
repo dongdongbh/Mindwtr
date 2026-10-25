@@ -1,0 +1,43 @@
+{
+  "tasks": [
+    {
+      "id": "t1",
+      "title": "Grüße 😀 \"quoted\", comma",
+      "description": "two\nlines",
+      "status": "inbox",
+      "tags": [
+        "#home"
+      ],
+      "contexts": [
+        "@desk"
+      ],
+      "createdAt": "2026-10-01T10:00:00.000Z",
+      "updatedAt": "2026-10-01T10:00:00.000Z"
+    },
+    {
+      "id": "t2",
+      "title": "Weekly review",
+      "status": "next",
+      "tags": [],
+      "contexts": [],
+      "createdAt": "2026-10-01T10:00:00.000Z",
+      "updatedAt": "2026-10-01T10:00:00.000Z",
+      "recurrence": {
+        "rule": "weekly"
+      }
+    },
+    {
+      "id": "t3",
+      "title": "Plain",
+      "status": "next",
+      "tags": [],
+      "contexts": [],
+      "createdAt": "2026-10-01T10:00:00.000Z",
+      "updatedAt": "2026-10-01T10:00:00.000Z"
+    }
+  ],
+  "projects": [],
+  "sections": [],
+  "areas": [],
+  "settings": {}
+}

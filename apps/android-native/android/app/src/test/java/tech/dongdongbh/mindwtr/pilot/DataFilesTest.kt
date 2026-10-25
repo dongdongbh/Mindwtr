@@ -261,70 +261,109 @@ class DataFilesTest {
         }
     }
 
-    // Audit gap 9: React Native kept its record in `files/export-pending.json` (dd6f93626), one `{"uri": ...}` while it wrote a
-    // backup into a picked folder. A death mid-write, then the upgrade, leaves that record; the first native start deletes its
-    // document by that URI only when the document is a cut-short export, and keeps a complete one (a record whose own delete
-    // failed after a finished write). It never looks a file up by name.
-    private val rnRecord get() = File(folder.root, "files-export-pending.json")
-    private fun rnRecordFor(uri: String) = rnRecord.writeText(JSONObject().put("uri", uri).toString())
+    // Audit gap 9: React Native kept its record in `files/export-pending.json` (dd6f93626; v1.3.7 writes `{"pending": [{uri,
+    // owner}]}` through a whole `.pending` list it then moves over the record). A death mid-write, then the upgrade, leaves that
+    // record; the first native start deletes a listed document by its URI only when it is a cut-short export, and keeps a
+    // complete one (a record whose own delete failed after a finished write). It never looks a file up by name.
+    private val rnRecord get() = File(folder.root, "export-pending.json")
+    private val rnPending get() = File(folder.root, "export-pending.json.pending")
+    /** v1.3.7's form, as RN's updateExportPending writes it. */
+    private fun rnList(vararg uris: String) = JSONObject().put("pending", org.json.JSONArray(uris.map { JSONObject().put("uri", it).put("owner", "mvn0-rnjs") })).toString()
+    private fun cleanRn(delete: (String) -> Boolean = { error("must not delete") }, exists: (String) -> Boolean? = { error("must not ask") },
+                        inspect: (String) -> RnExportFile?) = cleanupRnExportRecord(rnRecord, delete, exists, inspect)
 
     @Test fun aRecordReactNativeLeftDeletesItsHalfWrittenBackup() {
-        rnRecordFor("content://doc/rn-half")
-        val deleted = mutableListOf<String>()
-        assertEquals("deleted", cleanupRnExportRecord(rnRecord, delete = { deleted += it; true }, exists = { false }, inspect = { RnExportFile.TRUNCATED }))
-        assertEquals(listOf("content://doc/rn-half"), deleted)
-        assertFalse(rnRecord.exists())
-    }
-
-    @Test fun aRecordReactNativeLeftKeepsACompleteBackup() {
-        for ((state, outcome) in listOf(RnExportFile.COMPLETE to "kept-complete", RnExportFile.UNCHECKED to "kept-unchecked", RnExportFile.GONE to "deleted")) {
-            rnRecordFor("content://doc/rn-finished")
-            assertEquals(outcome, cleanupRnExportRecord(rnRecord, delete = { error("must not delete") }, exists = { error("must not ask") }, inspect = { state }))
+        for (text in listOf(rnList("content://doc/rn-half"), JSONObject().put("uri", "content://doc/rn-half").toString())) {
+            rnRecord.writeText(text)
+            val deleted = mutableListOf<String>()
+            assertEquals(listOf("deleted"), cleanRn(delete = { deleted += it; true }, exists = { false }) { RnExportFile.TRUNCATED })
+            assertEquals(listOf("content://doc/rn-half"), deleted)
             assertFalse(rnRecord.exists())
         }
     }
 
-    @Test fun aRecordReactNativeLeftStaysWhileTheProviderKeepsItsDocument() {
-        rnRecordFor("content://doc/rn-half")
-        assertEquals("kept", cleanupRnExportRecord(rnRecord, delete = { false }, exists = { true }, inspect = { RnExportFile.TRUNCATED }))
-        assertTrue(rnRecord.isFile)
-        assertEquals("kept", cleanupRnExportRecord(rnRecord, delete = { error("must not delete") }, exists = { true }, inspect = { throw IOException("provider") }))
-        assertTrue(rnRecord.isFile)
-        assertEquals("deleted", cleanupRnExportRecord(rnRecord, delete = { true }, exists = { false }, inspect = { RnExportFile.TRUNCATED }))
+    @Test fun aRecordReactNativeLeftKeepsACompleteBackup() {
+        rnRecord.writeText(rnList("content://doc/finished", "content://doc/large", "content://doc/gone"))
+        val states = mapOf("content://doc/finished" to RnExportFile.COMPLETE, "content://doc/large" to RnExportFile.UNCHECKED, "content://doc/gone" to RnExportFile.GONE)
+        assertEquals(listOf("kept-complete", "kept-unchecked", "deleted"), cleanRn { states.getValue(it) })
         assertFalse(rnRecord.exists())
+    }
+
+    @Test fun aRecordReactNativeLeftStaysWhileTheProviderKeepsItsDocumentOrCannotSay() {
+        rnRecord.writeText(rnList("content://doc/refused", "content://doc/unsure", "content://doc/half"))
+        val deleted = mutableListOf<String>()
+        val outcomes = cleanRn(delete = { deleted += it; it == "content://doc/half" }, exists = { it != "content://doc/half" }) { uri ->
+            when (uri) { "content://doc/unsure" -> null; else -> RnExportFile.TRUNCATED }
+        }
+        assertEquals(listOf("kept", "kept", "deleted"), outcomes)
+        assertEquals(listOf("content://doc/refused", "content://doc/half"), deleted)
+        assertEquals(listOf("content://doc/refused", "content://doc/unsure"), JSONObject(rnRecord.readText()).getJSONArray("pending").let { list -> List(list.length()) { list.getJSONObject(it).getString("uri") } })
+        assertEquals(listOf("kept"), cleanRn { throw IOException("provider") }.take(1))
+        assertTrue(rnRecord.isFile)
+    }
+
+    // RN writes the whole new list to `.pending`, then moves it over the record: a death between leaves only `.pending`, the
+    // newest list, which RN reads first.
+    @Test fun aPendingListReactNativeLeftIsReadFirstAndRemoved() {
+        rnRecord.writeText(rnList("content://doc/older"))
+        rnPending.writeText(rnList("content://doc/newest"))
+        val looked = mutableListOf<String>()
+        assertEquals(listOf("deleted"), cleanRn(delete = { true }, exists = { false }) { looked += it; RnExportFile.TRUNCATED })
+        assertEquals(listOf("content://doc/newest"), looked)
+        assertFalse(rnRecord.exists())
+        assertFalse(rnPending.exists())
+        rnPending.writeText(rnList("content://doc/orphan"))
+        assertEquals(listOf("kept-complete"), cleanRn { RnExportFile.COMPLETE })
+        assertFalse(rnPending.exists())
     }
 
     @Test fun aRecordReactNativeLeftWithNoFolderDocumentTouchesNothing() {
         val never = { _: String -> error("must not look") }
-        assertNull(cleanupRnExportRecord(rnRecord, delete = never, exists = never, inspect = never))
+        assertEquals(emptyList<String>(), cleanupRnExportRecord(rnRecord, delete = never, exists = never, inspect = never))
         // RN wrote the record only for a picked folder's `content://` document; anything else, or a record cut short, is dropped.
-        for (text in listOf(JSONObject().put("uri", "file:///data/user/0/x/files/backup.json").toString(), "")) {
+        for (text in listOf(rnList("file:///data/user/0/x/files/backup.json"), "", "{\"pending\": [{\"uri\": \"content://doc")) {
             rnRecord.writeText(text)
-            assertNull(cleanupRnExportRecord(rnRecord, delete = never, exists = never, inspect = never))
+            assertEquals(emptyList<String>(), cleanupRnExportRecord(rnRecord, delete = never, exists = never, inspect = never))
             assertFalse(rnRecord.exists())
         }
     }
 
-    // RN's three export formats (data-transfer.ts): core's JSON backup, Mindwtr CSV (no trailing newline) and the TaskNotes ZIP.
+    /** RN's three export formats, written by core's own writers (serializeBackupData, serializeMindwtrCsv, buildTaskNotesExportZip). */
+    private fun rnExport(file: String) = javaClass.getResourceAsStream("/rn-exports/$file")!!.use { it.readBytes() }
+    private fun judge(name: String, bytes: ByteArray, size: Long? = bytes.size.toLong(), limit: Long = RN_EXPORT_CHECK_BYTES) =
+        inspectRnExportStream(name, size, limit) { ByteArrayInputStream(bytes) }
+
     @Test fun aReactNativeExportIsJudgedCompleteOnlyWhenItsFormatEnds() {
         val name = "mindwtr-backup-2026-10-01T10-00-00-000Z"
-        val json = JSONObject().put("tasks", org.json.JSONArray().put(JSONObject().put("id", "t1").put("title", "Grüße 😀"))).put("settings", JSONObject()).toString(2).toByteArray()
-        // Recurrence is Mindwtr CSV's last column, empty on most rows: a cut inside a non-empty last field cannot be seen.
-        val csv = "Title,Description,ID,Recurrence\nBuy milk,\"two\nlines, quoted \"\"x\"\"\",t1,FREQ=DAILY\nCall,,t2,".toByteArray()
-        val zip = java.io.ByteArrayOutputStream().also { out ->
-            java.util.zip.ZipOutputStream(out).use { z -> z.putNextEntry(java.util.zip.ZipEntry("TaskNotes/a.md")); z.write(ByteArray(4096) { 'a'.code.toByte() }); z.closeEntry() }
-        }.toByteArray()
-        for ((file, bytes) in listOf("$name.json" to json, "$name.csv" to csv, "$name-tasknotes.zip" to zip, "$name (1).json" to json)) {
-            assertEquals(file, RnExportFile.COMPLETE, judgeRnExport(file, bytes))
-            for (cut in listOf(0, 1, bytes.size / 2, bytes.size - 1)) {
-                assertEquals("$file cut at $cut", RnExportFile.TRUNCATED, judgeRnExport(file, bytes.copyOf(cut)))
+        for (file in listOf("$name.json", "$name.csv", "$name-tasknotes.zip")) {
+            val bytes = rnExport(file)
+            assertEquals(file, RnExportFile.COMPLETE, judge(file, bytes))
+            assertEquals("$file renamed by the provider", RnExportFile.COMPLETE, judge(file.replace(".", " (1)."), bytes))
+            // A CSV cut inside its header line cannot be told from an export with no tasks (it is kept): cut after the header.
+            val after = if (file.endsWith(".csv")) bytes.indexOf('\n'.code.toByte()) + 1 else 0
+            for (cut in listOf(1, after + (bytes.size - after) / 3, after + (bytes.size - after) / 2, bytes.size - 1)) {
+                assertEquals("$file cut at $cut", RnExportFile.TRUNCATED, judge(file, bytes.copyOf(cut)))
             }
+            assertEquals("$file empty", RnExportFile.TRUNCATED, judge(file, ByteArray(0)))
         }
-        // A cut inside a UTF-8 character is cut short too.
+        val json = rnExport("$name.json")
+        // A cut inside a UTF-8 character is cut short too; a leading BOM is no cut.
         val emoji = json.indexOfFirst { it == 0xF0.toByte() }
-        assertEquals(RnExportFile.TRUNCATED, judgeRnExport("$name.json", json.copyOf(emoji + 2)))
+        assertEquals(RnExportFile.TRUNCATED, judge("$name.json", json.copyOf(emoji + 2)))
+        assertEquals(RnExportFile.COMPLETE, judge("$name.json", byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + json))
+        assertEquals(RnExportFile.COMPLETE, judge("$name.csv", byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + rnExport("$name.csv")))
         // A file that is not one of RN's export names is never judged (nor deleted).
-        assertEquals(RnExportFile.UNCHECKED, judgeRnExport("notes.json", json.copyOf(3)))
+        assertEquals(RnExportFile.UNCHECKED, judge("notes.json", json.copyOf(3)))
+    }
+
+    @Test fun aReactNativeExportTheProviderCannotMeasureIsNeverJudgedCutShort() {
+        val file = "mindwtr-backup-2026-10-01T10-00-00-000Z.json"
+        val json = rnExport(file)
+        // No size: the provider cannot say. Over the limit: kept unread. A short read (the stream ends before the size): unsure.
+        assertNull(judge(file, json, size = null))
+        assertEquals(RnExportFile.UNCHECKED, inspectRnExportStream(file, json.size.toLong(), limit = json.size - 1L) { error("must not read") })
+        assertNull(judge(file, json.copyOf(json.size / 2), size = json.size.toLong()))
+        assertNull(inspectRnExportStream(file, json.size.toLong()) { object : java.io.InputStream() { override fun read(): Int = throw IOException("provider") } })
     }
 
     // This process's own entries belong to an export still running here: its start's cleanup leaves them.
