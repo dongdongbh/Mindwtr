@@ -3008,6 +3008,10 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 // per device), with RN's device lock prompt and lock screen.
 {
     const lockKt = source('AppLock.kt');
+    // RN's 7268108c9: TalkBack hears the lock's title as a heading, and the unlock message (a failed unlock's reason included)
+    // as a polite live region, read out when it changes.
+    assert.match(lockKt, /Text\(t\("appLock\.title"\), [^\n]*\n\s+modifier = Modifier\.padding\(bottom = 10\.dp\)\.semantics \{ heading\(\) \}\)/, 'the app lock title is a heading');
+    assert.match(lockKt, /Text\(message, [^\n]*\n\s+modifier = [^\n]*\.testTag\("app-lock-message"\)\.semantics \{ liveRegion = LiveRegionMode\.Polite \}\)/, 'the unlock message is a polite live region');
     const settingsUi = source('SettingsScreen.kt');
     const settingsModel = source('SettingsModel.kt');
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
