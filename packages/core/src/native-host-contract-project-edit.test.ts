@@ -280,3 +280,22 @@ describe('project actions: retries, replays and refused Undos', () => {
         expect(saves()).toBe(count);
     });
 });
+
+// RN's view options Sort (ProjectDetailModal's sort modal): the project's task sort, core's choices, saved as a target state.
+describe('runProjectEdit sort', () => {
+    it('stores the chosen sort once, a replay writes nothing, and a filed project refuses it', async () => {
+        const { host, stored, saves } = await open();
+        const options = host.getProjectTaskSortOptions({ projectId: 'p' });
+        expect(options).toMatchObject({ ok: true, value: { canEdit: true, choices: expect.arrayContaining([expect.objectContaining({ id: 'default', selected: true })]) } });
+        const edit = { requestId: uuid(60), projectId: 'p', kind: 'sort', sortBy: 'title' } as never;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { kind: 'sort', outcome: 'saved' } });
+        expect(stored().taskSortBy).toBe('title');
+        const count = saves();
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        expect(await host.runProjectEdit({ requestId: uuid(61), projectId: 'archived', kind: 'sort', sortBy: 'title' } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+        expect(await host.runProjectEdit({ requestId: uuid(62), projectId: 'p', kind: 'sort', sortBy: 'nonsense' } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+});

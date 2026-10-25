@@ -7,6 +7,7 @@ import { revisionOf } from './native-request-receipts';
 import { createProjectToSectionPreviewer, getProjectToSectionEligibility, planProjectToSection, type ProjectToSectionReceipt } from './project-to-section';
 import { projectDuplicateId } from './native-host-contract-project-duplicate';
 import { useTaskStore } from './store';
+import { PROJECT_TASK_SORT_OPTIONS } from './task-list-sort-options';
 import { deterministicHash128 } from './uuid';
 import { ensureDeviceId } from './store-helpers';
 import { getProjectAccentColor } from './task-accent-color';
@@ -36,7 +37,9 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'deleteUndo'; deleteRequestId: string }
     // RN's Convert to section… (the request UUID names the new section) and that conversion's Undo.
     | { kind: 'toSection'; destinationProjectId: string; title: string; expected: string }
-    | { kind: 'toSectionUndo'; convertRequestId: string });
+    | { kind: 'toSectionUndo'; convertRequestId: string }
+    // RN's view options Sort: the project's task sort (core's choices).
+    | { kind: 'sort'; sortBy: string });
 /** [reply] is the prepared command's own answer when it wrote: the copy and its toast (duplicate), RN's Undo toast (delete). */
 export type NativeProjectEditResult = { id: string; kind: NativeProjectEdit['kind']; outcome: 'saved' | 'unchanged' | 'blocked'; reply?: unknown };
 
@@ -80,6 +83,7 @@ const valid = (input: unknown): input is NativeProjectEdit => {
             && UUID.test(edit.deleteRequestId) && edit.deleteRequestId !== edit.requestId;
         case 'toSection': return keys(edit, ['destinationProjectId', 'title', 'expected']) && id(edit.destinationProjectId) && text(edit.title, 500)
             && text(edit.expected, 200);
+        case 'sort': return keys(edit, ['sortBy']) && (PROJECT_TASK_SORT_OPTIONS as readonly string[]).includes(edit.sortBy as string);
         case 'toSectionUndo': return keys(edit, ['convertRequestId']) && typeof edit.convertRequestId === 'string'
             && UUID.test(edit.convertRequestId) && edit.convertRequestId !== edit.requestId;
         default: return false;
@@ -241,6 +245,14 @@ export function createProjectEditMethods(deps: {
                 if (!same(shown, edit.order)) return { ok: true, value: { conflict: 'The Sections changed since they were shown' } };
                 return { ok: true, value: { command: 'ProjectSectionOrder', request: { ...base, sectionId: edit.sectionId,
                     direction: edit.direction, expectedSections: read.value.token } } };
+            }
+            case 'sort': {
+                const read = await options('getProjectTaskSortOptions');
+                if (!read.ok) return read;
+                if (read.value.canEdit === false) return { ok: true, value: { outcome: 'blocked' } };
+                const expected = token(read.value);
+                if ((expected.taskSortBy ?? 'default') === edit.sortBy) return { ok: true, value: { outcome: 'unchanged' } };
+                return { ok: true, value: { command: 'ProjectTaskSort', request: { ...base, sortBy: edit.sortBy, expected } } };
             }
             case 'toSection': {
                 const converted = (destinationProjectId: string, sectionId: string) => ({ destinationProjectId, sectionId,

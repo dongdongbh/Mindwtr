@@ -1167,6 +1167,8 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     projectTaskOrderView: (input) => contract.getProjectTaskOrderView(input),
     projectDetailFilterView: (input) => contract.getProjectDetailFilterView(input),
     projectDetailFilterOptions: (input) => contract.getProjectDetailFilterOptions(input),
+    // The project's view options Sort (ProjectsScreen.kt): core's choices for the project; the write is projectEdit's sort.
+    projectTaskSortOptions: (input) => contract.getProjectTaskSortOptions(input),
     waiting: (input) => contract.getWaitingView(input),
     someday: (input) => contract.getSomedayView(input),
     reference: (input) => contract.getReferenceView(input),
