@@ -13,7 +13,8 @@
 // exact retry, and Try again stores it once; (g) Save & edit on a task with no project opens its editor over Focus, as RN's
 // openTaskScreen does; (h) the keyboard's own Done key saves the popup, as Save does (RN's b13f04019), with no line added;
 // (i) More with the keyboard up waits for the keyboard to go, so the field stays on screen above the panel (RN's #1120,
-// d73c7f2c1). It touches only the development package (it refuses any other
+// d73c7f2c1); (j) a hardware Enter saves the popup too, its title without a line, as RN's field does (submitBehavior
+// blurAndSubmit: an adb KEYCODE_ENTER in Mindwtr Dev's popup saved it, 10-25). It touches only the development package (it refuses any other
 // APK), never launches over another app, clears its debug properties and leaves "Add another" off on exit.
 // Leave the device on its home screen before running. It needs host `bun`.
 // Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
@@ -52,7 +53,7 @@ const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padSt
 // The picker's project: one fixed name, created once through the picker, then picked, so runs add no projects.
 const PROJECT = '5600';
 const titles = { a: `53${run}`, b1: `54${run}`, b2: `55${run}`, c: `56${run}`, d1: `57${run}1`, d2: `57${run}2`, e: `58${run}`, f: `59${run}`, g: `56${run}1`,
-    h: `56${run}2`, i: `56${run}3` };
+    h: `56${run}2`, i: `56${run}3`, j: `56${run}4` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tapExpecting } = device;
@@ -327,6 +328,12 @@ try {
     check(title(nodes) === titles.i, '(i) the typed title is kept');
     await save(onInbox, 'the capture to close the popup');
     check(core('', titles.i).stored[titles.i].length === 1, '(i) the capture typed before More is stored once');
+
+    // (j) A hardware Enter saves the popup as Save does: it closes and the title is stored once, with no line.
+    await typeCapture(titles.j, titles.j);
+    sh('input keyevent KEYCODE_ENTER');
+    await waitFor('the popup to close on a hardware Enter', onInbox, 15_000);
+    check(core('', titles.j).stored[titles.j].length === 1, '(j) a hardware Enter stored the capture once, its title without a line');
     console.log('Capture device check passed');
 } catch (error) {
     evidenced(error);

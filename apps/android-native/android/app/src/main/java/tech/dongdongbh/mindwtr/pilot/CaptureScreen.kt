@@ -61,6 +61,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
@@ -417,7 +422,13 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
         textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { saveCapture(openAfterSave = false) }),
-        modifier = modifier.fillMaxWidth().heightIn(min = 44.dp, max = 120.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+        // A hardware Enter saves too, with no line added, as RN's multi-line field with submitBehavior blurAndSubmit does
+        // (an adb Enter in RN's popup saved it, 10-25); a pasted text keeps its lines (core's several-captures question).
+        modifier = modifier.onPreviewKeyEvent { event ->
+            val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
+            if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
+            enter
+        }.fillMaxWidth().heightIn(min = 44.dp, max = 120.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
             .testTag("capture-title").semantics { contentDescription = label },
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
