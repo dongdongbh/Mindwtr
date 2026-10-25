@@ -42,9 +42,9 @@ class CoreJobTest {
         }
         override fun appActive() = appActive
         override fun reminders(mode: String, key: String): JSONObject {
-            events += "reminders $mode"
+            events += "reminders $mode $key"
             remindersFailure?.let { throw it }
-            return JSONObject()
+            return JSONObject().put("outcome", "cycle-completed")
         }
     }
 
@@ -78,13 +78,13 @@ class CoreJobTest {
 
     @Test fun theHostBootsBeforeTheJobAndWidgetsRefreshAfterIt() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders cycle", "sync capture", "ensure", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "ensure", "widgets"), events)
     }
 
     // #1257: what a capture job stored while the app was closed is sent before the job ends (core's capture run), never after.
     @Test fun aCaptureJobSendsWhatItStoredBeforeItEnds() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders cycle", "sync capture", "ensure", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "ensure", "widgets"), events)
         assertEquals(listOf("Native Android core work ingest success"), lines)
     }
 
@@ -93,7 +93,7 @@ class CoreJobTest {
     // A widget tap or a capture is stored and drawn before the job waits for any sync (a dead server can hold that for minutes).
     @Test fun aCaptureJobStoresAndDrawsWhatItDrainedBeforeItWaitsForTheSync() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("drain", "widgets", "reminders cycle", "sync capture"), events.filter { it in setOf("drain", "widgets", "reminders cycle", "sync capture") }.take(4))
+        assertEquals(listOf("drain", "widgets", "reminders background capture", "sync capture"), events.filter { it in setOf("drain", "widgets", "reminders background capture", "sync capture") }.take(4))
     }
 
     @Test fun aCaptureJobMakesSureTheScheduledJobExistsWhenCoreWantsIt() {
@@ -102,20 +102,20 @@ class CoreJobTest {
         events.clear()
         syncWanted = false
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders cycle", "sync capture", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "widgets"), events)
     }
 
     @Test fun aCaptureWhoseScheduledJobIsNotStoredRetries() {
         ensured = false
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders cycle", "sync capture", "ensure"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "ensure"), events)
     }
 
     @Test fun aCaptureWhoseSyncThrowsRetriesItsUpload() {
         // The capture is committed; the retry sends it (the count it owes survives in OwedUploads).
         syncFailure = IllegalStateException("Core backgroundSync timed out")
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders cycle", "sync capture"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture"), events)
         assertEquals(listOf("Native Android core work ingest retry Core backgroundSync timed out"), lines)
     }
 
@@ -137,28 +137,27 @@ class CoreJobTest {
 
     @Test fun theSyncJobRunsCoresScheduledRunThenQueuesItsNext() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.SYNC))
-        assertEquals(listOf("boot", "recover", "drain", "sync scheduled", "reminders cycle", "again", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "sync scheduled", "reminders background sync", "again", "widgets"), events)
     }
 
     @Test fun theSyncJobQueuesNoNextRunOnceCoreSaysItIsNotWanted() {
         syncWanted = false
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.SYNC))
-        assertEquals(listOf("boot", "recover", "drain", "sync scheduled", "reminders cycle", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "sync scheduled", "reminders background sync", "widgets"), events)
     }
 
     // #1424 (RN 64f35d79d): tasks a background sync brought get their alarms before the job ends; core's 2.5 s store timer may
     // never fire in a job's process, and a cold job planned once before the sync.
     @Test fun aBackgroundSyncPlansTheRemindersOfWhatItSyncedBeforeItEnds() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.SYNC))
-        assertEquals(listOf("sync scheduled", "reminders cycle"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
+        assertEquals(listOf("sync scheduled", "reminders background sync"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
         assertEquals("cycled", diagnostics.single().getString("reminders"))
-        assertEquals("v1.3.8/native-background-reminders", diagnostics.single().getString("releaseCheck"))
     }
 
     // #1398 (RN a7da952cf): a capture's reminder is set by the job that stored it, before its sync's wait.
     @Test fun aCaptureJobPlansItsRemindersBeforeItSends() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("reminders cycle", "sync capture"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
+        assertEquals(listOf("reminders background capture", "sync capture"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
         assertEquals("cycled", diagnostics.single().getString("reminders"))
     }
 
@@ -189,7 +188,7 @@ class CoreJobTest {
     @Test fun aSyncJobWhoseNextRunIsNotStoredRetries() {
         nextStored = false
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.SYNC))
-        assertEquals(listOf("boot", "recover", "drain", "sync scheduled", "reminders cycle", "again"), events)
+        assertEquals(listOf("boot", "recover", "drain", "sync scheduled", "reminders background sync", "again"), events)
     }
 
     @Test fun aSyncJobWaitsForRecoveryAndTheDrain() {

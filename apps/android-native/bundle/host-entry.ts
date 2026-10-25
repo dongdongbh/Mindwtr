@@ -5462,7 +5462,9 @@ globalThis.MindwtrHost = {
      * the daily or weekly alarm `key` that fired again at its next time, else "cycle".
      */
     remindersCycle(mode: string, key: string): string {
-        return submit(async () => (mode === 'fired' && key ? requireReminders().fired(key) : requireReminders().cycle(mode === 'rebuild')));
+        return submit(async () => (mode === 'fired' && key ? requireReminders().fired(key)
+            : mode === 'background' && (key === 'capture' || key === 'sync') ? requireReminders().background(key)
+            : requireReminders().cycle(mode === 'rebuild')));
     },
     /** A reminder's Done (core's completeReminderTask): a journaled write under the request UUID its notification was posted with. */
     reminderDone(requestId: string, taskId: string): string {

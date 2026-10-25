@@ -42,7 +42,7 @@ internal object CoreJob {
         fun drain(): Boolean
         /** Core's runContextAutomation with [json] (`{ action, context }`): `{ notification }`, null for none. */
         fun contextAutomation(json: String): JSONObject
-        /** Core's reminder plan applied now ([mode] "cycle", "rebuild", or "fired" with [key]). */
+        /** Core's reminder plan applied now ([mode] "cycle", "rebuild", "fired" with [key], or "background" with [key] "capture" or "sync"). */
         fun reminders(mode: String, key: String): JSONObject = throw UnsupportedOperationException("reminders")
         /** Core's completeReminderTask, journaled under [requestId]. */
         fun reminderDone(requestId: String, taskId: String): JSONObject = throw UnsupportedOperationException("reminderDone")
@@ -94,14 +94,14 @@ internal object CoreJob {
                 INGEST -> {
                     // What the drain stored (a capture, a widget's check-off) reaches the widgets now, not after the sync's wait.
                     refreshWidgets()
-                    planReminders(host, line)
+                    planReminders(host, line, "capture")
                     if (host.backgroundSync("capture").optBoolean("schedule") && !ensureSync()) Outcome.Retry else Outcome.Success
                 }
                 SYNC -> {
                     val again = if (host.appActive()) {
                         line.put("skipped", "foreground")
                         true
-                    } else host.backgroundSync("scheduled").optBoolean("schedule").also { planReminders(host, line) }
+                    } else host.backgroundSync("scheduled").optBoolean("schedule").also { planReminders(host, line, "sync") }
                     if (again && !syncAgain()) Outcome.Retry else Outcome.Success
                 }
                 REMINDERS -> {
@@ -140,11 +140,12 @@ internal object CoreJob {
     /**
      * RN's reconcileLocalMobileNotificationsInBackground (#1398, #1424): what a capture stored or a background sync brought gets its
      * alarms before the job ends. Core's store timer (2.5 s after a change) may never fire in a job's process, and a cold job's first
-     * plan ran before its sync. A plan that fails never fails the job; [line] says which it was.
+     * plan ran before its sync. A plan that fails never fails the job; [line] says which it was, and core's own line
+     * (host-reminders.ts `background`, releaseCheck v1.3.8/native-background-reminders) says the cycle ran.
      */
-    private fun planReminders(host: Calls, line: JSONObject) {
-        val planned = runCatching { host.reminders("cycle", "") }.isSuccess
-        line.put("releaseCheck", "v1.3.8/native-background-reminders").put("reminders", if (planned) "cycled" else "failed")
+    private fun planReminders(host: Calls, line: JSONObject, reason: String) {
+        val planned = runCatching { host.reminders("background", reason).optString("outcome") == "cycle-completed" }.getOrDefault(false)
+        line.put("reminders", if (planned) "cycled" else "failed")
     }
 }
 

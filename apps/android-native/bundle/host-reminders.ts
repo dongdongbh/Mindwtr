@@ -69,7 +69,8 @@ export type NativeReminderBindings = {
 
 const log = (message: string, context: Record<string, unknown>, warn = false) => {
     try {
-        (warn ? logWarn : logInfo)(`[Local Notifications] ${message}`, { scope: 'notifications', context, force: context.releaseCheck === 'v1.3.8/due-advance-reminder' });
+        // A release check's line shows in the tester's log whatever the debug-logging switch (RN's force: true).
+        (warn ? logWarn : logInfo)(`[Local Notifications] ${message}`, { scope: 'notifications', context, force: typeof context.releaseCheck === 'string' });
     } catch { /* a diagnostic line must never fail its caller */ }
 };
 
@@ -174,6 +175,23 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
         async cycle(rebuild: boolean) {
             if (isSandboxMode()) return { mode: 'sandbox' };
             return cycle(rebuild);
+        },
+        /**
+         * RN's reconcileLocalMobileNotificationsInBackground (#1398, #1424): a capture or sync job (CoreJob.kt) plans once before it
+         * ends, since the store timer may never fire in a job's process. A failed plan is reported, never thrown: it never fails the job.
+         */
+        async background(reason: 'capture' | 'sync') {
+            if (isSandboxMode()) return { mode: 'sandbox', outcome: 'skipped' };
+            const receipt = (outcome: string) => log('Background reminder reconciliation',
+                { releaseCheck: 'v1.3.8/native-background-reminders', reason, outcome }, outcome === 'failed');
+            try {
+                const summary = await cycle(false);
+                receipt('cycle-completed');
+                return { ...summary, outcome: 'cycle-completed' };
+            } catch {
+                receipt('failed');
+                return { outcome: 'failed' };
+            }
         },
         /** A daily or weekly alarm [key] that fired: core makes it again at its next time, or cancels it once it was turned off. */
         async fired(key: string) {

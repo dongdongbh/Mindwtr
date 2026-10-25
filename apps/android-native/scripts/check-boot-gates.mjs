@@ -9180,7 +9180,7 @@ export const REMINDER_NOTIFICATION_EVENT_RESCHEDULE_DELAY_MS = 5;
 export const REMINDER_STORE_RESCHEDULE_DELAY_MS = 30;
 export const hasActiveMobileNotificationFeature = (settings) => settings.on === true;
 export const isSandboxMode = () => globalThis.reminderSandbox === true;
-export const logInfo = () => {}; export const logWarn = (message, payload) => { (globalThis.reminderWarns ??= []).push([message, payload]); };
+export const logInfo = (message, payload) => { (globalThis.reminderInfos ??= []).push([message, payload]); }; export const logWarn = (message, payload) => { (globalThis.reminderWarns ??= []).push([message, payload]); };
 export const nameNotifyListener = (_name, listener) => listener;
 export const shouldRescheduleReminderAlarms = (state, previous) => state.tasks !== previous.tasks;
 const listeners = [];
@@ -9326,6 +9326,24 @@ globalThis.standStore = useTaskStore;
         apply: () => (partialPlans === 1 ? 1 : 0),
         cleanupRn: () => 0,
     });
+    // RN's reconcileLocalMobileNotificationsInBackground (#1398, #1424; audit gap 7): a capture or sync job plans once and the tester's
+    // line says it ran (forced, as RN's), or that it failed without failing the job.
+    globalThis.reminderInfos = [];
+    assert.equal((await counted.background('sync')).outcome, 'cycle-completed');
+    const receipt = globalThis.reminderInfos.find(([message]) => message === '[Local Notifications] Background reminder reconciliation');
+    assert.deepEqual([receipt?.[1].context, receipt?.[1].force], [{ releaseCheck: 'v1.3.8/native-background-reminders', reason: 'sync', outcome: 'cycle-completed' }, true]);
+    const failing = mod.createNativeReminders({
+        plan: async () => ({ ok: false, error: { code: 'NOT_READY', message: 'storage' } }),
+        planSnooze: () => { throw new Error('no snooze here'); },
+        readStored: async () => ({ alarms: null, state: null }),
+        permissionGranted: () => true,
+        apply: () => 0,
+        cleanupRn: () => 0,
+    });
+    globalThis.reminderWarns = [];
+    assert.equal((await failing.background('capture')).outcome, 'failed', 'a failed plan is reported, never thrown');
+    assert.deepEqual(globalThis.reminderWarns.map(([message, payload]) => [message, payload.context.reason, payload.context.outcome]),
+        [['[Local Notifications] Background reminder reconciliation', 'capture', 'failed']]);
     globalThis.reminderWarns = [];
     assert.equal((await partial.cycle(false)).refused, 1, 'the cycle finishes and reports the refused alarm');
     await sleep(40);

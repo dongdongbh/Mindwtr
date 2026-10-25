@@ -34,7 +34,7 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'missing',
     // kept-attachment-not-found reuses releaseCheck and backend; restored is a count. No names or ids.
     'restored',
-    // native-background-reminders: the core work line's job and its reminder plan (cycled/failed). No identifiers.
+    // native-background-reminders reuses reason and outcome; the core work line beside it adds job and reminders (cycled/failed).
     'job', 'reminders',
 
     // web-attachment-upload reuses releaseCheck, stage and count; only acknowledged PUTs.
