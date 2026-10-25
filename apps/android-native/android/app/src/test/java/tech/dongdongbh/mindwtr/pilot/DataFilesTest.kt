@@ -363,6 +363,10 @@ class DataFilesTest {
         assertNull(judge(file, json, size = null))
         assertEquals(RnExportFile.UNCHECKED, inspectRnExportStream(file, json.size.toLong(), limit = json.size - 1L) { error("must not read") })
         assertNull(judge(file, json.copyOf(json.size / 2), size = json.size.toLong()))
+        // Some providers report SIZE 0 for "unknown": a non-empty stream then reads long, so the whole file is kept.
+        assertNull(judge(file, json, size = 0L))
+        // Trailing NULs (a provider's padding) after the closed object are no cut.
+        assertEquals(RnExportFile.COMPLETE, judge(file, json + ByteArray(4)))
         assertNull(inspectRnExportStream(file, json.size.toLong()) { object : java.io.InputStream() { override fun read(): Int = throw IOException("provider") } })
     }
 

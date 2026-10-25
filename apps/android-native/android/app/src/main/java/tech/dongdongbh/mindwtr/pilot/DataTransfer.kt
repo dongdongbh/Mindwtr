@@ -721,7 +721,6 @@ internal fun inspectRnExportStream(name: String, size: Long?, limit: Long = RN_E
     val kind = RN_EXPORT_NAME.find(name)?.groupValues?.get(1)?.lowercase() ?: return RnExportFile.UNCHECKED
     if (size == null) return null
     if (size > limit) return RnExportFile.UNCHECKED
-    if (size == 0L) return RnExportFile.TRUNCATED
     return try {
         open().use { input ->
             val counted = CountingInput(input)
@@ -763,10 +762,11 @@ private fun textEnds(input: CountingInput, csv: Boolean): Boolean {
             val code = reader.read()
             if (code < 0) break
             val char = code.toChar()
-            if (first) { first = false; if (char == '﻿') continue }
+            if (first) { first = false; if (char == '\uFEFF') continue }
             if (!csv) {
                 when {
-                    closed -> if (!char.isWhitespace()) return false
+                    // Trailing NULs (a provider's padding) are no cut, as JSONTokener read them.
+                    closed -> if (!char.isWhitespace() && char != '\u0000') return false
                     quoted -> if (escaped) escaped = false else if (char == '\\') escaped = true else if (char == '"') quoted = false
                     char == '"' -> quoted = true
                     char == '{' || char == '[' -> depth += 1
@@ -800,7 +800,6 @@ private fun zipEnds(input: CountingInput): Boolean {
     while (true) {
         val read = input.read(chunk)
         if (read < 0) break
-        if (read >= keep) { System.arraycopy(chunk, read - keep, tail, 0, keep); filled = keep; continue }
         val shift = maxOf(0, filled + read - keep)
         if (shift > 0) { System.arraycopy(tail, shift, tail, 0, filled - shift); filled -= shift }
         System.arraycopy(chunk, 0, tail, filled, read)
@@ -813,11 +812,13 @@ private fun zipEnds(input: CountingInput): Boolean {
         if (u32(at) != 0x06054b50L || at + 22 + u16(at + 20) != filled) continue
         val size = u32(at + 12)
         val offset = u32(at + 16)
-        // ZIP64 keeps its real offsets elsewhere; its end record was written, so the writer finished.
-        if (offset == 0xffffffffL || size == 0xffffffffL) return true
+        // A ZIP64 file (fflate, RN's writer, never makes one) keeps its real offsets in a ZIP64 record this check does not read:
+        // a 0xffffffff marker, or the ZIP64 locator right before this record, means its end was written, so it is taken as whole.
+        if (offset == 0xffffffffL || size == 0xffffffffL || (at >= 20 && u32(at - 20) == 0x07064b50L)) return true
         if (offset + size != base + at) continue
         val local = offset - base
-        return size == 0L || local < 0 || u32(local.toInt()) == 0x02014b50L
+        // A false signature inside the comment or the data does not end the search.
+        if (size == 0L || local < 0 || u32(local.toInt()) == 0x02014b50L) return true
     }
     return false
 }
