@@ -1,4 +1,5 @@
 import { getProjectAccentColor } from './task-accent-color';
+import { DEFAULT_AREA_COLOR } from './color-constants';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import { createDateFormatter, hasTimeComponent, safeParseDate, safeParseDueDate, type DateFormatter, type DateFormattingConfig } from './date';
 import { tFallback, type TranslateFn } from './i18n';
@@ -54,7 +55,7 @@ type TaskRowMetaPartBody =
  * One item of the row's metadata line, in display order. `text` is the whole visible
  * label, except that context and tag show "+overflowCount" after it when above zero.
  * `detail` parts hide when the view hides details (mobile lists always do; Focus has a toggle).
- * A null dotColor means the client's tint color.
+ * A project or area with no color gets the grey default dot, as group headers and desktop rows do (#1422).
  */
 export type TaskRowMetaPart = TaskRowMetaPartBody & { text: string; detail: boolean };
 export type TaskRowMetaPartKind = TaskRowMetaPart['kind'];
@@ -171,13 +172,13 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
             kind: 'project',
             text: section ? `${project.title} · ${section.title}` : project.title,
             projectId: project.id,
-            dotColor: getProjectAccentColor(project, new Map(projectArea ? [[projectArea.id, projectArea]] : [])) ?? null,
+            dotColor: getProjectAccentColor(project, new Map(projectArea ? [[projectArea.id, projectArea]] : [])) ?? DEFAULT_AREA_COLOR,
         });
     }
     // A task filed straight under an area names the area; a project already
     // carries its area through the dot (#1246).
     if ((isReference || !project) && area) {
-        add({ kind: 'area', text: area.name, dotColor: area.color || null });
+        add({ kind: 'area', text: area.name, dotColor: area.color || DEFAULT_AREA_COLOR });
     }
     if (!isReference && input.projectDeadlineLabel) {
         add({ kind: 'projectDeadline', text: input.projectDeadlineLabel });

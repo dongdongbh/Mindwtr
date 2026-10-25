@@ -5,7 +5,7 @@ import { loadTranslations } from './i18n/i18n-loader';
 import type { Language } from './i18n/i18n-types';
 import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaPart } from './task-row-meta';
 import { getProjectRowStatus } from './project-row-meta';
-import { TASK_PRIORITY_COLORS } from './color-constants';
+import { DEFAULT_AREA_COLOR, TASK_PRIORITY_COLORS } from './color-constants';
 import type { Area, Project, Section, Task } from './types';
 
 type ViewOptions = {
@@ -227,6 +227,16 @@ describe('buildTaskRowMeta', () => {
         expect(meta.parts.find((part) => part.kind === 'project')).toMatchObject({ dotColor: '#10b981' });
         expect(meta.parts.find((part) => part.kind === 'due')).toMatchObject({ tone: 'overdue' });
         expect(meta.priority).toBe('urgent');
+    });
+
+    it('gives a project or area with no color the grey default dot, like the group headers (#1422)', () => {
+        const project: Project = { id: 'p', title: 'Plain', status: 'active', color: DEFAULT_AREA_COLOR, order: 0,
+            tagIds: [], createdAt: '', updatedAt: '' };
+        const area = { id: 'a', name: 'Area', order: 0, createdAt: '', updatedAt: '' };
+        const inProject = buildTaskRowMeta({ ...base, task: task({ projectId: 'p' }), lookup: { project } }).parts;
+        expect(inProject.find((part) => part.kind === 'project')).toMatchObject({ dotColor: DEFAULT_AREA_COLOR });
+        const inArea = buildTaskRowMeta({ ...base, task: task({ areaId: 'a' }), lookup: { taskArea: area } }).parts;
+        expect(inArea.find((part) => part.kind === 'area')).toMatchObject({ dotColor: DEFAULT_AREA_COLOR });
     });
 
     it('carries the sequence label only for the available cue', () => {
