@@ -1009,7 +1009,10 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         try await seedWebDAV416(hash: false); remote.status = 404
         let core = host(); _ = try await core.start(); let input = try await request(core)
         let before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
-        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        // Shared on-demand refusal: a successful command envelope carrying unavailable, never an availability acknowledgment.
+        let response = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
+        let value = try XCTUnwrap(response["value"] as? [String: Any])
+        XCTAssertEqual(value["status"] as? String, "unavailable"); XCTAssertTrue(value["update"] is NSNull)
         XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertEqual(try json(projectRows416()), try json(before))
         XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try others(), other)

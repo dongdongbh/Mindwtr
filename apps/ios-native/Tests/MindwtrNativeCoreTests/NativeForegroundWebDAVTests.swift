@@ -1034,7 +1034,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         _ = try await cold.start(); XCTAssertEqual(remote.recorded.count, beforeCold)
         for (mode, fixture) in fixtures {
             let current = try projectDownloadAttachment(fixture)
-            XCTAssertEqual(current["deletedAt"] != nil, mode == "404", "The durable distinction survives recreation")
+            XCTAssertNil(current["deletedAt"], "No failure, a 404 included, deletes the row after recreation (\(mode))")
             XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path))
         }
         XCTAssertEqual(try Data(contentsOf: target), originalBytes); assertNativeCredentialObservation(); await cold.close()
