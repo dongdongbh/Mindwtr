@@ -46,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -113,7 +114,9 @@ data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>) {
 }
 
 sealed interface DetailItem
-data class DetailSection(val id: String, val title: String, val count: Int, val muted: Boolean) : DetailItem
+/** [collapsible]: RN's Completed pile heading, which folds ([collapsed]) the done tasks under it. */
+data class DetailSection(val id: String, val title: String, val count: Int, val muted: Boolean, val collapsible: Boolean = false,
+                         val collapsed: Boolean = false) : DetailItem
 data class DetailTask(val row: TaskRow, val sequenceCue: String?) : DetailItem
 
 /** Core's sequence cue values and mobile's label key for each. */
@@ -124,7 +127,7 @@ private val CUE_KEYS = mapOf("available" to "projects.availableNextAction", "lat
  * [metadata] for the project's Details (getProjectDetailsPresentation: the summary and every value's label).
  */
 data class ProjectDetail(val revision: String, val projectId: String, val readOnly: Boolean, val total: Int, val items: List<DetailItem>,
-                         val metadata: JSONObject? = null, val gettingStarted: JSONObject? = null) {
+                         val metadata: JSONObject? = null, val gettingStarted: JSONObject? = null, val controls: JSONObject? = null) {
     /** Adds one later window after the items already loaded. */
     fun append(window: JSONObject): ProjectDetail {
         val next = parse(window)
@@ -138,10 +141,12 @@ data class ProjectDetail(val revision: String, val projectId: String, val readOn
             val items = json.getJSONArray("items")
             return ProjectDetail(json.getString("revision"), json.getString("projectId"), json.getBoolean("readOnly"),
                 json.getInt("total"), metadata = json.optJSONObject("metadata"), gettingStarted = json.optJSONObject("gettingStarted"),
+                controls = json.optJSONObject("controls"),
                 items = List(items.length()) { index ->
                     items.getJSONObject(index).let { item ->
                         if (item.getString("type") == "section") {
-                            DetailSection(item.getString("id"), item.getString("title"), item.getInt("count"), item.getBoolean("muted"))
+                            DetailSection(item.getString("id"), item.getString("title"), item.getInt("count"), item.getBoolean("muted"),
+                                item.optBoolean("collapsible"), item.optBoolean("collapsed"))
                         } else {
                             DetailTask(item.getJSONObject("row").taskRow(), if (item.isNull("sequenceCue")) null else item.getString("sequenceCue"))
                         }
@@ -162,6 +167,22 @@ fun ProjectsTab(model: InboxViewModel, modifier: Modifier) {
         owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { model.refreshProjects() }
     }
     if (model.openProjectId == null) ProjectList(model, modifier) else ProjectDetailList(model, modifier)
+}
+
+/** RN's collapsible section heading (TaskList): the chevron, the title and the count; a tap folds or unfolds the Completed pile. */
+@Composable
+private fun CompletedHeading(entry: DetailSection, enabled: Boolean, toggle: () -> Unit) {
+    val c = LocalTheme.current.colors
+    val open = !entry.collapsed
+    Row(Modifier.fillMaxWidth().clickable(enabled = enabled, role = Role.Button, onClick = toggle)
+        .semantics { stateDescription = t(if (open) "markdown.collapse" else "markdown.expand") }
+        .padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 6.dp).testTag("project-completed-heading"),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (open) Lucide.ChevronDownPlain else Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.size(15.dp))
+        Text(entry.title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (entry.muted) c.secondaryText else c.text,
+            modifier = Modifier.weight(1f))
+        Text("${entry.count}", style = rnText(11, 600), color = c.secondaryText)
+    }
 }
 
 /**
@@ -388,6 +409,17 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         // takes none).
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // RN's view options "..." (More options): washed in the tint while the project's sort or Show completed is on.
+            LaunchedEffect(openProjectId) { projectDetails.readSort() }
+            val optionsLabel = t("taskEdit.moreOptions")
+            val active = projectShowCompleted || projectDetails.customSort
+            val optionsShape = RoundedCornerShape(12.dp)
+            Box(Modifier.size(44.dp).clip(optionsShape).background(if (active) c.tint.copy(alpha = 0x20 / 255f) else c.filterBg)
+                .border(1.dp, if (active) c.tint else c.border, optionsShape)
+                .clickable(enabled = writable && detail != null && failedAction == null, role = Role.Button) { projectDetails.openViewOptions() }
+                .semantics { contentDescription = optionsLabel; selected = active }.testTag("project-task-view-options-button"), contentAlignment = Alignment.Center) {
+                Icon(Ionicons.EllipsisHorizontal, null, tint = if (active) c.tint else c.secondaryText, modifier = Modifier.size(20.dp))
+            }
             Spacer(Modifier.weight(1f))
             if (detail?.readOnly == false) {
                 val theme = LocalTheme.current
@@ -423,7 +455,8 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
             for (entry in detail?.items.orEmpty()) when (entry) {
                 is DetailSection -> item(key = "section:${entry.id}") {
-                    SectionTitle(entry.title, entry.count,
+                    if (entry.collapsible) CompletedHeading(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted)
+                    else SectionTitle(entry.title, entry.count,
                         Modifier.fillMaxWidth().fade(if (entry.muted) 0.6f else 1f).padding(top = 12.dp, bottom = 8.dp, start = 4.dp))
                 }
                 is DetailTask -> item(key = "task:${entry.row.id}") {

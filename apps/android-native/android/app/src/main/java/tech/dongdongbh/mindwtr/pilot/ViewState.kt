@@ -13,6 +13,8 @@ import org.json.JSONObject
 
 /** RN's FOCUS_VIEW_STATE_STORAGE_KEY. */
 const val FOCUS_VIEW_KEY = "mindwtr:view:focus:v1"
+/** RN's PROJECT_SHOW_COMPLETED_STORAGE_KEY (ProjectDetailModal): "true" or "false", device-wide. */
+const val PROJECT_SHOW_COMPLETED_KEY = "mindwtr:view:project-detail:show-completed:v1"
 /** RN's PROJECT_LIST_VIEW_STATE_STORAGE_KEY. */
 const val PROJECTS_VIEW_KEY = "mindwtr:view:projects:v1"
 /** RN's DEFAULT_EXPANDED_SECTIONS keys; every section starts open. */

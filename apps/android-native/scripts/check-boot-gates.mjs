@@ -2066,7 +2066,11 @@ assert.match(labelCalls, /contract\.setLanguage\(\{ storedLanguage: stored \|\| 
 assert.match(labelCalls, /contract\.getStrings\(\{ keys: JSON\.parse\(keysJson\) as string\[\] \}\)/);
 assert.doesNotMatch(labelCalls, /requireSaved/);
 assert.equal(model.match(/runtime\.projects\(\)/g).length, 2, 'read() after boot and commands, and the resume refresh');
-assert.equal(model.match(/runtime\.projectDetail\(/g).length, 2, 'the first window and the next');
+// The open project reads core's project view (RN's Show completed and Completed pile, O2f-parity b4a): the first window and the next.
+assert.equal(model.match(/projectWindow\(runtime, /g).length, 2, 'the first window and the next');
+assert.match(model, /runtime\.menuRead\("projectDetailView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)/);
+assert.match(source('ViewState.kt'), /const val PROJECT_SHOW_COMPLETED_KEY = "mindwtr:view:project-detail:show-completed:v1"/);
+assert.match(model, /prefs\.edit\(\)\.putString\(PROJECT_SHOW_COMPLETED_KEY, on\.toString\(\)\)\.apply\(\)/);
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.projects\(\)|projectDetail\(/g), null);
 // Projects render only core's order: groups, areas, rows, and detail items are walked as parsed, never sorted or dropped.
 assert.doesNotMatch(code(projectsUi) + code(model), /\.(sort\w*|sorted\w*|filter(?!Bg\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/);
@@ -2090,7 +2094,7 @@ assert.match(model, /if \(id != openProjectId\) return\s+if \(detail == null\) k
 assert.match(model, /if \(failure\.message\?\.startsWith\("TASK_NOT_FOUND"\) != true\) throw failure\s+null/);
 // Read on every resume of the Projects tab and after every command, as Focus is.
 assert.match(projectsUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ model\.refreshProjects\(\) \}/);
-assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 3, 'the lifecycle loop, and the boot\'s deferred read (first content, or the tab chosen while the boot ran)');
+assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 5, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), and RN\'s Show completed and Completed pile (b4a)');
 assert.match(model, /ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s*at\.project,\s*if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
 // The open project survives rotation (ViewModel) and process death (SavedStateHandle); Back closes it unless a retry is owed.
 assert.match(model, /var openProjectId by mutableStateOf\(saved\.get<String>\("project"\)\)/);
@@ -2322,9 +2326,9 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     // (review PD 3; ProjectDetailsTest's ReplyGuard).
     {
         const details = code(source('ProjectDetails.kt'));
-        // Six reads: the five Details reads and Convert to section's (readConvert, its kind passed in).
-        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 6, 'every Details read takes a ticket');
-        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 6, 'every Details reply checks its ticket');
+        // Seven reads: the five Details reads, Convert to section's (readConvert, its kind passed in) and the view options' sort.
+        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 7, 'every Details read takes a ticket');
+        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 7, 'every Details reply checks its ticket');
         assert.match(details, /shell\.fresh\(mine, InboxViewModel\.Part\.ProjectDetails\)/);
         assert.match(details, /fun closeOverlays\(\) \{\s*replies\.close\(\)/);
     }
@@ -9706,5 +9710,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(shell.match(/\+ presetPatch\(current\)/g)?.length, 3, 'Save, Create tasks and the picker keep the preset');
     assert.equal(shell.match(/\.withPreset\(action\)/g)?.length, 3, 'their sends carry it');
     assert.match(shell, /current\.preset\?\.let \{ put\("preset", it\) \}/);
+}
+// Pass O2f-parity b4a: RN's pinned row "..." (More options) with Sort (core's choices, the prepared sort through runProjectEdit)
+// and Show completed (RN's device key), washed while either is on; the Completed pile folds under RN's chevron heading.
+{
+    const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
+    assert.match(header, /\{ projectDetails\.openViewOptions\(\) \}[\s\S]{0,200}testTag\("project-task-view-options-button"\)/);
+    assert.match(header, /val active = projectShowCompleted \|\| projectDetails\.customSort/);
+    assert.match(header, /if \(entry\.collapsible\) CompletedHeading\(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted\)/);
+    assert.match(details, /"project-view-sort-option"[\s\S]{0,600}"project-view-completed-option"/);
+    assert.match(details, /edit\(projectId, "sort", answer = \{ readSort\(\) \}\) \{ put\("sortBy", sortBy\) \}/);
+    assert.match(hostEntry, /projectTaskSortOptions: \(input\) => contract\.getProjectTaskSortOptions\(input\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

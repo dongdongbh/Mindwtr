@@ -140,6 +140,12 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     /** RN's header "..." sheet (projectActionsVisible), and the confirm Cancel project or Delete asks first. */
     var actionsOpen by mutableStateOf(false)
     var actionConfirm by mutableStateOf<String?>(null)
+    /** RN's view options sheet (the pinned row's "..."), and its sort modal on core's sort choices for this project. */
+    var viewOptionsOpen by mutableStateOf(false)
+    var sortOpen by mutableStateOf(false)
+    var sort by mutableStateOf<JSONObject?>(null); private set
+    /** The project's own sort is not Default: RN washes the "..." while a sort, Show completed or Order is on. */
+    val customSort: Boolean get() = sort?.optString("effectiveSortBy", "default")?.let { it != "default" } == true
     /** The sheet's Convert to section… row as core answers it: its label, and whether it is offered (or why not). */
     var convertRow by mutableStateOf<JSONObject?>(null); private set
     /** RN's ProjectToSectionModal, open while set: core's destinations and preview for the picked destination and typed name. */
@@ -177,6 +183,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         notesDraft = null; notesView = null; areaPicker = null; tagPicker = null; tagDraft = ""; datePicker = null
         sections = null; sectionDraft = null; sectionDelete = null; help = null; actionsOpen = false; actionConfirm = null
         convertRow = null; convert = null; convertConfirm = false
+        viewOptionsOpen = false; sortOpen = false; sort = null
     }
 
     private fun input(id: String) = JSONObject().put("projectId", id)
@@ -349,6 +356,26 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
                 }
             }
         }) { put("destinationProjectId", destination).put("title", title).put("expected", expected) } ?: return
+    }
+
+    /** Core's sort choices for this project (getProjectTaskSortOptions): the view options' Sort row, its modal, the "..." wash. */
+    fun readSort() {
+        val id = projectId ?: return
+        val ticket = replies.ticket("sort")
+        shell.background(emptyList(), { runtime -> runtime.menuRead("projectTaskSortOptions", input(id).toString()) }) { reply, _ ->
+            if (replies.current(ticket)) sort = reply
+        }
+    }
+
+    fun openViewOptions() {
+        viewOptionsOpen = true
+        readSort()
+    }
+
+    /** RN's sort modal: the project's task sort, stored as a target state (core's prepared sort, through runProjectEdit). */
+    fun chooseSort(sortBy: String) {
+        sortOpen = false
+        edit(projectId, "sort", answer = { readSort() }) { put("sortBy", sortBy) }
     }
 
     /** RN's Duplicate: the copy opens, with core's "Project duplicated". */
@@ -963,6 +990,13 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
     }
     sections?.let { options -> SectionManager(model, options) }
     if (actionsOpen) ProjectActionsSheet(model)
+    if (viewOptionsOpen) ViewOptionsSheet(model)
+    if (sortOpen) sort?.let { options ->
+        BackHandler { sortOpen = false }
+        ChoiceModal(model, options.getString("label"), options.menuObjects("choices").map { choice ->
+            Choice(choice.getString("label"), choice.getBoolean("selected")) { chooseSort(choice.getString("id")) }
+        }, dismiss = { sortOpen = false })
+    }
     convert?.let { options -> ConvertSheet(model, options) }
     actionConfirm?.let { action ->
         // RN's Alert before Cancel project and Delete, with its words.
@@ -1082,21 +1116,60 @@ private fun ConvertButton(label: String, enabled: Boolean, tag: String? = null, 
         .padding(horizontal = 10.dp, vertical = 8.dp))
 }
 
+/**
+ * RN's view options sheet (ProjectOptionsModal titled More options): Sort with the current choice (off on a filed project, with
+ * RN's Reactivate hint), and Show completed / Hide completed (not on a filed project).
+ */
+@Composable
+private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails) {
+    val c = LocalTheme.current.colors
+    val archived = model.project?.readOnly == true
+    val idle = !model.busy && model.failedAction == null
+    Overlay({ viewOptionsOpen = false }, outsideCloses = false) {
+        val shape = RoundedCornerShape(14.dp)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            .pointerInput(Unit) { detectTapGestures { } }.padding(14.dp).testTag("project-view-options-sheet"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(t("taskEdit.moreOptions"), style = rnText(17, 800), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
+                val close = t("common.close")
+                Box(Modifier.size(34.dp).clickable(role = Role.Button) { viewOptionsOpen = false }.semantics { contentDescription = close },
+                    contentAlignment = Alignment.Center) { Icon(Ionicons.Close, null, tint = c.secondaryText, modifier = Modifier.size(20.dp)) }
+            }
+            val listShape = RoundedCornerShape(10.dp)
+            Column(Modifier.fillMaxWidth().clip(listShape).border(1.dp, c.border, listShape)) {
+                sort?.let { options ->
+                    val current = options.menuObjects("choices").firstOrNull { it.getBoolean("selected") }?.getString("label")
+                    ProjectOptionRow(Ionicons.SwapVerticalOutline, options.getString("label"), "project-view-sort-option", idle && !archived,
+                        if (archived) t("projects.reactivate") else null, value = current, selected = customSort) { viewOptionsOpen = false; sortOpen = true }
+                }
+                model.project?.controls?.takeIf { !archived }?.let { controls ->
+                    val on = controls.getBoolean("showCompleted")
+                    ProjectOptionRow(if (on) SettingsIonicons.EyeOutline else SettingsIonicons.EyeOffOutline, controls.getString("label"), "project-view-completed-option",
+                        idle, selected = on) { viewOptionsOpen = false; model.setProjectShowCompleted(!on) }
+                }
+            }
+        }
+    }
+}
+
 /** RN's ProjectOptionRow: a 32-dp icon tile, the label (and its description), a hairline under it. */
 @Composable
 private fun ProjectOptionRow(icon: ImageVector, label: String, tag: String, enabled: Boolean, description: String? = null, danger: Boolean = false,
-                             onClick: () -> Unit) {
+                             value: String? = null, selected: Boolean = false, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).fade(if (enabled) 1f else 0.45f).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
-        .hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 9.dp).testTag(tag),
+        .semantics { this.selected = selected }.hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 9.dp).testTag(tag),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(32.dp).clip(RoundedCornerShape(9.dp)).background(c.filterBg), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = if (danger) c.danger else c.secondaryText, modifier = Modifier.size(19.dp))
+        Box(Modifier.size(32.dp).clip(RoundedCornerShape(9.dp)).background(if (selected) c.tint.copy(alpha = 0x20 / 255f) else c.filterBg),
+            contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = if (danger) c.danger else if (selected) c.tint else c.secondaryText, modifier = Modifier.size(19.dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(label, style = rnText(14, 700), color = if (danger) c.danger else c.text)
             description?.let { Text(it, style = rnText(11, 400, 15), color = c.secondaryText) }
         }
+        value?.let { Text(it, style = rnText(12, 600), color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 140.dp)) }
+        if (selected) Icon(SettingsIonicons.Checkmark, null, tint = c.tint, modifier = Modifier.size(18.dp))
     }
 }
 

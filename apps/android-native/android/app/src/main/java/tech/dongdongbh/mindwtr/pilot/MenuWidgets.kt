@@ -273,10 +273,10 @@ class Choice(val label: String, val selected: Boolean, val onClick: () -> Unit)
 
 /** RN's sort and group modals: a centered card over a dimmed screen, the title, and the options; the current one is washed. */
 @Composable
-fun ChoiceModal(model: InboxViewModel, title: String, choices: List<Choice>) = with(model.menu) {
+fun ChoiceModal(model: InboxViewModel, title: String, choices: List<Choice>, dismiss: () -> Unit = { model.menu.keepDialog(null) }) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { keepDialog(null) }.padding(20.dp),
+    Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button, onClick = dismiss).padding(20.dp),
         contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 360.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.cardBg)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -285,7 +285,7 @@ fun ChoiceModal(model: InboxViewModel, title: String, choices: List<Choice>) = w
                 for (choice in choices) {
                     Text(choice.label, style = rnText(14, 400), color = c.text, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
                         .then(if (choice.selected) Modifier.background(c.filterBg) else Modifier)
-                        .selectable(selected = choice.selected, enabled = idle, role = Role.Button) { keepDialog(null); choice.onClick() }
+                        .selectable(selected = choice.selected, enabled = idle, role = Role.Button) { dismiss(); choice.onClick() }
                         .padding(horizontal = 10.dp, vertical = 8.dp))
                 }
             }

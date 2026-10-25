@@ -170,6 +170,29 @@ try {
     check(true, '(c) Undo puts the copy back');
     nodes = await tapExpecting(byText(nodes, STARTER_TITLE) ?? fail('no Getting Started row'),
         (current) => projectTitled(current, STARTER_TITLE) && Boolean(tagged(current, 'getting-started-actions')), 'Getting Started again');
+    // The pinned row's view options "..." (RN's More options, b4a): Sort with its current choice, then Show completed. A sort
+    // other than Default washes the "..."; Default again clears it.
+    const viewOpen = (current) => Boolean(tagged(current, 'project-view-options-sheet'));
+    const openView = async () => {
+        await tapExpecting(tagged(await screen(), 'project-task-view-options-button') ?? fail('no view options "..."'), viewOpen, 'the view options');
+        return waitFor('the Sort row', (current) => Boolean(tagged(current, 'project-view-sort-option')), 15_000);
+    };
+    nodes = await openView();
+    const viewRows = ['project-view-sort-option', 'project-view-completed-option'].map((tag) => tagged(nodes, tag));
+    check(viewRows.every(Boolean) && centerY(viewRows[0]) < centerY(viewRows[1]) && hasText(nodes, en['sort.default']),
+        '(c) the view options list Sort (Default) then Show completed, as RN');
+    shot('project-view-options');
+    const pickSort = async (label) => {
+        nodes = await openView();
+        await tapExpecting(tagged(nodes, 'project-view-sort-option'), (current) => !viewOpen(current) && hasText(current, label), 'the sort choices');
+        return tapExpecting(byText(await screen(), label) ?? fail(`no ${label} choice`), (current) => !hasText(current, en['sort.label']), 'the sort chosen');
+    };
+    await pickSort(en['sort.title']);
+    nodes = await waitFor('the "..." washed', (current) => tagged(current, 'project-task-view-options-button')?.selected === 'true', 15_000);
+    check(true, '(c) a Title sort washes the view options "..."');
+    await pickSort(en['sort.default']);
+    nodes = await waitFor('the "..." plain again', (current) => tagged(current, 'project-task-view-options-button')?.selected === 'false', 15_000);
+    check(true, '(c) Default again clears it');
     // The pinned "+" (RN's openProjectQuickAdd): the popup opens with Getting Started chosen, and the task saves as Next in it.
     nodes = await tapExpecting(tagged(nodes, 'project-add-task-button') ?? fail('no project "+"'),
         (current) => Boolean(tagged(current, 'quick-capture')) && hasText(current, STARTER_TITLE), 'the capture popup with Getting Started chosen', 15_000);

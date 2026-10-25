@@ -202,6 +202,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var focusView by mutableStateOf(FocusViewState.read(prefs)); private set
     /** Collapsed area groups and the open Someday / Waiting and Closed groups, device-local as RN keeps them. */
     var projectsView by mutableStateOf(ProjectsViewState.read(prefs)); private set
+    /** RN's project Show completed (the view options): device-wide, in RN's own key and text, as RN keeps it (#1030). */
+    var projectShowCompleted by mutableStateOf(prefs.getString(PROJECT_SHOW_COMPLETED_KEY, null) == "true"); private set
+    /** RN's Completed pile under a project's open tasks: folded again each time another project opens (TaskList). */
+    var projectCompletedCollapsed by mutableStateOf(true); private set
     /** Core's area filter: the header trigger's label and the sheet's options. */
     var areaFilter by mutableStateOf<AreaFilter?>(null); private set
     /** RN's area sheet is open. */
@@ -1836,6 +1840,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** Opens one project's detail at core's first window. */
     fun openProject(id: String) {
+        if (id != openProjectId) projectCompletedCollapsed = true
         val mine = ++issued
         perform { runtime ->
             val detail = readProject(runtime, id, null, PAGE)
@@ -1897,16 +1902,35 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         project = detail
     }
 
+    /** RN's Show completed and Completed pile shape the window: core's project view (getProjectDetailView) for both. */
+    private fun projectWindow(runtime: CoreHost, id: String, offset: Int, revision: String): JSONObject =
+        runtime.menuRead("projectDetailView", JSONObject().put("projectId", id).put("offset", offset).put("limit", PAGE)
+            .apply { if (revision.isNotEmpty()) put("revision", revision) }
+            .put("showCompleted", projectShowCompleted).put("completedCollapsed", projectCompletedCollapsed).toString())
+
+    /** RN's Show completed / Hide completed: stored at once, in RN's key; the project reads again. */
+    fun setProjectShowCompleted(on: Boolean) {
+        projectShowCompleted = on
+        prefs.edit().putString(PROJECT_SHOW_COMPLETED_KEY, on.toString()).apply()
+        refreshProjects()
+    }
+
+    /** RN's Completed heading: folds or unfolds the pile. */
+    fun toggleProjectCompleted() {
+        projectCompletedCollapsed = !projectCompletedCollapsed
+        refreshProjects()
+    }
+
     /**
      * Core's project detail read to [depth] items at one revision. As in Focus,
      * STALE_REVISION is never an error: the project changed, so read it again
      * from offset 0. A fresh read that went stale keeps its first window.
      */
     private fun readProject(runtime: CoreHost, id: String, start: ProjectDetail?, depth: Int): ProjectDetail {
-        var view = start ?: ProjectDetail.parse(runtime.projectDetail(id, 0, PAGE, ""))
+        var view = start ?: ProjectDetail.parse(projectWindow(runtime, id, 0, ""))
         while (view.items.size < minOf(depth, view.total)) {
             val next = try {
-                view.append(runtime.projectDetail(id, view.items.size, PAGE, view.revision))
+                view.append(projectWindow(runtime, id, view.items.size, view.revision))
             } catch (failure: Exception) {
                 if (failure.message?.startsWith("STALE_REVISION") != true) throw failure
                 return if (start == null) view else readProject(runtime, id, null, depth)
