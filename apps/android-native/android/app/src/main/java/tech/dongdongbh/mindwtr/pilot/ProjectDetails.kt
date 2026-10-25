@@ -503,7 +503,8 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     private fun answered(action: FailedAction, reply: JSONObject) {
         shell.acknowledged(action)
         refusals.remove(action.id)
-        answers.remove(action.id)?.let { answer -> shell.ui { answer(reply) } }
+        // The action still holds busy here: its follow-up (openProject) waits until it settles, or perform would drop it.
+        answers.remove(action.id)?.let { answer -> shell.ui { shell.menu.whenIdle { answer(reply) } } }
     }
 
     fun retry(action: FailedAction) = send(action)

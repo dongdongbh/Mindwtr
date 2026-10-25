@@ -9626,12 +9626,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(header, /ProjectTitleField\([^\n]*\n[\s\S]{0,800}\{ projectDetails\.openActions\(\) \}[\s\S]{0,200}testTag\("project-actions-menu-button"\)/);
     assert.match(details, /"project-duplicate-button"[\s\S]{0,500}"project-convert-to-section-button"[\s\S]{0,300}"project-reactivate-button"[\s\S]{0,300}"project-archive-button"[\s\S]{0,300}"project-cancel-button"[\s\S]{0,300}"project-delete-button"/);
     assert.match(details, /deleteId = edit\(id, "delete", refused = [^\n]*answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo", refused = [^\n]*\) \{ put\("deleteRequestId", deleteId\) \}/);
-    assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ answer\(reply\) \} \}/);
+    // A reply's follow-up (open the copy, the destination, the restored project) waits for the action to settle: the action still
+    // holds busy when its reply is posted, and a perform started then is dropped (phone run 3: Duplicate never opened the copy).
+    assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ shell\.menu\.whenIdle \{ answer\(reply\) \} \} \}/);
     // Review of b1+b2: the sheet stores a typed title and notes before any action (RN's onBeforeConvertToSection), and a refused
     // action shows RN's failure line (core's STALE_REVISION is otherwise silent); Convert sends the preview Next confirmed.
     assert.match(details, /fun openActions\(\) \{\s+storeTyped\(\)\s+actionsOpen = true/);
     assert.match(details, /if \(message\.startsWith\("STALE_REVISION"\)\) \{\s+answers\.remove\(action\.id\)\s+refusals\.remove\(action\.id\)\?\.let \{ refused -> shell\.ui \{ refused\(message\.substringAfter\(": "\)\) \} \}/);
     assert.match(details, /put\("destinationProjectId", destination\)\.put\("title", title\)\.put\("expected", expected\)/);
+    // RN resets the detail list for each project and shows Getting Started's actions at the top again after Reactivate.
+    assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,200}LazyColumn\([^\n]*state = listState/);
     // b3: the pinned "+" opens the capture popup with RN's preset (the project, status Next), kept in the durable draft and sent
     // with every capture call.
     assert.match(header, /\{ openCapture\(openProjectId\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);

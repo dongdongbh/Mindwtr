@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -396,7 +398,12 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             }
         }
         // RN's KeyboardAvoidingView: the open keyboard shortens the list, so a focused Details field scrolls into view.
-        LazyColumn(Modifier.weight(1f).background(c.bg).imePadding(), contentPadding = PaddingValues(12.dp)) {
+        // RN's list starts at the top for each project (resetProjectDetailScroll), and its header rows (Getting Started's actions)
+        // show again at the top when they come back (Reactivate): a lazy list would keep the row below them first instead.
+        val listState = remember(openProjectId) { LazyListState() }
+        val gettingStarted = detail?.gettingStarted != null
+        LaunchedEffect(openProjectId, gettingStarted) { if (gettingStarted && listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0) }
+        LazyColumn(Modifier.weight(1f).background(c.bg).imePadding(), state = listState, contentPadding = PaddingValues(12.dp)) {
             // RN's Details toggle and panel (its Attachments card inside), scrolling away with the rows as RN's list header.
             openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
             for (entry in detail?.items.orEmpty()) when (entry) {
