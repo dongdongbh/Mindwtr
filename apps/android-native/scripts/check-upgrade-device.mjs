@@ -296,6 +296,8 @@ const isDatabase = (path) => /^files\/SQLite\/mindwtr\.db(-wal|-shm)?$/.test(pat
 // for the database the app left, with the inputs the app logged.
 const widgetPrefsNow = () => widgetPrefs(runAs(`cat ${WIDGET_PREFS} 2>/dev/null || true`));
 const isWidgetPayload = (path) => path === WIDGET_PREFS;
+// The native Pomodoro's own files (pass R2b), new at a first start that boots: its alarm book (the upgrade time) and its card's fold.
+const isPomodoroPrefs = (path) => path === 'shared_prefs/mindwtr_pomodoro_alarms.xml' || path === 'shared_prefs/mindwtr-pomodoro.xml';
 /**
  * Before the app stops: leaves it (the app publishes what changed as it leaves; while it is in front a change waits up to five
  * minutes, as RN's), waits until that publication is stored and drawn, and returns its logged inputs.
@@ -673,7 +675,8 @@ const scenarioUpgrade = async () => {
     check(checkpointMatches(before, after), `(1) ${RN_CHECKPOINT} holds the pre-upgrade RKStorage files byte for byte (${rnFiles.join(', ')}), taken at boot before anything opened RKStorage`);
     const changed = differences(before, after, {
         changedOk: (path) => isDatabase(path) || path === queuedPath || isAsyncStorage(path) || isWidgetPayload(path),
-        newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path),
+        newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path)
+            || isPomodoroPrefs(path),
     });
     checkLedger('1', after);
     checkOwedUploads('1', after);
@@ -793,7 +796,8 @@ const scenarioJsonAhead = async () => {
     check(checkpointMatches(before, after), `(2) ${RN_CHECKPOINT} holds the pre-import RKStorage files byte for byte`);
     const changed = differences(before, after, {
         changedOk: (path) => isDatabase(path) || isAsyncStorage(path) || isWidgetPayload(path),
-        newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path),
+        newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path)
+            || isPomodoroPrefs(path),
     });
     check(changed.length === 0, `(2) every other file is unchanged but RN's widget payload${shortList(changed)}`);
     verifyWidgetPayload('2', widgetsBefore, published);
@@ -1045,7 +1049,8 @@ const scenarioMissingWithBackup = async () => {
     check(checkpointMatches(before, after), `(5b) ${RN_CHECKPOINT} holds the pre-upgrade RKStorage files`);
     const changed = differences(before, after, {
         changedOk: (path) => isAsyncStorage(path) || isWidgetPayload(path),
-        newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path),
+        newOk: (path) => isDatabase(path) || path === `${DB}.prewrite` || isAsyncStorage(path) || isRnCheckpoint(path) || isWidgetPayload(path)
+            || isPomodoroPrefs(path),
     });
     check(changed.length === 0, `(5b) every other file is unchanged but RN's widget payload${shortList(changed)}`);
     checkLedger('5b', after);
