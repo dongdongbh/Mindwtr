@@ -823,6 +823,9 @@ class CoreHost(
     /** RN's theme as core resolves it: [stored] is RN's device-local `@mindwtr_theme` ("" for none). */
     fun theme(stored: String): JSONObject = callAsync("theme", stored)
 
+    /** Core's language with a settled synced `settings.language` first ([stored]: RN's device key), and the key's write to mirror it. */
+    fun languageSaved(stored: String, system: String): JSONObject = callAsync("languageSaved", stored, system)
+
     /** Core's General row for RN's app lock (its `value` is the stored setting); an owed save does not block it. */
     fun appLock(): JSONObject = callAsync("appLock")
 

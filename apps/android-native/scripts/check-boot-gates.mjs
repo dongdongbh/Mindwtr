@@ -833,7 +833,7 @@ assert.match(model, /fun refreshFocus\(\) \{\s+\/\/[^\n]*\s+if \(focus == null &
 // Projects waits even when already read: a list older than a write made outside a command (the welcome sheet's Getting Started)
 // would keep the project's header title blank (O2f phone check).
 assert.match(model, /fun refreshProjects\(\) \{\s+(?:\/\/[^\n]*\s+)+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
-assert.match(model, /private fun refreshAll\(\) \{\s+val at = depth\(\)\s+background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, ::showLists\)/);
+assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+background\(Part\.entries, \{ runtime -> if \(synced\) applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)/);
 // A command's lists are read again only after it succeeds (or was refused as stale), in the background, once busy is released.
 assert.match(model, /try \{\s+\/\/[^\n]*\s+debugProperty\("delay_action_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+work\(runtime\); done = true\s+\}/);
 assert.match(model, /ui \{\s+busy = false\s+if \(\(done \|\| stale\) && action != null\) refreshAll\(\)\s+finished\?\.invoke\(\)\s+\}/);
@@ -2133,7 +2133,7 @@ assert.match(model, /if \(action\.kind == "saveSearch"\) keepSearch\(SearchState
     'a new screen reopens the save dialog on an owed save, never re-sends it');
 assert.match(searchUi, /failedAction == null \|\| failedAction == saveSearchAction\(state, sent\)/);
 assert.match(searchUi, /failedAction == null \|\| failedAction == completeAction\(task\.id, task\.taskRevision\)/, 'Mark Done from search is the lists\' Done with its exact retry');
-assert.match(model, /private fun refreshAll\(\) \{[\s\S]*?if \(search != null\) readSearch\(\)\s+\}/, 'search is read again after every command');
+assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{[\s\S]*?if \(search != null\) readSearch\(\)\s+\}/, 'search is read again after every command');
 // Search results are core's: core's highlight segments, date line and tone, and tap target; Kotlin never sorts or filters them.
 assert.doesNotMatch(code(searchUi), /\.(sort\w*|sorted\w*|groupBy|reversed|shuffled|distinct\w*)\b/);
 assert.match(searchUi, /row\.getJSONArray\("titleSegments"\)\.segments\(\)/);
@@ -2406,7 +2406,7 @@ assert.equal(code(menuModel).match(/if \(failure\.message\?\.startsWith\("STALE_
 assert.match(menuModel, /private fun readMoveChoices\(depth: Int = WINDOW\) \{[\s\S]*?\.put\("offset", 0\)[\s\S]*?\.put\("revision", first\.getString\("revision"\)\)[\s\S]*?if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/,
     'the move dialog pages its choices under the first window\'s revision and rereads from the first window');
 assert.match(menuModel, /fun moreMoveChoices\(\) \{ moveChoices\?\.getJSONObject\("choices"\)\?\.getJSONArray\("items"\)\?\.length\(\)\?\.let \{ readMoveChoices\(it \+ WINDOW\) \} \}/);
-assert.match(model, /private fun refreshAll\(\) \{\s+val at = depth\(\)\s+background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every command');
+assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+background\(Part\.entries, \{ runtime -> if \(synced\) applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every command');
 // Filters, sorts and groups: every choice sends the exact edit or value core put on it; only typed text builds an edit.
 {
     // Kotlin names only core's Archive and bulk actions (NativeArchiveAction, NativeBulkAction), the typed text's edits (a filter's
@@ -2988,7 +2988,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(hostEntry.slice(hostEntry.indexOf('appLock(): string {'), hostEntry.indexOf('    projects(): string {')), /requireSaved/);
     assert.match(coreHost, /fun appLock\(\): JSONObject = callAsync\("appLock"\)/);
     // At boot, before any screen reads data (the owed-retry restore included), the app opens locked while core says on.
-    assert.match(model, /applyDeviceChoices\(runtime, prefs\)\s+\/\/[^\n]*\n\s+lock\.boot\(runtime\)\s+ProcessCoreHost\.failure\?\.let/);
+    assert.match(model, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)\s+\/\/[^\n]*\n\s+lock\.boot\(runtime\)\s+ProcessCoreHost\.failure\?\.let/);
     assert.match(lockKt, /val on = runtime\.appLock\(\)\.getBoolean\("value"\)\s+shell\.ui \{ enabled = on; locked = on \}/);
     // The gate wraps every screen inside the one theme; while locked the lock screen replaces them (RN's gate renders it instead of
     // its children), and the screens' saved state waits for the unlock.
@@ -8630,6 +8630,17 @@ assert.deepEqual(await poll(ready, ready.MindwtrHost.strings('["tab.inbox"]')),
     { ok: true, value: { language: 'zh', strings: { 'tab.inbox': '收集箱' }, missing: [] } });
 assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"en-US"}', '{"storedLanguage":"zh","systemLocale":"en-US"}',
     '{"keys":["tab.inbox"]}']);
+// RN b5bf5e5fb and b8e2ebdeb: a language or theme synced from another device applies on Android at once, after boot's load and
+// after each finished sync cycle: languageSaved (the settled synced language wins, mirrored to RN's key) and the theme read again.
+{
+    const settingsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/SettingsModel.kt'), 'utf8');
+    const viewModelKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt'), 'utf8');
+    assert.match(settingsKt, /fun applySyncedChoices\(runtime: CoreHost, prefs: SharedPreferences\) \{[\s\S]*?runtime\.languageSaved\([\s\S]*?ThemeChoice\.load\(runtime\.theme\(/);
+    assert.match(viewModelKt, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)/, 'boot applies synced choices after the device ones');
+    assert.match(viewModelKt, /if \(cycles != syncCycles\) \{[\s\S]{0,400}?refreshAll\(synced = true\)/, 'a finished sync cycle applies synced choices');
+    assert.match(viewModelKt, /if \(synced\) applySyncedChoices\(runtime, prefs\)/);
+    assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject = callAsync\("languageSaved", stored, system\)/);
+}
 // The new iOS-only route reads the settled Settings row. The two-arg Android route above keeps its device-key semantics.
 {
     const savedLanguage = async (stored = 'zh', system = 'en-US') => await poll(ready, ready.MindwtrHost.languageSaved(stored, system));

@@ -307,7 +307,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 if (cycles != syncCycles) {
                     syncCycles = cycles
                     // A read refused while a user action runs would leave the lists stale until the next resume: wait for idle.
-                    menu.whenIdle { if (writable) refreshAll() }
+                    menu.whenIdle { if (writable) refreshAll(synced = true) }
                 } else if (menu.list == "settings") menu.settings.refresh()
             }
             // A screen's external calendars finished loading (host-calendar.ts): the screen showing them reads again.
@@ -390,6 +390,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 val runtime = ProcessCoreHost.get(getApplication(), prefs.getString(LANGUAGE_KEY, null))
                 // The language and theme chosen in this app's Settings (RN's device keys) win over the ones found at boot.
                 applyDeviceChoices(runtime, prefs)
+                applySyncedChoices(runtime, prefs)
                 // RN's app lock, before any screen shows data (an owed save does not block it).
                 lock.boot(runtime)
                 ProcessCoreHost.failure?.let { pending -> ui { host = runtime; restore(pending, storedProcessing, storedCapture); keepRoutes() }; return@Thread }
@@ -1878,9 +1879,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     /** Every list from offset 0, as deep as it is shown, in the background: after every command. */
-    private fun refreshAll() {
+    /** Every list and the open screen read again; after a finished sync cycle ([synced]) its language and theme first. */
+    private fun refreshAll(synced: Boolean = false) {
         val at = depth()
-        background(Part.entries, { runtime -> read(runtime, at) }, ::showLists)
+        background(Part.entries, { runtime -> if (synced) applySyncedChoices(runtime, prefs); read(runtime, at) }, ::showLists)
         menu.refresh()
         if (search != null) readSearch()
     }

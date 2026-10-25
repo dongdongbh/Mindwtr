@@ -84,6 +84,23 @@ fun applyDeviceChoices(runtime: CoreHost, prefs: SharedPreferences) {
 }
 
 /**
+ * A language or theme synced from another device, applied at once, as RN's _layout follows `settings.language` (b5bf5e5fb) and
+ * its theme context `settings.theme` (b8e2ebdeb). After boot's load and after each finished sync cycle: core's languageSaved (a
+ * settled synced language wins) and its key mirrored here, the labels read again when it changed; the theme read again, where
+ * the synced `settings.theme` already wins over the device key. Cosmetic: a failure keeps what shows.
+ */
+fun applySyncedChoices(runtime: CoreHost, prefs: SharedPreferences) {
+    runCatching {
+        val before = prefs.getString(LANGUAGE_KEY, null)
+        val reply = runtime.languageSaved(before.orEmpty(), Locale.getDefault().toLanguageTag())
+        reply.optJSONArray("deviceWrites")?.takeIf { it.length() > 0 }?.let { deviceStore(prefs).store(it, null, replay = false) }
+        if (prefs.getString(LANGUAGE_KEY, null) != before) Labels.load(runtime.strings(LABEL_KEYS))
+    }.onFailure { Log.w(CoreHost.TAG, "Native Android synced language not applied ${failureForLog(it)}") }
+    runCatching { ThemeChoice.load(runtime.theme(prefs.getString(THEME_KEY, null).orEmpty())) }
+        .onFailure { Log.w(CoreHost.TAG, "Native Android synced theme not applied ${failureForLog(it)}") }
+}
+
+/**
  * A Settings screen at one revision: core's view, on Manage its lists as paged and core's Someday sections, and on GTD the
  * capture intent's token (RN's CaptureIntentConfigStore; it never goes to core), null while it is off or unreadable.
  */
