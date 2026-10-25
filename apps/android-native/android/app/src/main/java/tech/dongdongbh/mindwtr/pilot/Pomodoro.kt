@@ -54,6 +54,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -457,7 +458,9 @@ fun PomodoroPicker(model: InboxViewModel) = with(model.pomodoro) {
     val enabled = model.menu.idle
     BackHandler { closePicker() }
     val choose = { id: String? -> if (enabled) { closePicker(); act("selectTask", JSONObject().put("taskId", id ?: JSONObject.NULL)) } }
-    Box(Modifier.fillMaxSize().background(Color(0x99000000)).pointerInput(Unit) { detectTapGestures { closePicker() } }.padding(20.dp),
+    // Its own root over the screen: its tags reach UiAutomator as resource ids only when it says so, as the other overlays do.
+    Box(Modifier.fillMaxSize().background(Color(0x99000000)).semantics { testTagsAsResourceId = true }
+        .pointerInput(Unit) { detectTapGestures { closePicker() } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(14.dp)
         Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.72f).dp).clip(shape).background(c.cardBg)
