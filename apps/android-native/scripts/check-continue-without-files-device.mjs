@@ -157,11 +157,25 @@ const runCommand = async (tag, operation, description, timeoutMs = 240_000) => {
 const leftovers = () => sqlite(pullFile(`files/${DB}`, 'db'),
     "SELECT p.title AS project, j.value->>'title' AS file FROM projects p, json_each(p.attachments) j WHERE p.deletedAt IS NULL "
     + "AND p.title LIKE 'CWF project %' AND j.value->>'kind' = 'file' AND j.value->>'deletedAt' IS NULL");
-/** Opens [project] in Projects with its Details, and taps Remove beside [file]; answers once the row is gone. */
-const removeProjectFile = async (project, file) => {
+/** Projects showing its list (Back from an open project: the tab keeps the last project open). */
+const projectList = async () => {
     let nodes = await toTabs();
     nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
-    nodes = await device.reveal(project);
+    // An open project shows its title field and Details controls (scrolled: not always its Details toggle).
+    const inProject = (current) => current.some((node) => /(^|\/)project-(title-input|details-[a-z]+|attachment-add-link)$/.test(node['resource-id'] ?? ''));
+    for (let step = 0; step < 4 && inProject(nodes); step += 1) {
+        await hideKeyboard();
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(1000);
+        nodes = await screen();
+    }
+    return inProject(nodes) ? fail('the project list did not come back') : nodes;
+};
+/** Opens [project] in Projects with its Details, and taps Remove beside [file]; answers once the row is gone. */
+const removeProjectFile = async (project, file) => {
+    await projectList();
+    let nodes = await device.reveal(project);
     nodes = await tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
     if (!tagged(nodes, 'project-attachment-add-link')) {
         nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
@@ -273,8 +287,7 @@ try {
     const after = projectAttachments().find((a) => a.id === fileId);
     check(Boolean(after) && !after.deletedAt && Boolean(after.cloudKey), '(4) the attachment is still live and keyed after Continue');
     check(/Sync activation continued without attachment files/.test(logs()), '(4) the app log has the activation-continue-without-files line');
-    nodes = await toTabs();
-    nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
+    await projectList();
     nodes = await device.reveal(names.project);
     nodes = await tapExpecting(inList(nodes, names.project) ?? fail('no project row'), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
     nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
