@@ -246,11 +246,19 @@ describe('buildTaskRowMeta', () => {
         expect(label('available')).toBe('Task. Status: status.next. Available next action');
         expect(label('later')).toBe('Task. Status: status.next');
     });
+
+    it('gives no status control while the editor layout hides Status, as React Native and desktop rows do (#1405)', () => {
+        const hidden = resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: ['status'] } } });
+        expect(hidden.status).toBe(false);
+        expect(buildTaskRowMeta({ ...base, features: hidden, task: task({}) }).statusLabel).toBeNull();
+        expect(buildTaskRowMeta({ ...base, features: resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: [] } } }), task: task({}) }).statusLabel)
+            .toBe('status.next');
+    });
 });
 
 describe('resolveTaskRowFeatures', () => {
     it('shows time spent only when Pomodoro is linked to tasks', () => {
-        expect(resolveTaskRowFeatures(undefined)).toEqual({ priorities: true, timeEstimates: true, timeSpent: false, taskAge: false });
+        expect(resolveTaskRowFeatures(undefined)).toEqual({ priorities: true, timeEstimates: true, timeSpent: false, taskAge: false, status: true });
         expect(resolveTaskRowFeatures({ features: { pomodoro: true } }).timeSpent).toBe(false);
         expect(resolveTaskRowFeatures({ features: { pomodoro: true }, gtd: { pomodoro: { linkTask: true } } }).timeSpent).toBe(true);
     });
