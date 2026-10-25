@@ -374,11 +374,14 @@ const restore = async () => {
     try {
         if (found) {
             if (!pid() || !front().includes(`${PKG}/`)) await launch();
+            // A failure with the task picker open: its scrim would take the tab bar's taps.
+            if (tagged(await screen(), 'pomodoro-picker')) { sh('input keyevent KEYCODE_BACK'); await sleep(1000); }
             if (found.pomodoro && settings().features?.pomodoro === true) {
                 // The timer at rest, so no alert of this check fires later.
                 const nodes = await toCard();
                 if (primary(nodes) === en['common.pause']) await tapExpecting(await control('pomodoro-primary'), (current) => primary(current) === en['common.start'], 'Pause');
-                await waitUntil('no Pomodoro alarm left', () => pomodoroAlarms().length === 0, 15_000);
+                // A due alert stays armed after a pause (RN's rule) until it fires, inexactly late without the exact-alarm grant.
+                await waitUntil('no Pomodoro alarm left', () => pomodoroAlarms().length === 0, LATE_MS);
             }
             await openNotifications();
             await setSwitch(en['settings.notificationsEnable'], found.reminders, () => true);
