@@ -1003,48 +1003,20 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         }
     }
 
-    func testWebDAVConfirmed404UsesSourceFreeColdRetryAndStopNeverRollsBackLostCommitAcknowledgment() async throws {
-        for variant in ["retry", "stop-before", "retry-after-commit", "stop-after-commit"] {
-            scenario(variant); let count = remote.counts[0]
-            try await seedWebDAV416(hash: false); remote.status = 404
-            let core = host(); _ = try await core.start(); let input = try await request(core)
-            let original = try selected(), before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
-            let fired = await inject(core, variant.hasSuffix("after-commit") ? .afterCommit : .afterIntent)
-            await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }; XCTAssertTrue(fired())
-            let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String)
-            XCTAssertEqual(retained["version"] as? Int, 2); XCTAssertEqual(retained["outcome"] as? String, "unrecoverable")
-            XCTAssertEqual(retained["phase"] as? String, "intent")
-            for field in ["source", "stage", "filled", "published", "managedDirectoryIdentity"] { XCTAssertNil(retained[field], field) }
-            for field in ["reservationStarted", "targetRetired", "stageRetired", "sourceRetired"] { XCTAssertEqual(retained[field] as? Bool, false, field) }
-            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
-            if variant.hasSuffix("after-commit") { try assertWebDAVEffect416(before, original: original, unrecoverable: true) }
-            else { XCTAssertEqual(try json(projectRows416()), try json(before)) }
-            let preCold = try rows(), retainedJournal = try Data(contentsOf: journal)
-            await core.close(); let cold = host(); try await retainedStart(cold)
-            let summary = try object(await cold.projectFileAvailabilitySummary())
-            XCTAssertEqual(try json(summary), try json(["requestId": id, "projectId": projectID, "attachmentId": attachmentID, "phase": "intent"]))
-            let appLock = try object(await cold.call("appLockOptions", argumentsJSON: "[\"{}\"]"))
-            XCTAssertEqual(Set(appLock.keys), Set(["row", "value", "expected"]))
-            let lockValue = try XCTUnwrap(appLock["value"] as? NSNumber)
-            XCTAssertEqual(CFGetTypeID(lockValue), CFBooleanGetTypeID()); XCTAssertFalse(lockValue.boolValue)
-            XCTAssertFalse(try XCTUnwrap(appLock["row"] as? [String: Any]).isEmpty)
-            XCTAssertFalse(try XCTUnwrap(appLock["expected"] as? [String: Any]).isEmpty)
-            XCTAssertEqual(try Data(contentsOf: journal), retainedJournal); XCTAssertEqual(try rows(), preCold)
-            XCTAssertEqual(try others(), other); XCTAssertEqual(try Data(contentsOf: manifest), config)
-            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
-            let reply: String
-            if variant.hasPrefix("stop") { reply = try await cold.abandonProjectFileAvailability(requestId: id) }
-            else { reply = try await cold.recoverProjectFileAvailability(requestId: id) }
-            let result = try object(reply)
-            if !variant.hasPrefix("stop") { XCTAssertEqual(result["status"] as? String, "unrecoverable"); try assertWebDAVEffect416(before, original: original, unrecoverable: true) }
-            else { XCTAssertEqual(result["abandoned"] as? Bool, true); XCTAssertEqual(try rows(), preCold) }
-            XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
-            XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try others(), other)
-            let terminal = variant.hasPrefix("stop") ? "abandoned" : "unrecoverable"
-            XCTAssertEqual(try webdavOutcomes416().filter { $0 == terminal }, [terminal])
-            XCTAssertEqual(try Data(contentsOf: manifest), config); try assertNoTaskOwner(); await cold.close()
-            let clean = host(); _ = try await clean.start(); XCTAssertEqual(remote.counts, [count + 1, 0]); await clean.close()
-        }
+    func testWebDAVConfirmed404IsRefusedAndLeavesTheRowWithoutAJournal() async throws {
+        // A remote 404 never deletes the attachment (core handleRemoteAttachmentNotFound): that delete would sync to every device.
+        scenario("404"); let count = remote.counts[0]
+        try await seedWebDAV416(hash: false); remote.status = 404
+        let core = host(); _ = try await core.start(); let input = try await request(core)
+        let before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
+        await refused { _ = try await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input) }
+        XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertEqual(try json(projectRows416()), try json(before))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path)); XCTAssertEqual(try cacheFiles(), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); XCTAssertEqual(try others(), other)
+        XCTAssertEqual(try webdavOutcomes416().filter { $0 == "unrecoverable" }, [])
+        XCTAssertEqual(try Data(contentsOf: manifest), config); try assertNoTaskOwner(); await core.close()
+        let cold = host(); _ = try await cold.start()
+        XCTAssertEqual(remote.counts, [count + 1, 0]); XCTAssertEqual(try json(projectRows416()), try json(before)); await cold.close()
     }
 
     func testWebDAVNativePasswordReadErrorAfterGETRefusesBeforeSourceAndFreshRequestSucceeds() async throws {

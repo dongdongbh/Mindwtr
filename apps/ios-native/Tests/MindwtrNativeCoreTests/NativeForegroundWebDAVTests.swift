@@ -998,7 +998,7 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         await host.close()
     }
 
-    func testProjectDownloadAuthHashAndCapFailuresStayRetryableWhile404IsTerminal() async throws {
+    func testProjectDownloadAuthHashCapAnd404FailuresStayRetryableAndLeaveTheRow() async throws {
         _ = try await configureStoredCleanupCandidate()
         var fixtures: [(String, ProjectDownloadFixture)] = []
         for mode in ["auth", "hash", "cap", "404"] {
@@ -1014,31 +1014,20 @@ final class NativeForegroundWebDAVTests: XCTestCase {
         for (mode, fixture) in fixtures {
             let input = try await projectDownloadInput(host, fixture), before = try rows(), oldProjects = try projectRows(), requestStart = remote.recorded.count
             let answer = try await command(host, "projectAttachmentDownload", input)
-            XCTAssertEqual(answer["status"] as? String, mode == "404" ? "unrecoverable" : "unavailable", mode)
+            // A 404 answers like any failure: the row stays live and keyed (deleting it would sync to every device).
+            XCTAssertEqual(answer["status"] as? String, "unavailable", mode)
             XCTAssertTrue(answer["update"] is NSNull)
             XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.target.path), mode)
             try assertDownloadPreservation(rows: before, projects: oldProjects, selected: fixture.projectID)
             XCTAssertTrue(remote.recorded.dropFirst(requestStart).allSatisfy { $0.method == "GET" && $0.path == fixture.remotePath })
             XCTAssertGreaterThan(remote.recorded.count, requestStart)
             let current = try projectDownloadAttachment(fixture)
-            if mode == "404" {
-                XCTAssertNotNil(current["deletedAt"] as? String); XCTAssertNil(current["cloudKey"]); XCTAssertNil(current["fileHash"])
-                XCTAssertEqual(current["title"] as? String, fixture.attachment["title"] as? String)
-                XCTAssertEqual(current["contentRev"] as? Int, fixture.attachment["contentRev"] as? Int)
-                let repeatInput = try await projectDownloadInput(host, fixture), repeatStart = remote.recorded.count, terminalRows = try rows()
-                do {
-                    _ = try await host.foregroundSync(command: "projectAttachmentDownload", requestJSON: json(repeatInput))
-                    XCTFail("The native owned preflight must refuse the terminal tombstone")
-                } catch { XCTAssertEqual(error.localizedDescription, "Foreground sync could not be confirmed") }
-                XCTAssertEqual(remote.recorded.count, repeatStart); XCTAssertEqual(try rows(), terminalRows)
-            } else {
-                XCTAssertNil(current["deletedAt"]); XCTAssertEqual(current["cloudKey"] as? String, fixture.attachment["cloudKey"] as? String)
-                XCTAssertEqual(current["fileHash"] as? String, fixture.attachment["fileHash"] as? String)
-                XCTAssertEqual(current["localStatus"] as? String, "missing")
-            }
+            XCTAssertNil(current["deletedAt"]); XCTAssertEqual(current["cloudKey"] as? String, fixture.attachment["cloudKey"] as? String)
+            XCTAssertEqual(current["fileHash"] as? String, fixture.attachment["fileHash"] as? String)
+            XCTAssertEqual(current["localStatus"] as? String, "missing")
             XCTAssertEqual(jobs?.counters.jobs, 0, "No refused response remains retained after this scope")
             XCTAssertEqual(jobs?.counters.running, 0, "No failed download escapes the foreground invocation")
-            try assertProjectDownloadMarker(mode == "404" ? ["unrecoverable"] : [])
+            try assertProjectDownloadMarker([])
         }
         try assertConfiguration(); await host.close()
         let cold = core(), beforeCold = remote.recorded.count

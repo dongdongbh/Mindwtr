@@ -15,6 +15,7 @@ import {
     markAttachmentPresenceReconciled,
 } from './attachment-presence-scope';
 import { clearAttachmentValidationFailures } from './sync-attachment-validation';
+import { DropboxFileNotFoundError } from './dropbox-sync';
 import {
     clearAttachmentSyncState,
     syncCloudAttachments,
@@ -310,6 +311,36 @@ describe('desktop sync attachment backends', () => {
                 return syncFileAttachments(appData, '/sync-root', deps);
         }
     };
+
+    it.each<DownloadBackend>(['cloud', 'dropbox', 'cloudkit'])(
+        'asks %s nothing on the next pass for a file that answered not-found, until its backoff ends',
+        async (backend) => {
+            // The row stays live after a not-found; without the backoff it would cost a request every sync.
+            const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
+            const deps: AttachmentBackendDeps = {
+                getTauriFetch: async () => fetcher as unknown as typeof fetch,
+                isTauriRuntimeEnv: () => true,
+                logSyncInfo: vi.fn(),
+                logSyncWarning: vi.fn(),
+                resolveWebdavPassword: vi.fn(async () => 'secret'),
+            };
+            dropboxMocks.downloadDropboxFile.mockRejectedValue(new DropboxFileNotFoundError('gone'));
+            cloudKitMocks.fetchCloudKitAttachmentAsset.mockRejectedValue(new cloudKitMocks.CloudKitAttachmentNotFoundError('attachment-record-not-found'));
+            const asked = () => (backend === 'cloud'
+                ? fetcher.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('attachments/attachment-1.txt')).length
+                : backend === 'dropbox'
+                    ? dropboxMocks.downloadDropboxFile.mock.calls.length
+                    : cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls.length);
+            const appData = createDownloadData(backend);
+
+            await runDownload(backend, appData, deps);
+            const first = asked();
+            expect(first).toBeGreaterThan(0);
+            await runDownload(backend, appData, deps);
+
+            expect(asked()).toBe(first);
+        },
+    );
 
     it.each<DownloadBackend>(['webdav', 'cloud', 'dropbox', 'cloudkit', 'file'])(
         'stages and generation-binds an absent %s attachment download before publishing metadata',

@@ -3887,6 +3887,10 @@ describe('attachment sync', () => {
       { idempotent: true },
     );
     expect(attachmentFileInstallerMock.installAttachmentFileGeneration).not.toHaveBeenCalled();
+    // The next pass asks CloudKit nothing while the not-found backoff holds.
+    const asked = vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mock.calls.length;
+    await attachmentSync.syncCloudKitAttachments(appData, undefined, { phase: 'post-merge' });
+    expect(vi.mocked(cloudkit.fetchCloudKitAttachmentAsset).mock.calls.length).toBe(asked);
   });
 
   it('preserves CloudKit scratch and metadata when native install reports a conflict', async () => {

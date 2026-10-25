@@ -48,10 +48,17 @@ vi.mock('./attachment-reference', async (importOriginal) => ({
     loadManagedAttachmentsDirPrefix: vi.fn(async () => '/app-data/mindwtr/attachments/'),
 }));
 
+// The real backoff, which only a remote "not found" sets; a test turns it on for one attachment.
+vi.mock('./sync-attachment-backends', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('./sync-attachment-backends')>();
+    return { ...actual, isAttachmentDownloadBackedOff: vi.fn(actual.isAttachmentDownloadBackedOff) };
+});
+
 import {
     clearAttachmentPresenceStamp,
     markAttachmentPresenceReconciled,
 } from './attachment-presence-scope';
+import { isAttachmentDownloadBackedOff } from './sync-attachment-backends';
 import { SyncService, __syncServiceTestUtils } from './sync-service';
 
 const waitForAssertion = async (assertion: () => void, maxAttempts = 200): Promise<void> => {
@@ -3436,6 +3443,20 @@ describe('SyncService testability hooks', () => {
             await expect(
                 __syncServiceTestUtils.hasAttachmentSyncWork(dataWith(overrides), SCOPE),
             ).resolves.toBe(true);
+        });
+
+        it('leaves a file that answered not-found out of the work while its backoff holds', async () => {
+            // The row stays live after a remote 404; it must not make every sync run the attachment phase.
+            markAttachmentPresenceReconciled(SCOPE);
+            const missing = dataWith({ uri: '', localStatus: 'missing' });
+            await expect(__syncServiceTestUtils.hasAttachmentSyncWork(missing, SCOPE)).resolves.toBe(true);
+            vi.mocked(isAttachmentDownloadBackedOff).mockImplementation((id) => id === 'attachment-1');
+            try {
+                await expect(__syncServiceTestUtils.hasAttachmentSyncWork(missing, SCOPE)).resolves.toBe(false);
+            } finally {
+                vi.mocked(isAttachmentDownloadBackedOff).mockReset();
+                vi.mocked(isAttachmentDownloadBackedOff).mockReturnValue(false);
+            }
         });
 
         it('reports work for a pending remote delete regardless of the stamp', async () => {
