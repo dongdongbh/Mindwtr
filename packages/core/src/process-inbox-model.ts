@@ -220,13 +220,13 @@ export function chooseQuickProcessInboxDestination(
     plan: FlowPlan,
 ): ProcessInboxAnswers {
     if (destination === 'later') return chooseProcessInboxActionability(answers, 'later', plan);
-    // 'project' falls through to the one-action question so quick mode can
-    // still split a capture into a project; the rest skip straight past it.
+    // Every choice skips the one-action question; picking Project already
+    // answered it, so the caller starts the project split (#1445).
     return {
         actionability: 'actionable',
         twoMinute: 'no',
         execution: destination === 'delegate' ? 'delegate' : 'defer',
-        oneActionAnswered: destination !== 'project',
+        oneActionAnswered: true,
     };
 }
 
@@ -240,7 +240,7 @@ export function backProcessInboxStep(
     if (mode === 'quick') {
         return {
             answers: { ...clearProcessInboxDecision(answers, 'actionability', plan), oneActionAnswered: false },
-            cancelProjectConversion: false,
+            cancelProjectConversion: true,
         };
     }
     if (step === 'file' && answers.oneActionAnswered) {
@@ -1940,6 +1940,15 @@ export function answerProcessInboxStep(input: {
     const commit = (kind: ProcessInboxCommitKind | 'convert', committed: ProcessInboxCommitted | null): ProcessInboxChoiceOutcome => (
         { type: 'commit', kind, committed }
     );
+    const startProjectSplit = (): ProcessInboxDraft => {
+        const started = startProcessInboxProjectConversion({
+            parsedTitle: input.parseTitle(draft.title).title,
+            title: draft.title,
+            taskTitle: input.task.title,
+            nextActionDraft: draft.nextAction,
+        });
+        return { ...draft, convertToProject: true, nextAction: started.nextActionDraft, projectId: null, projectSearch: '' };
+    };
     if (choice === 'back') {
         if (step === getProcessInboxEntryStep(mode, plan)) return { type: 'invalid' };
         const back = backProcessInboxStep(answers, mode, plan);
@@ -1963,9 +1972,11 @@ export function answerProcessInboxStep(input: {
                 return flow(chooseQuickProcessInboxDestination(answers, choice, plan),
                     { ...draft, convertToProject: false, nextAction: '', extraActions: [] });
             }
-            if ((choice === 'project' && plan.visibleFields.project) || choice === 'later' || choice === 'delegate') {
-                return flow(chooseQuickProcessInboxDestination(answers, choice, plan));
+            // Project opens the project setup at once: the one-action question would ask again (#1445).
+            if (choice === 'project' && plan.visibleFields.project) {
+                return flow(chooseQuickProcessInboxDestination(answers, choice, plan), startProjectSplit());
             }
+            if (choice === 'later' || choice === 'delegate') return flow(chooseQuickProcessInboxDestination(answers, choice, plan));
             if (choice === 'someday' || choice === 'incubate') return flow(chooseProcessInboxActionability(answers, choice, plan));
             if (choice === 'reference') return commit('reference', 'reference');
             if (choice === 'trash') return commit('trash', 'trash');
@@ -1981,21 +1992,7 @@ export function answerProcessInboxStep(input: {
             if (choice === 'single') {
                 return flow({ ...answers, oneActionAnswered: true }, { ...draft, convertToProject: false, nextAction: '', extraActions: [] });
             }
-            if (choice === 'project') {
-                const started = startProcessInboxProjectConversion({
-                    parsedTitle: input.parseTitle(draft.title).title,
-                    title: draft.title,
-                    taskTitle: input.task.title,
-                    nextActionDraft: draft.nextAction,
-                });
-                return flow({ ...answers, oneActionAnswered: true }, {
-                    ...draft,
-                    convertToProject: true,
-                    nextAction: started.nextActionDraft,
-                    projectId: null,
-                    projectSearch: '',
-                });
-            }
+            if (choice === 'project') return flow({ ...answers, oneActionAnswered: true }, startProjectSplit());
             return { type: 'invalid' };
         default:
             break;

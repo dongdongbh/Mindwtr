@@ -133,6 +133,22 @@ describe('Process Inbox steps', () => {
         expect(resolveProcessInboxStep(outcome.answers, 'quick', base)).toBe('file');
     });
 
+    it('opens the project setup for quick Project without asking "More than one step?" (#1445)', () => {
+        const base = plan({});
+        const task = { id: 't1', title: 'Plan trip', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        const draft = createProcessInboxDraft(task);
+        const outcome = answerProcessInboxStep({ choice: 'project', answers: INITIAL_PROCESS_INBOX_ANSWERS,
+            draft, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
+        expect(outcome.type).toBe('flow');
+        if (outcome.type !== 'flow') return;
+        expect(resolveProcessInboxStep(outcome.answers, 'quick', base)).toBe('file');
+        expect(outcome.draft).toMatchObject({ convertToProject: true, nextAction: 'Plan trip', projectId: null });
+        // Back returns to the choices and drops the split.
+        const back = answerProcessInboxStep({ choice: 'back', answers: outcome.answers,
+            draft: outcome.draft, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
+        expect(back).toMatchObject({ type: 'flow', answers: INITIAL_PROCESS_INBOX_ANSWERS, draft: { convertToProject: false, nextAction: '' } });
+    });
+
     it('starts a capture with no project or area in the default area (#1445)', () => {
         const task = { id: 't1', title: 'Call bank', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
         expect(createProcessInboxDraft(task, 'a-work').areaId).toBe('a-work');
@@ -140,12 +156,12 @@ describe('Process Inbox steps', () => {
         expect(createProcessInboxDraft({ ...task, projectId: 'p1' }, 'a-work').areaId).toBeNull();
     });
 
-    it('steps back one question and drops a project split only from the file step', () => {
+    it('steps back one question and drops a project split from the file step', () => {
         const base = plan({});
         const file = answers({ actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true });
         expect(backProcessInboxStep(file, 'guided', base)).toEqual({ answers: { ...file, oneActionAnswered: false }, cancelProjectConversion: true });
-        // Quick mode returns to its entry screen and keeps a started split, as mobile does.
-        expect(backProcessInboxStep(file, 'quick', base)).toEqual({ answers: INITIAL_PROCESS_INBOX_ANSWERS, cancelProjectConversion: false });
+        // Quick mode returns to its entry screen; only Project starts a split there, so Back drops it.
+        expect(backProcessInboxStep(file, 'quick', base)).toEqual({ answers: INITIAL_PROCESS_INBOX_ANSWERS, cancelProjectConversion: true });
     });
 
     it('keeps only the calendar day of a picked date, then adds the default time unless date-only', () => {

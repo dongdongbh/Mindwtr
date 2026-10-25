@@ -3304,9 +3304,9 @@ describe('InboxProcessingModal', () => {
       addProject.mockResolvedValue({ id: 'new-project', title: 'Plan Launch' });
       const root = await openMode('quick');
 
+      // Project opens the project setup without the one-action question (#1445).
       pressStep(root, 'taskEdit.projectLabel');
-      // Quick reaches the one-action question, so conversion stays available.
-      pressStep(root, 'process.moreThanOneStepYes');
+      expect(findNodesWithText(root, 'process.moreThanOneStep')).toHaveLength(0);
 
       act(() => {
         findTextInputByAccessibilityLabel(root, 'projects.projectName').props.onChangeText('Plan Launch');
@@ -3376,8 +3376,7 @@ describe('InboxProcessingModal', () => {
         if (mode === 'guided') {
           walkToFileStep(root);
         } else {
-          pressStep(root, 'taskEdit.projectLabel');
-          pressStep(root, 'process.moreThanOneStepNo');
+          pressStep(root, 'inbox.illDoIt');
         }
         expandMoreOptions(root);
 
@@ -3406,8 +3405,7 @@ describe('InboxProcessingModal', () => {
         if (mode === 'guided') {
           walkToFileStep(root);
         } else {
-          pressStep(root, 'taskEdit.projectLabel');
-          pressStep(root, 'process.moreThanOneStepNo');
+          pressStep(root, 'inbox.illDoIt');
         }
 
         expect(root.findByProps({ placeholder: 'projects.addPlaceholder' })).toBeTruthy();

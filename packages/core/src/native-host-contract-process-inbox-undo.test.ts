@@ -172,7 +172,7 @@ describe('Process Inbox public Undo', () => {
                 if (answer.kind === 'flow') view = answer.result.view!;
                 return answer;
             };
-            choose('project'); choose('project');
+            choose('project');
             view = value(sqlite.host.getInboxProcessingStep({ sessionId: view.sessionId, taskId: ID, step: view.step,
                 edit: { type: 'set', field: 'nextAction', value: 'First action' } }));
             const conversion = choose('createProject');
