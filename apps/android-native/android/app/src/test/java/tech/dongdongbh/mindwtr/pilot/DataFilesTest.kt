@@ -25,6 +25,24 @@ class DataFilesTest {
         assertTrue(dataRowsBusy("import:todoist", syncing = true))
     }
 
+    // RN's 9782c1c84: a recovery snapshot over core's 128 MB backup limit is refused by its size alone, before a byte is read. The
+    // snapshot here is sparse (no disk used) and unreadable, so any read would fail differently.
+    @Test fun anOversizedSnapshotIsRefusedBeforeItIsRead() {
+        val snapshot = File(folder.root, "data.2026-10-25T10-00-00.000.snapshot.json")
+        java.io.RandomAccessFile(snapshot, "rw").use { it.setLength(DataTransferLimits.MAX_BACKUP_SOURCE_BYTES + 1) }
+        assertTrue(snapshot.setReadable(false, false))
+        try {
+            assertTrue(runCatching { admitBackupSource(snapshot, base64 = false) }.exceptionOrNull() is TransferTooLarge)
+            // A picked import (base64) is bounded when it is staged instead, so only its presence is checked here.
+            assertEquals(DataTransferLimits.MAX_BACKUP_SOURCE_BYTES + 1, admitBackupSource(snapshot, base64 = true))
+            assertTrue(runCatching { admitBackupSource(File(folder.root, "gone.json"), base64 = false) }.exceptionOrNull() is IllegalStateException)
+        } finally {
+            snapshot.setReadable(true, false)
+        }
+        val fits = File(folder.root, "fits.json").apply { writeText("{}") }
+        assertEquals(2L, admitBackupSource(fits, base64 = false))
+    }
+
     @Test fun theCopyCountsItsOwnBytesWhateverTheProviderSaid() {
         // The provider's SIZE column said 1 byte (RN's 7b7201ab6): the copy counts what it reads and stops past the production limit.
         val out = File(folder.root, "stage")

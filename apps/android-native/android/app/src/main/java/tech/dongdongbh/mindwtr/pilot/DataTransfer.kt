@@ -348,9 +348,7 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
             var sourceMiB = 0L
             var libraryMiB = 0L
             try {
-                check(source.isFile) { "Snapshot file not found." }
-                if (!base64 && source.length() > DataTransferLimits.MAX_BACKUP_SOURCE_BYTES) throw TransferTooLarge()
-                val sourceBytes = source.length()
+                val sourceBytes = admitBackupSource(source, base64)
                 val libraryBytes = runtime.databaseBytes()
                 sourceMiB = sourceBytes / MIB; libraryMiB = libraryBytes / MIB
                 admitTransfer(sourceBytes, libraryBytes)
@@ -975,6 +973,18 @@ internal class HeapPeak {
 
 /** A picked file, or it with the library, over the measured transfer limit (design §4.1). */
 internal class TransferTooLarge : IOException("The selected file is too large")
+
+/**
+ * The file a restore or merge reads ([source]), admitted by its length alone, before a byte is read: it must exist, and a JSON
+ * backup or recovery snapshot (not [base64], a picked import's staged copy, bounded while it was copied) must fit core's
+ * MAX_BACKUP_SOURCE_BYTES (RN's 9782c1c84). Its length, for the transfer limit next.
+ */
+internal fun admitBackupSource(source: File, base64: Boolean): Long {
+    check(source.isFile) { "Snapshot file not found." }
+    val length = source.length()
+    if (!base64 && length > DataTransferLimits.MAX_BACKUP_SOURCE_BYTES) throw TransferTooLarge()
+    return length
+}
 
 /** [input] into [file], synced; refuses once it passes [limit] bytes (the caller deletes [file]). */
 internal fun copyBounded(input: InputStream, file: File, limit: Long) {
