@@ -41,3 +41,4 @@ Changes collected since the latest stable release.
 - Mobile, desktop and the native apps: when a sync folder or server cannot find an attachment's file, the attachment now stays in your task or project, and Mindwtr tries to download it again later. Before, it was removed from every device.
 - Android: Settings › Sync now shows the same question as the other apps when a new sync folder or server cannot find some attachment files: the list of files, Cancel, and Continue without these files.
 - Mobile and desktop: each Saved Search has its own Sort control and remembers its sort. "Use global setting" keeps following your global task sort, which is what existing saved searches do (#1453).
+- Desktop on Linux: typing in a task's description no longer lags, most of all for a task in Today's Focus, where each letter could take up to a second to appear (#1454).
