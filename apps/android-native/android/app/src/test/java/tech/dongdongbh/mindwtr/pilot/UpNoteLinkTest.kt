@@ -43,4 +43,19 @@ class UpNoteLinkTest {
             assertNull(attemptUpNoteLink(href, { fail("Must not open") }, { fail("Must not offer recovery") }))
         }
     }
+
+    // RN's openExternalLink (c2e30c2e5): every external link a description or project notes holds, any scheme, is opened once
+    // as typed; when nothing opens it, the exact link is offered for Copy link. Only UpNote's handoff is logged.
+    @Test fun anyExternalLinkThatNothingOpensOffersItsExactTextForCopy() {
+        for (href in listOf("https://example.org/a?b=1#c", "mailto:a@example.org", "obsidian://open?vault=Notes&file=A%20B", original)) {
+            val failed = mutableListOf<String>()
+            var calls = 0
+            assertFalse(href, attemptExternalLink(href, { calls++; throw android.content.ActivityNotFoundException() }, { failed.add(it) }))
+            assertEquals(href, 1, calls)
+            assertEquals(href, listOf(href), failed)
+            val opened = mutableListOf<String>()
+            assertTrue(href, attemptExternalLink(href, { opened.add(it) }, { fail("Must not offer recovery") }))
+            assertEquals(listOf(href), opened)
+        }
+    }
 }

@@ -2947,7 +2947,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // Close does (asking first while edits are unsaved).
     const followLink = /val follow = \{ target: JSONObject ->([\s\S]*?)\n        Unit\n    \}/.exec(editorUi)?.[1];
     assert(followLink, 'the editor has an explicit link-follow handler');
-    assert.match(followLink, /^\s*if \(target\.getString\("kind"\) == "external"\) \{\s+val original = target\.getString\("href"\)\s+val upnote = openUpNoteLink\(context, original, ::t\) \{ outcome ->\s+anyTime\(\{ it\.logLinkHandoff\(outcome, "markdown"\) \}, \{\}\)\s+\}\s+if \(upnote == null\) runCatching \{ context\.startActivity\(Intent\(Intent\.ACTION_VIEW, original\.toUri\(\)\)\) \}\s+\}\s+else if \(editor\.readOnly \|\| \(!editor\.dirty && !editsPending\)\) go\(target\)\s+else \{ linkAfterLeave = target\.toString\(\); confirmLeave = true \}\s*$/, 'UpNote has explicit recovery; other external links retain their opener and internal navigation retains the unsaved-edit guard');
+    assert.match(followLink, /^\s*if \(target\.getString\("kind"\) == "external"\) \{\s+openExternalLink\(context, target\.getString\("href"\), ::t\) \{ outcome -> anyTime\(\{ it\.logLinkHandoff\(outcome, "markdown"\) \}, \{\}\) \}\s+\}\s+else if \(editor\.readOnly \|\| \(!editor\.dirty && !editsPending\)\) go\(target\)\s+else \{ linkAfterLeave = target\.toString\(\); confirmLeave = true \}\s*$/, 'every external link offers Copy link when nothing opens it (UpNote logged), and internal navigation retains the unsaved-edit guard');
     assert.match(taskViewUi, /withLink\(LinkAnnotation\.Clickable\(target\.toString\(\), TextLinkStyles\(SpanStyle\(color = tint, textDecoration = TextDecoration\.Underline\)\)\) \{ follow\(target\) \}\)/);
     // No Kotlin policy in the new files: core's rows, options and words walked as sent; no dates.
     for (const [name, text] of Object.entries(pass10)) {
@@ -9596,6 +9596,12 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(source('TaskRowView.kt'), /\.heightIn\(min = 44\.dp\)\.clip\(shape\)\.background\(colors\.bg\)\s+\.then\(tap\)/);
     // A picked local .ics stays readable after a reboot (RN's 5bfa6bf6b): its picker is ACTION_OPEN_DOCUMENT, the only pick whose
     // grant can persist (GetContent's cannot), and addFile persists it (keepPickedFileReadable, CalendarVisitTest).
+    // RN's openExternalLink (c2e30c2e5): a description's or project notes' external link, any scheme, opens through
+    // openExternalLink, which offers Copy link when nothing opens it (UpNoteLinkTest); none fails silently.
+    for (const file of ['TaskEditor.kt', 'ProjectDetails.kt']) {
+        assert.match(source(file), /openExternalLink\(context, target\.getString\("href"\)/, `${file}'s external links offer Copy link`);
+        assert.doesNotMatch(source(file), /runCatching \{ context\.startActivity\(Intent\(Intent\.ACTION_VIEW, (?:original|target\.getString\("href"\))/);
+    }
     const calendar = source('CalendarSettings.kt');
     assert.match(calendar, /rememberLauncherForActivityResult\(ActivityResultContracts\.OpenDocument\(\)\) \{ uri -> uri\?\.let \{ screen\.addFile\(it, revision\) \} \}/,
         'the local .ics picker is OpenDocument, feeding addFile');

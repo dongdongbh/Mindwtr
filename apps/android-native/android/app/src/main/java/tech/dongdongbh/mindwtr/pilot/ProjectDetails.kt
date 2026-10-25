@@ -614,7 +614,7 @@ private fun ProjectNotes(model: InboxViewModel, projectId: String, archived: Boo
     LaunchedEffect(projectId, model.project, notesExpanded, preview, notesDraft, model.busy) { if (notesExpanded && preview && !model.busy) readNotes() }
     val link = { target: JSONObject ->
         when (target.getString("kind")) {
-            "external" -> { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, target.getString("href").toUri())) } }
+            "external" -> openExternalLink(context, target.getString("href"), { t(it) }) { outcome -> model.anyTime({ it.logLinkHandoff(outcome, "markdown") }, {}) }
             "task" -> model.openEditor(target.getString("id"), "view")
             "project" -> model.openProject(target.getString("id"))
             else -> Unit
