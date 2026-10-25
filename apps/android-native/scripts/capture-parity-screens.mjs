@@ -71,7 +71,10 @@ const A13_ONLY = process.env.PARITY_ONLY === '13a';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
-    apks = { rn: (A13_ONLY ? built.rn155 : built.rn154).path, native: built.native153.path };
+    // Today's RN when the harness built it (build-upgrade-harness.mjs --parity-rn), else RN 154's older source; A13 shoots RN 155.
+    const rnSide = A13_ONLY ? built.rn155 : built.rnParity ?? built.rn154;
+    apks = { rn: rnSide.path, native: built.native153.path };
+    console.log(`RN side: ${A13_ONLY ? 'rn155' : built.rnParity ? `rnParity from ${built.rnParitySource}` : `rn154 from ${built.recoverySource}`}`);
 } catch {
     console.error(`REFUSED: no ${harness}/apks/manifest.json; run build-upgrade-harness.mjs first`);
     process.exit(2);
@@ -220,6 +223,8 @@ const shoot = async (name, ready) => {
     requireAppFront();
     const file = resolve(out, `${name}.png`);
     writeFileSync(file, adbRaw('exec-out', 'screencap', '-p'));
+    // The view tree beside each shot, so a pair's heights can be measured (bounds in px) as well as looked at.
+    writeFileSync(resolve(out, `${name}.xml`), adbRaw('exec-out', 'uiautomator', 'dump', '/dev/tty'));
     shots.push(name);
     console.log(`shot ${basename(file)}`);
 };

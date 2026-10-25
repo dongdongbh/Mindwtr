@@ -6,8 +6,9 @@
 //   153  this worktree's native app, build type `upgradetest`
 //   154  RN recovery, built from RECOVERY_COMMIT with only versionCode raised
 //   155  RN with its Pomodoro alarm re-arm fix (45dff1573), built from RN_FIX_COMMIT the same way
+//   151  with --parity-rn: RN at this checkout's HEAD, the RN side of capture-parity-screens' pairs
 //
-//   node apps/android-native/scripts/build-upgrade-harness.mjs [--rebuild-rn]
+//   node apps/android-native/scripts/build-upgrade-harness.mjs [--rebuild-rn] [--parity-rn]
 //
 // Each RN build comes from a `git archive` of its pinned commit in a throwaway
 // folder under $MINDWTR_HARNESS_DIR (default /home/dd/.mindwtr-harness). Only
@@ -72,7 +73,10 @@ const linkFarm = (from, to, skip) => {
 };
 
 const patchId = sha256(patch).slice(0, 12);
-const patchFor = (commit) => (commit === RN_FIX_COMMIT ? patchFix : patch);
+// --parity-rn: also the RN app at this checkout's HEAD (versionCode 151, below the native 153 installed over it), the RN side of
+// capture-parity-screens' pairs, so they compare with today's RN rather than RN 154's older source.
+const parityCommit = process.argv.includes('--parity-rn') ? out('git', ['-C', repo, 'rev-parse', 'HEAD']) : null;
+const patchFor = (commit) => (commit === RN_FIX_COMMIT || commit === parityCommit ? patchFix : patch);
 const rnApk = (commit, code) => resolve(apks, `rn-${commit.slice(0, 12)}-${sha256(patchFor(commit)).slice(0, 12)}-${code}.apk`);
 
 const checkRnIdentity = (mobile) => {
@@ -155,7 +159,7 @@ try {
     }
     const tagCommit = out('git', ['-C', repo, 'rev-parse', `${TAG}^{commit}`]);
     if (tagCommit !== V132) fail(`${TAG} resolves to ${tagCommit}, not the pinned ${V132}`);
-    const wanted = [[V132, 152], [RECOVERY_COMMIT, 154], [RN_FIX_COMMIT, 155]]
+    const wanted = [[V132, 152], [RECOVERY_COMMIT, 154], [RN_FIX_COMMIT, 155], ...(parityCommit ? [[parityCommit, 151]] : [])]
         .filter(([commit, code]) => process.argv.includes('--rebuild-rn') || !existsSync(rnApk(commit, code)));
     for (const commit of new Set(wanted.map(([source]) => source))) {
         buildRn(commit, wanted.filter(([source]) => source === commit).map(([, code]) => code));
@@ -176,8 +180,11 @@ try {
         rn154: describe(rnApk(RECOVERY_COMMIT, 154), 154, true),
         rnFixSource: RN_FIX_COMMIT,
         rn155: describe(rnApk(RN_FIX_COMMIT, 155), 155, true),
+        ...(parityCommit ? { rnParitySource: parityCommit, rnParity: describe(rnApk(parityCommit, 151), 151, true) } : {}),
     };
-    if (new Set([result.rn152.signer, result.native153.signer, result.rn154.signer, result.rn155.signer]).size !== 1) fail('the four APKs have different signers');
+    if (new Set([result.rn152.signer, result.native153.signer, result.rn154.signer, result.rn155.signer, result.rnParity?.signer ?? result.rn152.signer]).size !== 1) {
+        fail('the APKs have different signers');
+    }
     writeFileSync(resolve(apks, 'manifest.json'), `${JSON.stringify(result, null, 2)}\n`);
     console.log(`\nAll four APKs are ${PKG}, signed by ${result.rn152.signer}\n${resolve(apks, 'manifest.json')}`);
 } catch (error) {
