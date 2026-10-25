@@ -1281,10 +1281,7 @@ fun ProjectTitleField(model: InboxViewModel, stored: String, archived: Boolean, 
     LaunchedEffect(stored, titleDraft) { if (titleDraft == stored) titleDraft = null }
     val text = titleDraft ?: stored
     var focused by remember { mutableStateOf(false) }
-    val commit = {
-        val trimmed = text.trim()
-        if (trimmed.isNotEmpty() && trimmed != stored) { titleDraft = trimmed; rename(trimmed) }
-    }
+    val commit = { titleToStore(titleDraft, stored)?.let { titleDraft = it; rename(it) } }
     BasicTextField(text, { titleDraft = it }, singleLine = true, enabled = !archived && !model.busy && model.failedAction == null,
         textStyle = rnText(18, 700).copy(color = c.text), cursorBrush = SolidColor(c.tint),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { commit() }),
@@ -1322,12 +1319,18 @@ internal class WriteQueue<T>(private val start: (T, () -> Unit) -> Boolean) {
 }
 
 /**
+ * The title a commit stores: only text the user typed ([typed] is null until then), trimmed, not blank, and not the stored title
+ * as saved (trimmed, as RN compares it since 0f4ac36ec). Outer spaces in the stored title never read as a rename.
+ */
+internal fun titleToStore(typed: String?, stored: String?): String? =
+    typed?.trim()?.takeIf { it.isNotEmpty() && it != stored?.trim() }
+
+/**
  * The edits leaving a project stores (RN's title end of editing and notes blur on close): a typed title, trimmed, when not
  * blank and not core's; typed notes, exactly, when not core's. In order: the title, then the notes.
  */
 internal fun editsOnLeave(title: String?, storedTitle: String?, notes: String?, storedNotes: String?): List<Pair<String, String>> = buildList {
-    val trimmed = title?.trim().orEmpty()
-    if (trimmed.isNotEmpty() && trimmed != storedTitle?.trim()) add("projectRename" to trimmed)
+    titleToStore(title, storedTitle)?.let { add("projectRename" to it) }
     if (notes != null && storedNotes != null && notes != storedNotes) add("projectNotes" to notes)
 }
 

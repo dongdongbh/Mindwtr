@@ -41,6 +41,16 @@ class ProjectDetailsTest {
         assertEquals(listOf("projectNotes" to ""), editsOnLeave(title = null, storedTitle = "Old", notes = "", storedNotes = "Old notes"))
     }
 
+    /** Focus loss or Done stores only a title the user typed, compared as saved: a padded stored title is no rename (audit 10-25 gap 5). */
+    @Test fun aCommitStoresOnlyATypedRename() {
+        // Focused and left without typing: nothing, even when the stored title has outer spaces.
+        assertEquals(null, titleToStore(typed = null, stored = "  Padded title  "))
+        assertEquals(null, titleToStore(typed = "  Padded title  ", stored = "  Padded title  "))
+        assertEquals(null, titleToStore(typed = "Padded title", stored = "  Padded title  "))
+        assertEquals(null, titleToStore(typed = "   ", stored = "Old"))
+        assertEquals("New", titleToStore(typed = " New ", stored = "  Padded title  "))
+    }
+
     /** A reply applies only if it answers the newest read of its kind in the current session (review PD 3). */
     @Test fun lateOrClosedRepliesNeverApply() {
         val guard = ReplyGuard()
