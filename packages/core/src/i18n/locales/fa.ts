@@ -2006,6 +2006,7 @@ export const faOverrides: Record<string, string> = {
         'search.saveSearchPrompt': 'نامی برای این جستجو انتخاب کنید',
         'search.savedSearches': 'جستجوهای ذخیره‌شده',
         'search.noSavedSearches': 'هنوز جستجوی ذخیره‌شده‌ای نیست.',
+        'search.sortUseGlobal': 'استفاده از تنظیم سراسری ({sort})',
         'search.deleteConfirm': 'این جستجوی ذخیره‌شده حذف شود؟',
         'search.helpOperators': 'از عملگرهایی مانند status:‏ context:‏ tag:‏ project:‏ due:<=7d استفاده کنید.',
         'search.hiddenCompletedMatches': '{{count}} مورد دیگر در انجام‌شده و بایگانی‌شده',

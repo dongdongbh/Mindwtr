@@ -286,7 +286,8 @@ export const LOCALES = {
         // so English growth does not reclassify deliberate protocol and brand names.
         // Eight MCP permission, port, and Codex-copy labels are translated in #1337.
         // Five Timeline reorder labels and keyboard instructions are translated in #1362.
-        translatedKeyFloor: 2559,
+        // The saved search "Use global setting" sort choice is translated in #1453.
+        translatedKeyFloor: 2560,
     },
     it: {
         loadSync: () => require('./locales/it') as typeof import('./locales/it'),

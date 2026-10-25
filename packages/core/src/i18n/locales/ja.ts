@@ -2044,6 +2044,7 @@ export const jaOverrides: Record<string, string> = {
         'search.saveSearchPrompt': 'この検索に名前を付ける',
         'search.savedSearches': '保存した検索',
         'search.noSavedSearches': '保存した検索はまだありません。',
+        'search.sortUseGlobal': 'グローバル設定を使用（{sort}）',
         'search.deleteConfirm': 'この保存した検索を削除しますか？',
         'search.helpOperators': 'status:、context:、tag:、project:、due:<=7d などの条件が使えます。',
         'search.hiddenCompletedMatches': '「完了」「アーカイブ」に他{{count}}件',

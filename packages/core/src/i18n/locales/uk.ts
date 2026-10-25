@@ -1868,6 +1868,7 @@ export const ukOverrides: Record<string, string> = {
     "bulk.moveFailed": "Не вдалося перемістити вибрані завдання",
     "bulk.updateFailed": "Не вдалося оновити вибрані завдання",
     "sort.label": "Сортувати",
+    "search.sortUseGlobal": "Використовувати глобальне налаштування ({sort})",
     "sort.default": "За замовчуванням",
     "sort.due": "Термін виконання",
     "sort.start": "Дата початку",

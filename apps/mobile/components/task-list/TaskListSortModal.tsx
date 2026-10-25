@@ -12,6 +12,8 @@ type ThemeColors = {
 };
 
 type TaskListSortModalProps = {
+  /** A first row above the options (a saved search's "Use global setting"); while selected, no option row is. */
+  inheritOption?: { label: string; selected: boolean; onSelect: () => void };
   onClose: () => void;
   onSelect: (option: TaskSortBy) => void;
   sortBy: TaskSortBy;
@@ -22,6 +24,7 @@ type TaskListSortModalProps = {
 };
 
 export function TaskListSortModal({
+  inheritOption,
   onClose,
   onSelect,
   sortBy,
@@ -47,6 +50,20 @@ export function TaskListSortModal({
         <View style={[styles.modalCard, { backgroundColor: themeColors.cardBg }]}>
           <Text style={[styles.modalTitle, { color: themeColors.text }]}>{t('sort.label')}</Text>
           <View style={styles.sortList}>
+            {inheritOption ? (
+              <Pressable
+                onPress={inheritOption.onSelect}
+                testID="sort-option-inherit"
+                style={[
+                  styles.sortItem,
+                  inheritOption.selected && { backgroundColor: themeColors.filterBg },
+                ]}
+              >
+                <Text style={[styles.sortItemText, { color: themeColors.text }]}>
+                  {inheritOption.label}
+                </Text>
+              </Pressable>
+            ) : null}
             {visibleSortOptions.map((option) => (
               <Pressable
                 key={option}
@@ -54,7 +71,7 @@ export function TaskListSortModal({
                 testID={`sort-option-${option}`}
                 style={[
                   styles.sortItem,
-                  option === sortBy && { backgroundColor: themeColors.filterBg },
+                  !inheritOption?.selected && option === sortBy && { backgroundColor: themeColors.filterBg },
                 ]}
               >
                 <Text style={[styles.sortItemText, { color: themeColors.text }]}>

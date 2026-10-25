@@ -1650,6 +1650,7 @@ export const frOverrides: Record<string, string> = {
         'search.saveSearchPrompt': 'Nommez cette recherche',
         'search.savedSearches': 'Recherches enregistrées',
         'search.noSavedSearches': 'Aucune recherche enregistrée pour l’instant.',
+        'search.sortUseGlobal': 'Utiliser le réglage global ({sort})',
         'search.deleteConfirm': 'Supprimer cette recherche enregistrée ?',
         'search.helpOperators': 'Utilisez des opérateurs tels que status:, context:, tag:, project:, due:<=7d.',
         'search.hiddenCompletedMatches': '{{count}} de plus dans terminées et archivées',

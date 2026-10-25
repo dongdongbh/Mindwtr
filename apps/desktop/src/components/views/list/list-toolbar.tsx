@@ -78,10 +78,14 @@ type SortBySelectProps<Sort extends SortField> = {
     iconTestId?: string;
     /** Defaults to TASK_LIST_SORT_OPTIONS; the Done list passes DONE_TASK_LIST_SORT_OPTIONS. */
     options?: readonly Sort[];
+    /** A first option above the sorts (a saved search's "Use global setting"); while selected, it is the value shown. */
+    inheritOption?: { label: string; selected: boolean; onSelect: () => void };
 };
 
+const INHERIT_SORT_VALUE = '__inherit';
+
 /** The labelled SORT select shared by every list toolbar. */
-export function SortBySelect<Sort extends SortField = TaskSortBy>({ value, defaultValue, onChange, t, className, iconTestId, options }: SortBySelectProps<Sort>) {
+export function SortBySelect<Sort extends SortField = TaskSortBy>({ value, defaultValue, onChange, t, className, iconTestId, options, inheritOption }: SortBySelectProps<Sort>) {
     const sortLabel = tFallback(t, 'sort.label', 'Sort');
     // Gated here rather than at each toolbar: Focus, Review, Contexts, Archive
     // and the project workspace all render this select, and a new one must not
@@ -108,12 +112,15 @@ export function SortBySelect<Sort extends SortField = TaskSortBy>({ value, defau
                     data-testid={iconTestId}
                 />
             )}
-            value={value}
-            options={sortOptions.map((option) => ({
-                value: option,
-                label: option === 'priority' ? t('filters.priority') : t(`sort.${option}`),
-            }))}
-            onChange={(next) => onChange(next as Sort)}
+            value={inheritOption?.selected ? INHERIT_SORT_VALUE : value}
+            options={[
+                ...(inheritOption ? [{ value: INHERIT_SORT_VALUE, label: inheritOption.label }] : []),
+                ...sortOptions.map((option) => ({
+                    value: option,
+                    label: option === 'priority' ? t('filters.priority') : t(`sort.${option}`),
+                })),
+            ]}
+            onChange={(next) => (next === INHERIT_SORT_VALUE ? inheritOption?.onSelect() : onChange(next as Sort))}
         />
     );
 }

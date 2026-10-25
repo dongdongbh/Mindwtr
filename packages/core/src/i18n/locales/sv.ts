@@ -2001,6 +2001,7 @@ export const svOverrides: Record<string, string> = {
         'search.saveSearchPrompt': 'Namnge den här sökningen',
         'search.savedSearches': 'Sparade sökningar',
         'search.noSavedSearches': 'Inga sparade sökningar än.',
+        'search.sortUseGlobal': 'Använd global inställning ({sort})',
         'search.deleteConfirm': 'Ta bort den här sparade sökningen?',
         'search.helpOperators': 'Använd operatorer som status:, context:, tag:, project:, due:<=7d.',
         'search.hiddenCompletedMatches': '{{count}} fler i Klar och Arkiverat',

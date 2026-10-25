@@ -1810,6 +1810,7 @@ export const koOverrides: Record<string, string> = {
         'search.saveSearchPrompt': '검색 이름 지정',
         'search.savedSearches': '저장된 검색',
         'search.noSavedSearches': '아직 저장된 검색결과가 없습니다.',
+        'search.sortUseGlobal': '전역 설정 사용 ({sort})',
         'search.deleteConfirm': '저장된 검색결과를 삭제하시겠습니까?',
         'search.helpOperators': 'status:, context:, tag:, project:, due:<=7d와 같은 연산자를 사용하세요.',
         'search.hiddenCompletedMatches': '완료 및 보관됨에 {{count}}개 더 있음',

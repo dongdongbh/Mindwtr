@@ -1403,6 +1403,7 @@ export const deOverrides: Record<string, string> = {
         'search.saveSearchPrompt': 'Diese Suchabfrage benennen',
         'search.savedSearches': 'Suchabfrage gespeichert',
         'search.noSavedSearches': 'Noch keine gespeicherte Suchabfragen.',
+        'search.sortUseGlobal': 'Globale Einstellung verwenden ({sort})',
         'search.deleteConfirm': 'Diese gespeicherte Suchabfrage löschen?',
         'search.helpOperators': 'Du kannst Operatoren benutzen wie z. B. status:, context:, tag:, project:, due:<=7d.',
         'search.hiddenCompletedMatches': '{{count}} weitere in Erledigt und Archiviert',

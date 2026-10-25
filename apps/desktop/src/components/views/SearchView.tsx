@@ -1,7 +1,18 @@
 import { useMemo, useCallback, useEffect, useState, useRef } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { collectBulkTaskTokens, shallow, useTaskStore, filterTasksBySearch, sortTasksBy, tFallback } from '@mindwtr/core';
+import {
+    collectBulkTaskTokens,
+    filterTasksBySearch,
+    getSavedSearchGlobalSortLabel,
+    getSavedSearchOwnSortBy,
+    resolveSavedSearchSortBy,
+    setSavedSearchSortById,
+    shallow,
+    sortTasksBy,
+    tFallback,
+    useTaskStore,
+} from '@mindwtr/core';
 import type { BulkOrganizeTaskUpdateInput } from '@mindwtr/core';
 import { useLanguage } from '../../contexts/language-context';
 import { Trash2 } from 'lucide-react';
@@ -22,10 +33,9 @@ import {
 } from './list/virtual-list';
 import { StoreTaskItem } from './list/StoreTaskItem';
 import { useTaskListScope } from './list/task-list-scope';
-import { LIST_END_GAP } from './list/list-toolbar';
+import { LIST_END_GAP, SortBySelect } from './list/list-toolbar';
 import { useTaskSelection } from './list/useTaskSelection';
 import { useUiStore } from '../../store/ui-store';
-import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 interface SearchViewProps {
     savedSearchId: string;
@@ -51,7 +61,6 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
     );
     const { t } = useLanguage();
     const showToast = useUiStore((state) => state.showToast);
-    const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
     const [tagPromptOpen, setTagPromptOpen] = useState(false);
     const [removeTagPickerOpen, setRemoveTagPickerOpen] = useState(false);
     const [contextPromptOpen, setContextPromptOpen] = useState(false);
@@ -62,6 +71,9 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
 
     const savedSearch = settings?.savedSearches?.find(s => s.id === savedSearchId);
     const query = savedSearch?.query || '';
+    // The saved search's own sort, else the global one (#1453). Opening the view writes nothing.
+    const sortBy = resolveSavedSearchSortBy(savedSearch, settings);
+    const ownSortBy = getSavedSearchOwnSortBy(savedSearch, settings);
 
     useEffect(() => {
         if (!perf.enabled) return;
@@ -213,6 +225,17 @@ export function SearchView({ savedSearchId, onDelete }: SearchViewProps) {
                 </div>
                 {savedSearch && (
                     <div className="flex items-center gap-2">
+                        <SortBySelect
+                            value={sortBy}
+                            onChange={(next) => { void setSavedSearchSortById(savedSearchId, next); }}
+                            inheritOption={{
+                                label: getSavedSearchGlobalSortLabel(settings, t),
+                                selected: ownSortBy === null,
+                                onSelect: () => { void setSavedSearchSortById(savedSearchId, null); },
+                            }}
+                            className="w-[220px]"
+                            t={t}
+                        />
                         <button
                             data-task-selection-toggle
                             onClick={toggleSelectionMode}

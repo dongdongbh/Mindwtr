@@ -1896,6 +1896,7 @@ export const zhHant: Record<string, string> = {
         'search.saveSearchPrompt': '爲此搜索命名',
         'search.savedSearches': '已保存的搜索',
         'search.noSavedSearches': '暫無已保存的搜索。',
+        'search.sortUseGlobal': '使用全域設定（{sort}）',
         'search.deleteConfirm': '刪除此已保存的搜索？',
         'search.helpOperators': '可用操作符：status:、context:、tag:、project:、due:<=7d 等。',
         'search.hiddenCompletedMatches': '「已完成」和「已封存」中還有 {{count}} 筆',

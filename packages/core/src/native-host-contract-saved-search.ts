@@ -33,11 +33,11 @@ import {
     buildSavedSearchScreenText,
     deleteSavedSearchById,
     findSavedSearch,
+    resolveSavedSearchSortBy,
     selectSavedSearchTasks,
     type SavedSearchScreenText,
 } from './saved-search-view-model';
 import { useTaskStore } from './store';
-import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import type { Task } from './types';
 
 export type NativeSavedSearchView = {
@@ -109,7 +109,7 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
                 projects: state.projects,
                 areaFilter: resolveAreaFilterSelection(state.settings.filters, areas),
                 areaById: new Map(areas.map((area) => [area.id, area])),
-                sortBy: resolveNonDoneTaskSortBy(state.settings.taskSortBy, state.settings),
+                sortBy: resolveSavedSearchSortBy(savedSearch, state.settings),
             });
             const text = buildSavedSearchScreenText({ savedSearch, savedSearches, t: deps.t() });
             return {

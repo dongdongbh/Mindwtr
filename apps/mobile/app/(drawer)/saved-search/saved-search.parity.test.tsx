@@ -66,7 +66,10 @@ vi.mock('@/hooks/use-theme-colors', () => {
 vi.mock('@/lib/task-meta-navigation', () => ({ openContextsScreen: vi.fn(), openProjectScreen: vi.fn() }));
 vi.mock('@/components/task-edit-modal', () => ({ TaskEditModal: (props: any) => React.createElement('TaskEditModal', props) }));
 vi.mock('@/components/swipeable-task-item', () => ({ SwipeableTaskItem: (props: any) => React.createElement('SwipeableTaskItem', props) }));
-vi.mock('lucide-react-native', () => ({ Trash2: (props: any) => React.createElement('Icon:Trash2', props) }));
+vi.mock('lucide-react-native', () => ({
+    ArrowUpDown: (props: any) => React.createElement('Icon:ArrowUpDown', props),
+    Trash2: (props: any) => React.createElement('Icon:Trash2', props),
+}));
 vi.mock('react-native', async (importOriginal) => {
   const actual = await importOriginal<any>();
   return {
@@ -214,14 +217,19 @@ const textOf = (node: ReactTestInstance): string => {
 };
 const hostsOf = (root: ReactTestInstance, type: string) => root.findAll((node) => String(node.type) === type);
 const inside = (container: ReactTestInstance, node: ReactTestInstance) => container.findAll((child) => child === node).length > 0;
+// The Sort control and its picker (#1453) came after the frozen capture; saved-search-screen.test.tsx covers them.
+const isSortControl = (node: ReactTestInstance) => hostsOf(node, 'Icon:ArrowUpDown').length > 0;
+const sortPickers = (root: ReactTestInstance) => hostsOf(root, 'Modal')
+  .filter((modal) => modal.findAll((node) => node.props?.testID === 'sort-option-inherit').length > 0);
 
 function observe(root: ReactTestInstance, seen: { writes: number; alerts: number; navigation: number }) {
   const list = hostsOf(root, 'FlatList')[0];
   const rows = hostsOf(list, 'SwipeableTaskItem');
   const editor = hostsOf(root, 'TaskEditModal')[0];
-  const buttons = hostsOf(root, 'TouchableOpacity');
+  const buttons = hostsOf(root, 'TouchableOpacity').filter((node) => !isSortControl(node));
+  const pickers = sortPickers(root);
   const observation = {
-    header: hostsOf(root, 'Text').filter((node) => !inside(list, node)).map(textOf),
+    header: hostsOf(root, 'Text').filter((node) => !inside(list, node) && !pickers.some((picker) => inside(picker, node))).map(textOf),
     deleteButton: buttons.filter((node) => !inside(list, node)).map((node) => [node.props.accessibilityLabel ?? null, hostsOf(node, 'Icon:Trash2').length]),
     rows: rows.map((node) => node.props.task.id),
     rowProps: rows.length > 0 ? {
@@ -247,7 +255,7 @@ async function perform(root: ReactTestInstance, action: Action) {
   const [kind] = action;
   const list = hostsOf(root, 'FlatList')[0];
   if (kind === 'delete') {
-    const button = hostsOf(root, 'TouchableOpacity').find((node) => !inside(list, node));
+    const button = hostsOf(root, 'TouchableOpacity').find((node) => !inside(list, node) && !isSortControl(node));
     if (!button) throw new Error('No delete button');
     await act(async () => { await button.props.onPress(); });
     return;

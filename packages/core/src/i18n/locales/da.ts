@@ -2079,6 +2079,7 @@ export const daOverrides: Record<string, string> = {
     'search.saveSearchPrompt': 'Navngiv denne søgning',
     'search.savedSearches': 'Gemte søgninger',
     'search.noSavedSearches': 'Ingen gemte søgninger endnu.',
+    'search.sortUseGlobal': 'Brug global indstilling ({sort})',
     'search.deleteConfirm': 'Vil du slette denne gemte søgning?',
     'search.helpOperators': 'Brug operatorer som status:, context:, tag:, project:, due:<=7d.',
     'search.hiddenCompletedMatches': '{{count}} mere i Udført og arkiveret',

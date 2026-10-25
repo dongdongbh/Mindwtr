@@ -9,8 +9,9 @@ import { taskMatchesAreaFilterSelection, type AreaFilterSelection } from './area
 import { tFallback } from './i18n';
 import { filterTasksBySearch } from './search';
 import { useTaskStore } from './store';
-import { sortTasksBy } from './task-utils';
-import type { Area, Project, SavedSearch, Task, TaskSortBy } from './types';
+import { getTaskSortByLabel, resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
+import { resolveTaskSortByForFeatures, sortTasksBy } from './task-utils';
+import type { AppSettings, Area, Project, SavedSearch, Task, TaskSortBy } from './types';
 
 type Translate = (key: string) => string;
 
@@ -47,6 +48,44 @@ export async function deleteSavedSearchById(id: string): Promise<boolean> {
     if (!findSavedSearch(settings.savedSearches, id)) return false;
     // updateSettings applies its change before its first await: nothing lands between this read and the write.
     await updateSettings({ savedSearches: removeSavedSearch(settings.savedSearches, id) });
+    return true;
+}
+
+/**
+ * The saved search's own sort, when it is one the task lists offer right now; null
+ * means it follows the global sort. An unknown or feature-gated value reads as null
+ * but stays stored, so a later build or a re-enabled feature gets it back (#1453).
+ */
+export function getSavedSearchOwnSortBy(savedSearch: SavedSearch | undefined, settings: AppSettings | undefined): TaskSortBy | null {
+    const own = savedSearch?.sort as TaskSortBy | undefined;
+    return own && TASK_LIST_SORT_OPTIONS.includes(own) && resolveTaskSortByForFeatures(own, settings) === own ? own : null;
+}
+
+/** The sort a saved search's screen uses: its own, else the global task sort (settings.taskSortBy). */
+export function resolveSavedSearchSortBy(savedSearch: SavedSearch | undefined, settings: AppSettings | undefined): TaskSortBy {
+    return getSavedSearchOwnSortBy(savedSearch, settings) ?? resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
+}
+
+/** The sort picker's first choice: "Use global setting (<current global sort>)". */
+export function getSavedSearchGlobalSortLabel(settings: AppSettings | undefined, t: Translate): string {
+    const label = getTaskSortByLabel(resolveNonDoneTaskSortBy(settings?.taskSortBy, settings), t);
+    return tFallback(t, 'search.sortUseGlobal', 'Use global setting ({sort})').replace('{sort}', label);
+}
+
+/**
+ * Set (or, with null, clear) one saved search's sort by its ID, against the saved
+ * searches as they are when the write runs: its name, query and groupBy stay, every
+ * other saved search stays the stored object. False, with nothing written, when no
+ * saved search has that ID or its stored sort is already that.
+ */
+export async function setSavedSearchSortById(id: string, sort: TaskSortBy | null): Promise<boolean> {
+    const { settings, updateSettings } = useTaskStore.getState();
+    const target = findSavedSearch(settings.savedSearches, id);
+    if (!target || (target.sort ?? null) === sort) return false;
+    const { sort: _previous, ...rest } = target;
+    const next: SavedSearch = sort === null ? rest : { ...rest, sort };
+    // updateSettings applies its change before its first await: nothing lands between this read and the write.
+    await updateSettings({ savedSearches: settings.savedSearches!.map((search) => (search === target ? next : search)) });
     return true;
 }
 

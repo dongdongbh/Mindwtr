@@ -2036,6 +2036,7 @@ export const en: Record<string, string> = {
         'search.saveSearchPrompt': 'Name this search',
         'search.savedSearches': 'Saved Searches',
         'search.noSavedSearches': 'No saved searches yet.',
+        'search.sortUseGlobal': 'Use global setting ({sort})',
         'search.deleteConfirm': 'Delete this saved search?',
         'search.helpOperators': 'Use operators like status:, context:, tag:, project:, due:<=7d.',
         'search.hiddenCompletedMatches': '{{count}} more in Done and Archived',

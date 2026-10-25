@@ -5,14 +5,23 @@ import {
   buildSavedSearchScreenText,
   deleteSavedSearchById,
   findSavedSearch,
+  getSavedSearchGlobalSortLabel,
+  getSavedSearchOwnSortBy,
+  getTaskListHeaderText,
+  getTaskSortByLabel,
+  resolveSavedSearchSortBy,
   selectSavedSearchTasks,
+  setSavedSearchSortById,
   shallow,
+  TASK_LIST_SORT_OPTIONS,
   useTaskStore,
   type Task,
   type TaskStatus,
 } from '@mindwtr/core';
 import { SwipeableTaskItem, type TaskRowActions } from '@/components/swipeable-task-item';
 import { TASK_LIST_WINDOWING_PROPS } from '@/components/task-list-windowing';
+import { TaskListSortButton } from '@/components/task-list/TaskListSortButton';
+import { TaskListSortModal } from '@/components/task-list/TaskListSortModal';
 import { TaskEditModal } from '@/components/task-edit-modal';
 import { useLanguage } from '@/contexts/language-context';
 import { useMobileAreaFilter } from '@/hooks/use-mobile-area-filter';
@@ -20,7 +29,6 @@ import { useTheme } from '@/contexts/theme-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { Trash2 } from 'lucide-react-native';
-import { resolveNonDoneTaskSortBy } from '@mindwtr/core';
 
 export default function SavedSearchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -53,7 +61,10 @@ export default function SavedSearchScreen() {
 
   const savedSearch = findSavedSearch(savedSearches, id);
   const query = savedSearch?.query || '';
-  const sortBy = resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
+  // The saved search's own sort, else the global one (#1453). Opening the screen writes nothing.
+  const sortBy = resolveSavedSearchSortBy(savedSearch, settings);
+  const ownSortBy = getSavedSearchOwnSortBy(savedSearch, settings);
+  const [sortModalVisible, setSortModalVisible] = useState(false);
   // The header, the delete confirmation and the empty state come from core, as the native host shows them.
   const screenText = buildSavedSearchScreenText({ savedSearch, savedSearches, t });
 
@@ -99,6 +110,16 @@ export default function SavedSearchScreen() {
   }, [deleteAction, id, goBackOrInbox]);
 
   const emptyMessage = screenText.empty.message;
+  const sortAccessibilityLabel = getTaskListHeaderText({
+    sortByLabel: getTaskSortByLabel(sortBy, t),
+    hasActiveFilters: false,
+    filterActiveCount: 0,
+    t,
+  }).sortAccessibilityLabel;
+  const chooseSort = (option: typeof ownSortBy) => {
+    setSortModalVisible(false);
+    void setSavedSearchSortById(id, option);
+  };
 
   // One actions object for every row, reading the current store handlers from a
   // ref, so a result-list re-render leaves untouched rows alone (#766).
@@ -139,6 +160,13 @@ export default function SavedSearchScreen() {
               </Text>
             ) : null}
           </View>
+          {savedSearch && (
+            <TaskListSortButton
+              accessibilityLabel={sortAccessibilityLabel}
+              onPress={() => setSortModalVisible(true)}
+              themeColors={tc}
+            />
+          )}
           {deleteAction && (
             <TouchableOpacity
               onPress={handleDeleteSearch}
@@ -184,6 +212,21 @@ export default function SavedSearchScreen() {
             )}
           </View>
         }
+      />
+
+      <TaskListSortModal
+        inheritOption={{
+          label: getSavedSearchGlobalSortLabel(settings, t),
+          selected: ownSortBy === null,
+          onSelect: () => chooseSort(null),
+        }}
+        onClose={() => setSortModalVisible(false)}
+        onSelect={chooseSort}
+        sortBy={sortBy}
+        sortOptions={TASK_LIST_SORT_OPTIONS}
+        t={t}
+        themeColors={tc}
+        visible={sortModalVisible}
       />
 
       <TaskEditModal

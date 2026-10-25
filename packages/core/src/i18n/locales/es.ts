@@ -1972,6 +1972,7 @@ export const esOverrides: Record<string, string> = {
 'search.saveSearchPrompt': "Dale un nombre a esta búsqueda",
 'search.savedSearches': "Búsquedas guardadas",
 'search.noSavedSearches': "Todavía no hay búsquedas guardadas.",
+'search.sortUseGlobal': 'Usar ajuste global ({sort})',
 'search.deleteConfirm': "¿Eliminar esta búsqueda guardada?",
 'search.helpOperators': "Usa operadores como status:, context:, tag:, project:, due:<=7d.",
 'search.hiddenCompletedMatches': "{{count}} más en Hecho y Archivado",

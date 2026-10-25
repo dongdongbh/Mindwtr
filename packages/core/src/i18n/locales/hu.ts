@@ -1972,6 +1972,7 @@ export const huOverrides: Record<string, string> = {
     'search.saveSearchPrompt': 'Nevezze el ezt a keresést',
     'search.savedSearches': 'Mentett keresések',
     'search.noSavedSearches': 'Még nincsenek mentett keresések.',
+    'search.sortUseGlobal': 'Globális beállítás használata ({sort})',
     'search.deleteConfirm': 'Törli ezt a mentett keresést?',
     'search.helpOperators': 'Használjon operátorokatv állapotként:, kontexus:, címke:, projekt:, due:<=7d.',
     'search.hiddenCompletedMatches': 'még {{count}} a Kész és Archiválva között',
