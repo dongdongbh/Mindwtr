@@ -14,7 +14,9 @@
 // openTaskScreen does; (h) the keyboard's own Done key saves the popup, as Save does (RN's b13f04019), with no line added;
 // (i) More with the keyboard up waits for the keyboard to go, so the field stays on screen above the panel (RN's #1120,
 // d73c7f2c1); (j) a hardware Enter saves the popup too, its title without a line, as RN's field does (submitBehavior
-// blurAndSubmit: an adb KEYCODE_ENTER in Mindwtr Dev's popup saved it, 10-25). It touches only the development package (it refuses any other
+// blurAndSubmit: an adb KEYCODE_ENTER in Mindwtr Dev's popup saved it, 10-25); (k) with d/m/y stored as the date format,
+// `/due:10/8` stores 10 August, as core reads it (#1006; the app applies the setting to quick add at boot and on every change).
+// It touches only the development package (it refuses any other
 // APK), never launches over another app, clears its debug properties and leaves "Add another" off on exit.
 // Leave the device on its home screen before running. It needs host `bun`.
 // Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
@@ -53,7 +55,8 @@ const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padSt
 // The picker's project: one fixed name, created once through the picker, then picked, so runs add no projects.
 const PROJECT = '5600';
 const titles = { a: `53${run}`, b1: `54${run}`, b2: `55${run}`, c: `56${run}`, d1: `57${run}1`, d2: `57${run}2`, e: `58${run}`, f: `59${run}`, g: `56${run}1`,
-    h: `56${run}2`, i: `56${run}3`, j: `56${run}4` };
+    h: `56${run}2`, i: `56${run}3`, j: `56${run}4`, k: `56${run}5` };
+const STAGED = '/data/local/tmp/mindwtr-native-dev-capture.db';
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tapExpecting } = device;
@@ -105,6 +108,41 @@ const core = (text = '', ...names) => JSON.parse(execFileSync('bun', ['-e', `
     console.log(JSON.stringify({ stored, expected, project, dataTasks }));
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase(), CHECK_TEXT: text, CHECK_TITLES: JSON.stringify(names) } }).trim().split('\n').pop());
+/**
+ * The stored date format set to [format] (null: unset) through core's updateSettings on a copy, with the app stopped; the copy goes
+ * back and the app starts on it, so the boot applies the setting. Returns the format stored before.
+ */
+const setDateFormat = async (format) => {
+    await device.stopApp();
+    const db = pullDatabase();
+    const before = JSON.parse(execFileSync('bun', ['-e', `
+        import { Database } from 'bun:sqlite';
+        import { SqliteAdapter, flushPendingSave, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
+        const db = new Database(process.env.CHECK_DB);
+        setStorageAdapter(new SqliteAdapter({
+            run: async (sql, params = []) => { db.query(sql).run(...params); },
+            all: async (sql, params = []) => db.query(sql).all(...params),
+            get: async (sql, params = []) => db.query(sql).get(...params) ?? undefined,
+            exec: async (sql) => { db.exec(sql); },
+        }));
+        await useTaskStore.getState().fetchData({ throwOnError: true });
+        const before = useTaskStore.getState().settings.dateFormat ?? null;
+        await useTaskStore.getState().updateSettings({ dateFormat: JSON.parse(process.env.CHECK_FORMAT) ?? undefined });
+        await flushPendingSave();
+        if (useTaskStore.getState().persistenceFailure) throw new Error('save failed');
+        db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+        db.close();
+        console.log(JSON.stringify(before));
+        process.exit(0);
+    `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: db, CHECK_FORMAT: JSON.stringify(format) } }).trim().split('\n').pop());
+    adbRaw('push', db, STAGED);
+    try { sh(`run-as ${PKG} cp ${STAGED} files/${DB}`); } finally { sh(`rm -f ${STAGED}`); }
+    sh(`run-as ${PKG} rm -f files/${DB}-wal files/${DB}-shm`);
+    device.launch(ACTIVITY);
+    await waitFor('the Inbox', onInbox, 60_000);
+    return before;
+};
+let restoreDateFormat = null;
 const snapshots = () => { try { return sh(`run-as ${PKG} ls files/snapshots`).split(/\s+/).filter((name) => name.endsWith('.snapshot.json')); } catch { return []; } };
 
 // ---- UI (core's English) ----
@@ -171,6 +209,9 @@ const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
     for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    if (restoreDateFormat) {
+        try { await restoreDateFormat(); } catch (error) { console.error(`RESTORE FAILED: the date format: ${error.message}; put it back in Settings › General`); }
+    }
     try {
         if (front().includes(`${PKG}/`)) {
             // "Add another" is RN's device preference: leave it off, as a fresh install has it.
@@ -334,6 +375,18 @@ try {
     sh('input keyevent KEYCODE_ENTER');
     await waitFor('the popup to close on a hardware Enter', onInbox, 15_000);
     check(core('', titles.j).stored[titles.j].length === 1, '(j) a hardware Enter stored the capture once, its title without a line');
+
+    // (k) A d/m/y date format reads a typed slash date day first, as core does (#1006).
+    const formatBefore = await setDateFormat('dmy');
+    restoreDateFormat = async () => { await setDateFormat(formatBefore); restoreDateFormat = null; };
+    const textK = `${titles.k} /due:10/8`;
+    await typeCapture(textK.replace(/ /g, '%s'), textK);
+    await save(onInbox, 'the capture to close the popup');
+    seen = core(textK, titles.k);
+    const storedK = seen.stored[titles.k];
+    check(storedK.length === 1 && JSON.stringify(storedK[0]) === JSON.stringify(seen.expected) && storedK[0].dueDate?.slice(5, 10) === '08-10',
+        `(k) with d/m/y stored, "/due:10/8" stored 10 August, as core's popup stores it: ${JSON.stringify(storedK[0])}`);
+    await restoreDateFormat();
     console.log('Capture device check passed');
 } catch (error) {
     evidenced(error);
