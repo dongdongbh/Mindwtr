@@ -9,7 +9,9 @@
 //   (2) the phone's WebDAV form switches to folder B, which has nothing: Save asks RN's question, listing the file;
 //   (3) Cancel leaves the stored setting on folder A and writes nothing to B;
 //   (4) Save again, then Continue: folder B is stored and written, and the project's attachment shows "Missing file";
-//   (5) sync Off again.
+//   (5) Remove on that attachment soft-deletes it (a file that exists nowhere goes by hand), and sync Off again.
+// A leftover attachment of an earlier cut-off run (a file that exists nowhere would stall every later check's switch of sync
+// location) is removed first the same way.
 // A screenshot of the question is saved for the RN-vs-native pair. It installs with `install -r` (development data stays),
 // touches only the development package, removes the port mapping, and leaves the phone on its home screen.
 // Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
@@ -18,7 +20,7 @@ import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, inboxCount, inEditor, inList, logStamp, linesAfter, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { box, check, connect, evidenced, fail, inboxCount, inEditor, inList, logStamp, linesAfter, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 import { hostDevice, serveWebdav } from './sync-harness.mjs';
 
@@ -94,6 +96,10 @@ const onInbox = (nodes) => !tagged(nodes, 'quick-capture') && !tagged(nodes, 'me
     && tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes));
 const withPrefix = (nodes, prefix) => nodes.find((node) => (node['content-desc'] ?? '').startsWith(prefix));
 const question = (nodes) => nodes.some((node) => node.text === en['settings.syncMissingFilesTitle']);
+// The dialog is its own window, so its buttons carry no resource ids: they are found by their words, drawn in capitals as
+// RN's Android Alert draws them.
+const continueButton = (nodes) => nodes.find((node) => node.text === en['settings.syncMissingFilesContinue'].toUpperCase());
+const cancelButton = (nodes) => nodes.find((node) => node.text === en['common.cancel'].toUpperCase());
 const hideKeyboard = async () => {
     if (!/mInputShown=true/.test(sh('dumpsys input_method'))) return;
     requireAppFront();
@@ -147,6 +153,25 @@ const runCommand = async (tag, operation, description, timeoutMs = 240_000) => {
     const since = logStamp(logs());
     await tapTag(tag, () => commands(operation, since) > 0, description, timeoutMs);
 };
+/** Projects of earlier runs that still hold a live file attachment. */
+const leftovers = () => sqlite(pullFile(`files/${DB}`, 'db'),
+    "SELECT p.title AS project, j.value->>'title' AS file FROM projects p, json_each(p.attachments) j WHERE p.deletedAt IS NULL "
+    + "AND p.title LIKE 'CWF project %' AND j.value->>'kind' = 'file' AND j.value->>'deletedAt' IS NULL");
+/** Opens [project] in Projects with its Details, and taps Remove beside [file]; answers once the row is gone. */
+const removeProjectFile = async (project, file) => {
+    let nodes = await toTabs();
+    nodes = await tapExpecting(tab(nodes, en['nav.projects']), (current) => tabSelected(current, en['nav.projects']), 'Projects');
+    nodes = await device.reveal(project);
+    nodes = await tapExpecting(inList(nodes, project) ?? fail(`no project row ${project}`), (current) => Boolean(tagged(current, 'project-details-toggle')), 'the project');
+    if (!tagged(nodes, 'project-attachment-add-link')) {
+        nodes = await tapExpecting(tagged(nodes, 'project-details-toggle'), (current) => Boolean(tagged(current, 'project-attachment-add-link')), 'the project Details');
+    }
+    const row = await reveal((current) => current.find((node) => node.text === file), file, false);
+    nodes = await screen();
+    const [, top, , bottom] = box(row);
+    const remove = nodes.find((node) => node.text === en['attachments.remove'] && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
+    await tapExpecting(remove ?? fail(`no Remove beside ${file}`), (current) => !current.some((node) => node.text === file), `${file} removed`);
+};
 const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
@@ -177,6 +202,12 @@ try {
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
     device.launch(ACTIVITY);
     await waitFor('the Inbox', onInbox, 60_000);
+
+    for (const { project, file } of leftovers()) {
+        console.log(`note - removing an earlier run's attachment ${file} (${project})`);
+        await removeProjectFile(project, file);
+    }
+    check(leftovers().length === 0, 'no earlier run left a file attachment that exists nowhere');
 
     // (1) Folder A: the phone, then the second device's project file, which A then loses.
     let nodes = await openSync();
@@ -222,21 +253,21 @@ try {
     nodes = await tapExpecting(await reveal((current) => tagged(current, 'sync-save'), 'sync-save'), question, 'the missing-files question', 240_000);
     check(nodes.some((node) => (node.text ?? '').includes(names.file) && (node.text ?? '').includes(names.project)),
         `(2) the question lists "${names.file} (${names.project})"`);
-    check(Boolean(tagged(nodes, 'sync-missing-files-continue')) && Boolean(tagged(nodes, 'sync-missing-files-cancel')),
-        '(2) the question offers Continue without these files and Cancel');
+    check(Boolean(continueButton(nodes)) && Boolean(cancelButton(nodes)),
+        '(2) the question offers CONTINUE WITHOUT THESE FILES and CANCEL (RN\'s Android Alert capitals)');
     const shot = resolve(work, `native-question-${run}.png`);
     writeFileSync(shot, device.adbRaw('exec-out', 'screencap', '-p'));
     console.log(`info - native question screenshot: ${shot}`);
 
     // (3) Cancel: the stored setting stays on folder A, and folder B gets nothing.
-    await tapExpecting(tagged(nodes, 'sync-missing-files-cancel'), (current) => !question(current), 'Cancel');
+    await tapExpecting(cancelButton(nodes), (current) => !question(current), 'Cancel');
     await sleep(2_000);
     check(storedUrl() === fieldsA.url && ![...dav.state.files.keys()].some((path) => path.startsWith(`${folderB}/`) && path.endsWith('data.json')),
         '(3) Cancel left the stored URL on folder A and wrote no document to folder B');
 
     // (4) Save again, then Continue: folder B is stored and written; the attachment shows "Missing file".
     nodes = await tapTag('sync-save', question, 'the missing-files question again', 240_000);
-    await tapExpecting(tagged(nodes, 'sync-missing-files-continue'), (current) => !question(current), 'Continue without these files');
+    await tapExpecting(continueButton(nodes), (current) => !question(current), 'Continue without these files');
     await until('folder B stored and written', () => storedUrl() === urlOf(folderB) && dav.state.files.has(`${folderB}/data.json`), 240_000, 3_000);
     check(true, '(4) Continue stored folder B and wrote the library there');
     const after = projectAttachments().find((a) => a.id === fileId);
@@ -251,7 +282,10 @@ try {
         && current.some((node) => (node.text ?? '') === names.file || (node['content-desc'] ?? '').includes(names.file)), 20_000);
     check(!nodes.some((node) => node.text === en['attachments.download']), `(4) the attachment shows "${en['attachments.missing']}", not "${en['attachments.download']}"`);
 
-    // (5) Sync Off again.
+    // (5) Remove by hand, then sync Off again.
+    await removeProjectFile(names.project, names.file);
+    await until('the attachment soft-deleted', () => projectAttachments().find((a) => a.id === fileId)?.deletedAt, 30_000, 2_000);
+    check(true, '(5) Remove soft-deleted the attachment whose file exists nowhere');
     await openSync();
     await tapTag('sync-backend-off', (current) => current.some((node) => node.text === en['settings.syncOff']), 'Sync off');
     await toTabs();

@@ -17,8 +17,8 @@
 //       journal is on disk (debug property install_stop=journal); the next boot's recovery rolls it back (no installer file,
 //       no half file), and the next sync installs the whole file;
 //   (8) a remote 404: a project file whose remote copy is gone stays a live, keyed attachment shown as missing (never deleted,
-//       so the delete cannot spread to other devices) and no bytes are written; the PDF's remote copy removed, a sync keeps its
-//       local bytes;
+//       so the delete cannot spread to other devices) and no bytes are written; the second device's Remove then deletes it on
+//       the phone (a real delete still wins); the PDF's remote copy removed, a sync keeps its local bytes;
 //   (9) sync Off again.
 // It installs with `install -r` (development data stays), touches only the development package, never launches over another
 // app, clears its debug property, removes the port mapping and the pushed files, and puts the keyboard back. Leave the phone on
@@ -517,6 +517,14 @@ try {
         && !attachmentFiles().some((name) => name.startsWith(goneId)),
         '(8) the 404 kept the attachment (live, its key, not available) and wrote no bytes');
     check(phoneSha(pdf.uri) === sha256(pdfBytes), '(8) the PDF\'s remote copy gone, the sync kept its local bytes');
+    // A real delete still wins: the second device removes the kept attachment, and the phone's next sync deletes it too. It also
+    // leaves no attachment that exists nowhere, which would stall a later check's switch of sync location.
+    const removed = await second.call('menuCommand', 'attachmentRemove', JSON.stringify({ requestId: randomUUID(), owner: { kind: 'project', projectId }, attachmentId: goneId }));
+    if (removed.kind !== 'saved') fail(`the second device did not remove the kept attachment (${JSON.stringify(removed)})`);
+    await second.syncNow('webdav', { ...webdavFields, password: null });
+    await syncNow('Sync now (the second device removed the kept file)');
+    await until('the kept attachment deleted on the phone', () => stored('projects', names.project).find((a) => a.id === goneId)?.deletedAt, 60_000, 3_000);
+    check(true, '(8) the second device\'s Remove deleted the kept attachment on the phone (a real delete still wins)');
 
     // (9) Sync Off again.
     await openSync();
