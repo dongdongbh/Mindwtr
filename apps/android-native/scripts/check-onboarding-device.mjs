@@ -167,6 +167,20 @@ try {
     check(true, '(c) Undo puts the copy back');
     nodes = await tapExpecting(byText(nodes, STARTER_TITLE) ?? fail('no Getting Started row'),
         (current) => projectTitled(current, STARTER_TITLE) && Boolean(tagged(current, 'getting-started-actions')), 'Getting Started again');
+    // The pinned "+" (RN's openProjectQuickAdd): the popup opens with Getting Started chosen, and the task saves as Next in it.
+    nodes = await tapExpecting(tagged(nodes, 'project-add-task-button') ?? fail('no project "+"'),
+        (current) => Boolean(tagged(current, 'quick-capture')) && hasText(current, STARTER_TITLE), 'the capture popup with Getting Started chosen', 15_000);
+    check(true, '(c) the project\'s "+" opens the capture popup with the project chosen');
+    shot('project-add');
+    const ADDED = 'Paint the fence';
+    const input = nodes.find((node) => node.class === 'android.widget.EditText' && (node['resource-id'] ?? '').endsWith('capture-title'))
+        ?? nodes.filter((node) => node.class === 'android.widget.EditText').pop() ?? fail('no capture field');
+    await tap(input);
+    requireAppFront();
+    sh(`input text '${ADDED.replaceAll(' ', '%s')}'`);
+    nodes = await waitFor('the typed capture', (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === ADDED), 10_000);
+    nodes = await tapExpecting(button(nodes, en['common.save']) ?? fail('no Save'), (current) => !tagged(current, 'quick-capture') && hasText(current, ADDED), 'the task in the project', 30_000);
+    check(projectTitled(nodes, STARTER_TITLE), '(c) the captured task shows in Getting Started');
     nodes = await tapExpecting(byText(nodes, en['starter.processInbox.check1']) ?? fail('no Open Inbox'), (current) => tabSelected(current, en['tab.inbox']), 'the Inbox');
     check(tabSelected(nodes, en['tab.inbox']), '(c) Open Inbox closes the project and shows the Inbox');
 

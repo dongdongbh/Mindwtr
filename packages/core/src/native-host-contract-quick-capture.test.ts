@@ -45,6 +45,24 @@ describe('native host contract: the capture popup', () => {
     const writes = (log: unknown[]) => log.map((entry) => (entry as unknown[])[0]);
     const chip = (view: NativeQuickCaptureView, kind: string) => view.preview.find((entry) => entry.kind === kind)?.value;
 
+    // RN's project "+" (openProjectQuickAdd): the popup opens with initialProps { projectId, status: 'next' }; the native host
+    // sends that preset with every call, so the project is chosen and the task saves as Next in it (O2f-parity b3).
+    it('keeps an opener preset: the project chosen, and the saved task Next in it', async () => {
+        const { host } = await openHost();
+        const preset = { projectId: 'p-home', status: 'next' } as const;
+        const opened = value(host.openQuickCapture());
+        const chosen = value(host.editQuickCapture({ text: '', options: opened.options, edit: { type: 'selectProject', projectId: 'p-home' }, preset } as never));
+        expect(chosen.view.options.projectId).toBe('p-home');
+        const saved = value(await host.submitQuickCapture({ text: 'Fix the gate', options: chosen.view.options, captureId: generateUUID(), preset } as never));
+        expect(saved).toMatchObject({ kind: 'saved', projectId: 'p-home' });
+        expect(useTaskStore.getState()._allTasks.find((task) => task.id === (saved as { taskId: string }).taskId)).toMatchObject({ projectId: 'p-home', status: 'next' });
+        // Without the preset the same capture is an Inbox task, as RN's tab-bar popup saves it.
+        const plain = value(await host.submitQuickCapture({ text: 'Fix the gate', options: chosen.view.options, captureId: generateUUID() }));
+        expect(useTaskStore.getState()._allTasks.find((task) => task.id === (plain as { taskId: string }).taskId)?.status).toBe('inbox');
+        expect(await host.submitQuickCapture({ text: 'x', options: chosen.view.options, captureId: generateUUID(), preset: { status: 'done' } } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('offers saved unused contexts and invalidates retained context choices when only settings changes', async () => {
         const { host } = await openHost();
         const opened = value(host.openQuickCapture());

@@ -132,6 +132,8 @@ data class CaptureDraft(
     val snapshot: String? = null,
     val snapshotTaken: Boolean = false,
     val linesText: String? = null,
+    /** An opener's preset core reads with every call (RN's initialProps): a project's "+" sends its project and the Next status. */
+    val preset: JSONObject? = null,
 ) {
     /** A read queued behind whatever is queued, unless one is already last. */
     fun reading(): CaptureDraft = if (requests.lastOrNull() === READ) this else copy(requests = requests + READ)
@@ -141,7 +143,7 @@ data class CaptureDraft(
         .put("confirm", confirm ?: JSONObject.NULL).put("lineIds", lineIds.joinToString(","))
         .put("edits", org.json.JSONArray().apply { requests.forEach { request -> request.optJSONObject("edit")?.let(::put) } })
         .put("snapshot", snapshot ?: JSONObject.NULL).put("snapshotTaken", snapshotTaken)
-        .put("linesText", linesText ?: JSONObject.NULL)
+        .put("linesText", linesText ?: JSONObject.NULL).put("preset", preset ?: JSONObject.NULL)
         .put("pending", pending?.let { JSONObject().put("kind", it.kind).put("id", it.id).put("title", it.title).put("patch", JSONObject(it.patch)) } ?: JSONObject.NULL)
 
     companion object {
@@ -160,6 +162,7 @@ data class CaptureDraft(
             requests = saved.optJSONArray("edits")?.let { edits -> List(edits.length()) { JSONObject().put("edit", edits.getJSONObject(it)) } }.orEmpty(),
             snapshot = if (saved.isNull("snapshot")) null else saved.optString("snapshot"), snapshotTaken = saved.optBoolean("snapshotTaken"),
             linesText = if (saved.isNull("linesText")) null else saved.optString("linesText").ifEmpty { null },
+            preset = saved.optJSONObject("preset"),
         )
     }
 }

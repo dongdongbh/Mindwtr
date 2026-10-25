@@ -149,6 +149,9 @@ export type NativePreparedQuickCaptureLines = {
 export const NATIVE_PREPARED_CAPTURE_LINES_MAX_BYTES = 8 * 1024 * 1024;
 export const NATIVE_PREPARED_CAPTURE_LINES_MAX_COUNT = 1000;
 
+/** An opener's preset (RN's openQuickCapture initialProps): the project "+" sends its project and the Next status with every call. */
+export type NativeQuickCapturePreset = { projectId: string; status: 'next' };
+
 const fail = (code: NativeHostErrorCode, message: string): NativeHostResult<never> => ({ ok: false, error: { code, message } });
 const isObjectRecord = (value: unknown): value is Record<string, unknown> => (
     typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -575,9 +578,10 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
     // that write nothing (refusals, a picker search that selects) never enter it.
     const receipts = createNativeRequestReceipts({ save: durableSave });
 
-    const context = (now = new Date()): QuickCaptureContext => {
+    const context = (now = new Date(), preset?: NativeQuickCapturePreset): QuickCaptureContext => {
         const state = useTaskStore.getState();
         return {
+            ...(preset ? { initialProps: preset } : {}),
             settings: state.settings,
             projects: state.projects,
             areas: state.areas,
@@ -594,8 +598,8 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
      * matched first under the name the line gives it: a replay files its task there, renamed
      * since or not, never in a project given that name since. Null when one is deleted or archived.
      */
-    const ownedContext = (requestId: string, texts: readonly string[], options: QuickCaptureOptions): QuickCaptureContext | null => {
-        const ctx = context();
+    const ownedContext = (requestId: string, texts: readonly string[], options: QuickCaptureOptions, preset?: NativeQuickCapturePreset): QuickCaptureContext | null => {
+        const ctx = context(undefined, preset);
         let projects = ctx.projects;
         for (const text of texts) {
             // The line's `+Project` as it reads with no project to match.
@@ -621,9 +625,10 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         cachedContextHistory = { tasks, taxonomy, choices };
         return choices;
     };
-    const freshOptions = (addAnother: boolean) => {
+    const freshOptions = (addAnother: boolean, preset?: NativeQuickCapturePreset) => {
         const state = useTaskStore.getState();
         return createQuickCaptureOptions({
+            ...(preset ? { initialProps: preset } : {}),
             projects: state.projects,
             defaultAreaId: resolveQuickCaptureDefaultAreaId(state.settings, state.areas),
             addAnother,
@@ -650,13 +655,18 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
     };
 
     /** The shared input checks: readiness, text and options. */
-    const readDraft = (input: unknown): NativeHostResult<{ text: string; options: QuickCaptureOptions }> => {
+    const readDraft = (input: unknown): NativeHostResult<{ text: string; options: QuickCaptureOptions; preset?: NativeQuickCapturePreset }> => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
         if (!isObjectRecord(input) || !isText(input.text, TEXT_LIMIT)) return fail('INVALID_INPUT', 'text is required');
         const options = readOptions(input.options);
         if (!options) return fail('INVALID_INPUT', 'options must hold every capture option with a valid value');
-        return { ok: true, value: { text: input.text, options } };
+        const preset = input.preset;
+        if (preset === undefined) return { ok: true, value: { text: input.text, options } };
+        if (!isObjectRecord(preset) || Object.keys(preset).length !== 2 || !isText(preset.projectId, 500) || !preset.projectId || preset.status !== 'next') {
+            return fail('INVALID_INPUT', 'preset must be a project and the Next status');
+        }
+        return { ok: true, value: { text: input.text, options, preset: { projectId: preset.projectId, status: 'next' } } };
     };
 
     return {
@@ -864,7 +874,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             const picker = readPicker(input.picker);
             if (picker === false) return fail('INVALID_INPUT', 'picker must be project, area, context or priority');
             if (!isEdit(input.edit)) return fail('INVALID_INPUT', 'edit is not a valid capture edit');
-            const ctx = context();
+            const ctx = context(undefined, draft.value.preset);
             const edited = applyQuickCaptureEdit(draft.value.options, input.edit, {
                 ...ctx,
                 contextChoices: input.edit.type === 'addContexts' ? contextChoices() : undefined,
@@ -898,14 +908,14 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             if (input.openAfterSave !== undefined && typeof input.openAfterSave !== 'boolean') {
                 return fail('INVALID_INPUT', 'openAfterSave must be a boolean');
             }
-            const { text, options } = draft.value;
+            const { text, options, preset } = draft.value;
             const plan = planQuickCaptureSave(text);
             if (plan.kind === 'empty') return fail('INVALID_INPUT', 'Type something to capture');
             if (plan.kind === 'bulk') {
                 return { ok: true, value: { kind: 'confirmLines', confirm: getQuickCaptureBulkConfirm(plan.lines, deps.t()), lineCount: plan.lines.length } };
             }
             // A refusal writes nothing, so it stays out of the receipts: never SAVE_FAILED, the ID stays free.
-            const planned = planQuickCaptureTask({ text: plan.text, options }, context());
+            const planned = planQuickCaptureTask({ text: plan.text, options }, context(undefined, preset));
             if (!planned.success) {
                 return planned.reason === 'invalid-date-command'
                     ? { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), planned.invalidDateCommands) } }
@@ -914,17 +924,17 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             const openAfterSave = input.openAfterSave === true;
             return receipts.run<NativeQuickCaptureSubmitResult>(
                 input.captureId,
-                JSON.stringify(['capture', text, options, openAfterSave]),
+                JSON.stringify(['capture', text, options, openAfterSave, ...(preset ? [preset] : [])]),
                 async () => {
                     const saved = (taskId: string, projectId: string | undefined): NativeHostResult<NativeQuickCaptureSubmitResult> => {
                         rebuildParseOptions();
                         const next = openAfterSave ? 'open' : options.addAnother ? 'addAnother' : 'close';
                         return {
                             ok: true,
-                            value: { kind: 'saved', taskId, projectId, next, reset: next === 'addAnother' ? { text: '', options: freshOptions(true) } : null },
+                            value: { kind: 'saved', taskId, projectId, next, reset: next === 'addAnother' ? { text: '', options: freshOptions(true, preset) } : null },
                         };
                     };
-                    const owned = ownedContext(input.captureId, [plan.text], options);
+                    const owned = ownedContext(input.captureId, [plan.text], options, preset);
                     if (!owned) return projectGone();
                     // After a restart the receipt is gone: the task this captureId created answers
                     // the retry, but only when it is what this draft writes.
@@ -1005,7 +1015,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
         }): Promise<NativeHostResult<NativeQuickCaptureLinesResult>> {
             const draft = readDraft(input);
             if (!draft.ok) return draft;
-            const { text, options } = draft.value;
+            const { text, options, preset } = draft.value;
             const plan = planQuickCaptureSave(text);
             if (plan.kind !== 'bulk') return fail('INVALID_INPUT', 'text must hold several lines');
             const ids = input.captureIds;
@@ -1019,15 +1029,15 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             }
             // Every line is checked before any write; a refusal stays out of the receipts.
             for (const line of plan.lines) {
-                const planned = planQuickCaptureTask({ text: line, options }, context());
+                const planned = planQuickCaptureTask({ text: line, options }, context(undefined, preset));
                 if (!planned.success && planned.reason === 'invalid-date-command') {
                     return { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), planned.invalidDateCommands) } };
                 }
             }
             const taskIds = ids.map((id) => id.toLowerCase());
-            return receipts.run<NativeQuickCaptureLinesResult>(ids[0], JSON.stringify(['lines', text, options, ids]), async () => {
+            return receipts.run<NativeQuickCaptureLinesResult>(ids[0], JSON.stringify(['lines', text, options, ids, ...(preset ? [preset] : [])]), async () => {
                 const state = useTaskStore.getState();
-                const owned = ownedContext(ids[0], plan.lines, options);
+                const owned = ownedContext(ids[0], plan.lines, options, preset);
                 if (!owned) return projectGone();
                 const missing: number[] = [];
                 // Lines saved before a restart answer from their tasks, when they match; nothing is prepared for them.
@@ -1101,7 +1111,7 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             // The same edit the picker's rows send.
             const choose = (id: string, created: boolean): NativeHostResult<{ options: QuickCaptureOptions; created: boolean }> => {
                 const edit: QuickCaptureEdit = picker === 'project' ? { type: 'selectProject', projectId: id } : { type: 'selectArea', areaId: id };
-                return { ok: true, value: { options: applyQuickCaptureEdit(options, edit, context())!.options, created } };
+                return { ok: true, value: { options: applyQuickCaptureEdit(options, edit, context(undefined, draft.value.preset))!.options, created } };
             };
             const resolve = () => {
                 const state = useTaskStore.getState();

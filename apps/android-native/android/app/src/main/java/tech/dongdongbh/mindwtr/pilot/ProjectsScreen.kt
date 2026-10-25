@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -376,6 +377,22 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 .clickable(enabled = writable && detail != null && failedAction == null, role = Role.Button) { projectDetails.openActions() }
                 .semantics { contentDescription = actionsLabel }.testTag("project-actions-menu-button"), contentAlignment = Alignment.Center) {
                 Icon(Ionicons.EllipsisHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
+            }
+        }
+        // RN's pinned row under the header (projectTaskPinnedToolbar): its "+" adds a task in this project, as Next (a filed project
+        // takes none).
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.weight(1f))
+            if (detail?.readOnly == false) {
+                val theme = LocalTheme.current
+                val addLabel = t("nav.addTask")
+                val addShape = RoundedCornerShape(14.dp)
+                Box(Modifier.size(width = 56.dp, height = 44.dp).clip(addShape).background(theme.filledBg).border(1.dp, theme.filledBg, addShape)
+                    .clickable(enabled = writable && failedAction == null, role = Role.Button) { openCapture(openProjectId) }
+                    .semantics { contentDescription = addLabel }.testTag("project-add-task-button"), contentAlignment = Alignment.Center) {
+                    Icon(SettingsIonicons.Add, null, tint = theme.filledText, modifier = Modifier.size(24.dp))
+                }
             }
         }
         // RN's KeyboardAvoidingView: the open keyboard shortens the list, so a focused Details field scrolls into view.

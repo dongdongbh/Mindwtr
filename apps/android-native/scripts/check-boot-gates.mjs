@@ -9625,5 +9625,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /"project-duplicate-button"[\s\S]{0,500}"project-convert-to-section-button"[\s\S]{0,300}"project-reactivate-button"[\s\S]{0,300}"project-archive-button"[\s\S]{0,300}"project-cancel-button"[\s\S]{0,300}"project-delete-button"/);
     assert.match(details, /deleteId = edit\(id, "delete", answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo"\) \{ put\("deleteRequestId", deleteId\) \}/);
     assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ answer\(reply\) \} \}/);
+    // b3: the pinned "+" opens the capture popup with RN's preset (the project, status Next), kept in the durable draft and sent
+    // with every capture call.
+    assert.match(header, /\{ openCapture\(openProjectId\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
+    const capture = source('CaptureScreen.kt'), shell = source('InboxViewModel.kt');
+    assert.match(capture, /\.put\("preset", preset \?: JSONObject\.NULL\)/);
+    assert.match(capture, /preset = saved\.optJSONObject\("preset"\)/);
+    assert.equal(shell.match(/\+ presetPatch\(current\)/g)?.length, 3, 'Save, Create tasks and the picker keep the preset');
+    assert.equal(shell.match(/\.withPreset\(action\)/g)?.length, 3, 'their sends carry it');
+    assert.match(shell, /current\.preset\?\.let \{ put\("preset", it\) \}/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

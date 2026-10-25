@@ -1199,12 +1199,22 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         if (value == null) captureStore.delete() else if (persist) captureStore.write(value.state())
     }
 
-    /** RN's center +: core's empty draft; RN's sticky "Add another" goes on with core's own edit. */
-    fun openCapture() {
+    /**
+     * RN's center +: core's empty draft; RN's sticky "Add another" goes on with core's own edit. A project's "+" ([projectId], RN's
+     * openProjectQuickAdd) chooses that project and keeps RN's preset (the project, status Next) for every call, so its task saves
+     * as Next in the project.
+     */
+    fun openCapture(projectId: String? = null) {
         if (capture != null) return
         perform { runtime ->
             val view = runtime.openQuickCapture()
-            ui { openedCapture(view, "") }
+            ui {
+                openedCapture(view, "")
+                if (projectId != null) capture?.let { opened ->
+                    keepCapture(opened.copy(preset = JSONObject().put("projectId", projectId).put("status", "next")))
+                    editCapture(JSONObject().put("type", "selectProject").put("projectId", projectId))
+                }
+            }
         }
     }
 
@@ -1302,7 +1312,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         captureInFlight = next
         val edit = next.optJSONObject("edit")
         val request = JSONObject().put("text", current.text).put("options", current.options)
-            .apply { current.picker?.let { put("picker", it) }; edit?.let { put("edit", it) } }
+            .apply { current.picker?.let { put("picker", it) }; edit?.let { put("edit", it) }; current.preset?.let { put("preset", it) } }
         background(emptyList(), { engine -> runCatching { if (edit != null) engine.editQuickCapture(request.toString()) else engine.quickCaptureView(request.toString()) } }) { reply, _ ->
             if (captureInFlight === next) captureInFlight = null
             // A reply counts only for its popup and the request it answers, still first in the queue.
@@ -1323,9 +1333,13 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         }
     }
 
+    /** The draft's opener preset in a request's saved patch (none for the center +). */
+    private fun presetPatch(current: CaptureDraft): Map<String, String> = current.preset?.let { mapOf("preset" to it.toString()) }.orEmpty()
+    private fun JSONObject.withPreset(action: FailedAction): JSONObject = apply { action.patch["preset"]?.let { put("preset", JSONObject(it)) } }
+
     /** A Save's exact request: the text, core's options, the capture UUID, and Save and edit. A retry reuses it. */
     fun captureAction(current: CaptureDraft, openAfterSave: Boolean) = current.pending?.takeIf { it.kind == "capture" }
-        ?: FailedAction("capture", current.captureId, current.text, patch = mapOf("options" to current.options.toString(), "openAfterSave" to "$openAfterSave"))
+        ?: FailedAction("capture", current.captureId, current.text, patch = mapOf("options" to current.options.toString(), "openAfterSave" to "$openAfterSave") + presetPatch(current))
 
     /** RN's Save (and Return): reads and edits still with core go first; the request is on disk before the call. */
     fun saveCapture(openAfterSave: Boolean) {
@@ -1350,7 +1364,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** Core's submitQuickCapture with [action]'s exact request. */
     private fun sendCapture(action: FailedAction) = perform(action) { runtime ->
         val request = JSONObject().put("text", action.title).put("options", JSONObject(action.patch["options"]!!)).put("captureId", action.id)
-            .put("openAfterSave", action.patch["openAfterSave"] == "true")
+            .put("openAfterSave", action.patch["openAfterSave"] == "true").withPreset(action)
         val reply = try {
             runtime.submitQuickCapture(request.toString())
         } catch (failure: Exception) {
@@ -1416,7 +1430,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** The several lines' exact request: the text (an imported file's, else the field's), core's options and one capture UUID per line. A retry reuses it. */
     fun linesAction(current: CaptureDraft) = current.pending?.takeIf { it.kind == "captureLines" }
         ?: FailedAction("captureLines", current.lineIds.first(), current.linesText ?: current.text,
-            patch = mapOf("options" to current.options.toString(), "captureIds" to current.lineIds.joinToString(",")))
+            patch = mapOf("options" to current.options.toString(), "captureIds" to current.lineIds.joinToString(",")) + presetPatch(current))
 
     /** RN's Create tasks: the request is on disk before the call. */
     fun createCaptureLines() {
@@ -1447,7 +1461,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         val ids = org.json.JSONArray(action.patch["captureIds"]!!.split(","))
         val submit = { name: String? ->
             runtime.submitQuickCaptureLines(JSONObject().put("text", action.title).put("options", JSONObject(action.patch["options"]!!))
-                .put("captureIds", ids).put("snapshotFileName", name ?: JSONObject.NULL).toString())
+                .put("captureIds", ids).put("snapshotFileName", name ?: JSONObject.NULL).withPreset(action).toString())
         }
         val fresh = {
             val written = runtime.createQuickCaptureSnapshot(snapshots, menu.settings.transfer.operations::protectedNames)
@@ -1477,7 +1491,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** The project or area picker's search, chosen or created: its exact request, with a UUID kept while the picker is open. */
     fun pickerAction(current: CaptureDraft) = current.pending?.takeIf { it.kind == "capturePicker" }
         ?: FailedAction("capturePicker", current.pickerRequestId, current.picker?.optString("query").orEmpty().trim(),
-            patch = mapOf("picker" to current.picker?.optString("kind").orEmpty(), "text" to current.text, "options" to current.options.toString()))
+            patch = mapOf("picker" to current.picker?.optString("kind").orEmpty(), "text" to current.text, "options" to current.options.toString()) + presetPatch(current))
 
     /** RN's picker submit (Return, or the Create row): the request is on disk before the call. */
     fun submitCapturePicker() {
@@ -1492,7 +1506,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** Core's submitQuickCapturePickerQuery; its options come back with the choice made, and the picker closes. */
     private fun sendPicker(action: FailedAction) = perform(action) { runtime ->
         val request = JSONObject().put("picker", action.patch["picker"]).put("query", action.title).put("text", action.patch["text"])
-            .put("options", JSONObject(action.patch["options"]!!)).put("requestId", action.id)
+            .put("options", JSONObject(action.patch["options"]!!)).put("requestId", action.id).withPreset(action)
         val reply = try {
             runtime.submitQuickCapturePickerQuery(request.toString())
         } catch (failure: Exception) {
