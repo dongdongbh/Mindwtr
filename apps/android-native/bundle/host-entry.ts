@@ -101,6 +101,7 @@ import {
     isWorkspaceTransitionActive,
     legacyImportMismatch,
     assertNativeLegacyBackupSafe,
+    countSqliteCopyRepairs,
     loadNativeRequestReceipts,
     logInfo,
     logWarn,
@@ -846,6 +847,8 @@ const importLegacyJson = async (adapter: ValidatedSqliteAdapter, loaded: LoadedD
         backupVersion: state.backupVersion,
         backupJson: state.backupPresent ? backup : null,
     }, loaded, await adapter.withConnection(() => sqliteHasAnyData(sqlite)));
+    // Before the save, so a save the repair could not make whole still leaves what it repaired in the log.
+    if (plan.repairs && countSqliteCopyRepairs(plan.repairs) > 0) logLegacyCopyRepair(plan);
     if (plan.merged && legacyImportMismatch(plan.merged, loaded)) {
         await adapter.saveData(plan.merged);
         const mismatch = legacyImportMismatch(plan.merged, await adapter.getData());
@@ -864,6 +867,19 @@ const importLegacyJson = async (adapter: ValidatedSqliteAdapter, loaded: LoadedD
     }
     if (plan.outcome !== 'none') logLegacyImport(plan, rnState);
     if (rnState === 'failed') throw new Error(`Cannot update the previous app version's saved state: ${rnFailure}`);
+};
+
+// a108d6764 on native: the copy was repaired before the import (rows SQLite always rejects),
+// where the preflight once refused it at every start. Counts per class only, never text or ids.
+const logLegacyCopyRepair = (plan: ReturnType<typeof planLegacyJsonImport>): void => {
+    const ios = globalThis.__mindwtrHostPlatform === 'ios';
+    const context: Record<string, string> = { releaseCheck: 'v1.3.8/native-legacy-copy-repair', path: plan.path ?? '' };
+    for (const [name, count] of Object.entries(plan.repairs ?? {})) context[name] = String(count);
+    try {
+        logWarn(ios ? 'Native iOS legacy JSON copy repaired' : 'Native Android legacy JSON copy repaired', {
+            scope: ios ? 'native-ios' : 'native-android', category: 'storage', force: true, context,
+        });
+    } catch { /* a diagnostic sink must not fail the boot */ }
 };
 
 const logLegacyImport = (plan: ReturnType<typeof planLegacyJsonImport>, rnState: string): void => {

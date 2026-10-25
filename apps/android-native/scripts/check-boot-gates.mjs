@@ -4139,6 +4139,7 @@ export function planLegacyJsonImport(state, current, sqliteHasData) {
 }
 export async function sqliteHasAnyData() { return globalThis.sqliteHasData; }
 export function assertNativeLegacyBackupSafe() { globalThis.events.push('legacyCheck'); }
+export function countSqliteCopyRepairs(counts) { return Object.values(counts ?? {}).reduce((total, count) => total + count, 0); }
 // Core compares every persisted field; the fake compares the whole snapshot.
 export function legacyImportMismatch(merged, saved) { return JSON.stringify(merged) === JSON.stringify(saved) ? null : 'tasks'; }
 export function splitSqlStatements(sql) { return [sql]; }

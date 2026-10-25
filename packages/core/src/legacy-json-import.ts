@@ -2,8 +2,10 @@ import { areaToSqliteRow } from './area-sync-schema';
 import { validateBackupJson } from './backup-transfer';
 import { personToSqliteRow } from './person-sync-schema';
 import { projectToSqliteRow } from './project-sync-schema';
+import { keepSavedFilters } from './saved-filters';
 import { sectionToSqliteRow } from './section-sync-schema';
 import type { SqliteClient } from './sqlite-adapter';
+import { repairAppDataForSqlite, type SqliteCopyRepairCounts } from './sqlite-copy-repair';
 import { mergeAppDataWithStats } from './sync';
 import { toStableSyncJson } from './sync-helpers';
 import { taskToSqliteRow } from './task-sync-schema';
@@ -59,7 +61,36 @@ export type LegacyJsonImportPlan = {
     setReconciled: boolean;
     /** RN's own diagnostic counts for an import. */
     counts?: { backupTasks: number; sqliteTasks: number; mergedTasks: number; tasksFromBackup: number };
+    /** Present only for `imported`: what {@link mergeLegacyJsonCopy} repaired, per class. */
+    repairs?: SqliteCopyRepairCounts;
 };
+
+/** The three moves of RN's JSON copy into SQLite (RN's (a) json-ahead recovery, (b) reconcile, (c) first move). */
+export type LegacyJsonCopyMove = NonNullable<LegacyJsonImportPlan['path']>;
+
+/**
+ * One move of RN's JSON copy into SQLite, as RN's storage adapter makes it and
+ * a native host replacing RN must too: the copy is repaired first (rows SQLite
+ * always rejects; see repairAppDataForSqlite, which fills from `current`
+ * first), then merged over `current`. The sync merge starts from SQLite's
+ * settings and drops the copy's device-local and unstamped ones, so into a
+ * SQLite with no settings the copy's settings move whole, minus filters SQLite
+ * cannot store; the first move also keeps the copy's keys beside settings a
+ * second process wrote meanwhile. The reconcile merges settings as sync does.
+ */
+export function mergeLegacyJsonCopy(current: AppData, rawCopy: AppData, move: LegacyJsonCopyMove) {
+    const { data: copy, counts: repairs } = repairAppDataForSqlite(rawCopy, current);
+    const result = mergeAppDataWithStats(current, copy);
+    if (move !== 'reconcile') {
+        const copySettings = { ...copy.settings, savedFilters: keepSavedFilters(copy.settings?.savedFilters) };
+        if (Object.keys(current.settings ?? {}).length === 0) {
+            result.data.settings = copySettings;
+        } else if (move === 'migrate') {
+            result.data.settings = { ...copySettings, ...result.data.settings };
+        }
+    }
+    return { ...result, repairs };
+}
 
 /** RN's `parseStoredAppDataJson`. Throws on JSON that does not parse, and on `null`. */
 export function parseLegacyJsonBackup(json: string): AppData {
@@ -76,8 +107,10 @@ export function parseLegacyJsonBackup(json: string): AppData {
 
 /**
  * A replacement client must not turn unreadable backup authority into an empty
- * library. Run before opening its database. RN's existing recovery policy below
- * stays unchanged; the native upgrade refuses sources requiring lossy repair.
+ * library. Run before opening its database. The import repairs what SQLite
+ * always rejects (mergeLegacyJsonCopy), so a copy is also safe when its repaired
+ * form passes; a copy the repair cannot make whole (lossy validation, duplicate
+ * ids) is still refused.
  */
 export function assertNativeLegacyBackupSafe(state: Pick<LegacyJsonImportState, 'jsonAhead' | 'backupJson'>): void {
     if (state.backupJson === null && !state.jsonAhead) return;
@@ -85,21 +118,31 @@ export function assertNativeLegacyBackupSafe(state: Pick<LegacyJsonImportState, 
         if (state.backupJson === null) throw new Error();
         const raw = JSON.parse(state.backupJson);
         if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !Array.isArray(raw.tasks)) throw new Error();
-        const validated = validateBackupJson(state.backupJson);
-        if (!validated.valid || !validated.data) throw new Error();
-        const original = parseLegacyJsonBackup(state.backupJson);
         for (const table of ['tasks', 'projects', 'sections', 'areas', 'people'] as const) {
             if (raw[table] !== undefined && !Array.isArray(raw[table])) throw new Error();
-            const rows = original[table] ?? [];
-            if (rows.length !== (validated.data[table] ?? []).length
-                || new Set(rows.map((row) => row.id)).size !== rows.length) throw new Error();
         }
-        if (legacyImportMismatch(original, validated.data)) throw new Error();
+        const parsed = parseLegacyJsonBackup(state.backupJson);
+        // A host may run this at every start, so a copy that passes as it is costs no repair pass.
+        if (validatesWhole(state.backupJson, parsed)) return;
+        const repaired = repairAppDataForSqlite(parsed).data;
+        if (!validatesWhole(JSON.stringify(repaired), repaired)) throw new Error();
     } catch {
         // Never include backup contents or parser errors in the native UI/log.
         throw new Error('Legacy backup requires recovery before native upgrade');
     }
 }
+
+// Backup validation keeps every row, with unique ids, and changes no field of `source`.
+const validatesWhole = (json: string, source: AppData): boolean => {
+    const validated = validateBackupJson(json);
+    if (!validated.valid || !validated.data) return false;
+    for (const table of ['tasks', 'projects', 'sections', 'areas', 'people'] as const) {
+        const rows = source[table] ?? [];
+        if (rows.length !== (validated.data[table] ?? []).length
+            || new Set(rows.map((row) => row.id)).size !== rows.length) return false;
+    }
+    return !legacyImportMismatch(source, validated.data);
+};
 
 /** RN's `sqliteHasAnyData`: any row in any of {@link LEGACY_JSON_IMPORT_DATA_TABLES}. */
 export async function sqliteHasAnyData(client: Pick<SqliteClient, 'get'>): Promise<boolean> {
@@ -134,12 +177,13 @@ export function planLegacyJsonImport(
             reason = 'backup-corrupt';
         }
     }
-    const imported = (path: NonNullable<LegacyJsonImportPlan['path']>, source: AppData) => {
-        const { data: merged, stats } = mergeAppDataWithStats(current, source);
+    const imported = (path: LegacyJsonCopyMove, source: AppData) => {
+        const { data: merged, stats, repairs } = mergeLegacyJsonCopy(current, source, path);
         return {
             outcome: 'imported' as const,
             path,
             merged,
+            repairs,
             counts: {
                 backupTasks: source.tasks.length,
                 sqliteTasks: current.tasks.length,

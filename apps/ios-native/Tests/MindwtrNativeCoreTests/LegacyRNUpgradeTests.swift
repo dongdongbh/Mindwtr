@@ -83,6 +83,12 @@ final class LegacyRNUpgradeTests: XCTestCase {
         let afterRows = try after.execute("SELECT id, title, description, dueDate, deletedAt, rev FROM tasks ORDER BY id")
         XCTAssertEqual(try JSONSerialization.jsonObject(with: Data(afterRows.utf8)) as? NSArray,
                        try JSONSerialization.jsonObject(with: Data(before.utf8)) as? NSArray)
+        // The copy's settings move whole into a SQLite with none (core's mergeLegacyJsonCopy): RN's device id stays this
+        // install's, so sync's revBy does not change on the upgrade.
+        let settingsRows = try JSONSerialization.jsonObject(with: Data(try after.execute("SELECT data FROM settings WHERE id = 1").utf8)) as? [[String: Any]]
+        let settingsJSON = try XCTUnwrap(settingsRows?.first?["data"] as? String)
+        let settings = try JSONSerialization.jsonObject(with: Data(settingsJSON.utf8)) as? [String: Any]
+        XCTAssertEqual(settings?["deviceId"] as? String, "rn-device")
         after.close()
     }
 

@@ -1,4 +1,4 @@
-import { AppData, countSqliteCopyRepairs, keepSavedFilters, mergeAppDataWithStats, repairAppDataForSqlite, SqliteAdapter, searchAll, splitSqlStatements, taskMatchesQuery, type SqliteClient, type CalendarSyncEntry, StorageAdapter, type Task } from '@mindwtr/core';
+import { AppData, countSqliteCopyRepairs, mergeLegacyJsonCopy, repairAppDataForSqlite, SqliteAdapter, searchAll, splitSqlStatements, taskMatchesQuery, type SqliteClient, type CalendarSyncEntry, StorageAdapter, type Task } from '@mindwtr/core';
 import { AppState, NativeModules, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -982,7 +982,7 @@ const reconcileJsonBackupIntoSqlite = async (
             return;
         }
         const current = currentSnapshot ?? await adapter.getData();
-        const { data: merged, stats } = mergeAppDataWithStats(current, repairJsonCopy(backup, current, 'reconcile'));
+        const { data: merged, stats } = mergeJsonCopyIntoSqlite(current, backup, 'reconcile');
         await adapter.saveData(merged);
         // The copy may be older than SQLite (a frozen run writes no backup), and
         // reads may fall back to it once this marks it merged. If even that fails,
@@ -999,13 +999,15 @@ const reconcileJsonBackupIntoSqlite = async (
 };
 
 type JsonCopyMove = 'migrate' | 'reconcile' | 'recover';
+const CORE_COPY_MOVE = { migrate: 'migrate', reconcile: 'reconcile', recover: 'json-ahead' } as const;
 
-// A copy holding a shape SQLite always rejects (a row without a title, a
-// section whose project is gone) once failed every move the same way, so
-// saving stayed blocked for good. Each move repairs the copy first.
-const repairJsonCopy = (copy: AppData, current: AppData, step: JsonCopyMove): AppData => {
-    const { data, counts } = repairAppDataForSqlite(copy, current);
-    if (countSqliteCopyRepairs(counts) > 0) {
+// One move of the copy into SQLite through core's mergeLegacyJsonCopy, which the
+// native hosts share: the copy is repaired first (a copy holding a shape SQLite
+// always rejects once failed every move the same way, so saving stayed blocked
+// for good), then merged, keeping this device's settings on the first moves.
+const mergeJsonCopyIntoSqlite = (current: AppData, copy: AppData, step: JsonCopyMove) => {
+    const result = mergeLegacyJsonCopy(current, copy, CORE_COPY_MOVE[step]);
+    if (countSqliteCopyRepairs(result.repairs) > 0) {
         // Forced: init runs before the settings that enable logging load. Counts only.
         void logWarn('[Storage] Repaired the JSON copy before moving it into SQLite', {
             scope: 'storage',
@@ -1013,11 +1015,11 @@ const repairJsonCopy = (copy: AppData, current: AppData, step: JsonCopyMove): Ap
             extra: {
                 releaseCheck: 'v1.3.8/rn-copy-repair',
                 step,
-                ...Object.fromEntries(Object.entries(counts).map(([name, count]) => [name, String(count)])),
+                ...Object.fromEntries(Object.entries(result.repairs).map(([name, count]) => [name, String(count)])),
             },
         });
     }
-    return data;
+    return result;
 };
 
 // After a move the copy must not stay older than SQLite, or hold rows the
@@ -1033,24 +1035,6 @@ const replaceJsonCopyAfterMove = async (merged: AppData, step: JsonCopyMove): Pr
     if (refreshed) return;
     await markJsonBackupOutgrown();
     if (jsonBackupOutgrown !== true) throw new Error('The old JSON backup could be neither refreshed nor marked outgrown.');
-};
-
-// The sync merge starts from SQLite's settings and drops the copy's
-// device-local and unstamped ones. Into a SQLite with no settings nothing else
-// holds them, so the copy's settings move whole, minus filters SQLite cannot
-// store. The first move also keeps the copy's keys under settings a second
-// process wrote meanwhile.
-const mergeJsonCopyIntoSqlite = (current: AppData, rawCopy: AppData, step: 'migrate' | 'recover') => {
-    const firstMove = step === 'migrate';
-    const copy = repairJsonCopy(rawCopy, current, step);
-    const result = mergeAppDataWithStats(current, copy);
-    const copySettings = { ...copy.settings, savedFilters: keepSavedFilters(copy.settings?.savedFilters) };
-    if (Object.keys(current.settings ?? {}).length === 0) {
-        result.data.settings = copySettings;
-    } else if (firstMove) {
-        result.data.settings = { ...copySettings, ...result.data.settings };
-    }
-    return result;
 };
 
 /**
