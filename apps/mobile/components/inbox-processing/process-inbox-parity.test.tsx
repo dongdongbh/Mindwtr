@@ -88,6 +88,8 @@ vi.mock('@react-native-community/datetimepicker', () => ({
   __esModule: true,
   default: (props: any) => React.createElement('DateTimePicker', props, props.children),
 }));
+// The Edit button's full task editor stays closed in every scenario.
+vi.mock('../task-edit-modal', () => ({ TaskEditModal: () => null }));
 
 type Action =
   | ['press', string]

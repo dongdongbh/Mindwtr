@@ -353,6 +353,15 @@ vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
 
+// The full editor is its own screen; these tests check how processing opens it and picks up its save.
+const taskEditModalProps = vi.hoisted(() => ({ current: null as any }));
+vi.mock('./task-edit-modal', () => ({
+  TaskEditModal: (props: any) => {
+    taskEditModalProps.current = props;
+    return null;
+  },
+}));
+
 vi.mock('@react-native-community/datetimepicker', () => ({
   __esModule: true,
   default: (props: any) => React.createElement('DateTimePicker', props, props.children),
@@ -620,6 +629,76 @@ describe('InboxProcessingModal', () => {
     });
 
     expect(root.findAllByProps({ placeholder: 'taskEdit.descriptionPlaceholder' }).length).toBeGreaterThan(0);
+  });
+
+  it('opens the full task editor for the current item, and filing keeps what the editor saved (#1445)', async () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+    const root = tree!.root;
+    const titleInput = () => root.findByProps({
+      placeholder: 'taskEdit.titleLabel',
+      accessibilityLabel: 'taskEdit.titleLabel',
+    });
+
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'common.edit', accessibilityRole: 'button' }).props.onPress();
+    });
+    expect(taskEditModalProps.current).toMatchObject({ visible: true, task: { id: 'inbox-1' }, defaultTab: 'task' });
+
+    taskEditModalProps.current.onSave('inbox-1', { title: 'Edited in the editor' });
+    expect(updateTask).toHaveBeenCalledWith('inbox-1', { title: 'Edited in the editor' });
+    // The save lands in the store, then the editor closes.
+    const edited = { ...baseInboxTask, title: 'Edited in the editor', updatedAt: '2025-01-02T00:00:00.000Z' };
+    storeState.tasks = [edited];
+    storeState._allTasks = storeState.tasks;
+    (storeState as any)._tasksById = new Map([[edited.id, edited]]);
+    try {
+      act(() => {
+        taskEditModalProps.current.onClose();
+      });
+      expect(taskEditModalProps.current).toMatchObject({ visible: false, task: null });
+      expect(titleInput().props.value).toBe('Edited in the editor');
+
+      updateTask.mockClear();
+      walkToFileStep(root);
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        title: 'Edited in the editor',
+      }));
+    } finally {
+      delete (storeState as any)._tasksById;
+    }
+  });
+
+  it('moves on to the next item when the editor files the current one out of the Inbox (#1445)', async () => {
+    const second = { ...baseInboxTask, id: 'inbox-2', title: 'Second capture', createdAt: '2025-01-02T00:00:00.000Z' };
+    storeState.tasks = [{ ...baseInboxTask }, second];
+    storeState._allTasks = storeState.tasks;
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+    const root = tree!.root;
+    const title = () => root.findByProps({ placeholder: 'taskEdit.titleLabel', accessibilityLabel: 'taskEdit.titleLabel' }).props.value;
+    expect(title()).toBe('Inbox task');
+
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'common.edit', accessibilityRole: 'button' }).props.onPress();
+    });
+    storeState.tasks = [{ ...baseInboxTask, status: 'next', updatedAt: '2025-01-02T00:00:00.000Z' }, second];
+    storeState._allTasks = storeState.tasks;
+    act(() => {
+      taskEditModalProps.current.onClose();
+    });
+    await flushAsyncActions();
+
+    expect(title()).toBe('Second capture');
   });
 
   it('keeps the title editable on every step of both modes', async () => {

@@ -27,3 +27,4 @@ Changes collected since the latest stable release.
 - Mobile and desktop: Process Inbox starts a capture with no project or area in your default area (#1445).
 - Android and iOS: on a slow start before Mindwtr has merged its older backup copy into its database, it now waits for the database instead of showing that older copy first. Before, a save from that view could put older settings back.
 - Mobile: in quick Process Inbox, Project now opens the project setup at once instead of asking "More than one step?" first (#1445).
+- Mobile: Process Inbox has an Edit button that opens the full task editor for the current item, for details processing does not offer, such as a checklist. After you save, processing shows your changes and files the item with them (#1445).

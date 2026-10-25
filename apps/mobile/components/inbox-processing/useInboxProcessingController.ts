@@ -917,6 +917,19 @@ export function useInboxProcessingController({
     await runCommit('skip');
   }, [runCommit]);
 
+  // After the full task editor closes: refill the draft from the saved task, so the screen shows the editor's
+  // changes and filing does not write the draft's older values back (#1445). A task that left the Inbox is
+  // dropped by the queue, which moves on to the next item.
+  const reloadEditedTask = useCallback(() => {
+    const base = processingBaseRef.current;
+    const latest = base ? useTaskStore.getState()._tasksById?.get(base.id) : undefined;
+    if (!base || !latest || (latest.updatedAt === base.updatedAt && latest.rev === base.rev)) return;
+    primeTaskState(latest);
+    void logInfo('Inbox processing reloaded the edited task', {
+      scope: 'inbox', force: true, extra: { releaseCheck: 'v1.3.8/inbox-processing-editor-reload' },
+    });
+  }, [primeTaskState]);
+
   const applyAppleClarificationStatus = useCallback((status: AppleClarificationSuggestion['status']) => {
     if (!status) return;
     if (status === 'someday' || status === 'reference') {
@@ -1291,6 +1304,7 @@ export function useInboxProcessingController({
     projectFirst,
     projectSearch,
     referenceEnabled,
+    reloadEditedTask,
     runCommit,
     selectedAreaId,
     selectedAssignedTo,

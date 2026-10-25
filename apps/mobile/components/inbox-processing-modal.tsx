@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, KeyboardAvoidingView, Modal, Platform, Text, TouchableOpacity, View } from 'react-native';
-import { LayoutList, Layers, X } from 'lucide-react-native';
-import { tFallback } from '@mindwtr/core';
+import { LayoutList, Layers, Pencil, X } from 'lucide-react-native';
+import { tFallback, useTaskStore, type Task } from '@mindwtr/core';
 
 import { AIResponseModal } from './ai-response-modal';
+import { TaskEditModal } from './task-edit-modal';
 import { ThemedAlertHost } from '@/components/themed-alert';
 import { styles } from './inbox-processing-modal.styles';
 import { InboxStepFlow } from './inbox-processing/InboxStepFlow';
@@ -34,9 +35,20 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
     handleSkipTask,
     headerStyle,
     progress,
+    reloadEditedTask,
     t,
     tc,
   } = controller;
+  const updateTask = useTaskStore((state) => state.updateTask);
+  // The full task editor for fields processing does not offer, such as a checklist (#1445).
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const closeEditor = useCallback(() => {
+    setEditingTask(null);
+    reloadEditedTask();
+  }, [reloadEditedTask]);
+  useEffect(() => {
+    if (!visible) setEditingTask(null);
+  }, [visible]);
   const androidKeyboardInset = useAndroidKeyboardInset(visible);
 
   const { total: sessionTotal, processed: sessionProcessed } = progress;
@@ -137,6 +149,15 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
             <>
             <TouchableOpacity
               style={styles.modeToggleButton}
+              onPress={() => setEditingTask(currentTask)}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.edit')}
+              hitSlop={8}
+            >
+              <Pencil size={20} color={tc.tint} strokeWidth={2} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.modeToggleButton}
               onPress={() => setProcessingMode(quick ? 'guided' : 'quick')}
               accessibilityRole="button"
               accessibilityLabel={modeToggleLabel}
@@ -167,6 +188,14 @@ export function InboxProcessingModal({ visible, onClose }: InboxProcessingModalP
         </View>
         {/* The AI failure alert fires while this modal is up (#940). */}
         <ThemedAlertHost />
+        {/* Mounted inside this modal so iOS presents the editor over the processing sheet. */}
+        <TaskEditModal
+          visible={Boolean(editingTask)}
+          task={editingTask}
+          onClose={closeEditor}
+          onSave={updateTask}
+          defaultTab="task"
+        />
       </Modal>
       {aiModal && (
         <AIResponseModal
