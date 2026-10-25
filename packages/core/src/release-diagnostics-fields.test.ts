@@ -34,6 +34,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'missing',
     // kept-attachment-not-found reuses releaseCheck and backend; restored is a count. No names or ids.
     'restored',
+    // native-background-reminders: the core work line's job and its reminder plan (cycled/failed). No identifiers.
+    'job', 'reminders',
 
     // web-attachment-upload reuses releaseCheck, stage and count; only acknowledged PUTs.
     // android-widget-capture-status: bounded creation status and picker origin; kind/outcome below.

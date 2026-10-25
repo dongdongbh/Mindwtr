@@ -94,13 +94,14 @@ internal object CoreJob {
                 INGEST -> {
                     // What the drain stored (a capture, a widget's check-off) reaches the widgets now, not after the sync's wait.
                     refreshWidgets()
+                    planReminders(host, line)
                     if (host.backgroundSync("capture").optBoolean("schedule") && !ensureSync()) Outcome.Retry else Outcome.Success
                 }
                 SYNC -> {
                     val again = if (host.appActive()) {
                         line.put("skipped", "foreground")
                         true
-                    } else host.backgroundSync("scheduled").optBoolean("schedule")
+                    } else host.backgroundSync("scheduled").optBoolean("schedule").also { planReminders(host, line) }
                     if (again && !syncAgain()) Outcome.Retry else Outcome.Success
                 }
                 REMINDERS -> {
@@ -134,6 +135,16 @@ internal object CoreJob {
         log(LINE, line.put("outcome", outcome.name.lowercase()))
         if (outcome == Outcome.Success && name != WIDGET_REFRESH) refreshWidgets()
         return outcome
+    }
+
+    /**
+     * RN's reconcileLocalMobileNotificationsInBackground (#1398, #1424): what a capture stored or a background sync brought gets its
+     * alarms before the job ends. Core's store timer (2.5 s after a change) may never fire in a job's process, and a cold job's first
+     * plan ran before its sync. A plan that fails never fails the job; [line] says which it was.
+     */
+    private fun planReminders(host: Calls, line: JSONObject) {
+        val planned = runCatching { host.reminders("cycle", "") }.isSuccess
+        line.put("releaseCheck", "v1.3.8/native-background-reminders").put("reminders", if (planned) "cycled" else "failed")
     }
 }
 
