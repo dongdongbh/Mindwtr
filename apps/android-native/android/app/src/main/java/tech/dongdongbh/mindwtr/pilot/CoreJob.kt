@@ -95,7 +95,9 @@ internal object CoreJob {
                     // What the drain stored (a capture, a widget's check-off) reaches the widgets now, not after the sync's wait.
                     refreshWidgets()
                     planReminders(host, line, "capture")
-                    if (host.backgroundSync("capture").optBoolean("schedule") && !ensureSync()) Outcome.Retry else Outcome.Success
+                    // What the capture's sync brought gets its alarms too, as RN's capture run plans after its sync.
+                    val wanted = host.backgroundSync("capture").optBoolean("schedule").also { planReminders(host, line, "sync") }
+                    if (wanted && !ensureSync()) Outcome.Retry else Outcome.Success
                 }
                 SYNC -> {
                     val again = if (host.appActive()) {

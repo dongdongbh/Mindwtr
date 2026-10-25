@@ -78,13 +78,13 @@ class CoreJobTest {
 
     @Test fun theHostBootsBeforeTheJobAndWidgetsRefreshAfterIt() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "ensure", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "reminders background sync", "ensure", "widgets"), events)
     }
 
     // #1257: what a capture job stored while the app was closed is sent before the job ends (core's capture run), never after.
     @Test fun aCaptureJobSendsWhatItStoredBeforeItEnds() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "ensure", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "reminders background sync", "ensure", "widgets"), events)
         assertEquals(listOf("Native Android core work ingest success"), lines)
     }
 
@@ -102,13 +102,13 @@ class CoreJobTest {
         events.clear()
         syncWanted = false
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "widgets"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "reminders background sync", "widgets"), events)
     }
 
     @Test fun aCaptureWhoseScheduledJobIsNotStoredRetries() {
         ensured = false
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.INGEST))
-        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "ensure"), events)
+        assertEquals(listOf("boot", "recover", "drain", "widgets", "reminders background capture", "sync capture", "reminders background sync", "ensure"), events)
     }
 
     @Test fun aCaptureWhoseSyncThrowsRetriesItsUpload() {
@@ -157,7 +157,7 @@ class CoreJobTest {
     // #1398 (RN a7da952cf): a capture's reminder is set by the job that stored it, before its sync's wait.
     @Test fun aCaptureJobPlansItsRemindersBeforeItSends() {
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.INGEST))
-        assertEquals(listOf("reminders background capture", "sync capture"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
+        assertEquals(listOf("reminders background capture", "sync capture", "reminders background sync"), events.filter { it.startsWith("sync") || it.startsWith("reminders") })
         assertEquals("cycled", diagnostics.single().getString("reminders"))
     }
 
