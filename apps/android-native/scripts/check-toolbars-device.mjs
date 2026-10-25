@@ -9,7 +9,9 @@
 // the Inbox's open filter sheet and its selection; (c) a bulk move of the two selected rows is one core write; (d) the @6901
 // Focus filter narrows Focus as core does, its Save under an injected failed commit stores nothing and Try again stores one
 // saved filter under its request UUID, which is then deleted; (e) Focus's Reorder drag writes only the moved tasks; (f)
-// Archived: a completion time stores core's picked value once, and Select all → Restore to Inbox moves exactly core's rows. It
+// Archived: a completion time stores core's picked value once, and Select all → Restore to Inbox moves exactly core's rows.
+// Back leaves each mode before its screen (RN's #1415, ca5eee151, 90a0e079e): the Inbox's selection, Focus's Reorder and
+// Archived's selection each end on Back, with the screen still open. It
 // touches only the development package (it refuses any other APK), never launches over another app, puts the Inbox sort back,
 // restores rotation and clears its debug properties on exit. Leave the device on its home screen before running. It needs host
 // `bun`, and Android 11 or later (the reorder drag uses `input motionevent`).
@@ -307,6 +309,12 @@ try {
     seen = core();
     check(seen.stored[titles.a][0].status === 'next' && seen.stored[titles.b][0].status === 'next' && commands('bulkAction') === bulkBefore + 1,
         '(c) Move to Next on two selected rows is one bulk write; both are stored Next');
+    // (c) Back leaves selection mode first: the Inbox stays open with no row selected.
+    nodes = await device.settle(await device.toTop());
+    await longPress(taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1])[0]?.text ?? fail('no Inbox row to select'));
+    await waitFor('selection mode', (current) => selectedCount(current) === 1, 10_000);
+    nodes = await back((current) => Number.isNaN(selectedCount(current)));
+    check(tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes)), '(c) Back ended the Inbox\'s selection mode, and the Inbox stayed open');
 
     // (d) Focus: the @6901 filter narrows Focus as core does.
     nodes = await tapExpecting(tab(await screen(), en['tab.next']) ?? fail('no Focus tab'), (current) => tabSelected(current, en['tab.next']), 'Focus');
@@ -318,12 +326,16 @@ try {
     nodes = await tapExpecting(button(await screen(), en['common.back']) ?? fail('no Back'), (current) => Boolean(withDescription(current, `${en['filters.contexts']}: ${CONTEXT}`)), 'the sheet');
     const focusRowsShown = (current) => taskRows(current).map((node) => node.text);
     nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => !focusSheet(current), 'the sheet to close');
-    nodes = await waitFor('the narrowed Focus', (current) => focusRowsShown(current).includes(titles.a) && !focusRowsShown(current).includes(titles.b), 15_000);
+    // Earlier runs' A rows (Next, @6901) stay in Focus, so this run's A can sit below the fold under the timer card: reveal it.
+    await waitFor('the narrowed Focus', (current) => focusRowsShown(current).length > 0 && !focusRowsShown(current).includes(titles.b)
+        && focusRowsShown(current).every((title) => seen.focusFiltered.includes(title)), 15_000);
+    nodes = await device.reveal(titles.a);
+    if (!focusRowsShown(nodes).includes(titles.a)) fail(`this run's A (${titles.a}) is not in the narrowed Focus`);
     check(focusRowsShown(nodes).every((title) => seen.focusFiltered.includes(title)) && !seen.focusFiltered.includes(titles.b),
         `(d) ${CONTEXT} narrows Focus to core's rows (${seen.focusFiltered.length})`);
 
     // (d) Save the filter under a failed commit: nothing stored, the request UUID on disk; Try again stores one saved filter.
-    nodes = await tapExpecting(withDescription(nodes, en['filters.label']) ?? fail('no Focus Filters button'), focusSheet, 'Focus\'s filter sheet');
+    nodes = await tapExpecting(withDescription(await device.toTop(), en['filters.label']) ?? fail('no Focus Filters button'), focusSheet, 'Focus\'s filter sheet');
     const saveLabel = 'Save';
     nodes = await tapExpecting(withDescription(nodes, saveLabel) ?? fail('no Save in the sheet'), (current) => Boolean(withDescription(current, 'Filter name')), 'the Save filter dialog');
     setProp('fail_commit', '1');
@@ -368,6 +380,11 @@ try {
     const replaced = order.filter((id) => seen.focused[id]?.order !== before[id]?.order).sort();
     check(rewritten.length > 0 && JSON.stringify(rewritten) === JSON.stringify(replaced), `(e) only the ${replaced.length} task(s) whose place changed were written`);
     await tapExpecting(button(await screen(), en['common.done']) ?? fail('no Done'), (current) => !withDescription(current, seen.reorder[0].positionLabel), 'Done');
+    // (e) Back leaves Reorder first: Focus stays open.
+    nodes = await tapExpecting(withDescription(await device.toTop(), en['projects.reorderTasks']) ?? fail('no Reorder'),
+        (current) => Boolean(withDescription(current, seen.reorder[0].positionLabel)), 'the reorder screen again');
+    nodes = await back((current) => !withDescription(current, seen.reorder[0].positionLabel));
+    check(tabSelected(nodes, en['tab.next']), '(e) Back ended Reorder, and Focus stayed open');
 
     // (f) Archived: this run's two rows (core's search), a completion time, then Select all → Restore to Inbox.
     nodes = await tapExpecting(tab(await screen(), en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
@@ -393,6 +410,11 @@ try {
     const selectAll = `${en['bulk.select']} ${en['common.all']}`;
     nodes = await tapExpecting(button(await screen(), en['bulk.select']) ?? fail('no Select'), (current) => Boolean(button(current, selectAll)), 'selection');
     nodes = await tapExpecting(button(nodes, selectAll), (current) => hasText(current, `2 ${en['bulk.selected']}`), 'Select all');
+    // (f) Back leaves the selection first: Archived stays open with its rows; then Select all again for the restore.
+    nodes = await back((current) => !hasText(current, `2 ${en['bulk.selected']}`) && Boolean(button(current, en['bulk.select'])));
+    check(tabSelected(nodes, en['nav.archived']) && rowTitles(nodes).includes(titles.e), '(f) Back ended Archived\'s selection, and Archived stayed open');
+    nodes = await tapExpecting(button(nodes, en['bulk.select']), (current) => Boolean(button(current, selectAll)), 'selection again');
+    nodes = await tapExpecting(button(nodes, selectAll), (current) => hasText(current, `2 ${en['bulk.selected']}`), 'Select all again');
     await tapExpecting(button(nodes, en['trash.restoreToInbox']), (current) => !rowTitles(current).includes(titles.e), 'Restore to Inbox');
     await waitFor('the restore write', () => commands('archiveAction') === archiveBefore + 2, 10_000);
     seen = core();

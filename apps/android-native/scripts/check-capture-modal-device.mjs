@@ -251,8 +251,15 @@ try {
     const question = en['quickAdd.bulkConfirmTitle'].replace('{{count}}', '2');
     const createLabel = en['quickAdd.bulkConfirmCreate'];
     nodes = await tapExpecting(control(nodes, 'capture-modal-save'), (current) => hasText(current, question) && hasText(current, createLabel), 'core\'s several-lines question');
-    const create = button(nodes, createLabel) ?? fail('no Create tasks on the question');
+    // Back leaves the question first (RN's 90a0e079e): the screen stays with both lines, and nothing is written.
     const linesBefore = saves('captureModalLines');
+    // An open keyboard takes the first Back.
+    if (keyboardShown()) { sh('input keyevent KEYCODE_BACK'); for (let wait = 0; wait < 15 && keyboardShown(); wait += 1) await sleep(200); }
+    sh('input keyevent KEYCODE_BACK');
+    nodes = await waitFor('the question to close on Back', (current) => !hasText(current, question) && onModal(`${titles.first}\n${titles.second}`)(current), 10_000);
+    check(saves('captureModalLines') === linesBefore, '(f) Back closed the several-lines question first: the screen kept both lines, and nothing was written');
+    nodes = await tapExpecting(control(nodes, 'capture-modal-save'), (current) => hasText(current, question) && hasText(current, createLabel), 'core\'s several-lines question again');
+    const create = button(nodes, createLabel) ?? fail('no Create tasks on the question');
     await tapExpecting(create, atTabs, 'Create tasks to save both lines');
     check(saves('captureModalLines') === linesBefore + 1, '(f) Create tasks ran one lines save');
 

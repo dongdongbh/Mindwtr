@@ -313,6 +313,15 @@ try {
     await waitFor('two lines in the field', (current) => title(current) === `${titles.d1}\n${titles.d2}`, 10_000);
     const confirmTitle = en['quickAdd.bulkConfirmTitle'].replace('{{count}}', '2');
     nodes = await save((current) => current.some((node) => node.text === confirmTitle), 'core\'s several-lines question');
+    // Back leaves the question first (RN's 90a0e079e): the popup stays with both lines, and nothing is written.
+    requireAppFront();
+    // An open keyboard takes the first Back.
+    if (keyboardShown()) { sh('input keyevent KEYCODE_BACK'); for (let wait = 0; wait < 15 && keyboardShown(); wait += 1) await sleep(200); }
+    sh('input keyevent KEYCODE_BACK');
+    nodes = await waitFor('the question to close on Back', (current) => !current.some((node) => node.text === confirmTitle) && inPopup(current), 10_000);
+    check(title(nodes) === `${titles.d1}\n${titles.d2}` && commands('quickCaptureLines', 'saved') === linesBefore,
+        '(d) Back closed the several-lines question first: the popup kept both lines, and nothing was written');
+    nodes = await save((current) => current.some((node) => node.text === confirmTitle), 'core\'s several-lines question again');
     await tapExpecting(button(nodes, en['quickAdd.bulkConfirmCreate']) ?? fail('no Create tasks'), onInbox, 'the lines to be created');
     seen = core('', titles.d1, titles.d2);
     const written = snapshots().filter((name) => !snapshotsBefore.includes(name));

@@ -2444,6 +2444,19 @@ assert.match(activity, /else if \(listed != null && writable\) MenuScreenHost\(m
 // Navigation survives rotation (the model is held by the ViewModel) and process death (the Bundle): the sheet, screen, tab, dialog, session.
 for (const key of ['menuSheet', 'menuScreen', 'historyTab', 'menuState', 'menuDialog', 'quickAccess', 'reviewFrom']) assert.match(menuModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
 assert.match(menuUi, /BackHandler\(enabled = failedAction == null\) \{ if \(menu\.dialog != null\) menu\.backInDialog\(\) else if \(menu\.page\?\.bulk != null\) menu\.list\?\.let\(menu::endBulk\) else menu\.closeScreen\(\) \}/);
+// Back leaves a screen's mode before the screen (RN's #1415 9f92b0505, ca5eee151, 90a0e079e) on every screen that has one: the
+// selection of the Inbox, Contexts, Review, Trash and Archived, Focus's Reorder, and both captures' several-lines question.
+// check-toolbars-device (Inbox, Reorder, Archived), check-capture-device and check-capture-modal-device press Back on the phone.
+for (const [file, handler] of [
+    ['InboxScreen.kt', /BackHandler\(enabled = model\.failedAction == null && \(dialog != null \|\| page\?\.bulk != null\)\) \{ if \(dialog != null\) backInDialog\(\) else endBulk\("inbox"\) \}/],
+    ['ContextsScreen.kt', /BackHandler\(enabled = bulk != null && dialog == null && model\.failedAction == null\) \{ endSelection\(\); reload\(\) \}/],
+    ['ReviewScreen.kt', /BackHandler\(enabled = bulk != null && dialog == null && model\.failedAction == null\) \{ endSelection\(\); reload\(\) \}/],
+    ['TrashScreen.kt', /BackHandler\(enabled = selecting && dialog == null && model\.failedAction == null\) \{ endSelection\(\); reload\(\) \}/],
+    ['ArchiveScreen.kt', /BackHandler\(enabled = selecting && dialog == null && model\.failedAction == null\) \{ selecting\(false\) \}/],
+    ['FocusScreen.kt', /BackHandler\(enabled = failedAction == null && reorder != null && menu\.focusControls\.dialog == null\) \{ menu\.focusControls\.reorder\(false\) \}/],
+    ['CaptureScreen.kt', /draft\.confirm != null -> cancelCaptureLines\(\)/],
+    ['CaptureModal.kt', /if \(modal\.confirm != null\) cancelLines\(\) else cancel\(leave = false\)/],
+]) assert.match(source(file), handler, `${file}: Back leaves its mode before the screen`);
 // Search results for the Menu lists open them (review ruling 5 of pass 4).
 assert.match(searchUi, /listed != null -> \{ closeSearch\(\); menu\.openRoute\(listed\); highlight\(task\.id\) \}/);
 assert.match(menuModel, /"\/waiting" to \(MenuScreen\.Waiting to null\), "\/someday" to \(MenuScreen\.Someday to null\),\s+"\/reference" to \(MenuScreen\.Reference to null\), "\/done" to \(MenuScreen\.History to "done"\), "\/archived" to \(MenuScreen\.History to "archived"\)/);
