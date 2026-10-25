@@ -57,8 +57,8 @@ export type NativeReminderBindings = {
     readStored: () => Promise<Stored>;
     /** Kotlin: the notification permission, as RN reads it. */
     permissionGranted: () => boolean;
-    /** Kotlin: the plan applied in core's order. */
-    apply: (planJson: string) => void;
+    /** Kotlin: the plan applied in core's order; how many alarms Android refused (each skipped, the rest made). */
+    apply: (planJson: string) => number | void;
     /** Kotlin: RN's alarms cancelled and its alarm maps removed; how many were cancelled. */
     cleanupRn: () => number;
     /** Kotlin's ledger: ids of alarms that showed, and of reminder notifications still in the tray. */
@@ -96,7 +96,10 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
         // Nothing to store when the stored value already says it (none stored reads as empty).
         const same = (next: string, previous: string | null) => next === previous || (previous === null && next === '{}');
         const unchanged = plan.schedule.length === 0 && plan.cancel.length === 0 && same(plan.alarms, stored.alarms);
-        bindings.apply(JSON.stringify({ ...plan, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME, unchanged, state: same(plan.state, stored.state) ? null : plan.state }));
+        const refused = Number(bindings.apply(JSON.stringify({ ...plan, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME, unchanged,
+            state: same(plan.state, stored.state) ? null : plan.state })) ?? 0);
+        // RN 271fb6be2: a refused alarm (a revoked exact-alarm grant, Android's alarm cap) is skipped; the next plan tries it again.
+        if (refused > 0) log('Reminder cycle finished with refused alarms', { releaseCheck: 'v1.3.8/native-reminder-cycle-partial', count: refused }, true);
         if (plan.schedule.some((item) => item && typeof item === 'object' && 'details' in item
             && item.details && typeof item.details === 'object' && 'data' in item.details
             && item.details.data && typeof item.details.data === 'object' && 'kind' in item.details.data
@@ -115,6 +118,7 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
             expired: plan.cancel.filter((item) => item.reason === 'expired').length,
             held: Object.keys(JSON.parse(plan.alarms) as object).length,
             ...bindings.receiverCounts?.(),
+            ...(refused > 0 ? { refused } : {}),
         };
         log('Native Android reminder cycle', summary);
         return summary;

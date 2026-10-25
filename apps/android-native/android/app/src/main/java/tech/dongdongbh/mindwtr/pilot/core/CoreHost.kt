@@ -75,8 +75,11 @@ class CoreHost(
      * reads it, and React Native's old alarms cancelled once. Engine thread.
      */
     interface Reminders {
-        /** Core's NativeReminderAlarmPlan (JSON, with the channel's name): `writeAhead` stored, cancels, alarms, then `alarms` stored. */
-        fun apply(plan: String)
+        /**
+         * Core's NativeReminderAlarmPlan (JSON, with the channel's name): `writeAhead` stored, cancels, alarms, then `alarms` stored.
+         * Answers how many alarms Android refused (each skipped; the next plan makes them again).
+         */
+        fun apply(plan: String): Int
         fun permissionGranted(): Boolean
         /** React Native's alarms cancelled and its alarm maps removed; how many were cancelled (0 once none is left). */
         fun cleanupRn(): Int
@@ -522,7 +525,7 @@ class CoreHost(
         }
         // Reminder alarms (host-reminders.ts): core's plan applied, the notification permission, RN's old alarms cancelled once.
         reminders?.let { alarms ->
-            bridge.setProperty("alarmApply", guarded { args -> alarms.apply(args[0] as String); null })
+            bridge.setProperty("alarmApply", guarded { args -> alarms.apply(args[0] as String) })
             bridge.setProperty("notificationsAllowed", guarded { _ -> alarms.permissionGranted() })
             bridge.setProperty("rnAlarmCleanup", guarded { _ -> alarms.cleanupRn() })
             bridge.setProperty("reminderReceiverCounts", guarded { _ -> alarms.receiverCounts() })

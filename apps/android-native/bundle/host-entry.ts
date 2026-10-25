@@ -205,7 +205,7 @@ type NativeBridge = {
     /** Android only: opens an android.os.Trace section named `name`, or closes the open one for "". */
     trace?(name: string): void;
     /** Reminder alarms (Reminders.kt): core's plan applied in core's order; the notification permission; RN's alarms cancelled once. */
-    alarmApply?(planJson: string): string | null;
+    alarmApply?(planJson: string): number | string | null;
     notificationsAllowed?(): boolean | string;
     rnAlarmCleanup?(): number | string;
     reminderReceiverCounts?(): string;
@@ -732,7 +732,7 @@ const reminders = typeof (globalThis.__mindwtrNative as { alarmApply?: unknown }
         planSnooze: (input) => contract.planReminderSnooze(input),
         readStored: async () => ({ alarms: await keyValue.get(REMINDER_ALARM_MAP_STORAGE_KEY), state: await keyValue.get(NATIVE_REMINDER_STATE_STORAGE_KEY) }),
         permissionGranted: () => checked(native().notificationsAllowed!()) === true,
-        apply: (planJson) => { checked(native().alarmApply!(planJson)); },
+        apply: (planJson) => Number(checked(native().alarmApply!(planJson)) ?? 0),
         cleanupRn: () => Number(checked(native().rnAlarmCleanup!())),
         receiverCounts: () => JSON.parse(String(checked(native().reminderReceiverCounts!()))) as { dropped: number; notQueued: number },
         ledger: () => JSON.parse(String(checked(native().reminderLedger!()))) as { fired: number[]; shown: number[] },

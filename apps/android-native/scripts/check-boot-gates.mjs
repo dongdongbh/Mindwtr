@@ -9180,7 +9180,7 @@ export const REMINDER_NOTIFICATION_EVENT_RESCHEDULE_DELAY_MS = 5;
 export const REMINDER_STORE_RESCHEDULE_DELAY_MS = 30;
 export const hasActiveMobileNotificationFeature = (settings) => settings.on === true;
 export const isSandboxMode = () => globalThis.reminderSandbox === true;
-export const logInfo = () => {}; export const logWarn = () => {};
+export const logInfo = () => {}; export const logWarn = (message, payload) => { (globalThis.reminderWarns ??= []).push([message, payload]); };
 export const nameNotifyListener = (_name, listener) => listener;
 export const shouldRescheduleReminderAlarms = (state, previous) => state.tasks !== previous.tasks;
 const listeners = [];
@@ -9315,6 +9315,23 @@ globalThis.standStore = useTaskStore;
         receiverCounts: () => ({ dropped: 2, notQueued: 1 }),
     });
     assert.deepEqual(await counted.cycle(false), { mode: 'active', rebuild: true, scheduled: 0, withdrawn: 0, expired: 0, held: 0, dropped: 2, notQueued: 1 });
+    // RN 271fb6be2 (audit gap 8): one alarm Android refused is skipped, the plan finishes, the top-up is still set, and a warning
+    // line says how many were refused.
+    let partialPlans = 0;
+    const partial = mod.createNativeReminders({
+        plan: async () => { partialPlans += 1; return { ok: true, value: { mode: 'active', cancel: [], schedule: [{}, {}], alarms: '{}', state: '{}', topUpDelayMs: partialPlans === 1 ? 10 : null } }; },
+        planSnooze: () => { throw new Error('no snooze here'); },
+        readStored: async () => ({ alarms: null, state: null }),
+        permissionGranted: () => true,
+        apply: () => (partialPlans === 1 ? 1 : 0),
+        cleanupRn: () => 0,
+    });
+    globalThis.reminderWarns = [];
+    assert.equal((await partial.cycle(false)).refused, 1, 'the cycle finishes and reports the refused alarm');
+    await sleep(40);
+    assert.equal(partialPlans, 2, 'the top-up still plans again after a refusal');
+    assert.deepEqual(globalThis.reminderWarns.map(([message, payload]) => [message, payload.context.releaseCheck, payload.context.count]),
+        [['[Local Notifications] Reminder cycle finished with refused alarms', 'v1.3.8/native-reminder-cycle-partial', 1]]);
     // The ledger (Kotlin): what showed and what is still in the tray go into every plan and every Snooze.
     const ledgerInputs = [];
     const withLedger = mod.createNativeReminders({

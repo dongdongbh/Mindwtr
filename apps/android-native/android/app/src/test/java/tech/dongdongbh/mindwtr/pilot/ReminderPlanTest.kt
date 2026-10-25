@@ -10,13 +10,15 @@ import org.junit.Test
 class ReminderPlanTest {
     private val events = mutableListOf<String>()
     private var scheduleFailure: Throwable? = null
+    /** Only the alarm with this id is refused (null: every alarm, with [scheduleFailure]). */
+    private var refusedId: Int? = null
 
     private val port = object : ReminderPlan.Port {
         override fun store(entries: Map<String, String>) { events += "store ${entries.values.joinToString(" + ")}" }
         override fun removeDelivered(id: Int) { events += "remove $id" }
         override fun cancel(id: Int) { events += "cancel $id" }
         override fun schedule(alarm: JSONObject) {
-            scheduleFailure?.let { throw it }
+            scheduleFailure?.takeIf { refusedId == null || refusedId == alarm.getInt("id") }?.let { events += "refused ${alarm.getInt("id")}"; throw it }
             events += "schedule ${alarm.getInt("id")} ${alarm.getString("key")}"
         }
         override fun clearDelivered() { events += "clear" }
@@ -86,12 +88,18 @@ class ReminderPlanTest {
         assertEquals(listOf("remove 7", "cancel 7", "clear", "store {after}"), events)
     }
 
-    @Test fun aRefusedAlarmLeavesTheWriteAheadStoredSoTheNextPlanMakesItAgain() {
+    // RN 271fb6be2: one refused alarm (a revoked exact-alarm grant, Android's 500 cap) is skipped and the rest are made. The map stays
+    // the write-ahead, which marks every alarm of this plan pending, so the next plan makes the refused one again under its id.
+    @Test fun aRefusedAlarmIsSkippedTheRestAreMadeAndTheWriteAheadStaysForTheNextPlan() {
         scheduleFailure = SecurityException("Too many alarms")
-        assertThrows(SecurityException::class.java) {
-            ReminderPlan.apply(plan("{ahead}", emptyList(), listOf(alarm("task:a", 11, null))), port)
-        }
-        assertEquals(listOf("store {ahead}"), events)
+        refusedId = 11
+        val refused = ReminderPlan.apply(plan("{ahead}", listOf(7 to "expired"), listOf(alarm("task:a", 11, null), alarm("task:b", 12, null))), port)
+        assertEquals(1, refused)
+        assertEquals(listOf("store {ahead}", "cancel 7", "refused 11", "schedule 12 task:b"), events)
+    }
+
+    @Test fun aPlanWithNoRefusalReportsNone() {
+        assertEquals(0, ReminderPlan.apply(plan("{ahead}", emptyList(), listOf(alarm("task:a", 11, null))), port))
     }
 
     @Test fun aRemovalThatFailsNeverStopsTheCancel() {

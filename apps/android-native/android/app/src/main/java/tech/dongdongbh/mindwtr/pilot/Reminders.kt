@@ -57,10 +57,12 @@ internal object ReminderPlan {
      * (not when `unchanged`: the stored map already says it) and `state` (null when unchanged) stored in one write, so a delivered
      * reminder core lets expire is remembered whenever its alarm leaves the map. A withdrawn alarm's delivered notification goes before its
      * cancel; an expired one's stays. A failed removal never
-     * stops a cancel. A refused alarm throws before `alarms` is stored: the next plan, from `writeAhead`, makes the pending alarms
-     * again under the same ids, so nothing is made twice or left behind. [checkpoint] names each point a process death is safe at.
+     * stops a cancel. An alarm Android refuses (a revoked exact-alarm grant, its alarm cap) is skipped and the rest are made, as RN's
+     * cycle does (271fb6be2); `alarms` and `state` are then not stored, so the next plan, from `writeAhead`, makes the pending alarms
+     * again under the same ids, and nothing is made twice or left behind. Answers how many were refused. [checkpoint] names each
+     * point a process death is safe at.
      */
-    fun apply(plan: JSONObject, port: Port, checkpoint: (String) -> Unit = {}) {
+    fun apply(plan: JSONObject, port: Port, checkpoint: (String) -> Unit = {}): Int {
         val ahead = buildMap {
             if (!plan.isNull("writeAhead")) put(MAP_KEY, plan.getString("writeAhead"))
             if (plan.has("stateAhead") && !plan.isNull("stateAhead")) put(STATE_KEY, plan.getString("stateAhead"))
@@ -71,6 +73,7 @@ internal object ReminderPlan {
         }
         val cancel = plan.getJSONArray("cancel")
         val schedule = plan.getJSONArray("schedule")
+        var refused = 0
         // The ledger first: a delivery checks it, so a cancelled alarm never shows even if the process dies before cancelling it.
         port.record(cancelled = List(cancel.length()) { cancel.getJSONObject(it).getInt("id") },
             armed = List(schedule.length()) { schedule.getJSONObject(it).let { alarm -> alarm.getInt("id") to alarm.getLong("fireAtMs") } })
@@ -83,16 +86,18 @@ internal object ReminderPlan {
         for (index in 0 until schedule.length()) {
             val alarm = schedule.getJSONObject(index)
             if (alarm.optString("replacing") == "withdrawn") runCatching { port.removeDelivered(alarm.getInt("id")) }
-            port.schedule(alarm)
+            try { port.schedule(alarm) } catch (failure: RuntimeException) { refused += 1 }
         }
         checkpoint("scheduled")
         if (plan.optBoolean("clearDelivered")) runCatching { port.clearDelivered() }
+        if (refused > 0) return refused
         // As RN's saveAlarmMap: a map that did not change is not written again (#766).
         val after = buildMap {
             if (!plan.optBoolean("unchanged")) put(MAP_KEY, plan.getString("alarms"))
             if (plan.has("state") && !plan.isNull("state")) put(STATE_KEY, plan.getString("state"))
         }
         if (after.isNotEmpty()) port.store(after)
+        return 0
     }
 }
 
@@ -306,19 +311,17 @@ internal class ReminderAlarms(
     /** The reminder channel's name core sent with the plan (core's REMINDER_NOTIFICATION_CHANNEL_NAME). */
     private var channelName = ""
 
-    override fun apply(plan: String) {
+    override fun apply(plan: String): Int {
         val parsed = JSONObject(plan)
         channelName = parsed.optString("channelName")
-        synchronized(LOCK) { applyLocked(parsed) }
+        return synchronized(LOCK) { applyLocked(parsed) }
     }
 
-    private fun applyLocked(parsed: JSONObject) {
-        ReminderPlan.apply(parsed, this) { point ->
-            // Debug builds only (check-reminders-device.mjs): `debug.mindwtr.native.reminder_stop=<point>` kills the process there.
-            if (debugProperty("reminder_stop") == point) {
-                Log.i(CoreHost.TAG, "Native Android reminder stop at=$point")
-                android.os.Process.killProcess(android.os.Process.myPid())
-            }
+    private fun applyLocked(parsed: JSONObject): Int = ReminderPlan.apply(parsed, this) { point ->
+        // Debug builds only (check-reminders-device.mjs): `debug.mindwtr.native.reminder_stop=<point>` kills the process there.
+        if (debugProperty("reminder_stop") == point) {
+            Log.i(CoreHost.TAG, "Native Android reminder stop at=$point")
+            android.os.Process.killProcess(android.os.Process.myPid())
         }
     }
 
