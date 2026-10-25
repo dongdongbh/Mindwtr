@@ -51,6 +51,20 @@ class ProjectDetailsTest {
         assertEquals("New", titleToStore(typed = " New ", stored = "  Padded title  "))
     }
 
+    /**
+     * A commit compares with the title last sent, else the title at open, as RN's sheet does (projects-screen.tsx): a rename another
+     * device made meanwhile is never overwritten by an unchanged title, and Done then focus loss sends one rename, not two.
+     */
+    @Test fun aCommitComparesWithTheTitleAtOpenOrLastSent() {
+        // Opened as "Old", ended on "Old ", another device renamed it "Remote": nothing is sent, "Remote" stays.
+        assertEquals(null, titleToStore(typed = "Old ", stored = titleBase(sent = null, opened = "Old", stored = "Remote")))
+        // Done sent "New"; focus loss before core's reply sends nothing more.
+        assertEquals(null, titleToStore(typed = "New", stored = titleBase(sent = "New", opened = "Old", stored = "Old")))
+        assertEquals("Newer", titleToStore(typed = "Newer", stored = titleBase(sent = "New", opened = "Old", stored = "Old")))
+        // No title at open known: core's stored title, as before.
+        assertEquals("New", titleToStore(typed = "New", stored = titleBase(sent = null, opened = null, stored = "Old")))
+    }
+
     /** A reply applies only if it answers the newest read of its kind in the current session (review PD 3). */
     @Test fun lateOrClosedRepliesNeverApply() {
         val guard = ReplyGuard()

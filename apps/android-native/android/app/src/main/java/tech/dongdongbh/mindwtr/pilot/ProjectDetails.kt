@@ -125,6 +125,8 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     var titleDraft by mutableStateOf<String?>(null)
     /** The title and the notes last journaled for this project. */
     private var sentTitle: String? = null
+    /** The title when this project opened (RN's sheet base): a commit compares with it until one is sent. */
+    private var openedTitle: String? = null
     private var sentNotes: String? = null
     /** Core's resolved notes blocks (getProjectNotes) for the preview. */
     var notesView by mutableStateOf<JSONObject?>(null); private set
@@ -169,13 +171,14 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         // Leaving a project stores its typed title and notes, as RN's end of editing and blur do on close (review PD 1).
         projectId?.let { old ->
             // Compared with what was last journaled (a field let go just now), else with core's: never journaled twice.
-            for ((kind, text) in editsOnLeave(titleDraft, sentTitle ?: shell.projects?.title(old), notesDraft,
+            for ((kind, text) in editsOnLeave(titleDraft, titleBase(sentTitle, openedTitle, shell.projects?.title(old)), notesDraft,
                 sentNotes ?: raw?.let { storedNotes() })) {
                 if (kind == "projectRename") rename(text, old) else writeNotes(text, old)
             }
         }
         titleDraft = null
         sentTitle = null
+        openedTitle = id?.let { shell.projects?.title(it) }
         sentNotes = null
         replies.close()
         projectId = id
@@ -267,6 +270,14 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     }
 
     // ---- Writes: the user's edit, journaled at once, then sent (core's runProjectEdit) ----
+
+    /** The header field showed [stored] for this project: it is the title at open when [follow] could not read one. */
+    fun sawTitle(stored: String) { if (openedTitle == null) openedTitle = stored }
+
+    /** The header field's commit (Done, focus loss): only a typed rename, compared with [titleBase], so it is never sent twice. */
+    fun commitTitle(stored: String) {
+        titleToStore(titleDraft, titleBase(sentTitle, openedTitle, stored))?.let { titleDraft = it; rename(it) }
+    }
 
     fun rename(title: String, projectId: String? = this.projectId) {
         val text = title.trim()
@@ -1279,9 +1290,10 @@ fun ProjectTitleField(model: InboxViewModel, stored: String, archived: Boolean, 
     val c = LocalTheme.current.colors
     // The typed title is the model's (a close stores it); once core's title equals it, the field shows core's again.
     LaunchedEffect(stored, titleDraft) { if (titleDraft == stored) titleDraft = null }
+    LaunchedEffect(projectId) { sawTitle(stored) }
     val text = titleDraft ?: stored
     var focused by remember { mutableStateOf(false) }
-    val commit = { titleToStore(titleDraft, stored)?.let { titleDraft = it; rename(it) } }
+    val commit = { commitTitle(stored) }
     BasicTextField(text, { titleDraft = it }, singleLine = true, enabled = !archived && !model.busy && model.failedAction == null,
         textStyle = rnText(18, 700).copy(color = c.text), cursorBrush = SolidColor(c.tint),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { commit() }),
@@ -1324,6 +1336,9 @@ internal class WriteQueue<T>(private val start: (T, () -> Unit) -> Boolean) {
  */
 internal fun titleToStore(typed: String?, stored: String?): String? =
     typed?.trim()?.takeIf { it.isNotEmpty() && it != stored?.trim() }
+
+/** What a title commit compares with: the title last journaled here, else the title at open (RN's base), else core's stored one. */
+internal fun titleBase(sent: String?, opened: String?, stored: String?): String? = sent ?: opened ?: stored
 
 /**
  * The edits leaving a project stores (RN's title end of editing and notes blur on close): a typed title, trimmed, when not
