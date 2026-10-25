@@ -10,11 +10,12 @@
 // permissions are RN's, so an upgrade keeps every grant. The alias takes RN's shares (app.json's expo-share-intent filters). The
 // debug build's check entries (its widget host, quick capture alias, and file share provider and sender) are in no other build. A
 // FOSS build (BuildConfig.FOSS) declares no Google Play services entry and no install referrer permission, as RN's FOSS build
-// strips them (df75a3584, a13d1184e); checkFossDependencies checks its libraries. Gradle's checkVariantIdentity runs it for each variant (app/build.gradle.kts);
+// strips them (df75a3584, a13d1184e); checkFossDependencies checks its libraries. Every variant launches from @mipmap/ic_launcher
+// and ic_launcher_round, and every adaptive launcher icon keeps its monochrome layer for themed icons (RN's 55049a2e0). Gradle's checkVariantIdentity runs it for each variant (app/build.gradle.kts);
 // it prints every problem and fails on any; check-variant-identity.test.mjs proves what it catches.
 // Usage: node check-variant-identity.mjs <build type> <merged AndroidManifest.xml> <mindwtr_shortcuts.xml> <BuildConfig.java>
 //     <mindwtr_link_scheme.xml>
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -67,6 +68,33 @@ const field = (buildConfig, name) => {
     const match = new RegExp(`\\b${name} = ("(?:[^"\\\\]|\\\\.)*"|\\w+);`).exec(buildConfig);
     return match ? (match[1].startsWith('"') ? JSON.parse(match[1]) : match[1]) : undefined;
 };
+
+/**
+ * RN's themed icon (55049a2e0): every adaptive launcher icon under [srcRoot] (app/src: main and every flavor's or build type's own
+ * res) keeps a monochrome layer whose drawable exists in main's res or its own.
+ */
+export function launcherIconProblems(srcRoot) {
+    const problems = [];
+    const sets = readdirSync(srcRoot).filter((set) => existsSync(resolve(srcRoot, set, 'res')));
+    const drawableExists = (set, name) => [set, 'main'].some((owner) => existsSync(resolve(srcRoot, owner, 'res'))
+        && readdirSync(resolve(srcRoot, owner, 'res')).filter((dir) => dir.startsWith('drawable'))
+            .some((dir) => ['xml', 'png', 'webp'].some((ext) => existsSync(resolve(srcRoot, owner, 'res', dir, `${name}.${ext}`)))));
+    let icons = 0;
+    for (const set of sets) {
+        for (const dir of readdirSync(resolve(srcRoot, set, 'res')).filter((name) => name.startsWith('mipmap-anydpi'))) {
+            for (const file of ['ic_launcher.xml', 'ic_launcher_round.xml']) {
+                const path = resolve(srcRoot, set, 'res', dir, file);
+                if (!existsSync(path)) continue;
+                icons += 1;
+                const drawable = /<monochrome\s+android:drawable="@drawable\/([\w.]+)"\s*\/>/.exec(readFileSync(path, 'utf8'))?.[1];
+                if (!drawable) problems.push(`${set}/res/${dir}/${file} has no monochrome layer`);
+                else if (!drawableExists(set, drawable)) problems.push(`${set}/res/${dir}/${file}'s monochrome drawable ${drawable} does not exist`);
+            }
+        }
+    }
+    if (icons === 0) problems.push('no adaptive launcher icon');
+    return problems;
+}
 
 /** Every problem with one variant's identity: [type] its build type; the rest, its files' text. */
 export async function identityProblems(type, manifest, shortcuts, buildConfig, linkScheme) {
@@ -139,6 +167,9 @@ export async function identityProblems(type, manifest, shortcuts, buildConfig, l
         }
     }
     expect('supportsRtl', attr(application, 'supportsRtl'), 'true');
+    // The launcher icons whose adaptive XML keeps the monochrome layer (launcherIconProblems).
+    expect('the launcher icon', attr(application, 'icon'), '@mipmap/ic_launcher');
+    expect('the round launcher icon', attr(application, 'roundIcon'), '@mipmap/ic_launcher_round');
     // RN's shortcuts for this build (their ids, labels, targets and links), each target a component the build declares.
     if (shortcuts !== buildShortcuts(identity.scheme, identity.pkg).xml) problems.push('the shortcuts are not RN\'s for this build');
     // The widget module's links (WidgetRenderer.appIntent: the widgets' header and row links, the detailed capture shortcut's) are
@@ -155,7 +186,8 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     const [type, ...paths] = process.argv.slice(2);
     if (paths.length !== 4) throw new Error('usage: check-variant-identity.mjs <build type> <merged manifest> <shortcuts xml> <BuildConfig.java> <link scheme xml>');
     const [manifestPath] = paths;
-    const problems = await identityProblems(type, ...paths.map((path) => readFileSync(path, 'utf8')));
+    const problems = [...await identityProblems(type, ...paths.map((path) => readFileSync(path, 'utf8'))),
+        ...launcherIconProblems(resolve(import.meta.dirname, '../android/app/src'))];
     for (const problem of problems) console.error(`${type}: ${problem}`);
     if (problems.length > 0) process.exit(1);
     console.log(`${type}: identity ok (${manifestPath})`);

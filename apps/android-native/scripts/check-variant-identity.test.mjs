@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { buildLinkSchemeXml, buildShortcuts, buildShortcutsManifest } from './build-shortcuts.mjs';
 import { buildManifest as buildWidgetManifest } from './build-widgets.mjs';
-import { identityProblems } from './check-variant-identity.mjs';
+import { identityProblems, launcherIconProblems } from './check-variant-identity.mjs';
 
 const require = createRequire(import.meta.url);
 const { Builder, parseStringPromise } = require('xml2js');
@@ -131,6 +131,34 @@ test('a FOSS build with the install referrer permission or a Google Play service
         '<provider android:name="com.google.firebase.provider.FirebaseInitProvider" android:authorities="x"/>']) {
         const manifest = foss.manifest.replace('</application>', `${entry}</application>`);
         assert.notDeepEqual(await problems('release', { ...foss, manifest }), [], entry);
+    }
+});
+
+// RN's 55049a2e0: Android 13's themed icons draw the adaptive icon's monochrome layer. Every variant launches from
+// @mipmap/ic_launcher and ic_launcher_round, and each adaptive icon keeps a monochrome layer whose drawable exists.
+test('a launcher icon without its monochrome layer, or a variant that points elsewhere, is caught', async () => {
+    const res = resolve(import.meta.dirname, '../android/app/src');
+    assert.deepEqual(launcherIconProblems(res), []);
+    const files = await variant('release');
+    assert.notDeepEqual(await problems('release', { ...files, manifest: files.manifest.replace('android:icon="@mipmap/ic_launcher"', 'android:icon="@mipmap/other"') }), []);
+    const { mkdtempSync, mkdirSync, writeFileSync, cpSync } = await import('node:fs');
+    mkdirSync(resolve(import.meta.dirname, '../android/build'), { recursive: true });
+    const copy = mkdtempSync(resolve(import.meta.dirname, '../android/build/icon-test-'));
+    try {
+        cpSync(resolve(res, 'main/res/mipmap-anydpi-v26'), resolve(copy, 'main/res/mipmap-anydpi-v26'), { recursive: true });
+        mkdirSync(resolve(copy, 'main/res/drawable'), { recursive: true });
+        writeFileSync(resolve(copy, 'main/res/drawable/ic_launcher_monochrome.xml'), '<vector/>');
+        assert.deepEqual(launcherIconProblems(copy), []);
+        const round = resolve(copy, 'main/res/mipmap-anydpi-v26/ic_launcher_round.xml');
+        writeFileSync(round, readFileSync(round, 'utf8').replace(/\s*<monochrome [^>]*\/>/, ''));
+        assert.notDeepEqual(launcherIconProblems(copy), []);
+        // A flavor or build type's own icon must keep the layer too.
+        mkdirSync(resolve(copy, 'foss/res/mipmap-anydpi-v26'), { recursive: true });
+        writeFileSync(resolve(copy, 'foss/res/mipmap-anydpi-v26/ic_launcher.xml'), '<adaptive-icon><foreground android:drawable="@mipmap/x"/></adaptive-icon>');
+        assert.ok(launcherIconProblems(copy).some((problem) => problem.includes('foss')));
+    } finally {
+        const { rmSync } = await import('node:fs');
+        rmSync(copy, { recursive: true, force: true });
     }
 });
 
