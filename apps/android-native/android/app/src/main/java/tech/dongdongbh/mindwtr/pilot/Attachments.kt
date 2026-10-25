@@ -448,25 +448,21 @@ internal fun attachmentLaunchLog(kind: String, uri: String?, failure: Throwable)
 /**
  * Core's open plan for a link or a file, started with [context] (an Activity). A file goes to Android's viewer (ACTION_VIEW on
  * the FileProvider URI with core's view type), else the share sheet, else its URI, as RN's open-file-externally and its
- * fallbacks do. Answers core's failure message for a link that nothing opened, else null.
+ * fallbacks do. A link nothing opens offers Copy link (RN's openExternalLink).
  */
-fun startAttachmentPlan(context: Context, plan: JSONObject, t: (String) -> String, diagnostic: (String) -> Unit): String? {
+fun startAttachmentPlan(context: Context, plan: JSONObject, t: (String) -> String, diagnostic: (String) -> Unit) {
     if (plan.getString("kind") == "link") {
-        if (openUpNoteLink(context, plan.getString("uri"), t, diagnostic) != null) return null
-        return try {
-            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(plan.getString("uri"))))
-            null
-        } catch (failure: Exception) {
-            Log.w(CoreHost.TAG, attachmentLaunchLog("link", plan.optString("uri"), failure))
-            plan.menuText("failedMessage")
-        }
+        // RN's attachment hooks open a link with openExternalLink: when nothing opens it, its alert offers Copy link.
+        val uri = plan.getString("uri")
+        openExternalLink(context, uri, t, { failure -> Log.w(CoreHost.TAG, attachmentLaunchLog("link", uri, failure)) }, diagnostic)
+        return
     }
     val raw = plan.getString("uri")
     val shared = runCatching { contentUri(context, raw) }.getOrNull()
     if (shared != null) {
         try {
             context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(shared, plan.getString("viewMimeType")).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-            return null
+            return
         } catch (_: ActivityNotFoundException) {
             // No viewer for the type: the share sheet is still a way out.
         } catch (failure: Exception) {
@@ -474,13 +470,12 @@ fun startAttachmentPlan(context: Context, plan: JSONObject, t: (String) -> Strin
         }
         try {
             context.startActivity(shareIntent(shared, plan.menuText("mimeType")))
-            return null
+            return
         } catch (failure: Exception) {
             Log.w(CoreHost.TAG, attachmentLaunchLog("share", raw, failure))
         }
     }
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(raw))) }.onFailure { Log.w(CoreHost.TAG, attachmentLaunchLog("uri", raw, it)) }
-    return null
 }
 
 /** A local attachment's URI another app may read: files/attachments/ through the FileProvider; a picked `content://` as it is. */
@@ -609,7 +604,7 @@ fun ProjectAttachments(model: InboxViewModel, projectId: String) = with(model.at
 @Composable
 fun AttachmentOverlays(model: InboxViewModel) = with(model.attachments) {
     val context = LocalContext.current
-    LaunchedEffect(launch) { launch?.let { plan -> launched(); startAttachmentPlan(context, plan, ::t) { outcome -> model.anyTime({ it.logLinkHandoff(outcome, "attachment") }, {}) }?.let { failed -> model.attachments.showAlert(failed) } } }
+    LaunchedEffect(launch) { launch?.let { plan -> launched(); startAttachmentPlan(context, plan, ::t) { outcome -> model.anyTime({ it.logLinkHandoff(outcome, "attachment") }, {}) } } }
     alert?.let { message ->
         AlertDialog(onDismissRequest = ::dismissAlert, title = { Text(t("attachments.title")) }, text = { Text(message) },
             confirmButton = { TextButton(onClick = ::dismissAlert) { Text(t("common.ok")) } })

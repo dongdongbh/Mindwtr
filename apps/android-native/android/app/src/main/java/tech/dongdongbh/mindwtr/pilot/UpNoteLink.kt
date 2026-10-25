@@ -11,8 +11,9 @@ import android.net.Uri
  * RN's openExternalLink (c2e30c2e5): one explicit attempt with the exact string; when nothing opens it, [failed] gets that string
  * to offer Copy link. Injected boundaries keep the original intact and test missing handlers.
  */
-internal fun attemptExternalLink(original: String, open: (String) -> Unit, failed: (String) -> Unit): Boolean =
-    try { open(original); true } catch (_: Exception) { failed(original); false }
+internal fun attemptExternalLink(original: String, open: (String) -> Unit, failed: (String) -> Unit,
+                                 logFailure: (Exception) -> Unit = {}): Boolean =
+    try { open(original); true } catch (failure: Exception) { logFailure(failure); failed(original); false }
 
 /** An UpNote link's handoff attempt (#1331); null for any other link. */
 internal fun attemptUpNoteLink(original: String, open: (String) -> Unit, failed: (String) -> Unit): Boolean? =
@@ -36,14 +37,9 @@ private fun offerLinkCopy(context: Context, exact: String, t: (String) -> String
 
 private fun viewLink(context: Context, link: String) = context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)))
 
-internal fun openUpNoteLink(context: Context, original: String, t: (String) -> String, diagnostic: (String) -> Unit): Boolean? {
-    val result = attemptUpNoteLink(original, open = { viewLink(context, it) }, failed = { offerLinkCopy(context, it, t) })
-    if (result != null) diagnostic(if (result) "opened" else "failed")
-    return result
-}
-
-/** A description's or project notes' external link (RN's markdown surface): any scheme, Copy link when nothing opens it. */
-internal fun openExternalLink(context: Context, original: String, t: (String) -> String, diagnostic: (String) -> Unit) {
-    val opened = attemptExternalLink(original, open = { viewLink(context, it) }, failed = { offerLinkCopy(context, it, t) })
+/** An external link of a description, project notes or an attachment (RN's openExternalLink): any scheme, Copy link when nothing opens it. */
+internal fun openExternalLink(context: Context, original: String, t: (String) -> String, logFailure: (Exception) -> Unit = {},
+                              diagnostic: (String) -> Unit) {
+    val opened = attemptExternalLink(original, open = { viewLink(context, it) }, failed = { offerLinkCopy(context, it, t) }, logFailure)
     if (isUpNoteLink(original)) diagnostic(if (opened) "opened" else "failed")
 }

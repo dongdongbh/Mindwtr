@@ -58,4 +58,12 @@ class UpNoteLinkTest {
             assertEquals(listOf(href), opened)
         }
     }
+
+    // A failed attachment link is logged by its failure's type (Attachments.kt), then offered for Copy link like any other.
+    @Test fun aFailedOpenReportsItsFailureBeforeOfferingCopy() {
+        val events = mutableListOf<String>()
+        val missing = android.content.ActivityNotFoundException()
+        assertFalse(attemptExternalLink("https://example.org", { throw missing }, { events.add("copy $it") }) { events.add("log ${it === missing}") })
+        assertEquals(listOf("log true", "copy https://example.org"), events)
+    }
 }

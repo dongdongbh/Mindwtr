@@ -9600,6 +9600,10 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // grant can persist (GetContent's cannot), and addFile persists it (keepPickedFileReadable, CalendarVisitTest).
     // RN's openExternalLink (c2e30c2e5): a description's or project notes' external link, any scheme, opens through
     // openExternalLink, which offers Copy link when nothing opens it (UpNoteLinkTest); none fails silently.
+    // An attachment link too (RN's attachment hooks call openExternalLink): Copy link when nothing opens it, not core's message.
+    const attachmentLink = /if \(plan\.getString\("kind"\) == "link"\) \{([\s\S]*?)\n    \}/.exec(source('Attachments.kt'))?.[1] ?? '';
+    assert.match(attachmentLink, /openExternalLink\(context, uri, t, \{ failure -> Log\.w\(CoreHost\.TAG, attachmentLaunchLog\("link", uri, failure\)\) \}, diagnostic\)/, 'a failed attachment link offers Copy link');
+    assert.doesNotMatch(attachmentLink, /failedMessage/);
     for (const file of ['TaskEditor.kt', 'ProjectDetails.kt']) {
         assert.match(source(file), /openExternalLink\(context, target\.getString\("href"\)/, `${file}'s external links offer Copy link`);
         assert.doesNotMatch(source(file), /runCatching \{ context\.startActivity\(Intent\(Intent\.ACTION_VIEW, (?:original|target\.getString\("href"\))/);
