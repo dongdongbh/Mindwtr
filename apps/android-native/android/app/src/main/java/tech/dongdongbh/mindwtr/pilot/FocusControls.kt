@@ -231,8 +231,9 @@ fun FocusGroupHeading(heading: JSONObject) {
 fun GroupedRow(grouped: Boolean, content: @Composable () -> Unit) {
     if (!grouped) return content()
     val c = LocalTheme.current.colors
+    // RN's borderLeftWidth 2 takes its own space before the 10 dp padding (rnBorder's rule), so the row starts 12 dp past the line's edge.
     Box(Modifier.padding(start = 13.dp).drawBehind { drawLine(c.border, Offset(1.dp.toPx(), 0f), Offset(1.dp.toPx(), size.height), 2.dp.toPx()) }
-        .padding(start = 10.dp)) { content() }
+        .padding(start = 12.dp)) { content() }
 }
 
 /**

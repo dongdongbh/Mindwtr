@@ -1815,7 +1815,7 @@ assert.match(activity, /Screen\.Focus -> FocusList\(model, Modifier\.fillMaxSize
 // Commands from Focus and a project use the Inbox's command path and its exact-retry lock.
 assert.match(rowUi, /fun TaskRowItem\(\s*model: InboxViewModel, task: TaskRow, status: RowStatus = RowStatus\.Hidden, star: RowStar = RowStar\.Hidden,/);
 // A task grouped under two Next actions headings shows under each: its heading is part of its key.
-assert.match(focusUi, /item\(key = "\$\{section\.key\}:\$\{group\}:\$\{task\.id\}"\) \{\s*GroupedRow\(grouped\) \{\s*TaskRowItem\(model, task,/);
+assert.match(focusUi, /item\(key = "\$\{section\.key\}:\$\{group\}:\$\{task\.id\}"\) \{\s*Box\(Modifier\.padding\(bottom = 8\.dp\)\) \{ GroupedRow\(grouped\) \{\s*TaskRowItem\(model, task,/);
 // RN hides a section core counts as empty, "Projects to review" included, and folds a section on its title.
 assert.match(focusUi, /if \(section\.total == 0\) continue/);
 assert.match(focusUi, /if \(reviewCount > 0\) \{/);

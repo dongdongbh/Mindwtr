@@ -145,8 +145,9 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                 // RN's headerTopRow: the date, 12 dp, then its 44 dp buttons 8 dp apart, so a long date wraps where RN's does.
                 Row(Modifier.fillMaxWidth().padding(top = if (pomodoro) 0.dp else 6.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // RN's text block fills the row's height and its text sits at the top of it.
                     Text(view.dateLabel.uppercase(), style = rnText(12, 600, letterSpacing = 0.6f), color = c.secondaryText,
-                        modifier = Modifier.weight(1f).padding(end = 4.dp))
+                        modifier = Modifier.weight(1f).align(Alignment.Top).padding(end = 4.dp))
                     view.controls?.let { FocusHeaderButtons(model, it) }
                     val label = t(if (othersOpen) "agenda.collapseOtherSections" else "agenda.expandOtherSections")
                     Box(Modifier.size(44.dp).clip(CircleShape).fade(if (others > 0) 1f else 0.4f)
@@ -205,12 +206,13 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                         item(key = "group:${section.key}:${heading.getString("id")}") { FocusGroupHeading(heading) }
                     }
                     val grouped = group != null
+                    // RN's itemWrapper: 8 dp below each Focus row, past the row's own 6.
                     item(key = "${section.key}:${group}:${task.id}") {
-                        GroupedRow(grouped) {
+                        Box(Modifier.padding(bottom = 8.dp)) { GroupedRow(grouped) {
                             TaskRowItem(model, task, status = if (section.key == "reviewDue") RowStatus.Badge else RowStatus.Hidden,
                                 star = RowStar.Shown, starBlocked = section.focusBlockedLabel, focusHighlight = section.key != "focus",
                                 details = focusView.showDetails)
-                        }
+                        } }
                     }
                 }
                 if (section.rows.size < section.rowTotal) item(key = "more:${section.key}") {
