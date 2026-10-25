@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { FILE_SYNC_ABSENT_FINGERPRINT, createMobileFileSync, type MobileFileSyncFullHost } from './mobile-file-sync';
-import { fileSyncErrorCode } from './mobile-file-sync-remote';
+import { FileSyncPathOwnerTerminatedError, fileSyncErrorCode, type MobileFileSyncObservedPublication } from './mobile-file-sync-remote';
 import { SyncEncryptionRemoteConflictError } from './sync-encryption';
 import type { AppData } from './types';
 
@@ -424,5 +424,330 @@ describe('fileSyncErrorCode', () => {
         named.name = `${PATH_DIR}/data.json`;
         expect(fileSyncErrorCode(named)).toBe('Error');
         expect(fileSyncErrorCode(`${PATH_DIR}/data.json`)).toBe('string');
+    });
+});
+
+
+// Synthetic shared-source contract only; this host is not a native owner or provider proof.
+type ObservedCall = { operation: string; uri: string; bytes?: Uint8Array; destination?: string };
+const observedFolder = (initial: Record<string, Uint8Array> = {}) => {
+    const folder = pathFolder();
+    for (const [name, bytes] of Object.entries(initial)) folder.files.set(`${PATH_DIR}/${name}`, new Uint8Array(bytes));
+    const owned = new Map<string, { state: 'unfinished' | 'created' | 'quarantine'; generation: Uint8Array }>();
+    const calls: ObservedCall[] = [];
+    let before: (call: ObservedCall) => void | Promise<void> = () => undefined;
+    let after: (call: ObservedCall) => void | Promise<void> = () => undefined;
+    let closed = false, lateCalls = 0, legacyCalls = 0;
+    const same = (left: Uint8Array | undefined, right: Uint8Array) => left?.length === right.length && left.every((byte, index) => byte === right[index]);
+    const leaf = (uri: string) => uri.slice(uri.lastIndexOf('/') + 1);
+    const child = (uri: string) => {
+        if (!uri.startsWith(`${PATH_DIR}/`) || uri.slice(PATH_DIR.length + 1).includes('/') || ['.', '..', ''].includes(leaf(uri))) throw new Error('Outside selected root');
+    };
+    const io = async <T>(call: ObservedCall, work: () => T): Promise<T> => {
+        calls.push(call);
+        if (closed) { lateCalls += 1; throw new Error('Owner already closed'); }
+        try {
+            await before(call);
+            const result = work();
+            await after(call);
+            return result;
+        } catch (error) { closed = true; owned.clear(); throw error; }
+    };
+    const generic = () => { legacyCalls += 1; throw new Error('Generic mutation is unsupported'); };
+    const publication: MobileFileSyncObservedPublication = {
+        createExclusive: uri => io<'created' | 'exists'>({ operation: 'create', uri }, () => {
+            child(uri);
+            if (folder.files.has(uri)) return 'exists';
+            const generation = new Uint8Array(0); folder.files.set(uri, generation);
+            owned.set(uri, { state: 'unfinished', generation }); return 'created';
+        }),
+        writeCreated: (uri, bytes) => io({ operation: 'write', uri, bytes: new Uint8Array(bytes) }, () => {
+            const entry = owned.get(uri);
+            if (!entry || entry.state !== 'unfinished' || folder.files.get(uri) !== entry.generation) throw new Error('Unowned creation');
+            const generation = new Uint8Array(bytes); folder.files.set(uri, generation);
+            owned.set(uri, { state: 'created', generation });
+        }),
+        renameObserved: (uri, name, bytes) => io({ operation: 'rename', uri, bytes: new Uint8Array(bytes), destination: `${PATH_DIR}/${name}` }, () => {
+            child(uri); const destination = `${PATH_DIR}/${name}`; child(destination);
+            if (!name.startsWith('.mindwtr-et-q-') || !same(folder.files.get(uri), bytes) || folder.files.has(destination)) throw new Error('Generation or destination changed');
+            if (owned.get(uri)?.state === 'unfinished') throw new Error('Unfinished creation');
+            const generation = folder.files.get(uri); if (!generation) throw new Error('Missing observed body');
+            folder.files.set(destination, generation); folder.files.delete(uri); owned.delete(uri);
+            owned.set(destination, { state: 'quarantine', generation }); return destination;
+        }),
+        deleteOwned: (uri, bytes) => io({ operation: 'delete', uri, bytes: new Uint8Array(bytes) }, () => {
+            child(uri); const entry = owned.get(uri), name = leaf(uri);
+            if (!entry || folder.files.get(uri) !== entry.generation || !same(entry.generation, bytes)
+                || !((entry.state === 'created' && name.startsWith('.mindwtr-et-s-')) || (entry.state === 'quarantine' && name.startsWith('.mindwtr-et-q-')))) throw new Error('Unowned deletion');
+            folder.files.delete(uri); owned.delete(uri);
+        }),
+    };
+    const path: MobileFileSyncFullHost['path'] = {
+        exists: uri => io({ operation: 'exists', uri }, () => uri.replace(/\/+$/, '') === PATH_DIR || folder.files.has(uri)),
+        info: uri => io({ operation: 'info', uri }, () => ({ exists: uri.replace(/\/+$/, '') === PATH_DIR || folder.files.has(uri), size: folder.files.get(uri)?.length })),
+        list: uri => io({ operation: 'list', uri }, () => {
+            if (uri.replace(/\/+$/, '') !== PATH_DIR) throw new Error('Outside selected root');
+            return [...folder.files.keys()].map(leaf);
+        }),
+        readBytes: uri => io({ operation: 'read', uri }, () => { child(uri); const bytes = folder.files.get(uri); return bytes === undefined ? null : new Uint8Array(bytes); }),
+        readText: uri => io({ operation: 'text', uri }, () => { child(uri); const bytes = folder.files.get(uri); return bytes === undefined ? null : new TextDecoder().decode(bytes); }),
+        writeBytes: generic, createExclusive: generic, writeCreated: generic, delete: generic, rename: generic,
+        observedPublication: publication,
+    };
+    const result = fakeHost({ os: () => 'ios', path });
+    return { ...result, files: folder.files, calls, publication,
+        before: (hook: typeof before) => { before = hook; }, after: (hook: typeof after) => { after = hook; },
+        counters: () => ({ closed, lateCalls, legacyCalls }),
+        mutations: () => calls.filter(call => ['create', 'write', 'rename', 'delete'].includes(call.operation)),
+        completions: () => result.logged.filter(entry => entry.message === 'File Sync observed path publication completed'),
+    };
+};
+
+const observedBytes = (weekStart: 'monday' | 'sunday') => new TextEncoder().encode(JSON.stringify({ ...data, settings: { weekStart } }, null, 2));
+
+describe('observed publication capability', () => {
+    const uri = `${PATH_DIR}/data.json`, backup = `${PATH_DIR}/data.json.bak`;
+    const current = observedBytes('sunday'), peer = observedBytes('monday'), next: AppData = { ...data, settings: { theme: 'dark' } };
+    const payload = new TextEncoder().encode(JSON.stringify(next, null, 2));
+    const oldBackup = new Uint8Array([7, 8, 9]), sentinel = new Uint8Array([0, 255, 3]);
+    const remoteFor = async (folder: ReturnType<typeof observedFolder>) => {
+        const remote = await createMobileFileSync(folder.host).createFileSyncEncryptionRemotePort(uri);
+        if (!remote) throw new Error('Expected observed remote'); return remote;
+    };
+    const write = async (folder: ReturnType<typeof observedFolder>) => {
+        const sync = createMobileFileSync(folder.host), read = await sync.readSyncFileVersioned(uri);
+        return sync.writeSyncFile(uri, next, { expectedFingerprint: read.fingerprint });
+    };
+
+    it.each([oldBackup, new Uint8Array(0)])('forwards complete old generations and owned cleanup without generic mutations (%j)', async old => {
+        const folder = observedFolder({ 'data.json': current, 'data.json.bak': old, sentinel });
+        const result = await observe(write(folder)).result;
+        expect(folder.calls.find(call => call.operation === 'rename')?.bytes).toEqual(old);
+        expect(folder.counters().legacyCalls).toBe(0);
+        expect(result).toEqual({ state: 'fulfilled', value: undefined });
+        expect(folder.files.get(uri)).toEqual(payload); expect(folder.files.get(backup)).toEqual(current);
+        expect(folder.files.get(`${PATH_DIR}/sentinel`)).toEqual(sentinel);
+        expect([...folder.files.keys()].sort()).toEqual([uri, backup, `${PATH_DIR}/sentinel`].sort());
+        const renames = folder.calls.filter(call => call.operation === 'rename');
+        expect(renames.map(call => call.bytes)).toEqual([old, current]);
+        const first = renames[0]; if (!first) throw new Error('Expected backup quarantine');
+        expect(folder.calls.findIndex(call => call.operation === 'read' && call.uri === backup)).toBeLessThan(folder.calls.indexOf(first));
+        expect(folder.calls.filter(call => call.operation === 'delete').map(call => call.bytes)).toEqual([old, payload, current]);
+        expect(folder.counters()).toEqual({ closed: false, lateCalls: 0, legacyCalls: 0 });
+        expect(folder.completions()).toHaveLength(1);
+        expect(folder.completions()[0]?.context).toEqual({ scope: 'sync', extra: { releaseCheck: 'v1.3.8/file-sync-observed-publication', operation: 'write', outcome: 'completed' } });
+    });
+
+    it.each([null, {}, { createExclusive: async (): Promise<'created'> => 'created' }, { createExclusive: async (): Promise<'created'> => 'created', writeCreated: async () => undefined, renameObserved: async () => uri }])('rejects incomplete capability before IO (%j)', value => {
+        const folder = observedFolder(); Object.defineProperty(folder.host.path, 'observedPublication', { value });
+        expect(() => createMobileFileSync(folder.host)).toThrow('complete observed publication capability');
+        expect(folder.calls).toEqual([]); expect(folder.counters().legacyCalls).toBe(0);
+    });
+
+    it('uses exclusive canonical creation for an absent version', async () => {
+        const folder = observedFolder();
+        await createMobileFileSync(folder.host).writeSyncFile(uri, next, { expectedFingerprint: FILE_SYNC_ABSENT_FINGERPRINT });
+        expect(folder.files.get(uri)).toEqual(payload); expect(folder.calls.some(call => call.operation === 'rename')).toBe(false);
+        expect(folder.counters().legacyCalls).toBe(0);
+    });
+
+    it('preserves a peer created just before canonical install', async () => {
+        const folder = observedFolder({ 'data.json': current }), remote = await remoteFor(folder), read = await remote.read('data.json');
+        folder.before(call => { if (call.operation === 'create' && call.uri === uri) folder.files.set(uri, peer); });
+        await expect(remote.write('data.json', payload, read.version)).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(folder.files.get(uri)).toEqual(peer);
+        expect(folder.calls.filter(call => call.operation === 'delete')).toEqual([]);
+        expect([...folder.files.keys()].some(name => name.includes('.mindwtr-et-q-'))).toBe(true);
+    });
+
+    it('refuses a stale fingerprint before any mutation', async () => {
+        const folder = observedFolder({ 'data.json': current });
+        await expect(createMobileFileSync(folder.host).writeSyncFile(uri, next, { expectedFingerprint: FILE_SYNC_ABSENT_FINGERPRINT })).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(folder.mutations()).toEqual([]); expect(folder.files.get(uri)).toEqual(current);
+    });
+
+    it('forwards the observed canonical generation even when a same-length peer arrives after staging', async () => {
+        const folder = observedFolder({ 'data.json': current }), remote = await remoteFor(folder), read = await remote.read('data.json');
+        expect(current.length).toBe(peer.length);
+        folder.before(call => { if (call.operation === 'rename' && call.uri === uri) folder.files.set(uri, peer); });
+        await expect(remote.write('data.json', payload, read.version)).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(folder.calls.find(call => call.operation === 'rename')?.bytes).toEqual(current);
+        expect(folder.files.get(uri)).toEqual(peer); expect(folder.counters().lateCalls).toBe(0);
+    });
+
+    it('does not turn a terminal metadata rejection into absence', async () => {
+        const folder = observedFolder(), remote = await remoteFor(folder);
+        folder.before(call => { if (call.operation === 'info' && call.uri === uri) throw new Error(`EIO: ${uri}`); });
+        await expect(remote.read('data.json')).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(folder.counters().lateCalls).toBe(0); expect(folder.mutations()).toEqual([]);
+    });
+
+    it.each([{}, { exists: undefined }].flatMap(metadata => [
+        { metadata, operation: 'read' }, { metadata, operation: 'write' },
+    ]))('refuses unknown metadata before $operation or later IO ($metadata)', async ({ metadata, operation }) => {
+        const folder = observedFolder({ sentinel }), remote = await remoteFor(folder);
+        const info = folder.host.path.info; let returnedAt = 0;
+        folder.host.path.info = async target => {
+            await info(target); returnedAt = folder.calls.length; return metadata;
+        };
+        const result = await observe<unknown>(operation === 'read'
+            ? remote.read('data.json') : remote.write('data.json', payload, null)).result;
+        expect(returnedAt).toBeGreaterThan(0);
+        expect(folder.calls).toHaveLength(returnedAt);
+        expect(folder.mutations()).toEqual([]);
+        expect([...folder.files.entries()]).toEqual([[`${PATH_DIR}/sentinel`, sentinel]]);
+        expect(result.state).toBe('rejected');
+        if (result.state === 'rejected') expect(result.reason).toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(folder.counters()).toEqual({ closed: false, lateCalls: 0, legacyCalls: 0 });
+        expect(folder.completions()).toEqual([]);
+    });
+
+    it('preserves legacy RN unknown-metadata absence and publication behavior', async () => {
+        const folder = pathFolder();
+        const { host } = fakeHost({ os: () => 'ios', path: { ...folder.port,
+            info: async target => folder.files.has(target) ? { exists: true, size: folder.files.get(target)?.length } : {},
+        } });
+        const remote = await createMobileFileSync(host).createFileSyncEncryptionRemotePort(uri);
+        if (!remote) throw new Error('Expected legacy remote');
+        expect(await remote.read('data.json')).toEqual({ bytes: null, version: null });
+        await remote.write('data.json', payload, null);
+        expect(folder.files.get(uri)).toEqual(payload);
+    });
+
+    it.each(['exists', 'text'])('does not retry or fall back after terminal %s failure', async operation => {
+        const folder = observedFolder({ 'data.json': current });
+        folder.before(call => { if (call.operation === operation) throw new Error(`EIO: ${uri}`); });
+        await expect(createMobileFileSync(folder.host).readSyncFile(uri)).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(folder.counters().lateCalls).toBe(0);
+    });
+
+    it.each(['read-before', 'rename-before', 'rename-after', 'write-before', 'write-after', 'readback', 'delete-before', 'delete-after'])('terminal backup %s failure cannot continue canonical publication', async mode => {
+        const folder = observedFolder({ 'data.json': current, 'data.json.bak': oldBackup, sentinel });
+        let installed = false, fired = false;
+        const fault = (call: ObservedCall, after: boolean) => {
+            if (after && call.operation === 'write' && call.uri === backup) installed = true;
+            const trigger = (mode === 'read-before' && !after && call.operation === 'read' && call.uri === backup)
+                || (mode.startsWith('rename-') && call.operation === 'rename' && call.uri === backup && after === mode.endsWith('after'))
+                || (mode.startsWith('write-') && call.operation === 'write' && call.uri === backup && after === mode.endsWith('after'))
+                || (mode === 'readback' && !after && installed && call.operation === 'read' && call.uri === backup)
+                || (mode.startsWith('delete-') && call.operation === 'delete' && after === mode.endsWith('after'));
+            if (trigger && !fired) { fired = true; throw new Error(`EIO: ${backup}`); }
+        };
+        folder.before(call => fault(call, false)); folder.after(call => fault(call, true));
+        await expect(write(folder)).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(fired).toBe(true); expect(folder.files.get(uri)).toEqual(current);
+        expect(folder.files.get(`${PATH_DIR}/sentinel`)).toEqual(sentinel);
+        expect(folder.counters().lateCalls).toBe(0); expect(folder.counters().legacyCalls).toBe(0);
+        expect(folder.completions()).toEqual([]);
+        expect(folder.logged.some(entry => entry.message.startsWith('File Sync backup rotation skipped'))).toBe(false);
+        expect(folder.all()).not.toContain(PRIVATE);
+    });
+
+    it('keeps a normal backup create collision best effort while preserving peer backup and retained bytes', async () => {
+        const folder = observedFolder({ 'data.json': current, 'data.json.bak': oldBackup });
+        folder.before(call => { if (call.operation === 'create' && call.uri === backup) folder.files.set(backup, peer); });
+        await write(folder);
+        expect(folder.files.get(uri)).toEqual(payload); expect(folder.files.get(backup)).toEqual(peer);
+        expect([...folder.files.entries()].some(([name, bytes]) => name.includes('.mindwtr-et-q-') && bytes.every((byte, i) => byte === oldBackup[i]) && bytes.length === oldBackup.length)).toBe(true);
+        expect(folder.counters().closed).toBe(false);
+        expect(folder.logged.some(entry => entry.message.startsWith('File Sync backup rotation skipped'))).toBe(true);
+        expect(folder.completions()).toHaveLength(1);
+    });
+
+    it.each(['write', 'rename', 'verify', 'delete'].flatMap(boundary => [{ boundary, rejected: false }, { boundary, rejected: true }]))('awaits entered $boundary with rejection=$rejected before advancing publication', async ({ boundary, rejected }) => {
+        const folder = observedFolder({ 'data.json': current }), remote = await remoteFor(folder), read = await remote.read('data.json');
+        const entered = deferred<void>(), release = deferred<void>(); let canonicalWritten = false, fired = false;
+        folder.after(call => { if (call.operation === 'write' && call.uri === uri) canonicalWritten = true; });
+        folder.before(async call => {
+            const matches = boundary === 'write' ? call.operation === 'write' && call.uri.includes('.mindwtr-et-s-')
+                : boundary === 'rename' ? call.operation === 'rename'
+                    : boundary === 'verify' ? call.operation === 'read' && call.uri === uri && canonicalWritten : call.operation === 'delete';
+            if (matches && !fired) { fired = true; entered.resolve(undefined); await release.promise; }
+        });
+        const operation = observe(remote.write('data.json', payload, read.version));
+        try {
+            await entered.promise; await nextTurn(); expect(operation.settled).toBe(false);
+            expect(folder.calls.filter(call => call.operation === 'delete')).toHaveLength(boundary === 'delete' ? 1 : 0);
+            if (boundary === 'write' || boundary === 'rename') expect(folder.files.get(uri)).toEqual(current);
+            if (rejected) {
+                release.reject(new Error('Entered owner operation failed'));
+                const result = await operation.result;
+                expect(result.state).toBe('rejected');
+                if (result.state === 'rejected') expect(result.reason).toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+                expect(folder.files.get(uri)).toEqual(boundary === 'write' || boundary === 'rename' ? current : payload);
+                expect([...folder.files.keys()].some(name => name.includes('.mindwtr-et-s-'))).toBe(true);
+                expect(folder.counters().lateCalls).toBe(0);
+            } else {
+                release.resolve(undefined); expect(await operation.result).toEqual({ state: 'fulfilled', value: undefined });
+                expect(folder.files.get(uri)).toEqual(payload);
+            }
+            expect(folder.counters().legacyCalls).toBe(0);
+        } finally { release.resolve(undefined); await operation.result; }
+    });
+
+    it('forwards old backup bytes to owned retirement after verifying replacement', async () => {
+        const folder = observedFolder({ 'data.json': current, 'data.json.bak': oldBackup });
+        const result = await observe(write(folder)).result;
+        expect(folder.calls.find(call => call.operation === 'delete')?.bytes).toEqual(oldBackup);
+        expect(result).toEqual({ state: 'fulfilled', value: undefined });
+    });
+
+    it('refuses a same-length canonical verification mismatch before owned cleanup', async () => {
+        const folder = observedFolder({ 'data.json': current }), remote = await remoteFor(folder), read = await remote.read('data.json');
+        let installed = false;
+        const changed = new Uint8Array(payload); changed[changed.findIndex(byte => byte === 'd'.charCodeAt(0))] ^= 1;
+        folder.after(call => { if (call.operation === 'write' && call.uri === uri) installed = true; });
+        folder.before(call => { if (installed && call.operation === 'read' && call.uri === uri) folder.files.set(uri, changed); });
+        const result = await observe(remote.write('data.json', payload, read.version)).result;
+        expect(result.state).toBe('rejected');
+        if (result.state === 'rejected') expect(result.reason).toBeInstanceOf(SyncEncryptionRemoteConflictError);
+        expect(folder.calls.filter(call => call.operation === 'delete')).toEqual([]);
+        expect(folder.files.get(uri)).toEqual(changed);
+        expect([...folder.files.keys()].some(name => name.includes('.mindwtr-et-q-'))).toBe(true);
+    });
+
+    it('refuses generic native writes and deletion without an owned-byte observation', async () => {
+        const folder = observedFolder({ 'data.json': current }), sync = createMobileFileSync(folder.host);
+        await expect(sync.writeSyncArtifactBytes(uri, payload)).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        await expect(sync.deleteSyncArtifact(uri)).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(folder.files.get(uri)).toEqual(current); expect(folder.calls).toEqual([]);
+        expect(folder.counters().legacyCalls).toBe(0);
+    });
+
+    it('refuses a created-only destination outside the selected root', async () => {
+        const folder = observedFolder(), sync = createMobileFileSync(folder.host);
+        await expect(sync.writeSyncArtifactBytes('file:///outside/data.json', payload, { createOnly: true })).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(folder.files.size).toBe(0); expect(folder.counters().legacyCalls).toBe(0);
+    });
+
+    it('retains a changed quarantine when owned cleanup rejects its old generation', async () => {
+        const folder = observedFolder({ 'data.json': current }), remote = await remoteFor(folder), read = await remote.read('data.json');
+        let changed: string | undefined;
+        folder.before(call => {
+            if (call.operation === 'delete' && call.uri.includes('.mindwtr-et-q-')) {
+                changed = call.uri; folder.files.set(call.uri, peer);
+            }
+        });
+        await expect(remote.write('data.json', payload, read.version)).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+        expect(changed).toBeDefined();
+        if (changed) expect(folder.files.get(changed)).toEqual(peer);
+        expect(folder.files.get(uri)).toEqual(payload); expect(folder.counters().lateCalls).toBe(0);
+        expect(folder.completions()).toEqual([]);
+    });
+
+    it.each([false, true])('quarantines versioned remove and preserves a recreated canonical=%s', async recreate => {
+        const folder = observedFolder({ 'data.json': current }), remote = await remoteFor(folder), read = await remote.read('data.json');
+        if (read.version === null) throw new Error('Expected observed generation');
+        let moved = false;
+        folder.after(call => { if (call.operation === 'rename') moved = true; });
+        folder.before(call => { if (recreate && moved && call.operation === 'info' && call.uri === uri) folder.files.set(uri, peer); });
+        if (recreate) {
+            await expect(remote.remove('data.json', read.version)).rejects.toBeInstanceOf(SyncEncryptionRemoteConflictError);
+            expect(folder.files.get(uri)).toEqual(peer); expect(folder.calls.some(call => call.operation === 'delete')).toBe(false);
+        } else {
+            await remote.remove('data.json', read.version); expect(folder.files.has(uri)).toBe(false);
+            expect(folder.calls.filter(call => call.operation === 'delete').map(call => call.bytes)).toEqual([current]);
+        }
+        expect(folder.counters().legacyCalls).toBe(0);
     });
 });

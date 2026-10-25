@@ -9,6 +9,8 @@ import { decodeUriSafe, sleep } from './async-utils';
 import {
     createMobileFileSyncRemote,
     fileSyncErrorCode,
+    fileSyncOwnerCall,
+    FileSyncPathOwnerTerminatedError,
     type MobileFileSyncHost,
     type MobileFileSyncSafPort,
 } from './mobile-file-sync-remote';
@@ -125,6 +127,9 @@ export type ResolvedSafSyncFile = { uri: string; name: string; exists: boolean }
  *  same host over SafDocumentsCore). One instance per app: it keeps the folder resolution cache. */
 export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
     const remote = createMobileFileSyncRemote(host);
+    const observedPublication = host.path?.observedPublication !== undefined;
+    const pathExists = (uri: string) => observedPublication
+        ? fileSyncOwnerCall(() => host.path.exists(uri)) : host.path.exists(uri);
     const {
         createFileSyncEncryptionRemotePort,
         isUnverifiedLengthRead,
@@ -216,14 +221,15 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
         if (host.os() !== 'ios') return false;
         if (!fileUri.startsWith('file://')) return false;
         try {
-            if (await host.path.exists(fileUri)) return false; // Real file is present
+            if (await pathExists(fileUri)) return false; // Real file is present
             // Check for .Name.icloud placeholder
             const parts = fileUri.split('/');
             const name = parts.pop() ?? '';
             const parentUri = parts.join('/');
             const placeholderUri = `${parentUri}/.${name}.icloud`;
-            return await host.path.exists(placeholderUri);
-        } catch {
+            return await pathExists(placeholderUri);
+        } catch (error) {
+            if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
             return false;
         }
     };
@@ -300,7 +306,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             return (await readSafText(fileUri)).text;
         }
 
-        const text = await host.path.readText(fileUri);
+        const text = observedPublication
+            ? await fileSyncOwnerCall(() => host.path.readText(fileUri)) : await host.path.readText(fileUri);
         if (text === null) {
             // No path in the context: a sync folder's path can name the user or their files.
             host.log.info('Sync file does not exist', { scope: 'sync' });
@@ -597,6 +604,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                 try {
                     fileContent = await host.bookmarks.readText(bookmark);
                 } catch (error) {
+                    if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
                     host.log.warn('Bookmarked sync read failed; falling back to direct file access', {
                         scope: 'sync',
                         extra: { error: fileSyncErrorCode(error) },
@@ -629,7 +637,8 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                         host.log.info('Using backup file while primary is iCloud-evicted', { scope: 'sync' });
                         return { data: parseAppData(backupContent), fromBackup: true };
                     }
-                } catch {
+                } catch (error) {
+                    if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
                     // Backup also unavailable.
                 }
                 throw new Error(ICLOUD_EVICTED_MESSAGE);
@@ -676,7 +685,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                         throw parseError;
                     }
                 } catch (error) {
-                    if (error instanceof SyncEncryptionNoKeyError || error instanceof FileSyncUnverifiedReadError) throw error;
+                    if (error instanceof FileSyncPathOwnerTerminatedError || error instanceof SyncEncryptionNoKeyError || error instanceof FileSyncUnverifiedReadError) throw error;
                     lastError = error;
                     // Small backoff to allow file writes to finish.
                     await sleep(120 + attempt * 80);
@@ -684,12 +693,16 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             }
             // Before the "invalid JSON" repair path can fire: ciphertext under the plain name
             // is not corrupt JSON (decision #4). Read the raw bytes and check for MWENC1.
-            const rawBytes = await readSyncArtifactBytes(resolvedUri).catch(() => null);
+            const rawBytes = await readSyncArtifactBytes(resolvedUri).catch((error: unknown) => {
+                if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
+                return null;
+            });
             if (await discoverEncryptedSyncFolder(resolvedUri, rawBytes, options?.locationScope)) {
                 throw new SyncEncryptionNoKeyError();
             }
             throw lastError;
         } catch (error) {
+            if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
             // Fail closed: neither a no-key discovery nor a failed decrypt may reach the
             // "invalid JSON -> return null and repair" branch below. Defense in depth — no
             // current MWENC1 error message matches that branch's regex, so removing these
@@ -884,6 +897,7 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
                     scope: 'sync', extra: { releaseCheck: 'v1.3.7/file-sync-saf-safety', check: 'backup', outcome: 'rotated' },
                 });
             } catch (error) {
+                if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
                 host.log.warn('File Sync backup rotation skipped; continuing with the atomic write', {
                     scope: 'sync',
                     extra: { error: fileSyncErrorCode(error) },
@@ -911,6 +925,12 @@ export const createMobileFileSync = (host: MobileFileSyncFullHost) => {
             parseAppData(new TextDecoder().decode(plaintext));
         } else {
             parseAppData(new TextDecoder().decode(written.bytes));
+        }
+        if (observedPublication && !resolvedUri.startsWith('content://')) {
+            host.log.info('File Sync observed path publication completed', {
+                scope: 'sync',
+                extra: { releaseCheck: 'v1.3.8/file-sync-observed-publication', operation: 'write', outcome: 'completed' },
+            });
         }
     };
 

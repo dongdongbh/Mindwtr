@@ -32,6 +32,23 @@ import { LEGACY_SYNC_FILE_NAME, SYNC_FILE_NAME } from './sync-service-utils';
 
 export const SYNC_FILE_TRANSITION_CAS_UNAVAILABLE = 'SYNC_FILE_TRANSITION_CAS_UNAVAILABLE';
 
+/** A rejected observed-owner operation ends this attempt; error text never grants continuation. */
+export class FileSyncPathOwnerTerminatedError extends Error {
+    readonly code = 'FILE_SYNC_PATH_OWNER_TERMINATED';
+    constructor() {
+        super('FILE_SYNC_PATH_OWNER_TERMINATED: the selected path owner session cannot continue');
+        this.name = 'FileSyncPathOwnerTerminatedError';
+    }
+}
+
+export const fileSyncOwnerCall = async <T>(operation: () => T | Promise<T>): Promise<T> => {
+    try {
+        return await operation();
+    } catch (error) {
+        throw error instanceof FileSyncPathOwnerTerminatedError ? error : new FileSyncPathOwnerTerminatedError();
+    }
+};
+
 /** A File Sync log line's error: the error's leading code (`SAF_DOCUMENT_UNAVAILABLE`, `SYNC_FILE_LOCK_BUSY`) or its plain
  *  name, never its text. Provider and file-system messages quote the document's URI or path, which names the user's files. */
 export const fileSyncErrorCode = (error: unknown): string => {
@@ -94,6 +111,13 @@ export type MobileFileSyncPathPort = {
     delete(uri: string): Promise<void>;
     /** Renames the file within its folder and answers its new URI; throws when the name is taken. */
     rename(uri: string, name: string): string | Promise<string>;
+    /** Undefined alone selects legacy mutations; a present capability must be complete. */
+    observedPublication?: MobileFileSyncObservedPublication;
+};
+
+export type MobileFileSyncObservedPublication = Required<Pick<MobileFileSyncPathPort, 'createExclusive' | 'writeCreated'>> & {
+    renameObserved(uri: string, name: string, expectedBytes: Uint8Array): Promise<string>;
+    deleteOwned(uri: string, expectedBytes: Uint8Array): Promise<void>;
 };
 
 export type MobileFileSyncLog = {
@@ -139,6 +163,28 @@ export type FileSyncRemotePort = SyncEncryptionRemotePort & {
 /** File Sync's folder IO and transition port over the host's SAF and path ports (React Native:
  *  expo-file-system and SafDocumentsCore; native Android: SafDocumentsCore). */
 export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
+    const publication = host.path?.observedPublication;
+    if (publication !== undefined && (publication === null || typeof publication !== 'object'
+        || typeof publication.createExclusive !== 'function' || typeof publication.writeCreated !== 'function'
+        || typeof publication.renameObserved !== 'function' || typeof publication.deleteOwned !== 'function')) {
+        throw new Error(`${SYNC_FILE_TRANSITION_CAS_UNAVAILABLE}: a complete observed publication capability is required`);
+    }
+    const createPathExclusive = (uri: string) => publication
+        ? fileSyncOwnerCall(() => publication.createExclusive(uri)) : host.path.createExclusive(uri);
+    const writePathCreated = (uri: string, bytes: Uint8Array) => publication
+        ? fileSyncOwnerCall(() => publication.writeCreated(uri, new Uint8Array(bytes))) : host.path.writeCreated(uri, bytes);
+    const pathInfo = (uri: string) => publication
+        ? fileSyncOwnerCall(async () => {
+            const info = await host.path.info(uri);
+            if (typeof info.exists !== 'boolean') throw new FileSyncPathOwnerTerminatedError();
+            return info;
+        }) : host.path.info(uri);
+    const pathList = (uri: string) => publication
+        ? fileSyncOwnerCall(() => host.path.list(uri)) : host.path.list(uri);
+    const legacyMissingInfo = (error: unknown): { exists: false } => {
+        if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
+        return { exists: false };
+    };
     const saf = (): MobileFileSyncSafPort => {
         if (!host.saf) throw new Error('This Android build does not support Storage Access Framework (SAF).');
         return host.saf;
@@ -187,7 +233,9 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 throw error;
             }
         }
-        return host.path.readBytes(uri);
+        if (!publication) return host.path.readBytes(uri);
+        const bytes = await fileSyncOwnerCall(() => host.path.readBytes(uri));
+        return bytes === null ? null : new Uint8Array(bytes);
     };
 
     /**
@@ -228,12 +276,13 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
     ): Promise<void> => {
         if (options.createOnly) {
             if (isSaf(uri)) throw new Error('SAF create-only writes must create through the directory handle');
-            if (await host.path.createExclusive(uri) === 'exists') {
+            if (await createPathExclusive(uri) === 'exists') {
                 throw new SyncEncryptionRemoteConflictError(`${uri} was created by another writer`);
             }
-            await host.path.writeCreated(uri, bytes);
+            await writePathCreated(uri, bytes);
             return;
         }
+        if (!isSaf(uri) && publication) throw new FileSyncPathOwnerTerminatedError();
         const isSealed = inspectSyncArtifact(bytes).kind === 'encrypted';
         if (isSealed) {
             // Ciphertext: pad up to the previous length instead of shrinking. Safe forever —
@@ -269,10 +318,23 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         return writeArtifactPayload(uri, bytes);
     };
 
-    const deleteSyncArtifact = async (uri: string): Promise<void> => {
+    const writeFreshArtifact = async (uri: string, bytes: Uint8Array): Promise<void> => {
+        if (!isSaf(uri) && publication) {
+            await writePathCreated(uri, bytes);
+            return;
+        }
+        await writeSyncArtifactBytes(uri, bytes);
+    };
+
+    const deleteSyncArtifact = async (uri: string, expectedBytes?: Uint8Array): Promise<void> => {
         if (isSaf(uri)) {
             if (!host.saf) return;
             await host.saf.delete(uri);
+            return;
+        }
+        if (publication) {
+            if (expectedBytes === undefined) throw new FileSyncPathOwnerTerminatedError();
+            await fileSyncOwnerCall(() => publication.deleteOwned(uri, new Uint8Array(expectedBytes)));
             return;
         }
         await host.path.delete(uri);
@@ -288,7 +350,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         /** `repairDecoratedName: false` refuses a provider-decorated create instead of renaming it
          *  onto `name` (a rename that may replace a document a peer just published there). */
         createNew(name: string, mimeType?: string, options?: { repairDecoratedName?: boolean }): Promise<string>;
-        rename(uri: string, name: string): Promise<string>;
+        rename(uri: string, name: string, expectedBytes?: Uint8Array): Promise<string>;
     };
 
     const openSafDirectory = async (dirUri: string): Promise<DirectoryHandle> => {
@@ -411,6 +473,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 try {
                     renamed = await renameSafDocument(uri, name);
                 } catch (error) {
+                    if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
                     if ((await listExact(name)).length > 0) {
                         throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
                     }
@@ -428,7 +491,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         const entries = new Map<string, string>();
         const refresh = async (): Promise<void> => {
             const next = new Map<string, string>();
-            for (const name of await host.path.list(normalized)) {
+            for (const name of await pathList(normalized)) {
                 next.set(name, `${normalized}${name}`);
             }
             entries.clear();
@@ -437,7 +500,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         await refresh();
         const listExact = async (name: string): Promise<string[]> => {
             const candidate = `${normalized}${name}`;
-            const info = await host.path.info(candidate).catch(() => ({ exists: false }));
+            const info = await pathInfo(candidate).catch(legacyMissingInfo);
             if (info.exists) {
                 entries.set(name, candidate);
                 return [candidate];
@@ -452,7 +515,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 let existing = entries.get(name);
                 if (!existing) {
                     const candidate = `${normalized}${name}`;
-                    const info = await host.path.info(candidate).catch(() => ({ exists: false }));
+                    const info = await pathInfo(candidate).catch(legacyMissingInfo);
                     if (info.exists) {
                         existing = candidate;
                         entries.set(name, candidate);
@@ -467,18 +530,24 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             listExact,
             createNew: async (name) => {
                 const uri = `${normalized}${name}`;
-                if (await host.path.createExclusive(uri) === 'exists') {
+                if (await createPathExclusive(uri) === 'exists') {
                     throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
                 }
                 entries.set(name, uri);
                 return uri;
             },
-            rename: async (uri, name) => {
+            rename: async (uri, name, expectedBytes) => {
                 const previousName = getLeafName(uri);
                 let renamedUri: string;
                 try {
-                    renamedUri = await host.path.rename(uri, name);
+                    if (publication) {
+                        if (expectedBytes === undefined) throw new FileSyncPathOwnerTerminatedError();
+                        renamedUri = await fileSyncOwnerCall(() => publication.renameObserved(uri, name, new Uint8Array(expectedBytes)));
+                    } else {
+                        renamedUri = await host.path.rename(uri, name);
+                    }
                 } catch (error) {
+                    if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
                     if ((await listExact(name)).length > 0) {
                         throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
                     }
@@ -559,9 +628,9 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         }
         const normalized = target.dirUri.endsWith('/') ? target.dirUri : `${target.dirUri}/`;
         const blocking: string[] = [];
-        for (const name of await host.path.list(normalized)) {
+        for (const name of await pathList(normalized)) {
             if (!isRetainedGenerationName(name)) continue;
-            const info = await host.path.info(`${normalized}${name}`);
+            const info = await pathInfo(`${normalized}${name}`);
             if (info.exists === false) continue;
             if (typeof info.size === 'number' && info.size === 0) continue;
             blocking.push(name);
@@ -850,7 +919,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             // authoritative bytes in quarantine for recovery.
             try {
                 const restoredUri = await location.directory.createNew(location.leaf, location.mimeType);
-                await writeSyncArtifactBytes(restoredUri, displaced);
+                await writeFreshArtifact(restoredUri, displaced);
                 const canonical = await location.directory.listExact(location.leaf);
                 const restored = await readSyncArtifactBytes(restoredUri);
                 if (
@@ -861,7 +930,8 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 ) {
                     return;
                 }
-            } catch {
+            } catch (error) {
+                if (error instanceof FileSyncPathOwnerTerminatedError) throw error;
                 // The transition returns a conflict below. Suppressing restoration errors is
                 // intentional: deleting or replacing either generation would be less safe.
             }
@@ -873,15 +943,21 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             if (existing.length > 1) throw new SyncEncryptionRemoteConflictError(`${name} is ambiguous`);
             let displacedUri: string | null = null;
             let displacedName: string | null = null;
+            let displacedBytes: Uint8Array | undefined;
             if (existing.length === 1) {
+                if (publication && !isSaf(existing[0])) {
+                    const observed = await readSyncArtifactBytes(existing[0]);
+                    if (observed === null) throw new SyncEncryptionRemoteConflictError(`${name} disappeared before backup rotation`);
+                    displacedBytes = observed;
+                }
                 displacedName = transitionScratchName('quarantine');
-                displacedUri = await documents.rename(existing[0], displacedName);
+                displacedUri = await documents.rename(existing[0], displacedName, displacedBytes);
             }
             // Exclusive install: a new document under the backup's name, never a rename onto it (a
             // provider's rename may replace a backup a peer published meanwhile). createNew fails
             // closed when that name is taken; the old backup then stays in its quarantine.
             const installedUri = await documents.createNew(name, mimeType, { repairDecoratedName: false });
-            await writeSyncArtifactBytes(installedUri, bytes);
+            await writeFreshArtifact(installedUri, bytes);
             const installed = await documents.listExact(name);
             const written = await readSyncArtifactBytes(installedUri);
             if (
@@ -893,7 +969,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after backup rotation`);
             }
             if (displacedUri && displacedName) {
-                await deleteSyncArtifact(displacedUri);
+                await deleteSyncArtifact(displacedUri, displacedBytes);
                 documents.entries.delete(displacedName);
             }
         };
@@ -912,7 +988,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 if (!location) throw new Error(`sync encryption: cannot create ${name} in the sync folder`);
                 const stageName = transitionScratchName('stage');
                 const stageUri = await location.directory.createNew(stageName, location.mimeType);
-                await writeSyncArtifactBytes(stageUri, bytes);
+                await writeFreshArtifact(stageUri, bytes);
                 const stagedBytes = await readSyncArtifactBytes(stageUri);
                 if (!stagedBytes || await versionFor(stagedBytes) !== await versionFor(bytes)) {
                     throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after transition staging`);
@@ -927,7 +1003,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                         throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
                     }
                     quarantineName = transitionScratchName('quarantine');
-                    quarantineUri = await location.directory.rename(exact[0], quarantineName);
+                    quarantineUri = await location.directory.rename(exact[0], quarantineName, current.bytes ?? undefined);
                     const displaced = await readSyncArtifactBytes(quarantineUri);
                     if (!displaced || await versionFor(displaced) !== expectedVersion) {
                         if (displaced) await restoreDisplacedGeneration(location, displaced);
@@ -941,7 +1017,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 // replaces an existing target. createNew verifies the exact canonical name and
                 // therefore fails closed when a peer creates it after quarantine/staging.
                 const installedUri = await location.directory.createNew(location.leaf, location.mimeType);
-                await writeSyncArtifactBytes(installedUri, stagedBytes);
+                await writeFreshArtifact(installedUri, stagedBytes);
                 const canonical = await location.directory.listExact(location.leaf);
                 if (canonical.length !== 1 || canonical[0] !== installedUri) {
                     throw new SyncEncryptionRemoteConflictError(`${name} was created by another writer`);
@@ -950,16 +1026,18 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 if (!written || await versionFor(written) !== await versionFor(bytes)) {
                     throw new SyncEncryptionRemoteConflictError(`${name} could not be verified after transition write`);
                 }
+                let quarantineBytes: Uint8Array | undefined;
                 if (quarantineUri) {
                     const retained = await readSyncArtifactBytes(quarantineUri);
                     if (!retained || await versionFor(retained) !== expectedVersion) {
                         throw new SyncEncryptionRemoteConflictError(`${name} quarantine changed during sync encryption transition`);
                     }
+                    quarantineBytes = retained;
                 }
-                await deleteSyncArtifact(stageUri);
+                await deleteSyncArtifact(stageUri, stagedBytes);
                 location.directory.entries.delete(stageName);
                 if (quarantineUri && quarantineName) {
-                    await deleteSyncArtifact(quarantineUri);
+                    await deleteSyncArtifact(quarantineUri, quarantineBytes);
                     location.directory.entries.delete(quarantineName);
                 }
             },
@@ -974,7 +1052,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 const exact = await location.directory.listExact(location.leaf);
                 if (exact.length !== 1) throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
                 const quarantineName = transitionScratchName('quarantine');
-                const quarantineUri = await location.directory.rename(exact[0], quarantineName);
+                const quarantineUri = await location.directory.rename(exact[0], quarantineName, current.bytes ?? undefined);
                 const displaced = await readSyncArtifactBytes(quarantineUri);
                 if (!displaced || await versionFor(displaced) !== expectedVersion) {
                     if (displaced) await restoreDisplacedGeneration(location, displaced);
@@ -988,7 +1066,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 if (!retained || await versionFor(retained) !== expectedVersion) {
                     throw new SyncEncryptionRemoteConflictError(`${name} quarantine changed during sync encryption transition`);
                 }
-                await deleteSyncArtifact(quarantineUri);
+                await deleteSyncArtifact(quarantineUri, retained);
                 location.directory.entries.delete(quarantineName);
                 location.directory.entries.delete(location.leaf);
             },
