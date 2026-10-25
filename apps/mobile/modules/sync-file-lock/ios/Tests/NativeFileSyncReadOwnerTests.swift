@@ -34,6 +34,8 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
       switch event {
       case .admitted: counts.increment("admitted")
       case .createdWriteCompleted: counts.increment("write-completed")
+      case .quarantineCompleted: counts.increment("quarantine-completed")
+      case .ownedDeleteCompleted: counts.increment("delete-completed")
       }
     })
   }
@@ -297,6 +299,406 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
       XCTAssertEqual(counts.count("write"), 1)
       XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("late").path))
       let token = try competing.acquireDirectory(root); try competing.release(token)
+    }
+  }
+
+  func testObservedQuarantineAndOwnedStageDeletionUseTheSameRealLease() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), prior = Data([1, 2, 3]), sentinel = Data([9, 8, 7]), counts = Counts()
+    try prior.write(to: root.appendingPathComponent("data.json"))
+    for name in ["unknown", "data.json.bak"] { try sentinel.write(to: root.appendingPathComponent(name)) }
+    var io = access(counts)
+    io.read = { fd, buffer, length in
+      counts.set("last-fd", Int(fd)); return Darwin.read(fd, buffer, length)
+    }
+    let writer = owner(root, counts, access: io), handle = try await writer.open()
+    try await writer.renameObserved("data.json", to: ".mindwtr-et-q-prior", expectedBytes: prior, using: handle)
+    XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("data.json").path))
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(".mindwtr-et-q-prior")), prior)
+    let adoptedFD = Int32(counts.count("last-fd"))
+    try await writer.deleteOwned(".mindwtr-et-q-prior", expectedBytes: prior, using: handle)
+    XCTAssertEqual(Darwin.fcntl(adoptedFD, F_GETFD), -1)
+    for (index, bytes) in [Data(), Data(repeating: 42, count: 80_000)].enumerated() {
+      let stage = ".mindwtr-et-s-\(index)", quarantine = ".mindwtr-et-q-\(index)"
+      let result = try await writer.createExclusive(stage, using: handle); XCTAssertEqual(result, .created)
+      try await writer.writeCreated(stage, bytes: bytes, using: handle)
+      if index == 0 {
+        try await writer.deleteOwned(stage, expectedBytes: bytes, using: handle)
+      } else {
+        let createdFD = Int32(counts.count("last-fd"))
+        try await writer.renameObserved(stage, to: quarantine, expectedBytes: bytes, using: handle)
+        try await writer.deleteOwned(quarantine, expectedBytes: bytes, using: handle)
+        XCTAssertEqual(Darwin.fcntl(createdFD, F_GETFD), -1)
+      }
+    }
+    let competing = SyncFileLockEngine(); defer { competing.drain() }
+    XCTAssertThrowsError(try competing.acquireDirectory(root))
+    XCTAssertEqual(counts.count("quarantine-completed"), 2); XCTAssertEqual(counts.count("delete-completed"), 3)
+    try await writer.close(handle)
+    let token = try competing.acquireDirectory(root); try competing.release(token)
+    XCTAssertEqual(counts.count("scope-stop"), 1)
+    for name in ["unknown", "data.json.bak"] { XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(name)), sentinel) }
+    XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: root.path)), Set([".mindwtr.lock", "unknown", "data.json.bak"]))
+  }
+
+  func testQuarantineCannotBecomeAnOwnedWritableCreation() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), bytes = Data([1, 2, 3]), counts = Counts()
+    try bytes.write(to: root.appendingPathComponent("data.json"))
+    var io = access(counts)
+    io.write = { fd, buffer, length in counts.increment("write"); return Darwin.write(fd, buffer, length) }
+    let writer = owner(root, counts, access: io), handle = try await writer.open()
+    try await writer.renameObserved("data.json", to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: handle)
+    await refuses { try await writer.writeBytes(".mindwtr-et-q-prior", bytes: Data([9]), using: handle) }
+    XCTAssertEqual(counts.count("write"), 0); XCTAssertEqual(counts.count("write-completed"), 0)
+    XCTAssertEqual(counts.count("quarantine-completed"), 1); XCTAssertEqual(counts.count("scope-stop"), 1)
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(".mindwtr-et-q-prior")), bytes)
+  }
+
+  func testUnfinishedCreationCannotGrantObservedQuarantineAuthority() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), counts = Counts()
+    var io = access(counts); let rename = io.renameExclusive
+    io.renameExclusive = { fd, source, destination in counts.increment("rename"); return rename(fd, source, destination) }
+    let writer = owner(root, counts, access: io), handle = try await writer.open()
+    _ = try await writer.createExclusive(".mindwtr-et-s-stage", using: handle)
+    await refuses { try await writer.renameObserved(".mindwtr-et-s-stage", to: ".mindwtr-et-q-prior", expectedBytes: Data(), using: handle) }
+    XCTAssertEqual(counts.count("rename"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(".mindwtr-et-s-stage")), Data())
+    XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".mindwtr-et-q-prior").path))
+  }
+
+  func testQuarantineRejectsInvalidDestinationsAndForeignHandlesWithoutIO() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), otherRoot = try folder(parent, "other"), counts = Counts(), bytes = Data([1])
+    try bytes.write(to: root.appendingPathComponent("source"))
+    var io = access(counts); let rename = io.renameExclusive
+    io.renameExclusive = { fd, source, destination in counts.increment("rename"); return rename(fd, source, destination) }
+    let writer = owner(root, counts, access: io), other = owner(otherRoot, Counts())
+    let handle = try await writer.open(), foreign = try await other.open()
+    for name in ["", ".", "..", "../target", "/target", "bad\0name", "folder/target", ".mindwtr.lock", "data.json", ".mindwtr-et-s-target", ".MINDWTR-et-q-target", ".mindwtr-et-q-"] {
+      await refuses { try await writer.renameObserved("source", to: name, expectedBytes: bytes, using: handle) }
+    }
+    for name in ["", ".", "..", "../source", "/source", "bad\0name", "folder/source", ".mindwtr.lock"] {
+      await refuses { try await writer.renameObserved(name, to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: handle) }
+      await refuses { try await writer.deleteOwned(name, expectedBytes: bytes, using: handle) }
+    }
+    await refuses { try await writer.renameObserved("source", to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: foreign) }
+    await refuses { try await writer.deleteOwned(".mindwtr-et-s-stage", expectedBytes: bytes, using: foreign) }
+    XCTAssertEqual(counts.count("rename"), 0); XCTAssertEqual(counts.count("scope-stop"), 0)
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("source")), bytes)
+    try await writer.close(handle); try await other.close(foreign)
+    await refuses { try await writer.renameObserved("source", to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: handle) }
+    await refuses { try await writer.deleteOwned(".mindwtr-et-s-stage", expectedBytes: bytes, using: handle) }
+  }
+
+  func testQuarantineNeverReplacesDestinationOrMovesAnUnexpectedGeneration() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for mode in ["collision", "bytes", "missing", "directory", "symlink", "hardlink", "root", "unicode"] {
+      let root = try folder(parent, mode), source = root.appendingPathComponent("source"), destination = root.appendingPathComponent(".mindwtr-et-q-prior")
+      let bytes = Data([1, 2, 3]), peer = Data([9, 8, 7]), counts = Counts()
+      if mode == "directory" { try FileManager.default.createDirectory(at: source, withIntermediateDirectories: false) }
+      else if mode == "symlink" {
+        try bytes.write(to: root.appendingPathComponent("sentinel"))
+        try FileManager.default.createSymbolicLink(at: source, withDestinationURL: root.appendingPathComponent("sentinel"))
+      } else if mode != "missing" { try bytes.write(to: source) }
+      if mode == "hardlink" { try FileManager.default.linkItem(at: source, to: root.appendingPathComponent("alias")) }
+      if mode == "collision" { try peer.write(to: destination) }
+      if mode == "unicode" { try bytes.write(to: root.appendingPathComponent("\u{e9}")) }
+      var io = access(counts); let rename = io.renameExclusive
+      io.renameExclusive = { fd, source, destination in counts.increment("rename"); return rename(fd, source, destination) }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      var requestedSource = "source"
+      var unicodeEntry: String?
+      if mode == "unicode" {
+        let listing = try await writer.list(using: handle)
+        let actual = try XCTUnwrap(listing.first(where: { $0.name == "\u{e9}" })).name
+        unicodeEntry = actual
+        requestedSource = actual.utf8.elementsEqual("\u{e9}".utf8) ? "e\u{301}" : "\u{e9}"
+        XCTAssertFalse(actual.utf8.elementsEqual(requestedSource.utf8))
+      }
+      if mode == "root" {
+        try FileManager.default.moveItem(at: root, to: parent.appendingPathComponent("old-root"))
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        try peer.write(to: source)
+      }
+      await refuses {
+        try await writer.renameObserved(requestedSource, to: ".mindwtr-et-q-prior", expectedBytes: mode == "bytes" ? peer : bytes, using: handle)
+      }
+      XCTAssertEqual(counts.count("rename"), mode == "collision" ? 1 : 0)
+      XCTAssertEqual(counts.count("quarantine-completed"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+      if mode == "collision" { XCTAssertEqual(try Data(contentsOf: destination), peer) }
+      else { XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path)) }
+      if ["collision", "bytes", "hardlink", "unicode"].contains(mode) { XCTAssertEqual(try Data(contentsOf: source), bytes) }
+      if mode == "root" { XCTAssertEqual(try Data(contentsOf: source), peer) }
+      if mode == "symlink" { XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("sentinel")), bytes) }
+      if let unicodeEntry { XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(unicodeEntry)), bytes) }
+    }
+  }
+
+  func testLockCaseAliasesAreRefusedBeforeAnyQuarantineMutation() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for (index, alias) in [".MINDWTR.LOCK", ".MiNdWtR.LoCk"].enumerated() {
+      let root = try folder(parent, "alias-\(index)"), counts = Counts()
+      var io = access(counts); let rename = io.renameExclusive
+      io.renameExclusive = { fd, source, destination in counts.increment("rename"); return rename(fd, source, destination) }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      let lock = root.appendingPathComponent(".mindwtr.lock"), bytes = try Data(contentsOf: lock)
+      var before = Darwin.stat(); XCTAssertEqual(Darwin.lstat(lock.path, &before), 0)
+      let listing = try await writer.list(using: handle)
+      XCTAssertTrue(listing.contains(where: { $0.name.utf8.elementsEqual(".mindwtr.lock".utf8) }))
+      XCTAssertFalse(listing.contains(where: { $0.name.utf8.elementsEqual(alias.utf8) }))
+      await refuses { try await writer.renameObserved(alias, to: ".mindwtr-et-q-lock", expectedBytes: bytes, using: handle) }
+      XCTAssertEqual(counts.count("rename"), 0); XCTAssertEqual(counts.count("quarantine-completed"), 0)
+      XCTAssertEqual(counts.count("scope-stop"), 1)
+      XCTAssertEqual(try Data(contentsOf: lock), bytes)
+      var after = Darwin.stat(); XCTAssertEqual(Darwin.lstat(lock.path, &after), 0)
+      XCTAssertEqual(after.st_dev, before.st_dev); XCTAssertEqual(after.st_ino, before.st_ino)
+      XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".mindwtr-et-q-lock").path))
+      let competing = SyncFileLockEngine(); defer { competing.drain() }
+      let token = try competing.acquireDirectory(root); try competing.release(token)
+    }
+  }
+
+  func testSourceReplacementDuringCompleteObservationRefusesBeforeRename() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), bytes = Data([1, 2, 3]), peer = Data([9, 8, 7]), counts = Counts()
+    let source = root.appendingPathComponent("source"), retained = root.appendingPathComponent("retained")
+    try bytes.write(to: source)
+    var io = access(counts); let rename = io.renameExclusive
+    io.read = { fd, buffer, length in
+      let count = Darwin.read(fd, buffer, length)
+      if count == 0, counts.count("replaced") == 0 {
+        counts.increment("replaced")
+        do { try FileManager.default.moveItem(at: source, to: retained); try peer.write(to: source) }
+        catch { XCTFail("Could not establish replacement control") }
+      }
+      return count
+    }
+    io.renameExclusive = { fd, source, destination in counts.increment("rename"); return rename(fd, source, destination) }
+    let writer = owner(root, counts, access: io), handle = try await writer.open()
+    await refuses { try await writer.renameObserved("source", to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: handle) }
+    XCTAssertEqual(counts.count("rename"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+    XCTAssertEqual(try Data(contentsOf: source), peer); XCTAssertEqual(try Data(contentsOf: retained), bytes)
+  }
+
+  func testDeleteRequiresCurrentOwnerRoleAndExactGenerationBeforeUnlink() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for mode in ["read-stage", "read-quarantine", "canonical", "backup", "created-quarantine", "unfinished", "wrong-bytes", "modified", "replaced", "hardlink", "missing", "old-owner", "unicode"] {
+      let root = try folder(parent, mode), counts = Counts(), bytes = Data([1, 2, 3]), peer = Data([9, 8, 7])
+      let name = mode == "canonical" ? "data.json" : mode == "backup" ? "data.json.bak" : ["read-quarantine", "created-quarantine"].contains(mode) ? ".mindwtr-et-q-prior" : mode == "unicode" ? ".mindwtr-et-s-\u{e9}" : ".mindwtr-et-s-stage"
+      let target = root.appendingPathComponent(name)
+      var io = access(counts); let unlink = io.unlink
+      io.unlink = { fd, name in counts.increment("unlink"); return unlink(fd, name) }
+      var writer = owner(root, counts, access: io), handle = try await writer.open()
+      if mode.hasPrefix("read-") {
+        try bytes.write(to: target)
+        let read = try await writer.read(name, using: handle); XCTAssertEqual(read, .bytes(bytes))
+      } else {
+        let result = try await writer.createExclusive(name, using: handle); XCTAssertEqual(result, .created)
+        if mode != "unfinished" { try await writer.writeCreated(name, bytes: bytes, using: handle) }
+      }
+      if mode == "modified" { try peer.write(to: target) }
+      if mode == "replaced" {
+        try FileManager.default.moveItem(at: target, to: root.appendingPathComponent("retained")); try peer.write(to: target)
+      }
+      if mode == "hardlink" { try FileManager.default.linkItem(at: target, to: root.appendingPathComponent("alias")) }
+      if mode == "missing" { try FileManager.default.removeItem(at: target) }
+      if mode == "old-owner" {
+        try await writer.close(handle)
+        writer = owner(root, counts, access: io); handle = try await writer.open()
+        let read = try await writer.read(name, using: handle); XCTAssertEqual(read, .bytes(bytes))
+      }
+      let stopped = counts.count("scope-stop")
+      await refuses {
+        try await writer.deleteOwned(mode == "unicode" ? ".mindwtr-et-s-e\u{301}" : name, expectedBytes: mode == "wrong-bytes" ? peer : bytes, using: handle)
+      }
+      XCTAssertEqual(counts.count("unlink"), 0); XCTAssertEqual(counts.count("delete-completed"), 0)
+      XCTAssertEqual(counts.count("scope-stop"), stopped + 1)
+      if mode == "missing" { XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)) }
+      else { XCTAssertEqual(try Data(contentsOf: target), mode == "unfinished" ? Data() : ["modified", "replaced"].contains(mode) ? peer : bytes) }
+      if mode == "replaced" { XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("retained")), bytes) }
+    }
+  }
+
+  func testRenameCannotOverwriteAStaleDestinationLedgerEntry() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), counts = Counts(), bytes = Data([1, 2, 3])
+    try bytes.write(to: root.appendingPathComponent("source"))
+    var io = access(counts); let rename = io.renameExclusive, syncFile = io.syncFile
+    io.syncFile = { fd in counts.set("fd", Int(fd)); try syncFile(fd) }
+    io.renameExclusive = { fd, source, destination in counts.increment("rename"); return rename(fd, source, destination) }
+    io.stopScope = { _ in XCTAssertEqual(Darwin.fcntl(Int32(counts.count("fd")), F_GETFD), -1); counts.increment("scope-stop") }
+    let writer = owner(root, counts, access: io), handle = try await writer.open()
+    _ = try await writer.createExclusive(".mindwtr-et-q-prior", using: handle)
+    try await writer.writeCreated(".mindwtr-et-q-prior", bytes: bytes, using: handle)
+    try FileManager.default.removeItem(at: root.appendingPathComponent(".mindwtr-et-q-prior"))
+    await refuses { try await writer.renameObserved("source", to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: handle) }
+    XCTAssertEqual(counts.count("rename"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("source")), bytes)
+  }
+
+  func testRenameFailuresRetainTruthfulNamesAndNeverGrantRestartDeletion() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for mode in ["syscall", "flush", "readback", "recreated", "coordinate-zero", "coordinate-wrong", "coordinate-twice", "coordinate-after"] {
+      let root = try folder(parent, mode), counts = Counts(), bytes = Data([1, 2, 3]), peer = Data([9, 8, 7])
+      let source = root.appendingPathComponent("source"), destination = root.appendingPathComponent(".mindwtr-et-q-prior")
+      try bytes.write(to: source)
+      var io = access(counts); let rename = io.renameExclusive, syncDirectory = io.syncDirectory, coordinate = io.coordinateWrite
+      io.read = { fd, buffer, length in
+        counts.set("fd", Int(fd)); counts.increment("read")
+        let count = Darwin.read(fd, buffer, length)
+        if mode == "readback", counts.count("moved") == 1, count > 0 { buffer.storeBytes(of: UInt8(0), as: UInt8.self) }
+        return count
+      }
+      io.renameExclusive = { fd, from, to in
+        if mode == "syscall" { errno = EIO; return -1 }
+        let result = rename(fd, from, to)
+        if result == 0 {
+          counts.increment("moved")
+          if mode == "recreated" { do { try peer.write(to: source) } catch { XCTFail("Could not establish peer control") } }
+        }
+        return result
+      }
+      io.syncDirectory = { fd in try syncDirectory(fd); if mode == "flush" { throw Owner.Failure.incompleteWrite } }
+      io.coordinateWrite = { url, body in
+        if mode == "coordinate-zero" { return }
+        if mode == "coordinate-wrong" { body(url.deletingLastPathComponent()); return }
+        try coordinate(url, body)
+        if mode == "coordinate-twice" { body(url) }
+        if mode == "coordinate-after" { throw Owner.Failure.coordination }
+      }
+      io.stopScope = { _ in
+        if counts.count("read") > 0 { XCTAssertEqual(Darwin.fcntl(Int32(counts.count("fd")), F_GETFD), -1) }
+        counts.increment("scope-stop")
+      }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      await refuses { try await writer.renameObserved("source", to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: handle) }
+      XCTAssertEqual(counts.count("quarantine-completed"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+      if counts.count("moved") == 1 {
+        XCTAssertEqual(try Data(contentsOf: destination), bytes)
+        if mode == "recreated" { XCTAssertEqual(try Data(contentsOf: source), peer) }
+        else { XCTAssertFalse(FileManager.default.fileExists(atPath: source.path)) }
+        let restarted = owner(root, Counts()), next = try await restarted.open()
+        await refuses { try await restarted.deleteOwned(".mindwtr-et-q-prior", expectedBytes: bytes, using: next) }
+        XCTAssertEqual(try Data(contentsOf: destination), bytes)
+      } else { XCTAssertEqual(try Data(contentsOf: source), bytes); XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path)) }
+      await refuses { _ = try await writer.createExclusive("late", using: handle) }
+    }
+  }
+
+  func testOwnedDeleteFailuresNeverAcknowledgeOrRemoveARecreatedPeer() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for mode in ["syscall", "flush", "readback", "recreated", "coordinate-zero", "coordinate-wrong", "coordinate-twice", "coordinate-after"] {
+      let root = try folder(parent, mode), counts = Counts(), bytes = Data([1, 2, 3]), peer = Data([9, 8, 7])
+      let target = root.appendingPathComponent(".mindwtr-et-s-stage")
+      var io = access(counts); let unlink = io.unlink, syncDirectory = io.syncDirectory, coordinate = io.coordinateWrite, syncFile = io.syncFile
+      io.syncFile = { fd in counts.set("fd", Int(fd)); try syncFile(fd) }
+      io.unlink = { fd, name in
+        counts.increment("unlink")
+        if mode == "syscall" { errno = EIO; return -1 }
+        let result = unlink(fd, name)
+        if result == 0 {
+          counts.increment("removed")
+          if mode == "recreated" { do { try peer.write(to: target) } catch { XCTFail("Could not establish peer control") } }
+        }
+        return result
+      }
+      io.read = { fd, buffer, length in
+        let count = Darwin.read(fd, buffer, length)
+        if mode == "readback", counts.count("armed") == 1, count > 0 { buffer.storeBytes(of: UInt8(0), as: UInt8.self) }
+        return count
+      }
+      io.syncDirectory = { fd in try syncDirectory(fd); if mode == "flush", counts.count("armed") == 1 { throw Owner.Failure.incompleteWrite } }
+      io.coordinateWrite = { url, body in
+        if counts.count("armed") == 0 { try coordinate(url, body); return }
+        if mode == "coordinate-zero" { return }
+        if mode == "coordinate-wrong" { body(url.deletingLastPathComponent()); return }
+        try coordinate(url, body)
+        if mode == "coordinate-twice" { body(url) }
+        if mode == "coordinate-after" { throw Owner.Failure.coordination }
+      }
+      io.stopScope = { _ in XCTAssertEqual(Darwin.fcntl(Int32(counts.count("fd")), F_GETFD), -1); counts.increment("scope-stop") }
+      let writer = owner(root, counts, access: io), handle = try await writer.open()
+      _ = try await writer.createExclusive(".mindwtr-et-s-stage", using: handle)
+      try await writer.writeCreated(".mindwtr-et-s-stage", bytes: bytes, using: handle)
+      counts.set("armed", 1)
+      await refuses { try await writer.deleteOwned(".mindwtr-et-s-stage", expectedBytes: bytes, using: handle) }
+      XCTAssertEqual(counts.count("delete-completed"), 0); XCTAssertEqual(counts.count("scope-stop"), 1)
+      if counts.count("removed") == 0 { XCTAssertEqual(try Data(contentsOf: target), bytes) }
+      else if mode == "recreated" { XCTAssertEqual(try Data(contentsOf: target), peer) }
+      else { XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)) }
+      await refuses { try await writer.writeBytes(".mindwtr-et-s-stage", bytes: peer, using: handle) }
+    }
+  }
+
+  func testCloseAndCancellationDrainEnteredRenameAndDeleteBeforeReleasingAdoptedFDs() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    for operation in ["rename", "delete"] {
+      for mode in ["close", "cancel", "error"] {
+        let root = try folder(parent, operation + "-" + mode), counts = Counts(), bytes = Data([1, 2, 3])
+        let entered = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        let closeStarted = DispatchSemaphore(value: 0), closed = DispatchSemaphore(value: 0)
+        if operation == "rename" { try bytes.write(to: root.appendingPathComponent("source")) }
+        var io = access(counts); let rename = io.renameExclusive, unlink = io.unlink
+        io.read = { fd, buffer, length in counts.set("fd", Int(fd)); return Darwin.read(fd, buffer, length) }
+        let barrier = {
+          counts.increment("entered"); entered.signal()
+          guard release.wait(timeout: .now() + 5) == .success, mode != "error" else { errno = EIO; return false }
+          return true
+        }
+        io.renameExclusive = { fd, source, destination in barrier() ? rename(fd, source, destination) : -1 }
+        io.unlink = { fd, name in barrier() ? unlink(fd, name) : -1 }
+        io.stopScope = { _ in XCTAssertEqual(Darwin.fcntl(Int32(counts.count("fd")), F_GETFD), -1); counts.increment("scope-stop") }
+        let writer = owner(root, counts, access: io), handle = try await writer.open()
+        if operation == "delete" {
+          _ = try await writer.createExclusive(".mindwtr-et-s-stage", using: handle)
+          try await writer.writeCreated(".mindwtr-et-s-stage", bytes: bytes, using: handle)
+        }
+        let changing = Task {
+          if operation == "rename" { try await writer.renameObserved("source", to: ".mindwtr-et-q-prior", expectedBytes: bytes, using: handle) }
+          else { try await writer.deleteOwned(".mindwtr-et-s-stage", expectedBytes: bytes, using: handle) }
+        }
+        XCTAssertEqual(entered.wait(timeout: .now() + 5), .success)
+        var closing: Task<Void, Error>?
+        if mode == "cancel" { changing.cancel() }
+        else {
+          closing = Task { closeStarted.signal(); defer { closed.signal() }; try await writer.close(handle) }
+          XCTAssertEqual(closeStarted.wait(timeout: .now() + 5), .success)
+          XCTAssertEqual(closed.wait(timeout: .now() + 0.05), .timedOut)
+        }
+        XCTAssertEqual(counts.count("scope-stop"), 0)
+        let competing = SyncFileLockEngine(); defer { competing.drain() }
+        XCTAssertThrowsError(try competing.acquireDirectory(root))
+        let late = Task { try await writer.createExclusive("late", using: handle) }
+        release.signal()
+        await refuses { try await changing.value }
+        if let closing { try await closing.value }
+        await refuses { _ = try await late.value }
+        XCTAssertEqual(counts.count("entered"), 1); XCTAssertEqual(counts.count("scope-stop"), 1)
+        XCTAssertEqual(counts.count("quarantine-completed"), 0); XCTAssertEqual(counts.count("delete-completed"), 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("late").path))
+        let token = try competing.acquireDirectory(root); try competing.release(token)
+      }
+    }
+  }
+
+  func testPublicationPrimitiveDiagnosticsHaveOnlyFixedCompletedContexts() {
+    for (event, operation, message) in [
+      (Owner.Diagnostic.quarantineCompleted, "quarantine", "Native iOS File Sync quarantine rename completed"),
+      (Owner.Diagnostic.ownedDeleteCompleted, "ownedDelete", "Native iOS File Sync owned artifact deletion completed"),
+    ] {
+      XCTAssertEqual(event.eventMessage, message)
+      XCTAssertEqual(event.context, ["releaseCheck": "v1.3.8/ios-file-sync-publication-primitives", "operation": operation, "outcome": "completed"])
+      XCTAssertTrue(Owner.Diagnostic.accepts(event.context))
+      for extra in ["path", "uri", "bookmark", "token", "fileName", "namespace", "count", "error"] {
+        var changed: [String: Any] = event.context; changed[extra] = "private"
+        XCTAssertFalse(Owner.Diagnostic.accepts(changed))
+      }
+      for (field, value) in [("releaseCheck", Owner.Diagnostic.marker), ("operation", "write"), ("outcome", "failed")] {
+        var changed: [String: Any] = event.context; changed[field] = value
+        XCTAssertFalse(Owner.Diagnostic.accepts(changed))
+      }
     }
   }
 

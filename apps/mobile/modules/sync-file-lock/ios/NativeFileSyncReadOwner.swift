@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// Hidden selected-folder IO. Writes are limited to this owner's newly created files; no sync provider is exposed.
+/// Hidden selected-folder IO. Only owned stages/quarantines can be retired; no sync provider is exposed.
 final class NativeFileSyncReadOwner: @unchecked Sendable {
   enum Failure: Error, Equatable { case unavailable, staleBookmark, scopeUnproven, invalidName, invalidHandle, closed, incompleteRead, incompleteWrite, coordination }
   enum CreateResult: Equatable { case created, exists }
@@ -15,21 +15,31 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   }
   enum Read: Equatable { case absent, bytes(Data) }
   enum Diagnostic: Equatable {
-    case admitted, createdWriteCompleted
+    case admitted, createdWriteCompleted, quarantineCompleted, ownedDeleteCompleted
     static let message = "Native iOS File Sync read owner admitted"
     static let marker = "v1.3.8/ios-file-sync-read-owner"
     static let createdWriteMessage = "Native iOS File Sync created-file write completed"
     static let createdWriteMarker = "v1.3.8/ios-file-sync-created-write"
-    var eventMessage: String { self == .admitted ? Self.message : Self.createdWriteMessage }
+    static let publicationMarker = "v1.3.8/ios-file-sync-publication-primitives"
+    var eventMessage: String {
+      switch self {
+      case .admitted: return Self.message
+      case .createdWriteCompleted: return Self.createdWriteMessage
+      case .quarantineCompleted: return "Native iOS File Sync quarantine rename completed"
+      case .ownedDeleteCompleted: return "Native iOS File Sync owned artifact deletion completed"
+      }
+    }
     var context: [String: String] {
       switch self {
       case .admitted: return ["releaseCheck": Self.marker, "operation": "admission", "outcome": "confirmed"]
       case .createdWriteCompleted: return ["releaseCheck": Self.createdWriteMarker, "operation": "createdWrite", "outcome": "completed"]
+      case .quarantineCompleted: return ["releaseCheck": Self.publicationMarker, "operation": "quarantine", "outcome": "completed"]
+      case .ownedDeleteCompleted: return ["releaseCheck": Self.publicationMarker, "operation": "ownedDelete", "outcome": "completed"]
       }
     }
     static func accepts(_ value: [String: Any]) -> Bool {
       guard Set(value.keys) == Set(["releaseCheck", "operation", "outcome"]) else { return false }
-      return [Diagnostic.admitted, .createdWriteCompleted].contains { event in
+      return [Diagnostic.admitted, .createdWriteCompleted, .quarantineCompleted, .ownedDeleteCompleted].contains { event in
         event.context.allSatisfy { value[$0.key] as? String == $0.value }
       }
     }
@@ -67,6 +77,16 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     var syncDirectory: (Int32) throws -> Void = { fd in
       guard Darwin.fsync(fd) == 0 else { throw Failure.incompleteWrite }
     }
+    var renameExclusive: (Int32, String, String) -> Int32 = { directory, source, destination in
+      source.withCString { sourceName in
+        destination.withCString { destinationName in
+          Darwin.renameatx_np(directory, sourceName, directory, destinationName, UInt32(RENAME_EXCL))
+        }
+      }
+    }
+    var unlink: (Int32, String) -> Int32 = { directory, name in
+      name.withCString { Darwin.unlinkat(directory, $0, 0) }
+    }
     // A false scope start is only accepted for a proven app-local directory, not an arbitrary external path.
     var applicationContainer = FileManager.default.homeDirectoryForCurrentUser
   }
@@ -86,10 +106,12 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     func sameIdentity(_ other: Node) -> Bool { device == other.device && inode == other.inode && kind == other.kind }
   }
 
+  private enum OwnedState: Equatable { case unfinishedCreation, completedCreation, pendingQuarantine, quarantine }
   private struct CreatedFile {
     let fd: Int32
     let before: Node
-    var completed = false
+    var state: OwnedState = .unfinishedCreation
+    var verified: Node? = nil
   }
 
   private let selection: Selection
@@ -107,6 +129,7 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   private var token: String?
   private var scoped = false
   private var cleanupError: Error?
+  // This one FD ledger also retains observed generations moved into quarantine.
   private var created: [Data: CreatedFile] = [:]
 
   init(selection: Selection, access: Access = Access(), diagnostic: @escaping (Diagnostic) -> Void) {
@@ -203,8 +226,8 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
     try await submit(handle) {
       guard let root = self.root else { throw Failure.closed }
       let key = Data(name.utf8)
-      try self.coordinated(root.appendingPathComponent(name), writing: true) {
-        guard let file = self.created[key], !file.completed else { throw Failure.unavailable }
+      let written = try self.coordinated(root.appendingPathComponent(name), writing: true) {
+        guard let file = self.created[key], file.state == .unfinishedCreation else { throw Failure.unavailable }
         guard file.before.kind == S_IFREG, file.before.size == 0, file.before.links == 1,
               try self.node(file.fd) == file.before, try self.lookup(name) == file.before else { throw Failure.unavailable }
         try bytes.withUnsafeBytes { buffer in
@@ -222,10 +245,87 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
         guard written.sameIdentity(file.before), written.links == 1, written.size == Int64(bytes.count),
               Darwin.lseek(file.fd, 0, SEEK_SET) == 0,
               try self.readComplete(name, fd: file.fd, before: written) == bytes else { throw Failure.incompleteWrite }
+        return written
       }
       try self.requireAccepting()
-      self.created[key]?.completed = true
+      self.created[key]?.verified = written
+      self.created[key]?.state = .completedCreation
       self.diagnostic(.createdWriteCompleted)
+    }
+  }
+
+  /// Moves an observed generation only to fresh quarantine; canonical installation stays exclusive-create.
+  func renameObserved(_ source: String, to destination: String, expectedBytes: Data, using handle: Handle) async throws {
+    try Self.validWriteName(source)
+    try Self.validWriteName(destination)
+    let sourceKey = Data(source.utf8), destinationKey = Data(destination.utf8)
+    guard sourceKey != destinationKey, Self.hasScratchPrefix(destination, ".mindwtr-et-q-") else { throw Failure.invalidName }
+    try await submit(handle) {
+      guard let root = self.root else { throw Failure.closed }
+      let moved = try self.coordinated(root, writing: true) {
+        guard self.created[destinationKey] == nil,
+              try self.names().contains(where: { $0.utf8.elementsEqual(source.utf8) }),
+              let before = try self.lookup(source), before.kind == S_IFREG, before.links == 1 else { throw Failure.unavailable }
+        let owned = self.created[sourceKey]
+        let fd: Int32
+        if let owned {
+          guard owned.state == .completedCreation || owned.state == .quarantine,
+                owned.verified == before else { throw Failure.unavailable }
+          fd = owned.fd
+        } else {
+          fd = source.withCString { openat(self.rootFD, $0, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC) }
+          guard fd >= 0 else { throw Failure.unavailable }
+        }
+        var retained = owned != nil
+        defer { if !retained { _ = Darwin.close(fd) } }
+        try self.verifyExpectedBytes(source, fd: fd, before: before, expected: expectedBytes)
+        guard try self.node(fd) == before, try self.lookup(source) == before,
+              try self.names().contains(where: { $0.utf8.elementsEqual(source.utf8) }) else { throw Failure.unavailable }
+        try self.validateRoot()
+        guard self.access.renameExclusive(self.rootFD, source, destination) == 0 else { throw Failure.unavailable }
+        self.created.removeValue(forKey: sourceKey)
+        self.created[destinationKey] = CreatedFile(fd: fd, before: before, state: .pendingQuarantine)
+        retained = true
+        try self.access.syncDirectory(self.rootFD)
+        let after = try self.node(fd)
+        guard after.sameIdentity(before), after.mode == before.mode, after.links == 1, after.size == before.size,
+              after.modifiedSeconds == before.modifiedSeconds, after.modifiedNanos == before.modifiedNanos,
+              try self.confirmedNode(source) == nil else { throw Failure.unavailable }
+        try self.verifyExpectedBytes(destination, fd: fd, before: after, expected: expectedBytes)
+        return after
+      }
+      try self.requireAccepting()
+      self.created[destinationKey]?.verified = moved
+      self.created[destinationKey]?.state = .quarantine
+      self.diagnostic(.quarantineCompleted)
+    }
+  }
+
+  /// Retires only this owner's verified stage/quarantine generation, never canonical/backup names.
+  func deleteOwned(_ name: String, expectedBytes: Data, using handle: Handle) async throws {
+    try Self.validWriteName(name)
+    let key = Data(name.utf8)
+    try await submit(handle) {
+      guard let root = self.root else { throw Failure.closed }
+      let fd = try self.coordinated(root, writing: true) {
+        guard let file = self.created[key],
+              (file.state == .completedCreation && Self.hasScratchPrefix(name, ".mindwtr-et-s-")) ||
+              (file.state == .quarantine && Self.hasScratchPrefix(name, ".mindwtr-et-q-")),
+              let before = file.verified, before.kind == S_IFREG, before.links == 1 else { throw Failure.unavailable }
+        try self.verifyExpectedBytes(name, fd: file.fd, before: before, expected: expectedBytes)
+        guard try self.node(file.fd) == before, try self.lookup(name) == before else { throw Failure.unavailable }
+        try self.validateRoot()
+        guard self.access.unlink(self.rootFD, name) == 0 else { throw Failure.unavailable }
+        try self.access.syncDirectory(self.rootFD)
+        let after = try self.node(file.fd)
+        guard after.sameIdentity(before), after.links == 0, after.size == before.size,
+              try self.confirmedNode(name) == nil else { throw Failure.unavailable }
+        return file.fd
+      }
+      try self.requireAccepting()
+      self.created.removeValue(forKey: key)
+      guard Darwin.close(fd) == 0 else { throw Failure.unavailable }
+      self.diagnostic(.ownedDeleteCompleted)
     }
   }
 
@@ -361,6 +461,15 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   private static func validWriteName(_ name: String) throws {
     try validName(name)
     guard name != ".mindwtr.lock" else { throw Failure.invalidName }
+  }
+
+  private static func hasScratchPrefix(_ name: String, _ prefix: String) -> Bool {
+    name.utf8.count > prefix.utf8.count && name.utf8.starts(with: prefix.utf8)
+  }
+
+  private func verifyExpectedBytes(_ name: String, fd: Int32, before: Node, expected: Data) throws {
+    guard Darwin.lseek(fd, 0, SEEK_SET) == 0,
+          try readComplete(name, fd: fd, before: before) == expected else { throw Failure.incompleteRead }
   }
 
   private func readComplete(_ name: String, fd: Int32, before: Node) throws -> Data {
