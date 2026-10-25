@@ -57,10 +57,10 @@ internal object ReminderPlan {
      * (not when `unchanged`: the stored map already says it) and `state` (null when unchanged) stored in one write, so a delivered
      * reminder core lets expire is remembered whenever its alarm leaves the map. A withdrawn alarm's delivered notification goes before its
      * cancel; an expired one's stays. A failed removal never
-     * stops a cancel. An alarm Android refuses (a revoked exact-alarm grant, its alarm cap) is skipped and the rest are made, as RN's
-     * cycle does (271fb6be2); `alarms` and `state` are then not stored, so the next plan, from `writeAhead`, makes the pending alarms
-     * again under the same ids, and nothing is made twice or left behind. Answers how many were refused. [checkpoint] names each
-     * point a process death is safe at.
+     * stops a cancel. An alarm Android refuses (a revoked exact-alarm grant, its alarm cap) is cancelled under its id and skipped, and
+     * the rest are made, as RN's cycle does (271fb6be2): `alarms` is stored with each refused alarm put back as its write-ahead entry
+     * (not yet made), so the next plan makes it again under its id. Answers how many were refused. [checkpoint] names each point a
+     * process death is safe at.
      */
     fun apply(plan: JSONObject, port: Port, checkpoint: (String) -> Unit = {}): Int {
         val ahead = buildMap {
@@ -73,7 +73,7 @@ internal object ReminderPlan {
         }
         val cancel = plan.getJSONArray("cancel")
         val schedule = plan.getJSONArray("schedule")
-        var refused = 0
+        val refused = mutableListOf<String>()
         // The ledger first: a delivery checks it, so a cancelled alarm never shows even if the process dies before cancelling it.
         port.record(cancelled = List(cancel.length()) { cancel.getJSONObject(it).getInt("id") },
             armed = List(schedule.length()) { schedule.getJSONObject(it).let { alarm -> alarm.getInt("id") to alarm.getLong("fireAtMs") } })
@@ -86,18 +86,33 @@ internal object ReminderPlan {
         for (index in 0 until schedule.length()) {
             val alarm = schedule.getJSONObject(index)
             if (alarm.optString("replacing") == "withdrawn") runCatching { port.removeDelivered(alarm.getInt("id")) }
-            try { port.schedule(alarm) } catch (failure: RuntimeException) { refused += 1 }
+            try {
+                port.schedule(alarm)
+            } catch (failure: RuntimeException) {
+                refused += alarm.getString("key")
+                // The payload under this id may already be the new one while the alarm still holds the old time: never let it fire.
+                runCatching { port.cancel(alarm.getInt("id")) }
+            }
         }
         checkpoint("scheduled")
         if (plan.optBoolean("clearDelivered")) runCatching { port.clearDelivered() }
-        if (refused > 0) return refused
         // As RN's saveAlarmMap: a map that did not change is not written again (#766).
         val after = buildMap {
-            if (!plan.optBoolean("unchanged")) put(MAP_KEY, plan.getString("alarms"))
-            if (plan.has("state") && !plan.isNull("state")) put(STATE_KEY, plan.getString("state"))
+            if (!plan.optBoolean("unchanged")) put(MAP_KEY, if (refused.isEmpty()) plan.getString("alarms") else pendingAgain(plan, refused))
+            // A refused Snooze's own plan keeps its `stateAhead` (not yet made); a cycle's refused Snooze is remade by the next rebuild.
+            val snoozeRefused = refused.isNotEmpty() && plan.has("stateAhead") && !plan.isNull("stateAhead")
+            if (plan.has("state") && !plan.isNull("state") && !snoozeRefused) put(STATE_KEY, plan.getString("state"))
         }
         if (after.isNotEmpty()) port.store(after)
-        return 0
+        return refused.size
+    }
+
+    /** `alarms` with each refused alarm put back as its write-ahead entry (not yet made), as RN's map leaves a refused alarm out. */
+    private fun pendingAgain(plan: JSONObject, refused: List<String>): String {
+        val ahead = if (plan.isNull("writeAhead")) JSONObject() else JSONObject(plan.getString("writeAhead"))
+        val alarms = JSONObject(plan.getString("alarms"))
+        for (key in refused) ahead.optJSONObject(key)?.let { alarms.put(key, it) } ?: alarms.remove(key)
+        return alarms.toString()
     }
 }
 

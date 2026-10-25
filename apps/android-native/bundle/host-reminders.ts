@@ -105,7 +105,8 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
             && item.details && typeof item.details === 'object' && 'data' in item.details
             && item.details.data && typeof item.details.data === 'object' && 'kind' in item.details.data
             && item.details.data.kind === 'task-due-advance')) log('Advance reminder scheduled', { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'scheduled' });
-        rebuilt = true;
+        // A refused Snooze is made again only by a rebuild (core remakes a made Snooze then), so after a refusal the next plan is one.
+        rebuilt = refused === 0;
         if (topUpTimer) clearTimeout(topUpTimer);
         topUpTimer = plan.topUpDelayMs === null ? null : setTimeout(() => {
             topUpTimer = null;
@@ -139,8 +140,10 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
         const result = bindings.planSnooze({ storedState: stored.state, alarm, permissionGranted: bindings.permissionGranted(), fired: bindings.ledger?.().fired });
         if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
         const { schedule, stateAhead, state } = result.value;
-        bindings.apply(JSON.stringify({ mode: 'active', cancel: [], schedule, writeAhead: null, stateAhead, alarms: stored.alarms, unchanged: true, state,
-            topUpDelayMs: null, clearDelivered: false, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME }));
+        const refused = Number(bindings.apply(JSON.stringify({ mode: 'active', cancel: [], schedule, writeAhead: null, stateAhead, alarms: stored.alarms,
+            unchanged: true, state, topUpDelayMs: null, clearDelivered: false, channelName: REMINDER_NOTIFICATION_CHANNEL_NAME })) ?? 0);
+        // Kotlin kept `stateAhead` (not yet made): the job's retry makes the alarm, once.
+        if (refused > 0) throw new Error('ALARM_REFUSED: Android refused the Snooze alarm');
         log('Native Android reminder snooze', { made: schedule.length });
     };
     const enqueue = (rebuild: boolean) => {

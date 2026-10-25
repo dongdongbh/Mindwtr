@@ -9318,8 +9318,9 @@ globalThis.standStore = useTaskStore;
     // RN 271fb6be2 (audit gap 8): one alarm Android refused is skipped, the plan finishes, the top-up is still set, and a warning
     // line says how many were refused.
     let partialPlans = 0;
+    const partialRemakes = [];
     const partial = mod.createNativeReminders({
-        plan: async () => { partialPlans += 1; return { ok: true, value: { mode: 'active', cancel: [], schedule: [{}, {}], alarms: '{}', state: '{}', topUpDelayMs: partialPlans === 1 ? 10 : null } }; },
+        plan: async (input) => { partialPlans += 1; partialRemakes.push(input.remake ?? null); return { ok: true, value: { mode: 'active', cancel: [], schedule: [{}, {}], alarms: '{}', state: '{}', topUpDelayMs: partialPlans === 1 ? 10 : null } }; },
         planSnooze: () => { throw new Error('no snooze here'); },
         readStored: async () => ({ alarms: null, state: null }),
         permissionGranted: () => true,
@@ -9348,6 +9349,18 @@ globalThis.standStore = useTaskStore;
     assert.equal((await partial.cycle(false)).refused, 1, 'the cycle finishes and reports the refused alarm');
     await sleep(40);
     assert.equal(partialPlans, 2, 'the top-up still plans again after a refusal');
+    // Review P3-3: core makes an already-made Snooze again only in a rebuild, so the plan after a refusal is a rebuild.
+    assert.deepEqual(partialRemakes, ['all', 'all'], 'the plan after a refusal remakes every alarm');
+    // Review P3-2: a refused Snooze throws, so its job retries from the stored not-yet-made state.
+    const refusedSnooze = mod.createNativeReminders({
+        plan: async () => ({ ok: true, value: { mode: 'active', cancel: [], schedule: [], alarms: '{}', state: '{}', topUpDelayMs: null } }),
+        planSnooze: (input) => ({ ok: true, value: { schedule: [input.alarm], stateAhead: '{"ahead":1}', state: '{"after":1}' } }),
+        readStored: async () => ({ alarms: null, state: null }),
+        permissionGranted: () => true,
+        apply: () => 1,
+        cleanupRn: () => 0,
+    });
+    await assert.rejects(refusedSnooze.snooze({ key: 'snooze:u', id: 1073741900, fireAtMs: 5, repeat: 'once', details: {}, replacing: null }), /ALARM_REFUSED/);
     assert.deepEqual(globalThis.reminderWarns.map(([message, payload]) => [message, payload.context.releaseCheck, payload.context.count]),
         [['[Local Notifications] Reminder cycle finished with refused alarms', 'v1.3.8/native-reminder-cycle-partial', 1]]);
     // The ledger (Kotlin): what showed and what is still in the tray go into every plan and every Snooze.

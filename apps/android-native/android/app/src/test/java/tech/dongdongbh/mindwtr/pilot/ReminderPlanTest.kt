@@ -88,14 +88,47 @@ class ReminderPlanTest {
         assertEquals(listOf("remove 7", "cancel 7", "clear", "store {after}"), events)
     }
 
-    // RN 271fb6be2: one refused alarm (a revoked exact-alarm grant, Android's 500 cap) is skipped and the rest are made. The map stays
-    // the write-ahead, which marks every alarm of this plan pending, so the next plan makes the refused one again under its id.
-    @Test fun aRefusedAlarmIsSkippedTheRestAreMadeAndTheWriteAheadStaysForTheNextPlan() {
+    // RN 271fb6be2: one refused alarm (a revoked exact-alarm grant, Android's 500 cap) is skipped and the rest are made.
+    @Test fun aRefusedAlarmIsSkippedAndTheRestAreMade() {
         scheduleFailure = SecurityException("Too many alarms")
         refusedId = 11
-        val refused = ReminderPlan.apply(plan("{ahead}", listOf(7 to "expired"), listOf(alarm("task:a", 11, null), alarm("task:b", 12, null))), port)
+        val ahead = """{"task:a":{"id":11,"pending":true},"task:b":{"id":12,"pending":true}}"""
+        val refused = ReminderPlan.apply(plan(ahead, listOf(7 to "expired"), listOf(alarm("task:a", 11, null), alarm("task:b", 12, null)))
+            .put("alarms", """{"task:a":{"id":11},"task:b":{"id":12}}"""), port)
         assertEquals(1, refused)
-        assertEquals(listOf("store {ahead}", "cancel 7", "refused 11", "schedule 12 task:b"), events)
+        assertEquals(listOf("store $ahead", "cancel 7", "refused 11", "cancel 11", "schedule 12 task:b"), events.dropLast(1))
+    }
+
+    // RN 271fb6be2's map: the final map is stored with only the refused alarm put back as not yet made (its write-ahead entry), so a
+    // cancel in that plan stays cancelled and a moved alarm is judged by its new version; the refused one is made again next time.
+    // Its replacement never armed, so the alarm it was replacing is cancelled too: it must not fire at its old time with the new payload.
+    @Test fun aRefusalStoresTheFinalMapWithTheRefusedAlarmPendingAndCancelsWhatItWasReplacing() {
+        scheduleFailure = SecurityException("Too many alarms")
+        refusedId = 11
+        val ahead = JSONObject().put("task:a", JSONObject().put("id", 11).put("signature", "old").put("pending", true))
+            .put("task:b", JSONObject().put("id", 12).put("signature", "b2").put("pending", true))
+            .put("task:gone", JSONObject().put("id", 7).put("signature", "g"))
+        val final = JSONObject().put("task:a", JSONObject().put("id", 11).put("signature", "new"))
+            .put("task:b", JSONObject().put("id", 12).put("signature", "b2"))
+        val refused = ReminderPlan.apply(plan(ahead.toString(), listOf(7 to "withdrawn"), listOf(alarm("task:a", 11, "withdrawn"), alarm("task:b", 12, null)))
+            .put("alarms", final.toString()).put("state", "{state}"), port)
+        assertEquals(1, refused)
+        val stored = JSONObject(events.last().removePrefix("store ").substringBefore(" + "))
+        assertEquals(listOf("task:a", "task:b"), stored.keys().asSequence().sorted().toList())
+        assertEquals("old", stored.getJSONObject("task:a").getString("signature"))
+        assertEquals(true, stored.getJSONObject("task:a").getBoolean("pending"))
+        assertEquals("b2", stored.getJSONObject("task:b").getString("signature"))
+        assertEquals("{state}", events.last().substringAfter(" + "))
+        assertEquals(listOf("remove 7", "cancel 7", "remove 11", "refused 11", "cancel 11", "schedule 12 task:b"), events.drop(1).dropLast(1))
+    }
+
+    // A refused Snooze (its own plan: no map, `stateAhead` says not yet made) keeps that state, so the retry makes it once.
+    @Test fun aRefusedSnoozeKeepsItsNotYetMadeState() {
+        scheduleFailure = SecurityException("Too many alarms")
+        val snooze = plan(null, emptyList(), listOf(alarm("snooze:u", 1073741900, null))).put("stateAhead", "{ahead-state}")
+            .put("state", "{made}").put("unchanged", true)
+        assertEquals(1, ReminderPlan.apply(snooze, port))
+        assertEquals(listOf("store {ahead-state}", "refused 1073741900", "cancel 1073741900"), events)
     }
 
     @Test fun aPlanWithNoRefusalReportsNone() {
