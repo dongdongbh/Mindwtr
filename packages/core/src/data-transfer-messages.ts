@@ -143,9 +143,12 @@ export const buildTodoistResultMessage = (result: { importedTaskCount: number; i
     snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTodoistTasksIntoProjects', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.subtasksBecameChecklistItems', { subtaskCount: result.importedChecklistItemCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);
+
+// Import results list warnings before the snapshot line: the phone toast shows only the first
+// four lines, and a skip reason cut off below the snapshot name left "Imported 0" unexplained (#1447).
 
 /** TickTick's and DGT GTD's result (the same lines). */
 export const buildAreaImportResultMessage = (result: {
@@ -153,8 +156,8 @@ export const buildAreaImportResultMessage = (result: {
 }, snapshotName: string, t: Translate): string => join([
     t('settings.backupMobile.importedTaskProjectAreaCounts', { taskCount: result.importedTaskCount, projectCount: result.importedProjectCount, areaCount: result.importedAreaCount }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.checklistItemsPreserved', { checklistItemCount: result.importedChecklistItemCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);
 
 export const buildOmniFocusResultMessage = (result: {
@@ -165,8 +168,8 @@ export const buildOmniFocusResultMessage = (result: {
     result.importedAreaCount > 0 ? t('settings.backupMobile.omnifocusAreasCreated', { areaCount: result.importedAreaCount }) : null,
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.nestedTasksBecameChecklistItems', { taskCount: result.importedChecklistItemCount }) : null,
     result.importedStandaloneTaskCount > 0 ? t('settings.backupMobile.tasksStayedOutsideProjects', { taskCount: result.importedStandaloneTaskCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);
 
 export const buildMindwtrCsvResultMessage = (result: {
@@ -180,6 +183,6 @@ export const buildMindwtrCsvResultMessage = (result: {
         areaCount: result.importedAreaCount,
     }),
     result.importedChecklistItemCount > 0 ? t('settings.backupMobile.checklistItemsPreserved', { checklistItemCount: result.importedChecklistItemCount }) : null,
+    ...warningLines(result.warnings, t),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
-    ...(result.warnings.length > 0 ? ['', ...warningLines(result.warnings, t)] : []),
 ]);
