@@ -1,5 +1,6 @@
 import { normalizeFocusTaskLimit } from './focus-utils';
 import { formatI18nTemplate, translateWithFallback } from './i18n';
+import { logInfo } from './logger';
 import { useTaskStore } from './store';
 import { logStaleWriteRefused } from './store-latest-updates';
 import { runStoreCommand } from './store-write-gate';
@@ -82,8 +83,16 @@ async function undoTaskCompletionNow(
             && task.recurrence.seriesId === seriesId
         ))
         : undefined;
+    // An occurrence edited since the completion made it (another device's edit synced in during the toast) stays: Undo never
+    // deletes an edit, and a duplicate the user can see and remove is the safer side.
+    const editedOccurrence = Boolean(generatedOccurrence && generatedOccurrence.updatedAt !== generatedOccurrence.createdAt);
+    if (editedOccurrence) {
+        logInfo('Completion Undo kept an edited next occurrence', {
+            scope: 'undo', force: true, context: { releaseCheck: 'v1.3.8/undo-keeps-edited-occurrence' },
+        });
+    }
 
-    if (generatedOccurrence) {
+    if (generatedOccurrence && !editedOccurrence) {
         const deleteResult = await Promise.resolve(state.deleteTask(generatedOccurrence.id));
         if (!deleteResult.success) {
             throw new Error(deleteResult.error || 'Failed to remove recurring follow-up');
@@ -104,7 +113,7 @@ async function undoTaskCompletionNow(
         }))
         : await Promise.resolve(state.moveTask(taskId, previousStatus));
     if (!moveResult.success) {
-        if (generatedOccurrence) {
+        if (generatedOccurrence && !editedOccurrence) {
             await Promise.resolve(useTaskStore.getState().restoreTask(generatedOccurrence.id));
         }
         throw new Error(moveResult.error || 'Failed to restore task status');

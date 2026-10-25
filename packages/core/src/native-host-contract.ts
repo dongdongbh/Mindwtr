@@ -3502,7 +3502,9 @@ export function createNativeHostContract(options: {
             }
             const task = useTaskStore.getState()._tasksById.get(input.id);
             if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
-            if (task.status === 'done') {
+            // A journal replay of an Undo that already ran finds the task no longer done and writes nothing.
+            const undone = task.status === 'done';
+            if (undone) {
                 if (taskRevisionOf(task) !== input.taskRevision) {
                     return fail('STALE_REVISION', 'The task changed after it was marked done; it was not undone');
                 }
@@ -3513,6 +3515,8 @@ export function createNativeHostContract(options: {
                     return fail(failure ? 'SAVE_FAILED' : 'ACTION_FAILED', failure?.message ?? (error instanceof Error ? error.message : String(error)));
                 }
             }
+            logInfo('Native completion Undo', { scope: 'native-host', force: true,
+                context: { releaseCheck: 'v1.3.8/native-undo-writes', kind: 'completion', outcome: undone ? 'undone' : 'skipped' } });
             const saved = await save();
             if (!saved.ok) return saved;
             return { ok: true, value: { id: input.id } };
@@ -3933,9 +3937,13 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             // Both sides go through the receipt's own builder, so a default the store fills in (reminderPolicy, a false flag) compares equal.
             const now = buildProcessInboxUndoRestoreUpdates(task) as Record<string, unknown>;
             const plain = (value: unknown) => JSON.stringify(value === false ? null : value ?? null);
+            // The star comes back only while Focus has room (undoTaskCompletion), so with Focus full a missing star is not owed.
+            const focusFull = !task.isFocusedToday && store.getFocusedCount() >= normalizeFocusTaskLimit(store.settings.gtd?.focusTaskLimit);
             const applied = input.kind === 'discarded' ? !task.deletedAt : !task.deletedAt && Object.entries(input.restoreUpdates)
-                .every(([field, value]) => plain(now[field]) === plain(value));
-            if (applied) return { ok: true, value: { taskId: input.taskId } };
+                .every(([field, value]) => (focusFull && (field === 'isFocusedToday' || field === 'focusOrder')) || plain(now[field]) === plain(value));
+            const logged = (outcome: 'undone' | 'skipped') => logInfo('Native Process Inbox Undo', { scope: 'native-host', force: true,
+                context: { releaseCheck: 'v1.3.8/native-undo-writes', kind: input.kind, outcome } });
+            if (applied) { logged('skipped'); return { ok: true, value: { taskId: input.taskId } }; }
             try {
                 const result = input.kind === 'completed'
                     ? (await undoTaskCompletion(input.taskId, input.previousStatus, input.wasFocusedToday, { restoreUpdates }), { success: true })
@@ -3950,6 +3958,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 const message = error instanceof Error ? error.message : String(error);
                 return message.startsWith('STALE_REVISION') ? fail('STALE_REVISION', message.replace(/^STALE_REVISION:\s*/, '')) : writeFailure(message);
             }
+            logged('undone');
             const saved = await deps.save();
             if (!saved.ok) return saved;
             return { ok: true, value: { taskId: input.taskId } };

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNativeHostContract } from './native-host-contract';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Task } from './types';
+import { buildProcessInboxUndoRestoreUpdates } from './process-inbox-model';
 import { generateUUID } from './uuid';
 
 // RN 23e2102b3, 3b1a3f4f4 and 376c562b5: each Process Inbox decision's toast offers Undo, bound to a receipt of the item as
@@ -95,5 +96,23 @@ describe('native Process Inbox decision Undo', () => {
 
         expect(await host.undoInboxDecision(wire(filed.toast!.undoReceipt!))).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(stored().startTime).toBe('2026-10-05');
+    });
+
+    // A Done decision on a starred item: its Undo brings the star back only while Focus has room (RN's rule), so a replay after Focus
+    // filled must not read the missing star as an Undo still owed.
+    it('changes nothing on a resent Done receipt once Focus filled up', async () => {
+        const starred = { ...inboxTask(), isFocusedToday: true };
+        const focused = (id: string): Task => ({ ...inboxTask(), id, title: id, status: 'next', isFocusedToday: true });
+        durable = { ...durable, tasks: [{ ...starred, status: 'done', isFocusedToday: false, completedAt: T0, rev: 2 }, focused('f1'), focused('f2'), focused('f3')],
+            settings: { deviceId: 'phone', gtd: { focusTaskLimit: 3 } } };
+        await useTaskStore.getState().fetchData({ throwOnError: true });
+        const receipt = wire({ taskId: 'inbox-a', kind: 'completed' as const, previousStatus: 'inbox' as const, wasFocusedToday: true,
+            restoreUpdates: Object.fromEntries(Object.entries(buildProcessInboxUndoRestoreUpdates(starred)).map(([field, value]) => [field, value ?? null])) });
+
+        expect(await host.undoInboxDecision(receipt)).toMatchObject({ ok: true });
+        const once = structuredClone(stored());
+        expect(once).toMatchObject({ status: 'inbox', isFocusedToday: false });
+        expect(await host.undoInboxDecision(receipt)).toMatchObject({ ok: true });
+        expect(stored()).toEqual(once);
     });
 });

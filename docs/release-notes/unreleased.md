@@ -42,3 +42,4 @@ Changes collected since the latest stable release.
 - Android: Settings › Sync now shows the same question as the other apps when a new sync folder or server cannot find some attachment files: the list of files, Cancel, and Continue without these files.
 - Mobile and desktop: each Saved Search has its own Sort control and remembers its sort. "Use global setting" keeps following your global task sort, which is what existing saved searches do (#1453).
 - Desktop on Linux: typing in a task's description no longer lags, most of all for a task in Today's Focus, where each letter could take up to a second to appear (#1454).
+- Undo after completing a repeating task no longer deletes its next occurrence when that occurrence was edited after it was made (for example on another device during the Undo toast). Both tasks stay, and you can delete the extra one. An unedited next occurrence is still removed.

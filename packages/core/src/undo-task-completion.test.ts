@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { formatProcessInboxCommitMessage } from './process-inbox-model';
 import { formatSomedaySectionMoved } from './someday-sections-model';
-import { flushPendingSave, resetForTests, useTaskStore } from './store';
+import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
+import { mockAppData } from './sync-test-utils';
 import { runSyncStoreSave } from './store-write-gate';
 import type { Task } from './types';
 import { formatTaskMarkedDoneMessage, formatTaskMovedMessage, restoreTaskSnapshot, undoTaskCompletion } from './undo-task-completion';
@@ -70,5 +71,45 @@ describe('undo of a processed task after sync changed it', () => {
         useTaskStore.setState({ settings: { deviceId: 'this-device' }, _allTasks: [row({ tags: ['decided'] })] });
         await undoTaskCompletion('t1', 'inbox', false, { restoreUpdates: { tags: [], status: 'inbox' } });
         expect(useTaskStore.getState()._tasksById.get('t1')).toMatchObject({ tags: [], status: 'inbox' });
+    });
+});
+
+// Coordinator decision 10-25: an Undo never deletes an edit. The next occurrence a completion spawned goes away with the Undo, as
+// RN's, unless it was edited since it was made (another device's edit synced in during the toast); then it stays.
+describe('undo of a recurring completion', () => {
+    beforeEach(() => {
+        resetForTests();
+        setStorageAdapter({ getData: async () => mockAppData(), saveData: async () => undefined });
+        useTaskStore.setState({ _allTasks: [], tasks: [], _tasksById: new Map(), _allProjects: [], projects: [],
+            _allSections: [], sections: [], _allAreas: [], areas: [], settings: { deviceId: 'this-device' }, isLoading: false, error: null });
+    });
+    afterEach(async () => { await flushPendingSave(); resetForTests(); });
+
+    const completeRoutine = async () => {
+        const task = await useTaskStore.getState().addTask('Water the plants', { status: 'next', recurrence: { rule: 'daily', strategy: 'strict' }, dueDate: '2026-10-25' });
+        expect((await useTaskStore.getState().updateTask(task.id, { status: 'done' })).success).toBe(true);
+        const next = useTaskStore.getState()._allTasks.find((row) => row.id !== task.id && !row.deletedAt)!;
+        expect(next).toBeDefined();
+        return { task, next };
+    };
+
+    it('removes the next occurrence it made when nothing edited it', async () => {
+        const { task, next } = await completeRoutine();
+        await undoTaskCompletion(task.id, 'next', false);
+        const state = useTaskStore.getState();
+        expect(state._tasksById.get(task.id)?.status).toBe('next');
+        expect(state._allTasks.find((row) => row.id === next.id)?.deletedAt).toBeTruthy();
+    });
+
+    it('keeps the next occurrence when another device edited it since', async () => {
+        const { task, next } = await completeRoutine();
+        const later = new Date(Date.parse(next.updatedAt) + 1000).toISOString();
+        useTaskStore.setState((state) => ({ _allTasks: state._allTasks.map((row) => (row.id === next.id
+            ? { ...row, title: 'Water the plants and herbs', rev: (row.rev ?? 1) + 1, revBy: 'other-device', updatedAt: later } : row)) }));
+        await undoTaskCompletion(task.id, 'next', false);
+        const state = useTaskStore.getState();
+        expect(state._tasksById.get(task.id)?.status).toBe('next');
+        expect(state._allTasks.find((row) => row.id === next.id)).toMatchObject({ title: 'Water the plants and herbs' });
+        expect(state._allTasks.find((row) => row.id === next.id)?.deletedAt).toBeFalsy();
     });
 });
