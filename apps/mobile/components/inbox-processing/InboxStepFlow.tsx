@@ -307,6 +307,27 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     </>
   );
 
+  const renderContextRow = () => (
+    <InboxContextSection
+      t={t}
+      tc={tc}
+      show={controller.showContextsField}
+      showContextsField={controller.showContextsField}
+      showTagsField={false}
+      selectedContexts={controller.selectedContexts}
+      selectedTags={controller.selectedTags}
+      toggleContext={controller.toggleContext}
+      toggleTag={controller.toggleTag}
+      newContext={controller.newContext}
+      setNewContext={controller.setNewContext}
+      addCustomContextMobile={controller.addCustomContextMobile}
+      tokenSuggestions={controller.tokenSuggestions}
+      applyTokenSuggestion={controller.applyTokenSuggestion}
+      contextCopilotSuggestions={controller.contextCopilotSuggestions}
+      tagCopilotSuggestions={controller.tagCopilotSuggestions}
+    />
+  );
+
   const renderProjectSection = (allowConversion: boolean) => (
     <InboxProjectSection
       t={t}
@@ -439,6 +460,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               clearLabel={t('common.clear')}
               tc={tc}
             />
+            {/* Start later lands in Next, where contexts decide when it shows (#1445). */}
+            {renderContextRow()}
             {renderProjectSection(false)}
           </View>
         );
@@ -506,26 +529,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
 
       case 'file': {
         const projectRow = renderProjectSection(true);
-        const contextRow = (
-            <InboxContextSection
-              t={t}
-              tc={tc}
-              show={controller.showContextsField}
-              showContextsField={controller.showContextsField}
-              showTagsField={false}
-              selectedContexts={controller.selectedContexts}
-              selectedTags={controller.selectedTags}
-              toggleContext={controller.toggleContext}
-              toggleTag={controller.toggleTag}
-              newContext={controller.newContext}
-              setNewContext={controller.setNewContext}
-              addCustomContextMobile={controller.addCustomContextMobile}
-              tokenSuggestions={controller.tokenSuggestions}
-              applyTokenSuggestion={controller.applyTokenSuggestion}
-              contextCopilotSuggestions={controller.contextCopilotSuggestions}
-              tagCopilotSuggestions={controller.tagCopilotSuggestions}
-            />
-        );
+        const contextRow = renderContextRow();
         return (
           <View>
             {/* Same precedence the one-scroll form used: context first unless

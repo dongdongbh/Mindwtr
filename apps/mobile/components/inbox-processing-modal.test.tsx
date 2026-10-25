@@ -675,6 +675,49 @@ describe('InboxProcessingModal', () => {
     }
   });
 
+  it('stays on the current step after the full task editor saves (#1445)', async () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    await flushAsyncActions();
+    const root = tree!.root;
+    walkToFileStep(root);
+
+    act(() => {
+      root.findByProps({ accessibilityLabel: 'common.edit', accessibilityRole: 'button' }).props.onPress();
+    });
+    const edited = { ...baseInboxTask, title: 'Edited in the editor', updatedAt: '2025-01-02T00:00:00.000Z' };
+    storeState.tasks = [edited];
+    storeState._allTasks = storeState.tasks;
+    (storeState as any)._tasksById = new Map([[edited.id, edited]]);
+    try {
+      act(() => {
+        taskEditModalProps.current.onClose();
+      });
+      updateTask.mockClear();
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        title: 'Edited in the editor',
+      }));
+    } finally {
+      delete (storeState as any)._tasksById;
+    }
+  });
+
+  it('offers contexts on the Start later step (#1445)', () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+    });
+    const root = tree!.root;
+    expect(root.findAllByProps({ placeholder: '@home' })).toHaveLength(0);
+    pressStep(root, 'Start later');
+    expect(root.findAllByProps({ placeholder: '@home' }).length).toBeGreaterThan(0);
+  });
+
   it('moves on to the next item when the editor files the current one out of the Inbox (#1445)', async () => {
     const second = { ...baseInboxTask, id: 'inbox-2', title: 'Second capture', createdAt: '2025-01-02T00:00:00.000Z' };
     storeState.tasks = [{ ...baseInboxTask }, second];

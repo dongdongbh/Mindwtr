@@ -30,3 +30,4 @@ Changes collected since the latest stable release.
 - Mobile: Process Inbox has an Edit button that opens the full task editor for the current item, for details processing does not offer, such as a checklist. After you save, processing shows your changes and files the item with them (#1445).
 - Mobile: in the task editor, Destination and an empty Due date now have a heading above a value box, like Start date and Review date. Before, they were filled rows with the label inside, so Destination looked like part of the Contexts field above it (#1449, #1451).
 - Mobile: the task editor's help button (?) sits next to the Scheduling and Details section titles instead of on its own line. Tapping it shows the help text below the title and does not fold the section (#1450).
+- Mobile: after saving in the full task editor from Process Inbox, you stay on the step you were on instead of starting the item over, and Start later now offers contexts (#1445).
