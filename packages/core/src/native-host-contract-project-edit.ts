@@ -2,8 +2,12 @@ import { isValidProjectColorOverride } from './color-constants';
 import type { NativeHostResult } from './native-host-contract';
 import { projectReviewPickerValue } from './project-details-presentation';
 import { normalizeProjectTag } from './project-tags';
+import { resolveI18nText, type I18nTemplateValues, type TranslateFn } from './i18n';
 import { revisionOf } from './native-request-receipts';
+import { createProjectToSectionPreviewer, getProjectToSectionEligibility, planProjectToSection, type ProjectToSectionReceipt } from './project-to-section';
 import { useTaskStore } from './store';
+import { ensureDeviceId } from './store-helpers';
+import { getProjectAccentColor } from './task-accent-color';
 
 /**
  * One Project details edit as the user made it: the field and its new value (a target state), under the request UUID the
@@ -27,7 +31,10 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'lifecycle'; action: 'complete' | 'cancel' | 'reactivate' }
     | { kind: 'duplicate' }
     | { kind: 'delete' }
-    | { kind: 'deleteUndo'; deleteRequestId: string });
+    | { kind: 'deleteUndo'; deleteRequestId: string }
+    // RN's Convert to section… (the request UUID names the new section) and that conversion's Undo.
+    | { kind: 'toSection'; destinationProjectId: string; title: string }
+    | { kind: 'toSectionUndo'; convertRequestId: string });
 /** [reply] is the prepared command's own answer when it wrote: the copy and its toast (duplicate), RN's Undo toast (delete). */
 export type NativeProjectEditResult = { id: string; kind: NativeProjectEdit['kind']; outcome: 'saved' | 'unchanged' | 'blocked'; reply?: unknown };
 
@@ -69,6 +76,9 @@ const valid = (input: unknown): input is NativeProjectEdit => {
         case 'duplicate': case 'delete': return keys(edit, []);
         case 'deleteUndo': return keys(edit, ['deleteRequestId']) && typeof edit.deleteRequestId === 'string'
             && UUID.test(edit.deleteRequestId) && edit.deleteRequestId !== edit.requestId;
+        case 'toSection': return keys(edit, ['destinationProjectId', 'title']) && id(edit.destinationProjectId) && text(edit.title, 500);
+        case 'toSectionUndo': return keys(edit, ['convertRequestId']) && typeof edit.convertRequestId === 'string'
+            && UUID.test(edit.convertRequestId) && edit.convertRequestId !== edit.requestId;
         default: return false;
     }
 };
@@ -95,7 +105,9 @@ export function createProjectEditMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     contract: () => Port;
+    t: () => TranslateFn;
 }) {
+    const word = (key: string, values?: I18nTemplateValues) => resolveI18nText(deps.t(), key, values ? { values } : undefined);
     const call = async (name: string, input: unknown): Promise<Reply> => {
         const port = deps.contract();
         return await (port[name] as (value: unknown) => Reply | Promise<Reply>).call(port, input);
@@ -104,10 +116,18 @@ export function createProjectEditMethods(deps: {
         const { id: _id, ...expected } = options.project as Json;
         return expected;
     };
-    type Plan = { outcome: 'unchanged' | 'blocked' } | { command: string; request: Json } | { conflict: string };
+    type Plan = { outcome: 'unchanged' | 'blocked' } | { command: string; request: Json } | { conflict: string }
+        // A store command run as is (Convert to section and its Undo): its answer is final, never prepared again.
+        | { run: () => Promise<NativeHostResult<Json>> };
     // The Deletes this process confirmed, by request UUID: their Undo needs the confirmed Delete. RN's Undo lives as long as its
     // toast and is gone after a restart; these are gone after a restart too.
     const deletes = new Map<string, Json>();
+    // The conversions this process made, by request UUID, for their Undo (RN keeps the receipt for its toast's Undo).
+    const conversions = new Map<string, ProjectToSectionReceipt>();
+    const remember = <T,>(map: Map<string, T>, key: string, value: T) => {
+        map.set(key, value);
+        if (map.size > 20) map.delete(map.keys().next().value as string);
+    };
 
     /** The request one edit makes from core's options for the project as it is now. */
     const plan = async (edit: NativeProjectEdit): Promise<NativeHostResult<Plan>> => {
@@ -205,6 +225,34 @@ export function createProjectEditMethods(deps: {
                 return { ok: true, value: { command: 'ProjectSectionOrder', request: { ...base, sectionId: edit.sectionId,
                     direction: edit.direction, expectedSections: read.value.token } } };
             }
+            case 'toSection': {
+                // The section named by this request exists: the conversion landed (a replay).
+                if (useTaskStore.getState()._allSections.some((row) => row.id === edit.requestId)) return { ok: true, value: { outcome: 'unchanged' } };
+                return { ok: true, value: { run: async () => {
+                    const state = useTaskStore.getState();
+                    const device = ensureDeviceId(state.settings);
+                    const planned = planProjectToSection(state, edit.projectId, edit.destinationProjectId, edit.title, edit.requestId,
+                        new Date().toISOString(), state.settings.deviceId ?? null, device.updated ? device.deviceId : null);
+                    if (!planned.ok) return fail('STALE_REVISION', word(`projects.convertBlocked.${planned.reason}`));
+                    const result = await state.convertProjectToSection(planned.command);
+                    if (!result.success) return fail(result.reason === 'save-failed' ? 'SAVE_FAILED' : 'STALE_REVISION', word(`projects.convertFailure.${result.reason}`));
+                    remember(conversions, edit.requestId, result.receipt);
+                    return { ok: true, value: { destinationProjectId: result.destinationProjectId, sectionId: result.sectionId,
+                        title: word('common.done'), message: word('projects.convertSuccess'), undoLabel: word('common.undo') } };
+                } } };
+            }
+            case 'toSectionUndo': {
+                const source = useTaskStore.getState()._projectsById.get(edit.projectId);
+                if (source && !source.deletedAt && !source.purgedAt) return { ok: true, value: { outcome: 'unchanged' } };
+                const receipt = conversions.get(edit.convertRequestId);
+                if (!receipt) return { ok: true, value: { conflict: word('projects.convertUndoFailure.invalid') } };
+                return { ok: true, value: { run: async () => {
+                    const result = await useTaskStore.getState().undoProjectToSection(receipt);
+                    if (!result.success) return fail(result.reason === 'save-failed' ? 'SAVE_FAILED' : 'STALE_REVISION', word(`projects.convertUndoFailure.${result.reason}`));
+                    conversions.delete(edit.convertRequestId);
+                    return { ok: true, value: { sourceProjectId: result.sourceProjectId } };
+                } } };
+            }
             case 'lifecycle': case 'duplicate': case 'delete': case 'deleteUndo': {
                 const current = useTaskStore.getState()._projectsById.get(edit.projectId);
                 const gone = !current || Boolean(current.deletedAt) || Boolean(current.purgedAt);
@@ -227,6 +275,45 @@ export function createProjectEditMethods(deps: {
     };
 
     return {
+        /**
+         * RN's Convert to section… for [projectId]: the actions row (its eligibility, or why not), the destinations core allows,
+         * and for a picked destination the preview's lines in the app language (or why that destination is refused). A read.
+         */
+        getProjectToSectionOptions(input: { projectId: string; destinationId: string | null; title: string }): NativeHostResult<Json> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!input || typeof input !== 'object' || !id(input.projectId) || !(input.destinationId === null || id(input.destinationId))
+                || !text(input.title, 500) || Object.keys(input).length !== 3) return fail('INVALID_INPUT', 'A project, a destination or null, and a title are required');
+            const state = useTaskStore.getState();
+            const source = state._projectsById.get(input.projectId);
+            const eligible = getProjectToSectionEligibility(state, input.projectId);
+            const previewer = createProjectToSectionPreviewer(state, input.projectId);
+            const areaById = new Map(state._allAreas.map((area) => [area.id, area]));
+            const destinations = eligible.ok ? state._allProjects.filter((row) => !row.deletedAt && previewer(row.id).ok)
+                .map((row) => ({ id: row.id, title: row.title, color: getProjectAccentColor(row, areaById) ?? null })) : [];
+            const preview = input.destinationId === null ? null : previewer(input.destinationId);
+            const destination = input.destinationId === null ? undefined : state._projectsById.get(input.destinationId);
+            const area = destination?.areaId ? state._allAreas.find((row) => row.id === destination.areaId && !row.deletedAt) : undefined;
+            return { ok: true, value: {
+                row: { label: word('projects.convertToSection'), eligible: eligible.ok, blocked: eligible.ok ? null : word(`projects.convertBlocked.${eligible.reason}`) },
+                sequentialNote: source?.isSequential ? word('projects.convertBlocked.destination-section-sequence') : null,
+                words: { title: word('projects.convertToSection'), destination: word('projects.convertDestination'), choose: word('projects.convertChooseDestination'),
+                    sectionName: word('projects.convertSectionName'), cancel: word('common.cancel'), back: word('common.back'), next: word('common.next'),
+                    convert: word('projects.convertToSection') },
+                destinations,
+                preview: preview?.ok && destination ? {
+                    named: word('projects.convertNamedSection', { name: input.title.trim() }),
+                    lines: [word('projects.convertSummary', { count: preview.taskCount, completed: preview.completedCount, archived: preview.archivedCount,
+                        source: preview.sourceTitle, destination: preview.destinationTitle }),
+                    ...(source?.supportNotes ? [word('projects.convertNotes')] : []),
+                    word('projects.convertArea', { area: area?.name ?? word('projects.noArea') }),
+                    word('projects.convertDestinationColor'), word('projects.convertColor'), word('projects.convertSettings'), word('projects.convertTrash')],
+                    color: getProjectAccentColor(destination, areaById) ?? null,
+                } : null,
+                blocked: preview && !preview.ok ? word(`projects.convertBlocked.${preview.reason}`) : null,
+            } };
+        },
+
         async runProjectEdit(input: NativeProjectEdit): Promise<NativeHostResult<NativeProjectEditResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -246,6 +333,12 @@ export function createProjectEditMethods(deps: {
                 }
                 const step = planned.value;
                 if ('conflict' in step) return fail('STALE_REVISION', step.conflict);
+                if ('run' in step) {
+                    const ran = await step.run();
+                    if (!ran.ok) return ran;
+                    const saved = await deps.save();
+                    return saved.ok ? { ok: true, value: { ...answer('saved'), reply: ran.value } } : saved;
+                }
                 if ('outcome' in step) {
                     const saved = await deps.save();
                     return saved.ok ? { ok: true, value: answer(step.outcome) } : saved;
@@ -262,10 +355,7 @@ export function createProjectEditMethods(deps: {
                     return saved.ok ? { ok: true, value: answer(prepared.value.kind === 'blocked' ? 'blocked' : 'unchanged') } : saved;
                 }
                 const committed = await call(`commitPrepared${step.command}`, { request: step.request, prepared: prepared.value.prepared });
-                if (committed.ok && step.command === 'ProjectDelete') {
-                    deletes.set(input.requestId, { request: step.request, prepared: prepared.value.prepared });
-                    if (deletes.size > 20) deletes.delete(deletes.keys().next().value as string);
-                }
+                if (committed.ok && step.command === 'ProjectDelete') remember(deletes, input.requestId, { request: step.request, prepared: prepared.value.prepared });
                 if (committed.ok) return { ok: true, value: ['duplicate', 'delete'].includes(input.kind) ? { ...answer('saved'), reply: committed.value } : answer('saved') };
                 if (committed.error.code !== 'STALE_REVISION') return committed;
                 stale = committed.error.message;

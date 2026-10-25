@@ -132,10 +132,22 @@ try {
         return fail(`the project actions never offered ${description}`);
     };
     nodes = await openActions();
+    // The Convert row comes with core's answer, a moment after the sheet.
+    nodes = await waitFor('the Convert to section row', (current) => Boolean(tagged(current, 'project-convert-to-section-button')), 15_000);
     const actionRows = ['project-duplicate-button', 'project-archive-button', 'project-cancel-button', 'project-delete-button'].map((tag) => tagged(nodes, tag));
     check(actionRows.every(Boolean) && actionRows.every((row, index) => index === 0 || centerY(actionRows[index - 1]) < centerY(row)),
         '(c) the project\'s "..." lists Duplicate, Complete, Cancel project and Delete in RN\'s order');
     shot('project-actions');
+    // Convert to section… is listed after Duplicate, offered or off with core's reason; when offered it opens RN's two-step sheet.
+    const convertRow = tagged(nodes, 'project-convert-to-section-button');
+    check(Boolean(convertRow) && centerY(actionRows[0]) < centerY(convertRow) && centerY(convertRow) < centerY(actionRows[1]),
+        '(c) Convert to section… follows Duplicate');
+    if (convertRow?.enabled === 'true') {
+        nodes = await tapExpecting(convertRow, (current) => Boolean(tagged(current, 'project-convert-sheet')), 'the convert sheet');
+        shot('project-convert');
+        nodes = await tapExpecting(button(nodes, en['common.cancel']) ?? fail('no Cancel on the convert sheet'), (current) => !tagged(current, 'project-convert-sheet'), 'the convert sheet closed');
+        nodes = await openActions();
+    }
     // Complete files it (Reactivate offered, no Cancel project); Reactivate makes it active again.
     await tapExpecting(tagged(nodes, 'project-archive-button'), (current) => !sheetOpen(current), 'the sheet closed');
     nodes = await actionsOffer('project-reactivate-button', 'Reactivate after Complete');

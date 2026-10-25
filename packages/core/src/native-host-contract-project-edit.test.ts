@@ -165,3 +165,39 @@ describe('runProjectEdit project actions', () => {
         expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
     });
 });
+
+// RN's Convert to section… (ProjectToSectionModal): core's eligibility for the sheet row, the destinations and the preview words,
+// then the conversion inside the journaled edit (the request UUID names the new section, so a replay finds it) and its Undo.
+describe('project to section', () => {
+    const task = { id: 't1', title: 'Wash', status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at };
+    const projects = [project('p', { tagIds: [] }), project('d', { tagIds: [], title: 'Home' }), project('archived', { status: 'archived' })];
+
+    it('answers the sheet row, the destinations and the preview in the app language', async () => {
+        const { host } = await open({ projects, tasks: [task] as never });
+        const none = host.getProjectToSectionOptions({ projectId: 'p', destinationId: null, title: 'Kitchen' });
+        expect(none).toMatchObject({ ok: true, value: { row: { label: 'Convert to section…', eligible: true, blocked: null },
+            destinations: [{ id: 'd', title: 'Home' }], preview: null, blocked: null } });
+        const picked = host.getProjectToSectionOptions({ projectId: 'p', destinationId: 'd', title: ' Kitchen ' });
+        expect(picked).toMatchObject({ ok: true, value: { blocked: null, preview: { named: 'New section: Kitchen',
+            lines: expect.arrayContaining(['Move 1 tasks (0 done, 0 archived) from Kitchen into Home.', 'The source project moves to Trash. Already-deleted tasks stay in Trash.']) } } });
+        const { host: tagged } = await open({ projects: [project('p'), project('d')] });
+        expect(tagged.getProjectToSectionOptions({ projectId: 'p', destinationId: null, title: 'Kitchen' }))
+            .toMatchObject({ ok: true, value: { row: { eligible: false, blocked: 'Remove this project’s tags first.' }, destinations: [] } });
+    });
+
+    it('converts once, with RN\'s Undo toast, and the Undo puts the project and its task back', async () => {
+        const { host, data } = await open({ projects, tasks: [task] as never });
+        const convert = { requestId: uuid(30), projectId: 'p', kind: 'toSection', destinationProjectId: 'd', title: ' Kitchen ' } as never;
+        expect(await host.runProjectEdit(convert)).toMatchObject({ ok: true, value: { kind: 'toSection', outcome: 'saved',
+            reply: { destinationProjectId: 'd', message: 'Project converted to section.', undoLabel: 'Undo' } } });
+        expect(data().projects.find((row) => row.id === 'p')?.deletedAt).toEqual(expect.any(String));
+        expect(data().sections.find((row) => row.id === uuid(30))).toMatchObject({ projectId: 'd', title: 'Kitchen' });
+        expect(data().tasks.find((row) => row.id === 't1')).toMatchObject({ projectId: 'd', sectionId: uuid(30) });
+        expect(await host.runProjectEdit(convert)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        const undo = { requestId: uuid(31), projectId: 'p', kind: 'toSectionUndo', convertRequestId: uuid(30) } as never;
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { kind: 'toSectionUndo', outcome: 'saved' } });
+        expect(data().projects.find((row) => row.id === 'p')?.deletedAt).toBeUndefined();
+        expect(data().tasks.find((row) => row.id === 't1')?.projectId).toBe('p');
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+    });
+});

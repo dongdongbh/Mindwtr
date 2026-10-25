@@ -1707,7 +1707,7 @@ export function createNativeHostContract(options: {
     let self: Record<string, unknown> | null = null;
     const contract = {
         version: NATIVE_HOST_CONTRACT_VERSION,
-        ...createProjectEditMethods({ readiness, save, contract: () => self ?? {} }),
+        ...createProjectEditMethods({ readiness, save, contract: () => self ?? {}, t: () => translate }),
         ...createTaskDraftSaveMethods({ readiness, save, validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value) }),
         ...createOwnedFileAddTaskDraftSaveMethods({ readiness, save, validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value) }),
         ...createOwnedEditorFileAddTaskDraftSaveMethods({ readiness, save, validateField: (field, value) => DRAFT_VALUE_CHECKS[field](value) }),

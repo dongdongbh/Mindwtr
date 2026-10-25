@@ -373,7 +373,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             val actionsLabel = t("projects.actionsLabel")
             val actionsShape = RoundedCornerShape(10.dp)
             Box(Modifier.padding(start = 8.dp).size(38.dp).clip(actionsShape).background(c.filterBg).border(1.dp, c.border, actionsShape)
-                .clickable(enabled = writable && detail != null && failedAction == null, role = Role.Button) { projectDetails.actionsOpen = true }
+                .clickable(enabled = writable && detail != null && failedAction == null, role = Role.Button) { projectDetails.openActions() }
                 .semantics { contentDescription = actionsLabel }.testTag("project-actions-menu-button"), contentAlignment = Alignment.Center) {
                 Icon(Ionicons.EllipsisHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
             }

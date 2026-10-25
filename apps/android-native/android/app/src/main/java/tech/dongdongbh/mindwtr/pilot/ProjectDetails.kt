@@ -54,6 +54,10 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -136,6 +140,14 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     /** RN's header "..." sheet (projectActionsVisible), and the confirm Cancel project or Delete asks first. */
     var actionsOpen by mutableStateOf(false)
     var actionConfirm by mutableStateOf<String?>(null)
+    /** The sheet's Convert to section… row as core answers it: its label, and whether it is offered (or why not). */
+    var convertRow by mutableStateOf<JSONObject?>(null); private set
+    /** RN's ProjectToSectionModal, open while set: core's destinations and preview for the picked destination and typed name. */
+    var convert by mutableStateOf<JSONObject?>(null); private set
+    var convertDestination by mutableStateOf<String?>(null); private set
+    var convertTitle by mutableStateOf(""); private set
+    /** RN's prepared step: the preview with the new section's name, then Convert (or Back). */
+    var convertConfirm by mutableStateOf(false)
     /** What the screen does with an edit's reply, by request UUID: Duplicate opens the copy, Delete offers RN's Undo. */
     private val answers = java.util.Collections.synchronizedMap(HashMap<String, (JSONObject) -> Unit>())
     /** RN's help Alert: its title and text. */
@@ -160,6 +172,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         open = false; statusMenu = false; raw = null; notesExpanded = false; notesPreview = false; notesFullscreen = false
         notesDraft = null; notesView = null; areaPicker = null; tagPicker = null; tagDraft = ""; datePicker = null
         sections = null; sectionDraft = null; sectionDelete = null; help = null; actionsOpen = false; actionConfirm = null
+        convertRow = null; convert = null; convertConfirm = false
     }
 
     private fun input(id: String) = JSONObject().put("projectId", id)
@@ -257,6 +270,57 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     fun lifecycle(action: String) {
         actionsOpen = false; actionConfirm = null
         edit(projectId, "lifecycle") { put("action", action) }
+    }
+
+    /** The "..." opens the sheet and asks core whether Convert to section… is offered for this project. */
+    fun openActions() {
+        actionsOpen = true
+        readConvert("convertRow", null, shell.projects?.title(projectId.orEmpty()).orEmpty()) { convertRow = it.getJSONObject("row") }
+    }
+
+    private fun readConvert(kind: String, destination: String?, title: String, done: (JSONObject) -> Unit) {
+        val id = projectId ?: return
+        val ticket = replies.ticket(kind)
+        val query = input(id).put("destinationId", destination ?: JSONObject.NULL).put("title", title).toString()
+        shell.background(emptyList(), { runtime -> runtime.menuRead("projectToSectionOptions", query) }) { reply, _ -> if (replies.current(ticket)) done(reply) }
+    }
+
+    /** RN's Convert to section…: no destination picked, the project's title as the section name. */
+    fun startConvert() {
+        actionsOpen = false
+        convertDestination = null; convertConfirm = false
+        convertTitle = shell.projects?.title(projectId.orEmpty()).orEmpty()
+        readConvert("convert", null, convertTitle) { convert = it }
+    }
+
+    fun pickDestination(id: String) {
+        convertDestination = id
+        readConvert("convert", id, convertTitle) { convert = it }
+    }
+
+    fun typeConvertTitle(text: String) {
+        convertTitle = text
+        readConvert("convert", convertDestination, text) { convert = it }
+    }
+
+    fun closeConvert() { convert = null; convertConfirm = false }
+
+    /** Convert: the destination opens with core's toast, whose Undo puts the project back and opens it again (RN's). */
+    fun convertNow() {
+        val id = projectId ?: return
+        val destination = convertDestination ?: return
+        val title = convertTitle
+        closeConvert()
+        var convertId = ""
+        convertId = edit(id, "toSection", answer = { reply ->
+            val done = reply.optJSONObject("reply") ?: return@edit
+            shell.openProject(done.getString("destinationProjectId"))
+            shell.showToast(done.getString("title"), done.getString("message"), "success", done.getString("undoLabel")) {
+                edit(id, "toSectionUndo", answer = { undone -> undone.optJSONObject("reply")?.let { shell.openProject(it.getString("sourceProjectId")) } }) {
+                    put("convertRequestId", convertId)
+                }
+            }
+        }) { put("destinationProjectId", destination).put("title", title) } ?: return
     }
 
     /** RN's Duplicate: the copy opens, with core's "Project duplicated". */
@@ -855,6 +919,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
     }
     sections?.let { options -> SectionManager(model, options) }
     if (actionsOpen) ProjectActionsSheet(model)
+    convert?.let { options -> ConvertSheet(model, options) }
     actionConfirm?.let { action ->
         // RN's Alert before Cancel project and Delete, with its words.
         val cancel = action == "cancel"
@@ -889,6 +954,11 @@ private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetai
             val listShape = RoundedCornerShape(10.dp)
             Column(Modifier.fillMaxWidth().clip(listShape).border(1.dp, c.border, listShape)) {
                 ProjectOptionRow(SettingsIonicons.CopyOutline, t("projects.duplicate"), "project-duplicate-button", idle) { duplicate() }
+                // Offered when core says the project can become a section; else shown off with core's reason, as RN's.
+                convertRow?.let { row ->
+                    ProjectOptionRow(Ionicons.FolderOpenOutline, row.getString("label"), "project-convert-to-section-button",
+                        idle && row.getBoolean("eligible"), row.menuText("blocked")) { startConvert() }
+                }
                 if (archived) ProjectOptionRow(SettingsIonicons.RefreshOutline, t("projects.reactivate"), "project-reactivate-button", idle) { lifecycle("reactivate") }
                 else ProjectOptionRow(Ionicons.ArchiveOutline, t("projects.complete"), "project-archive-button", idle, t("projects.archiveHelp")) { lifecycle("complete") }
                 if (!archived) ProjectOptionRow(Ionicons.CloseCircleOutline, t("projects.cancel"), "project-cancel-button", idle, danger = true) {
@@ -900,6 +970,72 @@ private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetai
             }
         }
     }
+}
+
+/**
+ * RN's ProjectToSectionModal: the destinations core allows (a radio list) and the section name, then Next shows the preview with
+ * the new section's name, and Convert sends it (Back returns). Core's preview lines and refusals, in the app language.
+ */
+@Composable
+private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(model.projectDetails) {
+    val c = LocalTheme.current.colors
+    val words = options.getJSONObject("words")
+    val preview = options.optJSONObject("preview")
+    val idle = !model.busy && model.failedAction == null
+    Overlay(::closeConvert, outsideCloses = false) {
+        val shape = RoundedCornerShape(12.dp)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.85f).dp).clip(shape)
+            .background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("project-convert-sheet")) {
+            Text(words.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                options.menuText("sequentialNote")?.let { Text(it, style = rnText(14, 400), color = c.secondaryText) }
+                if (!convertConfirm) {
+                    Text(words.getString("destination"), style = rnText(14, 400), color = c.text, modifier = Modifier.padding(bottom = 8.dp))
+                    for (destination in options.menuObjects("destinations")) {
+                        val on = destination.getString("id") == convertDestination
+                        Text(destination.getString("title"), style = rnText(14, 400), color = if (on) c.tint else c.text, modifier = Modifier.fillMaxWidth()
+                            .selectable(on, enabled = idle, role = Role.RadioButton) { pickDestination(destination.getString("id")) }.padding(vertical = 10.dp))
+                    }
+                    val nameLabel = words.getString("sectionName")
+                    Text(nameLabel, style = rnText(14, 400), color = c.text, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                    val inputShape = RoundedCornerShape(10.dp)
+                    BasicTextField(convertTitle, ::typeConvertTitle, enabled = idle, singleLine = true, textStyle = rnText(16, 400).copy(color = c.text),
+                        cursorBrush = SolidColor(c.tint), modifier = Modifier.fillMaxWidth().clip(inputShape).background(c.inputBg).border(1.dp, c.border, inputShape)
+                            .padding(horizontal = 12.dp, vertical = 10.dp).semantics { contentDescription = nameLabel }.testTag("project-convert-name"))
+                }
+                preview?.let { shown ->
+                    val lines = shown.getJSONArray("lines")
+                    Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(lines.getString(0), style = rnText(14, 400), color = c.text)
+                        if (convertConfirm) Text(shown.getString("named"), style = rnText(14, 400), color = c.text)
+                        for (index in 1 until lines.length()) {
+                            // RN's destination-color line leads with the destination's color dot (the fourth line from the end).
+                            if (index == lines.length() - 4) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(12.dp).clip(CircleShape).background(shown.menuText("color")?.let(::coreColorOrNull) ?: Color.Transparent).border(1.dp, c.border, CircleShape))
+                                Text(lines.getString(index), style = rnText(14, 400), color = c.secondaryText)
+                            } else Text(lines.getString(index), style = rnText(14, 400), color = c.secondaryText)
+                        }
+                    }
+                }
+                options.menuText("blocked")?.let { Text(it, style = rnText(14, 400), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
+                val next = convertConfirm || (preview != null && convertTitle.isNotBlank())
+                ConvertButton(words.getString(if (convertConfirm) "back" else "cancel"), idle) { if (convertConfirm) convertConfirm = false else closeConvert() }
+                ConvertButton(words.getString(if (convertConfirm) "convert" else "next"), idle && next, "project-convert-next") {
+                    if (convertConfirm) convertNow() else convertConfirm = true
+                }
+            }
+        }
+    }
+}
+
+/** RN's linkModalButton: a 14/700 label, half faded while off. */
+@Composable
+private fun ConvertButton(label: String, enabled: Boolean, tag: String? = null, onClick: () -> Unit) {
+    Text(label, style = rnText(14, 700), color = LocalTheme.current.colors.text, modifier = Modifier.fade(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(10.dp))
+        .clickable(enabled = enabled, role = Role.Button, onClick = onClick).then(if (tag != null) Modifier.testTag(tag) else Modifier)
+        .padding(horizontal = 10.dp, vertical = 8.dp))
 }
 
 /** RN's ProjectOptionRow: a 32-dp icon tile, the label (and its description), a hairline under it. */
