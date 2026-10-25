@@ -9594,5 +9594,12 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(editor, /FocusStar\(focused, !starEnabled, 22/);
     // RN's row statusBadge has a borderColor but no borderWidth: a plain fill (O2f-parity pairs).
     assert.match(source('TaskRowView.kt'), /\.heightIn\(min = 44\.dp\)\.clip\(shape\)\.background\(colors\.bg\)\s+\.then\(tap\)/);
+    // A picked local .ics stays readable after a reboot (RN's 5bfa6bf6b): its picker is ACTION_OPEN_DOCUMENT, the only pick whose
+    // grant can persist (GetContent's cannot), and addFile persists it (keepPickedFileReadable, CalendarVisitTest).
+    const calendar = source('CalendarSettings.kt');
+    assert.match(calendar, /rememberLauncherForActivityResult\(ActivityResultContracts\.OpenDocument\(\)\) \{ uri -> uri\?\.let \{ screen\.addFile\(it, revision\) \} \}/,
+        'the local .ics picker is OpenDocument, feeding addFile');
+    assert.doesNotMatch(calendar, /ActivityResultContracts\.GetContent/);
+    assert.match(calendar, /fun addFile\(uri: Uri, revision: String\) \{[^}]*keepPickedFileReadable \{ flags -> resolver\.takePersistableUriPermission\(uri, flags\) \}/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
