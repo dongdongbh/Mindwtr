@@ -232,10 +232,14 @@ val checkFossDependencies by tasks.registering {
 }
 val checkVariantIdentity by tasks.registering { dependsOn(checkFossDependencies) }
 
+/** androidx.sqlite's bundled driver: the app's (Android) and the JVM tests' builds are always the same version. */
+val sqliteVersion = "2.7.1"
+
 dependencies {
     implementation("wang.harlon.quickjs:wrapper-android:3.2.0")
-    // Android's system SQLite does not guarantee FTS5, which core schema needs.
-    implementation("androidx.sqlite:sqlite-bundled:2.7.1")
+    // Android's system SQLite does not guarantee FTS5, which core schema needs. The JVM tests run the same library's JVM build
+    // (RnKeyValueTest), so both use [sqliteVersion] and move together.
+    implementation("androidx.sqlite:sqlite-bundled:$sqliteVersion")
     // RN's fetch runs on OkHttp; the host's fetch uses it too (HostIo.kt), so redirects, TLS and cleartext match RN's.
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // RN's Play-only modules, in the Play channel alone (RN's FOSS build drops them, scripts/verify_foss_no_google_services.py):
@@ -269,6 +273,8 @@ dependencies {
     // JVM unit tests of plain Kotlin (the entry queue, WriteJournalTest); Android's org.json is a stub there.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    // RN's RKStorage on the real SQLite in JVM tests (RnKeyValueTest): the bundled driver's JVM build, test classpath only.
+    testImplementation("androidx.sqlite:sqlite-bundled-jvm:$sqliteVersion")
 }
 
 val buildCoreBundle by tasks.registering(Exec::class) {
