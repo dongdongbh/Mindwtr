@@ -1145,7 +1145,7 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
                 model.project?.controls?.takeIf { !archived }?.let { controls ->
                     val on = controls.getBoolean("showCompleted")
                     ProjectOptionRow(if (on) SettingsIonicons.EyeOutline else SettingsIonicons.EyeOffOutline, controls.getString("label"), "project-view-completed-option",
-                        idle, selected = on) { viewOptionsOpen = false; model.setProjectShowCompleted(!on) }
+                        idle, selected = on) { viewOptionsOpen = false; model.showProjectCompleted(!on) }
                 }
             }
         }

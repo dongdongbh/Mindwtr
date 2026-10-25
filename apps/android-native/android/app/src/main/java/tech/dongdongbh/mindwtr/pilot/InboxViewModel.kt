@@ -1909,7 +1909,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             .put("showCompleted", projectShowCompleted).put("completedCollapsed", projectCompletedCollapsed).toString())
 
     /** RN's Show completed / Hide completed: stored at once, in RN's key; the project reads again. */
-    fun setProjectShowCompleted(on: Boolean) {
+    fun showProjectCompleted(on: Boolean) {
         projectShowCompleted = on
         prefs.edit().putString(PROJECT_SHOW_COMPLETED_KEY, on.toString()).apply()
         refreshProjects()
