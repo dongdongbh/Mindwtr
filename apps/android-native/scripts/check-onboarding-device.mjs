@@ -80,12 +80,13 @@ try {
     await wipe();
     // The app's own start (no harness start tab): an empty library opens on Focus, RN's home tab, under the sheet.
     let nodes = await start(sheet, 'the welcome sheet', { startTab: '' });
-    check(tabSelected(nodes, en['tab.next']), '(a) the welcome sheet opens over Focus, RN\'s home tab');
     const options = [en['onboarding.startFreshTitle'], en['onboarding.syncTitle'], en['onboarding.importTitle']].map((title) => byText(nodes, title));
     check(options.every(Boolean) && centerY(options[0]) < centerY(options[1]) && centerY(options[1]) < centerY(options[2]),
         '(a) an empty library opens the welcome sheet: Start using Mindwtr, then Set up sync, then Import tasks');
     shot('welcome');
     nodes = await tapExpecting(byText(nodes, en['onboarding.skipForNow']) ?? fail('no Skip for now'), (current) => !sheet(current) && onTabs(current), 'the tabs');
+    // The sheet is its own window (its dump holds no tabs): the tabs under it, read once it closes, are that same start's.
+    check(tabSelected(nodes, en['tab.next']), '(a) the welcome sheet opened over Focus, RN\'s home tab');
     await start(onTabs, 'the tabs after Skip');
     await sleep(3000);
     check(!sheet(await screen()), '(a) after Skip, a new start opens no welcome sheet');
