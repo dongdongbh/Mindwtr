@@ -25,3 +25,4 @@ Changes collected since the latest stable release.
 - Mobile: in quick Process Inbox, "I'll do it" now opens the filing step (project, area, contexts, dates) before moving the task to Next, as guided mode and desktop do (#1445).
 - Mobile: Process Inbox date rows have a clock button, so you can set a time for start, due, review and follow-up dates (#1445).
 - Mobile and desktop: Process Inbox starts a capture with no project or area in your default area (#1445).
+- Android and iOS: on a slow start before Mindwtr has merged its older backup copy into its database, it now waits for the database instead of showing that older copy first. Before, a save from that view could put older settings back.

@@ -496,9 +496,42 @@ const hasStoredJsonBackup = async (): Promise<boolean> => {
     return jsonBackupStored;
 };
 
-// Pending or stored, and not outgrown: a fallback read would find a copy.
+// Set once the marker reads as set, or once this run merged the copy and
+// refreshed it. Never kept false: another runtime may set the marker later.
+let jsonCopyReconciled = false;
+let didLogUnreconciledJsonCopy = false;
+
+// Until the reconcile has merged the copy into SQLite, SQLite may overrule it.
+// A read served from it hands the store an old settings row, and the next save
+// writes that row whole over the newer one, so reads wait for SQLite instead.
+const hasReconciledJsonCopy = async (): Promise<boolean> => {
+    if (jsonCopyReconciled) return true;
+    try {
+        if (await AsyncStorage.getItem(SQLITE_JSON_RECONCILE_KEY) != null) jsonCopyReconciled = true;
+    } catch {
+        // Unknown counts as not merged; the next read asks again.
+    }
+    // A reconcile that finished during the read may have set it too.
+    if (jsonCopyReconciled) return true;
+    if (!didLogUnreconciledJsonCopy) {
+        didLogUnreconciledJsonCopy = true;
+        // Forced: this runs inside the first read, before logging settings load.
+        void logWarn('[Storage] JSON copy not yet merged into SQLite; reads wait for SQLite', {
+            scope: 'storage',
+            force: true,
+            extra: { releaseCheck: 'v1.3.8/rn-unreconciled-no-fallback' },
+        });
+    }
+    return false;
+};
+
+// Pending or stored, not outgrown, and merged: a fallback read would find a
+// copy that holds what SQLite held when it was last written.
 const hasUsableJsonBackup = async (): Promise<boolean> => (
-    !jsonBackupFrozen && isJsonBackupUsable() && (jsonBackupCoalescer.hasPending() || await hasStoredJsonBackup())
+    !jsonBackupFrozen
+    && isJsonBackupUsable()
+    && (jsonBackupCoalescer.hasPending() || await hasStoredJsonBackup())
+    && await hasReconciledJsonCopy()
 );
 
 // The #975 read-authority rule: reads come from the JSON backup while it is
@@ -868,11 +901,7 @@ export const getMobileStartupSnapshotFromBackup = async (): Promise<AppData | nu
     }
     // Before a reconcile the copy may be one SQLite would overrule; the startup
     // view must never show it.
-    try {
-        if (await AsyncStorage.getItem(SQLITE_JSON_RECONCILE_KEY) == null) return null;
-    } catch {
-        return null;
-    }
+    if (!await hasReconciledJsonCopy()) return null;
     const jsonValue = await getLegacyJson(AsyncStorage);
     if (jsonValue == null) {
         return null;
@@ -896,6 +925,8 @@ const SQLITE_JSON_RECONCILE_KEY = `${DATA_KEY}:sqlite-json-reconcile-v1`;
 
 // Best-effort: an unwritten marker only repeats an idempotent merge next launch.
 const markJsonReconcileDone = async (): Promise<void> => {
+    // This run merged it, whether or not the marker lands.
+    jsonCopyReconciled = true;
     try {
         await AsyncStorage.setItem(SQLITE_JSON_RECONCILE_KEY, '1');
     } catch (error) {
@@ -940,6 +971,20 @@ const reconcileJsonBackupIntoSqlite = async (
         const current = currentSnapshot ?? await adapter.getData();
         const { data: merged, stats } = mergeAppDataWithStats(current, backup);
         await adapter.saveData(merged);
+        // The copy may be older than SQLite (a frozen run writes no backup), and
+        // reads may fall back to it once this marks it merged.
+        let refreshed = false;
+        try {
+            refreshed = !(await saveStartupJsonBackup(AsyncStorage, merged, 'mobile.storage.sqlite_init.reconcile')).skipped;
+        } catch (error) {
+            logStorageWarn('[Storage] Failed to refresh the JSON backup after the reconcile', error);
+        }
+        if (!refreshed) {
+            // Too large, or the write failed: the old copy must be refused instead.
+            // If even that fails, the backup freezes (see prepareSqliteData).
+            await markJsonBackupOutgrown();
+            if (jsonBackupOutgrown !== true) throw new Error('The old JSON backup could be neither refreshed nor marked outgrown.');
+        }
         logStorageInfo('[Storage] Reconciled JSON backup into SQLite', {
             backupTasks: String(backup.tasks.length),
             sqliteTasks: String(current.tasks.length),
@@ -1730,6 +1775,8 @@ export const __mobileStorageTestUtils = {
         jsonBackupStored = null;
         jsonBackupOutgrown = null;
         jsonBackupFrozen = false;
+        jsonCopyReconciled = false;
+        didLogUnreconciledJsonCopy = false;
         widgetRefreshCoalescer.reset();
         initializeSqliteState = initSqliteState;
         jsonAheadOfSqlite = false;
