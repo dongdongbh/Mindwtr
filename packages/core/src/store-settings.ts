@@ -46,7 +46,7 @@ import { notificationSettingWitness } from './notification-settings-model';
 import { taskEditValuesEqual } from './json-value-equality';
 import { backfillArchiveClocks, getArchiveRetentionPreview, isArchiveRetentionDays } from './archive-retention';
 import { calendarSubscriptionModules } from './store-calendar-subscription-modules';
-import { getSavedTaxonomyTokens, normalizeTaxonomyToken } from './taxonomy-catalog';
+import { getSavedTaxonomyTokens, normalizeTaxonomyToken, retainTaxonomyEffects } from './taxonomy-catalog';
 
 const STORAGE_TIMEOUT_MS = 15_000;
 let storageTimeoutMs = STORAGE_TIMEOUT_MS;
@@ -1039,10 +1039,10 @@ export const createSettingsActions = ({
                 });
 
                 if (autoArchiveResult.didAutoArchive) {
-                    persist(set, debouncedSave, state, { tasks: autoArchiveResult.allTasks, settings: newSettings });
+                    persist(set, debouncedSave, state, { tasks: autoArchiveResult.allTasks, settings: autoArchiveResult.settings });
                     return {
                         _allTasks: autoArchiveResult.allTasks,
-                        settings: newSettings,
+                        settings: autoArchiveResult.settings,
                         lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt),
                     };
                 }
@@ -1184,6 +1184,8 @@ export const createSettingsActions = ({
                 ? gtdArchiveEffects(durable.tasks, settings, input.preparedAt,
                     input.deviceIdBefore ?? input.deviceIdToInitialize!) : null;
             if (archiveEffects && !taskEditValuesEqual(archiveEffects, input.archiveEffects)) return memory;
+            // The same catalogue writes as RN updateSettings' archive pass.
+            const savedSettings = archiveEffects?.length ? retainTaxonomyEffects(settings, archiveEffects) : settings;
             const archivedById = new Map(archiveEffects?.map((effect) => [effect.before.id, effect.after]) ?? []);
             const writtenTasks = archiveEffects
                 ? durable.tasks.map((row) => archivedById.get(row.id) ?? row) : durable.tasks;
@@ -1193,14 +1195,14 @@ export const createSettingsActions = ({
             persist(set, debouncedSave, { ...memory, _allTasks: durable.tasks,
                 _allProjects: durable.projects, _allSections: durable.sections ?? [],
                 _allAreas: durable.areas ?? [], _allPeople: durable.people ?? [], settings: durable.settings },
-            { ...durable, tasks: writtenTasks, settings });
+            { ...durable, tasks: writtenTasks, settings: savedSettings });
             const lastDataChangeAt = getNextDataChangeAt(memory.lastDataChangeAt);
             authority.saveBoundary = { taskReference: freshTasks, lastDataChangeAt,
                 generation: getSaveGeneration(), failure: memory.persistenceFailure };
             result = { success: true, outcome: 'applied' };
             return { _allTasks: freshTasks, _allProjects: freshProjects,
                 _allSections: durable.sections ?? [], _allAreas: durable.areas ?? [],
-                _allPeople: durable.people ?? [], settings, lastDataChangeAt };
+                _allPeople: durable.people ?? [], settings: savedSettings, lastDataChangeAt };
         });
         return result;
     },

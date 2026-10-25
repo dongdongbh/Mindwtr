@@ -10,6 +10,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import type { AppData, Area, Task } from './types';
 import { generateUUID } from './uuid';
 import { buildGtdSettingsModel, resolveGtdPomodoroDurations } from './gtd-settings-model';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 
 const ID = '00000000-0000-4000-8000-000000000103';
 const AT = '2026-09-01T00:00:00.000Z';
@@ -1481,7 +1482,7 @@ describe('prepared GTD Auto-archive', () => {
         start.settings.gtd = { ...start.settings.gtd, autoArchiveDays: 0 };
         start.tasks = [
             { ...terminal, id: 'archive-old', status: 'done', deletedAt: undefined,
-                completedAt: old, updatedAt: old, rev: 7 },
+                completedAt: old, updatedAt: old, rev: 7, tags: ['#Legacy'] },
             { ...terminal, id: 'archive-recent', status: 'done', deletedAt: undefined,
                 completedAt: recent, updatedAt: recent },
             { ...terminal, id: 'archive-active', status: 'next', deletedAt: undefined,
@@ -1509,6 +1510,12 @@ describe('prepared GTD Auto-archive', () => {
         expect(env.data().settings.gtd).toEqual({ ...start.settings.gtd, autoArchiveDays: 7 });
         expect(env.data().tasks[0]).toEqual(prepared.archiveEffects?.[0].after);
         expect(env.data().tasks.slice(1)).toEqual(start.tasks.slice(1));
+        // Archiving can leave a legacy tag unused: native keeps it saved, as RN updateSettings does (#828).
+        expect(getSavedTaxonomyTokens(env.data().settings, 'tag')).toEqual(['#Legacy']);
+        const rn = await open(start);
+        await useTaskStore.getState().updateSettings({ gtd: { ...start.settings.gtd, autoArchiveDays: 7 } });
+        await flushPendingSave();
+        expect(getSavedTaxonomyTokens(rn.data().settings, 'tag')).toEqual(['#Legacy']);
     });
 
     it('Never preserves already archived tasks and has an empty frozen effect batch', async () => {

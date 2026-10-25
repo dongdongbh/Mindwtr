@@ -20,6 +20,7 @@ import { getAutoArchiveDays, shouldAutoArchiveCompletedTask } from './task-utils
 import { isTaskActionable, isTaskFinished } from './task-status';
 import { generateUUID as uuidv4 } from './uuid';
 import { runToEnd, type CooperativePass } from './cooperative';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 import type { AppData, Area, Project, Task, TaskEditorFieldId } from './types';
 
 // Bumped whenever a schema-shaped repair (project status/order, legacy area
@@ -394,11 +395,17 @@ export const runAutoArchive = (
     tasks: Task[],
     settings: AppData['settings'],
     context: { nowIso: string; nowMs: number; deviceId?: string; enabled?: boolean }
-): { allTasks: Task[]; didAutoArchive: boolean } => {
+): { allTasks: Task[]; didAutoArchive: boolean; settings: AppData['settings'] } => {
     const result = autoArchiveStaleCompletedTasks(tasks, settings, context);
+    // Archiving can leave a token unused, so keep it saved; a catalogue write needs a device ID.
+    const retained = result.didAutoArchive && context.deviceId
+        ? retainTaxonomyEffects(settings, result.tasks.flatMap((after, index) =>
+            after !== tasks[index] ? [{ before: tasks[index], after }] : []))
+        : settings;
     return {
         allTasks: result.tasks,
         didAutoArchive: result.didAutoArchive,
+        settings: retained,
     };
 };
 
@@ -418,7 +425,7 @@ const autoArchiveStaleTasksMigration: LoadMigration = {
             nowMs: ctx.nowMs,
             deviceId: data.settings.deviceId,
         });
-        return result.didAutoArchive ? { ...data, tasks: result.allTasks } : null;
+        return result.didAutoArchive ? { ...data, tasks: result.allTasks, settings: result.settings } : null;
     },
 };
 

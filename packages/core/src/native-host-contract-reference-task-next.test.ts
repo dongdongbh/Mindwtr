@@ -256,17 +256,29 @@ describe('Reference leading Next is the source-bound RN status-only update', () 
         } finally { await sqlite.close(); }
     });
 
-    it('preserves harmless unrelated settings and permits a limit change when conversion fills no slot', async () => {
+    it('matches RN settings while preserving unrelated settings and a limit change when conversion fills no slot', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
+        const changeSettings = (settings: AppData['settings']) => {
+            settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 };
+        };
+        const rn = await openSqliteHost(seed()); let expectedSettings: ReturnType<typeof rows>['settings'];
+        try {
+            await editSettings(rn, changeSettings); await rn.restart(undefined, { recoveryLoad: true });
+            const before = rows().settings;
+            expect(await useTaskStore.getState().updateTask(ID, { status: 'next' })).toEqual({ success: true });
+            await flushPendingSave(); expectedSettings = rows().settings;
+            // A status-only write leaves every token in use, so RN writes no settings (#828).
+            expect(expectedSettings).toEqual(before);
+            expect(expectedSettings).toMatchObject({ theme: 'dark', gtd: { focusTaskLimit: 1, autoArchiveDays: 1 } });
+        } finally { await rn.close(); }
         const sqlite = await openSqliteHost(seed());
         try {
             const command = await prepare(sqlite);
             expect(command.prepared.checklist.effect.guards).toMatchObject({ focusCount: null, focusLimit: null, focusBoundary: null, autoArchiveDays: null });
-            await editSettings(sqlite, (settings) => { settings.theme = 'dark'; settings.gtd = { ...settings.gtd, focusTaskLimit: 1, autoArchiveDays: 1 }; });
+            await editSettings(sqlite, changeSettings);
             await sqlite.restart(undefined, { recoveryLoad: true });
-            const settings = rows().settings;
             expect(value(await sqlite.host.commitPreparedDoneTaskStatus(command))).toEqual({ id: ID });
-            expect(rows().settings).toEqual(settings);
+            expect(rows().settings).toEqual(expectedSettings!);
         } finally { await sqlite.close(); }
     });
 

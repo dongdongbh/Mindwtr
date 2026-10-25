@@ -197,6 +197,23 @@ describe('saved contexts and tags', () => {
         expect(getSavedTaxonomyTokens(env.saved().settings, 'tag')).toEqual(['#Legacy']);
     });
 
+    it('keeps a legacy token through the automatic Done-to-Archived pass on load and on a settings change', async () => {
+        const stale = task({ status: 'done', tags: ['#Legacy'], completedAt: '2026-01-01T00:00:00.000Z',
+            updatedAt: '2026-01-01T00:00:00.000Z' });
+        const loaded = await open(document({ deviceId: 'device', gtd: { autoArchiveDays: 7 } }, [stale]));
+        expect(loaded.saved().tasks[0].status).toBe('archived');
+        expect(getSavedTaxonomyTokens(loaded.saved().settings, 'tag')).toEqual(['#Legacy']);
+        // A library with no device ID gets one from an earlier load step, so it keeps the token too.
+        const anonymous = await open(document({ gtd: { autoArchiveDays: 7 } }, [stale]));
+        expect(anonymous.saved().tasks[0].status).toBe('archived');
+        expect(getSavedTaxonomyTokens(anonymous.saved().settings, 'tag')).toEqual(['#Legacy']);
+        const changed = await open(document({ deviceId: 'device', gtd: { autoArchiveDays: 0 } }, [stale]));
+        await useTaskStore.getState().updateSettings({ gtd: { autoArchiveDays: 7 } });
+        await flushPendingSave();
+        expect(changed.saved().tasks[0].status).toBe('archived');
+        expect(getSavedTaxonomyTokens(changed.saved().settings, 'tag')).toEqual(['#Legacy']);
+    });
+
     it('keeps a skipped recurring occurrence\'s tokens in use through its follow-up', async () => {
         const env = await open(document({ deviceId: 'device' }, [task({ tags: ['#Legacy'], dueDate: '2026-10-20',
             recurrence: { rule: 'daily', strategy: 'strict' } })]));
