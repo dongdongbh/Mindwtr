@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
@@ -99,7 +98,7 @@ fun AreaSheet(model: InboxViewModel) = with(model) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
-                .border(1.dp, c.border, shape).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp),
+                .rnBorder(1.dp, c.border, shape).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp),
         ) {
             Text(t("projects.areaFilter"), style = rnText(16, 700), color = c.text,
                 modifier = Modifier.padding(bottom = if (filter.isDefault) 12.dp else 4.dp).semantics { heading() })
@@ -122,7 +121,7 @@ fun AreaSheet(model: InboxViewModel) = with(model) {
                     }
                     Row(
                         Modifier.padding(bottom = 10.dp).fillMaxWidth().heightIn(min = 48.dp).clip(rowShape)
-                            .background(tone?.copy(alpha = 0x18 / 255f) ?: c.cardBg).border(1.dp, tone ?: c.border, rowShape)
+                            .background(tone?.copy(alpha = 0x18 / 255f) ?: c.cardBg).rnBorder(1.dp, tone ?: c.border, rowShape)
                             .then(control).padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {

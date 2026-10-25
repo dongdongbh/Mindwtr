@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -85,7 +84,7 @@ fun EditorTabs(model: InboxViewModel, editor: TaskEditor) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
     Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Row(Modifier.weight(1f).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)) {
+        Row(Modifier.weight(1f).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)) {
             for ((tab, icon, key) in listOf(Triple("task", SettingsLucide.Pencil, "markdown.edit"), Triple("view", Lucide.Eye, "markdown.preview"))) {
                 val open = editor.tab == tab
                 val label = t(key)
@@ -141,7 +140,7 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
                         val spoken = item.getString("accessibilityLabel")
                         val shape = RoundedCornerShape(12.dp)
                         val open = { follow(JSONObject().put("kind", "token").put("value", value)) }
-                        Text(value, style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+                        Text(value, style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
                             .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; onClick { open(); true } }
                             .clickable { open() }.padding(horizontal = 10.dp, vertical = 6.dp))
                     }
@@ -150,7 +149,7 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
             "description" -> Column(Modifier.padding(bottom = 16.dp)) {
                 ViewLabel(row.getString("label"))
                 val shape = RoundedCornerShape(10.dp)
-                Box(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(12.dp)) {
+                Box(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) {
                     MarkdownBlocks(row.menuObjects("blocks"), labels, follow)
                 }
             }
@@ -164,7 +163,7 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
                         val shape = RoundedCornerShape(12.dp)
                         val enabled = !item.getBoolean("disabled")
                         val owner = AttachmentOwner("task", editor.id)
-                        Column(Modifier.weight(1f).heightIn(min = 90.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+                        Column(Modifier.weight(1f).heightIn(min = 90.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                             .clickable(enabled = enabled, role = Role.Button) { attachments.open(owner, item.getString("id")) }.padding(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                             if (item.getBoolean("image")) AttachmentThumbnail(item.getString("uri"), item.getString("title"))
@@ -191,7 +190,7 @@ private fun ViewLabel(label: String) =
 private fun ViewCard(label: String, spoken: String? = null, onClick: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
         .then(if (onClick != null) Modifier.clearAndSetSemantics { contentDescription = spoken ?: label; role = Role.Button; onClick { onClick(); true } }
             .clickable(onClick = onClick) else Modifier)
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -206,7 +205,7 @@ private fun StatusPill(status: String, label: String, enabled: Boolean, open: ()
     val colors = LocalTheme.current.status(status)
     val shape = RoundedCornerShape(8.dp)
     val spoken = t("task.aria.changeStatus").replace("{{status}}", label)
-    Row(Modifier.fade(if (enabled) 1f else 0.6f).heightIn(min = 32.dp).clip(shape).background(colors.bg).border(1.dp, colors.border, shape)
+    Row(Modifier.fade(if (enabled) 1f else 0.6f).heightIn(min = 32.dp).clip(shape).background(colors.bg).rnBorder(1.dp, colors.border, shape)
         .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (enabled) onClick { open(); true } else disabled() }
         .clickable(enabled = enabled, onClick = open).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
@@ -285,12 +284,12 @@ internal fun MarkdownBlocks(blocks: List<JSONObject>, labels: JSONObject, follow
                 Text(runs(block), style = rnText(if (level == 1) 16 else if (level == 2) 15 else 14, 700, 20), color = c.text)
             }
             "rule" -> Box(Modifier.padding(vertical = 4.dp).fillMaxWidth().height(1.dp).background(c.border))
-            "code" -> Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(8.dp))) {
+            "code" -> Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp))) {
                 Text(block.getString("text"), style = rnText(12, 400, 18).copy(fontFamily = FontFamily.Monospace), color = c.text,
                     modifier = Modifier.padding(start = 10.dp, top = 8.dp, bottom = 8.dp, end = 38.dp))
                 val copy = labels.getString("copyCode")
                 Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg)
-                    .border(1.dp, c.border, RoundedCornerShape(7.dp))
+                    .rnBorder(1.dp, c.border, RoundedCornerShape(7.dp))
                     .clearAndSetSemantics { contentDescription = copy; role = Role.Button; onClick { clipboard.setText(AnnotatedString(block.getString("text"))); true } }
                     .clickable { clipboard.setText(AnnotatedString(block.getString("text"))) },
                     contentAlignment = Alignment.Center) {
@@ -359,7 +358,7 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
             if (reorder) {
                 val label = labels.getString(if (ordering) "done" else "reorder")
                 val shape = RoundedCornerShape(8.dp)
-                Box(Modifier.heightIn(min = 36.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                Box(Modifier.heightIn(min = 36.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                     .clearAndSetSemantics { contentDescription = label; role = Role.Button; onClick { ordering = !ordering; true } }
                     .clickable { ordering = !ordering }.padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center) { Text(label, style = rnText(12, 700), color = c.tint) }
@@ -371,7 +370,7 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
             }
         }
         val shape = RoundedCornerShape(10.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(8.dp)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(8.dp)) {
             val items = field.menuObjects("items")
             if (ordering && reorder) {
                 for (item in items) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = false).padding(horizontal = 4.dp, vertical = 8.dp),
@@ -383,7 +382,7 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
                         val can = item.getBoolean(if (up) "canMoveUp" else "canMoveDown") && !locked
                         val label = item.getString(if (up) "moveUpLabel" else "moveDownLabel")
                         val box = RoundedCornerShape(8.dp)
-                        Box(Modifier.fade(if (can) 1f else 0.35f).size(36.dp).clip(box).background(c.filterBg).border(1.dp, c.border, box)
+                        Box(Modifier.fade(if (can) 1f else 0.35f).size(36.dp).clip(box).background(c.filterBg).rnBorder(1.dp, c.border, box)
                             .clearAndSetSemantics { contentDescription = label; role = Role.Button
                                 if (can) onClick { editChecklist(JSONObject().put("kind", "move").put("itemId", id).put("step", if (up) -1 else 1)); true } else disabled() }
                             .clickable(enabled = can) { editChecklist(JSONObject().put("kind", "move").put("itemId", id).put("step", if (up) -1 else 1)) }, contentAlignment = Alignment.Center) {
@@ -396,7 +395,7 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
                 val addLabel = labels.getString("add")
                 val addItem = { editChecklist(JSONObject().put("kind", "add")) }
                 val add = RoundedCornerShape(8.dp)
-                Row(Modifier.padding(top = 6.dp).fillMaxWidth().clip(add).background(c.cardBg).border(1.dp, c.border, add)
+                Row(Modifier.padding(top = 6.dp).fillMaxWidth().clip(add).background(c.cardBg).rnBorder(1.dp, c.border, add)
                     .clearAndSetSemantics { contentDescription = addLabel; role = Role.Button; testTag = "checklist-add-item"; if (!locked) onClick { addItem(); true } else disabled() }
                     .clickable(enabled = !locked) { addItem() }
                     .padding(vertical = 9.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -407,7 +406,7 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
                     val reset = labels.getString("reset")
                     val box = RoundedCornerShape(12.dp)
                     val canReset = !locked && writable && failedAction == null
-                    Box(Modifier.fade(if (canReset) 1f else 0.5f).heightIn(min = 44.dp).clip(box).background(c.cardBg).border(1.dp, c.border, box)
+                    Box(Modifier.fade(if (canReset) 1f else 0.5f).heightIn(min = 44.dp).clip(box).background(c.cardBg).rnBorder(1.dp, c.border, box)
                         .clearAndSetSemantics { contentDescription = reset; role = Role.Button; testTag = "checklist-reset"; if (canReset) onClick { resetChecklist(); true } else disabled() }
                         .clickable(enabled = canReset) { resetChecklist() }
                         .padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
@@ -450,7 +449,7 @@ private fun ChecklistItemRow(model: InboxViewModel, editor: TaskEditor, field: J
             if (!locked) onClick { editChecklist(JSONObject().put("kind", "toggle").put("itemId", id)); true } else disabled()
         }.clickable(enabled = !locked) { editChecklist(JSONObject().put("kind", "toggle").put("itemId", id)) }, contentAlignment = Alignment.Center) {
             val box = RoundedCornerShape(6.dp)
-            Box(Modifier.size(28.dp).clip(box).border(2.dp, c.tint, box).background(if (done) c.tint else c.cardBg), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(28.dp).clip(box).rnBorder(2.dp, c.tint, box).background(if (done) c.tint else c.cardBg), contentAlignment = Alignment.Center) {
                 if (done) Icon(Lucide.CheckBold, null, tint = c.onTint, modifier = Modifier.size(12.dp))
             }
         }

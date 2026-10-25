@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -247,7 +246,7 @@ private fun PeriodNavigation(model: InboxViewModel, header: JSONObject, day: Boo
             val today = header.getJSONObject("today")
             val label = today.getString("label")
             val todayState = today.getJSONObject("state")
-            Text(label, style = rnText(11, 700), color = c.tint, modifier = Modifier.clip(CircleShape).border(1.dp, c.border, CircleShape)
+            Text(label, style = rnText(11, 700), color = c.tint, modifier = Modifier.clip(CircleShape).rnBorder(1.dp, c.border, CircleShape)
                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; onClick { if (idle) calendar.go(todayState); idle } }
                 .clickable(enabled = idle) { calendar.go(todayState) }.padding(horizontal = 10.dp, vertical = 3.dp))
         }
@@ -270,7 +269,7 @@ private fun NavArrow(model: InboxViewModel, glyph: String, target: JSONObject) =
 private fun ModeToggle(model: InboxViewModel, view: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Row(Modifier.fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+    Row(Modifier.fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         for (option in view.menuObjects("modes")) {
             val active = option.getBoolean("selected")
             val label = option.getString("label")
@@ -294,7 +293,7 @@ private fun ShowCompleted(model: InboxViewModel, toggle: JSONObject) = with(mode
     val hint = toggle.getString("hint")
     Text(toggle.getString("label"), style = rnText(12, 800), color = if (on) c.tint else c.secondaryText,
         modifier = Modifier.padding(top = 8.dp).clip(shape).background(if (on) theme.wash(c.tint, 0.14f, 0.24f) else c.inputBg)
-            .border(1.dp, if (on) c.tint else c.border, shape)
+            .rnBorder(1.dp, if (on) c.tint else c.border, shape)
             .clearAndSetSemantics { contentDescription = hint; role = Role.Button; selected = on; onClick { if (idle) calendar.showCompleted(!on); idle } }
             .clickable(enabled = idle) { calendar.showCompleted(!on) }.padding(horizontal = 10.dp, vertical = 6.dp))
 }
@@ -480,7 +479,7 @@ private fun ScheduleSearch(model: InboxViewModel, placeholder: String, modifier:
     BasicTextField(query, { typeQuery(it) }, singleLine = true, textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
         modifier = modifier.fillMaxWidth().semantics { contentDescription = placeholder }.testTag("calendar-search"),
         decorationBox = { inner ->
-            Box(Modifier.clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(12.dp), contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(12.dp), contentAlignment = Alignment.CenterStart) {
                 if (query.isEmpty()) Text(placeholder, style = rnText(14, 400), color = c.secondaryText)
                 inner()
             }
@@ -550,7 +549,7 @@ private fun CalendarItemRow(model: InboxViewModel, item: JSONObject, lane: Strin
         item.getBoolean("pressable"), idle, item.spoken(), "calendar-item", actions = actions, onClick = { calendar.openItem(item) }) {
         if (item.optBoolean("showDone")) {
             Text(done, style = rnText(12, 600), color = c.tint, modifier = Modifier.padding(start = 8.dp).clip(CircleShape)
-                .background(c.tint.copy(alpha = 0.16f)).border(1.dp, c.tint.copy(alpha = 0.35f), CircleShape)
+                .background(c.tint.copy(alpha = 0.16f)).rnBorder(1.dp, c.tint.copy(alpha = 0.35f), CircleShape)
                 .clickable(enabled = idle) { complete() }.padding(horizontal = 10.dp, vertical = 5.dp))
         }
     }
@@ -825,7 +824,7 @@ private fun DensityBar(model: InboxViewModel, density: JSONObject, text: JSONObj
             val track = maxWidth
             Box(Modifier.fillMaxWidth().height(4.dp).clip(CircleShape).background(c.border))
             Box(Modifier.width(track * progress).height(4.dp).clip(CircleShape).background(c.tint))
-            Box(Modifier.offset(x = track * progress - 11.dp).size(22.dp).clip(CircleShape).background(c.tint).border(3.dp, c.cardBg, CircleShape))
+            Box(Modifier.offset(x = track * progress - 11.dp).size(22.dp).clip(CircleShape).background(c.tint).rnBorder(3.dp, c.cardBg, CircleShape))
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             choices.forEachIndexed { index, choice ->
@@ -867,7 +866,7 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
     Column(Modifier.fillMaxSize().periodSwipe(model, view.getJSONObject("header"))) {
         if (allDay.isNotEmpty()) {
             val shape = RoundedCornerShape(12.dp)
-            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(12.dp)) {
+            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) {
                 Text(text.getString("allDay").uppercase(), style = rnText(12, 800), color = c.secondaryText, modifier = Modifier.padding(bottom = 8.dp))
                 Column(Modifier.heightIn(max = 132.dp).verticalScroll(rememberScrollState())) { ExactTargets {
                     for (item in allDay) {
@@ -886,7 +885,7 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DayTimeline(model, content, placed, dayKey)
             val shape = RoundedCornerShape(12.dp)
-            Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ScheduleSearch(model, text.getString("schedulePlaceholder"))
                 TaskResults(model, content.menuText("searchTitle"), null, placed.tasks)
             }
@@ -901,7 +900,7 @@ private fun DayTimeline(model: InboxViewModel, content: JSONObject, placed: Plac
     val labels = content.getJSONArray("hourLabels")
     val extent = content.extentMinutes()
     val shape = RoundedCornerShape(12.dp)
-    Box(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)) {
+    Box(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)) {
         // 9 above and below the grid, so the first and last hour rows (centered on their lines) show whole.
         Box(Modifier.fillMaxWidth().padding(vertical = 9.dp).height((extent * PPM).dp).testTag("calendar-timeline")
             // A tap: the minute under the finger, snapped to core's 5 and early enough for a 30-minute task (core's snapCalendarTimelineMinutes).
@@ -1001,7 +1000,7 @@ private fun DayBlock(model: InboxViewModel, item: JSONObject, dayKey: String, ex
                 val w = 1.dp.toPx()
                 drawRoundRect(border, Offset(w / 2, w / 2), Size(size.width - w, size.height - w), androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()),
                     style = androidx.compose.ui.graphics.drawscope.Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4 * w, 4 * w))))
-            } else Modifier.border(1.dp, border, shape))
+            } else Modifier.rnBorder(1.dp, border, shape))
             .testTag("calendar-block")
             .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (pressable && idle) onClick { calendar.openItem(item); true } else disabled() }
             .pointerInput(item.getString("id"), pressable) { detectTapGestures { if (pressable && idle) calendar.openItem(item) } }
@@ -1079,7 +1078,7 @@ private fun ItemSheet(model: InboxViewModel, sheet: JSONObject) = with(model.men
     Box(Modifier.fillMaxSize().background(theme.alertScrim).clickable(role = Role.Button) { calendar.closeSheet() }.semantics { contentDescription = title }
         .padding(24.dp), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(18.dp)
-        Column(Modifier.fillMaxWidth().shadow(14.dp, shape).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.fillMaxWidth().shadow(14.dp, shape).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.testTag("calendar-sheet").padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(title, style = rnText(20, 700), color = c.text, modifier = Modifier.semantics { heading() })
             sheet.menuText("message")?.let { Text(it, style = rnText(16, 400, 23), color = c.secondaryText, modifier = Modifier.heightIn(max = 240.dp).verticalScroll(rememberScrollState())) }
@@ -1093,7 +1092,7 @@ private fun ItemSheet(model: InboxViewModel, sheet: JSONObject) = with(model.men
                     val label = button.getString("label")
                     val enabled = style == "cancel" || button.getString("id") == "ok" || idle
                     Box(weight.fade(if (enabled) 1f else 0.5f).heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp)).background(fill)
-                        .border(1.dp, if (fill == c.filterBg) c.border else fill, RoundedCornerShape(12.dp))
+                        .rnBorder(1.dp, if (fill == c.filterBg) c.border else fill, RoundedCornerShape(12.dp))
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { calendar.press(button.getString("id")); true } else disabled() }
                         .clickable(enabled = enabled) { calendar.press(button.getString("id")) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
                         Text(label, style = rnText(14, 700), color = if (fill == c.filterBg) c.text else c.onTint, textAlign = TextAlign.Center)
@@ -1141,7 +1140,7 @@ private fun ComposerSheet(model: InboxViewModel, draft: ComposerDraft) = with(mo
             }
             val mode = composer.getString("mode")
             val shapeToggle = RoundedCornerShape(10.dp)
-            Row(Modifier.fillMaxWidth().clip(shapeToggle).background(c.inputBg).border(1.dp, c.border, shapeToggle).padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(Modifier.fillMaxWidth().clip(shapeToggle).background(c.inputBg).rnBorder(1.dp, c.border, shapeToggle).padding(2.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                 for ((value, label) in listOf("new" to text.getString("newTask"), "existing" to text.getString("existingTask"))) {
                     val active = mode == value
                     val choose = { if (!active) calendar.choose(JSONObject().put("type", "mode").put("mode", value)) }
@@ -1195,7 +1194,7 @@ private fun ComposerSheet(model: InboxViewModel, draft: ComposerDraft) = with(mo
                     val label = duration.getString("label")
                     val pick = { calendar.choose(JSONObject().put("type", "duration").put("minutes", duration.getInt("minutes"))) }
                     Text(label, style = rnText(12, 900), color = if (active) c.onTint else c.secondaryText, modifier = Modifier.clip(CircleShape)
-                        .background(if (active) c.tint else c.inputBg).border(1.dp, if (active) c.tint else c.border, CircleShape)
+                        .background(if (active) c.tint else c.inputBg).rnBorder(1.dp, if (active) c.tint else c.border, CircleShape)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = active; onClick { if (!locked) pick(); !locked } }
                         .clickable(enabled = !locked) { pick() }.padding(horizontal = 10.dp, vertical = 6.dp))
                 }
@@ -1231,7 +1230,7 @@ private fun ComposerField(value: String, placeholder: String, enabled: Boolean, 
     BasicTextField(value, onChange, enabled = enabled, singleLine = true, textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
         modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder }.testTag(tag),
         decorationBox = { inner ->
-            Box(Modifier.heightIn(min = 46.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(12.dp), contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.heightIn(min = 46.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(12.dp), contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) Text(placeholder, style = rnText(14, 400), color = c.secondaryText)
                 inner()
             }
@@ -1251,7 +1250,7 @@ private fun TimeField(modifier: Modifier, label: String, raw: String, shown: Str
             cursorBrush = SolidColor(c.tint),
             modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }.semantics { contentDescription = label },
             decorationBox = { inner ->
-                Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(12.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(12.dp), contentAlignment = Alignment.Center) {
                     if (value.isEmpty()) Text(placeholder, style = rnText(14, 800), color = c.secondaryText)
                     inner()
                 }

@@ -4,7 +4,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.CircularProgressIndicator
@@ -277,7 +276,7 @@ private fun DraftInput(key: String, coreValue: String, pending: Boolean, placeho
 /** RN's bordered input (waitingInput, projectSearchInput, contextInput): radius 10, 10 by 8 padding. */
 private fun Modifier.inputBox(c: ThemeColors, filled: Boolean = false) =
     fillMaxWidth().clip(RoundedCornerShape(10.dp)).then(if (filled) Modifier.background(c.inputBg) else Modifier)
-        .border(1.dp, c.border, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)
+        .rnBorder(1.dp, c.border, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)
 
 /** RN's InboxCaptureCard: the returning mark, the editable title, similar tasks, the note preview, and the note toggle. */
 @Composable
@@ -287,7 +286,7 @@ private fun InboxViewModel.CaptureCard(flow: InboxProcessing, locked: Boolean, s
     val pending = flow.edits.isNotEmpty()
     var notesOpen by rememberSaveable(flow.taskId) { mutableStateOf(false) }
     val shape = RoundedCornerShape(14.dp)
-    Column(Modifier.padding(bottom = 20.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(bottom = 20.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         capture.text("returningLabel")?.let { label ->
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -334,7 +333,7 @@ private fun InboxViewModel.CaptureCard(flow: InboxProcessing, locked: Boolean, s
         }
         if (notesOpen) {
             DraftInput("${flow.taskId}:description", note, pending, capture.getString("descriptionPlaceholder"), noteLabel, !locked,
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bg).border(1.dp, c.border, RoundedCornerShape(10.dp))
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.bg).rnBorder(1.dp, c.border, RoundedCornerShape(10.dp))
                     .padding(horizontal = 12.dp, vertical = 10.dp), rnText(14, 400), singleLine = false, minLines = 4) {
                 send(JSONObject().put("type", "set").put("field", "description").put("value", it))
             }
@@ -391,7 +390,7 @@ private fun StepBody(model: InboxViewModel, flow: InboxProcessing, locked: Boole
                     val label = option.getString("label")
                     val shape = RoundedCornerShape(12.dp)
                     Box(Modifier.weight(1f).widthIn(min = 96.dp).heightIn(min = 48.dp).clip(shape).background(if (on) c.tint else c.cardBg)
-                        .border(1.dp, if (on) c.tint else c.border, shape).semantics { contentDescription = label }
+                        .rnBorder(1.dp, if (on) c.tint else c.border, shape).semantics { contentDescription = label }
                         .selectable(selected = on, enabled = !locked, role = Role.Tab) { send(option.getJSONObject("edit")) }
                         .padding(horizontal = 10.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
                         Text(label, style = rnText(14, 600), color = if (on) c.onTint else c.text, textAlign = TextAlign.Center)
@@ -420,7 +419,7 @@ private fun ChoiceButton(choice: JSONObject, compact: Boolean, enabled: Boolean,
     val c = LocalTheme.current.colors
     val label = choice.getString("label")
     val shape = RoundedCornerShape(14.dp)
-    Row(modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = if (compact) 48.dp else 52.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Row(modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = if (compact) 48.dp else 52.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .button(label, enabled, onClick).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .padding(horizontal = if (compact) 12.dp else 16.dp, vertical = if (compact) 10.dp else 12.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -461,7 +460,7 @@ private fun SectionTitle(icon: ImageVector?, text: String) {
 private fun SmallOutlined(text: String, description: String, enabled: Boolean, filled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Box(Modifier.clip(shape).then(if (filled) Modifier.background(c.cardBg) else Modifier).border(1.dp, c.border, shape)
+    Box(Modifier.clip(shape).then(if (filled) Modifier.background(c.cardBg) else Modifier).rnBorder(1.dp, c.border, shape)
         .button(description, enabled, onClick).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 8.dp)) {
         Text(text, style = rnText(if (filled) 13 else 12, 400), color = if (filled) c.text else c.secondaryText)
@@ -491,7 +490,7 @@ private fun DateRow(row: JSONObject, locked: Boolean, send: (JSONObject) -> Unit
                 val text = chip.getString("label")
                 val shape = RoundedCornerShape(999.dp)
                 Box(Modifier.weight(1f).widthIn(min = 92.dp).heightIn(min = 34.dp).clip(shape).background(if (on) c.tint else c.filterBg)
-                    .border(1.dp, if (on) c.tint else c.border, shape).semantics { contentDescription = "$label: $text" }
+                    .rnBorder(1.dp, if (on) c.tint else c.border, shape).semantics { contentDescription = "$label: $text" }
                     .selectable(selected = on, enabled = !locked, role = Role.Tab) { send(chip.getJSONObject("edit")) }
                     .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
                     Text(text, style = rnText(12, 600), color = if (on) c.onTint else c.secondaryText, textAlign = TextAlign.Center, maxLines = 2)
@@ -507,7 +506,7 @@ private fun Suggestions(options: List<JSONObject>, locked: Boolean, send: (JSONO
     if (options.isEmpty()) return
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.padding(top = 8.dp, bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(8.dp),
+    Column(Modifier.padding(top = 8.dp, bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(8.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
         for (option in options) {
             Text(option.getString("label"), style = rnText(13, 600), color = c.text, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp))
@@ -531,7 +530,7 @@ private fun DelegateSection(flow: InboxProcessing, delegate: JSONObject, locked:
     delegate.child("followUp")?.let { DateRow(it, locked, send, pickDate) }
     val request = delegate.getJSONObject("request")
     val shape = RoundedCornerShape(12.dp)
-    Box(Modifier.padding(top = 12.dp).fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Box(Modifier.padding(top = 12.dp).fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clickable(role = Role.Button) {
             context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
                 .putExtra(Intent.EXTRA_SUBJECT, request.getString("subject")).putExtra(Intent.EXTRA_TEXT, request.getString("message")), null))
@@ -548,7 +547,7 @@ private fun OptionChip(option: JSONObject, prefix: String, locked: Boolean, send
     val label = option.getString("label")
     val edit = option.getJSONObject("edit")
     val shape = RoundedCornerShape(12.dp)
-    Row(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on) c.tint else c.border, shape)
+    Row(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, shape)
         .semantics { contentDescription = "$prefix: $label" }.selectable(selected = on, enabled = !locked, role = Role.Tab) { send(edit) }
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (!edit.isNull("value")) Box(Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape).background(coreColorOrNull(option.text("color")) ?: c.secondaryText))
@@ -652,13 +651,13 @@ private fun TokenSection(flow: InboxProcessing, tokens: JSONObject, locked: Bool
     for ((labelName, listName) in listOf("contextSuggestionsLabel" to "contextSuggestions", "tagSuggestionsLabel" to "tagSuggestions")) {
         val label = tokens.text(labelName) ?: continue
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(8.dp)) {
+        Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(8.dp)) {
             Text(label, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(bottom = 6.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (chip in tokens.items(listName)) {
                     val chipShape = RoundedCornerShape(10.dp)
                     Text(chip.getString("label"), style = rnText(13, 600), color = c.text, modifier = Modifier.clip(chipShape).background(c.filterBg)
-                        .border(1.dp, c.border, chipShape).clickable(enabled = !locked, role = Role.Button) { send(chip.getJSONObject("edit")) }
+                        .rnBorder(1.dp, c.border, chipShape).clickable(enabled = !locked, role = Role.Button) { send(chip.getJSONObject("edit")) }
                         .padding(horizontal = 10.dp, vertical = 8.dp))
                 }
             }
@@ -673,7 +672,7 @@ private fun MoreOptions(flow: InboxProcessing, more: JSONObject, locked: Boolean
     val c = LocalTheme.current.colors
     val open = more.getBoolean("open")
     val shape = RoundedCornerShape(12.dp)
-    Row(Modifier.padding(bottom = 18.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Row(Modifier.padding(bottom = 18.dp).fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clickable(enabled = !locked, role = Role.Button) { send(more.getJSONObject("edit")) }.padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Text(more.getString("label"), style = rnText(15, 600), color = c.text, modifier = Modifier.weight(1f))
@@ -696,7 +695,7 @@ private fun MoreOptions(flow: InboxProcessing, more: JSONObject, locked: Boolean
                         val on = option.getBoolean("selected")
                         val text = option.getString("label")
                         val chipShape = RoundedCornerShape(10.dp)
-                        Box(Modifier.clip(chipShape).background(if (on) c.tint else c.filterBg).border(1.dp, if (on) c.tint else c.border, chipShape)
+                        Box(Modifier.clip(chipShape).background(if (on) c.tint else c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, chipShape)
                             .semantics { contentDescription = "$label: $text" }
                             .selectable(selected = on, enabled = !locked, role = Role.Tab) { send(option.getJSONObject("edit")) }
                             .padding(horizontal = 10.dp, vertical = 8.dp)) {

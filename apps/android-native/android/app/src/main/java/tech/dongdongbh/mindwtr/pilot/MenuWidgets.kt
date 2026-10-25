@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -211,7 +210,7 @@ fun OverflowTrigger(plain: Boolean = false, enabled: Boolean = true, onClick: ()
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
     val label = t("taskEdit.moreOptions")
-    Box(Modifier.size(44.dp).clip(shape).then(if (plain) Modifier else Modifier.background(c.filterBg).border(1.dp, c.border, shape))
+    Box(Modifier.size(44.dp).clip(shape).then(if (plain) Modifier else Modifier.background(c.filterBg).rnBorder(1.dp, c.border, shape))
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
         Icon(Lucide.MoreHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
     }
@@ -234,7 +233,7 @@ fun OverflowSheet(model: InboxViewModel, title: String, actions: List<OverflowAc
         .semantics { contentDescription = close }.padding(start = 12.dp, end = 12.dp, top = 24.dp)) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.align(Alignment.BottomCenter).widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp)
-            .clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+            .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
             .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 12.dp)) {
             Row(Modifier.heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (dialog?.has("page") == true) {
@@ -247,7 +246,7 @@ fun OverflowSheet(model: InboxViewModel, title: String, actions: List<OverflowAc
                     contentAlignment = Alignment.Center) { Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(20.dp)) }
             }
             val section = RoundedCornerShape(12.dp)
-            Column(Modifier.verticalScroll(rememberScrollState()).clip(section).border(1.dp, c.border, section)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).clip(section).rnBorder(1.dp, c.border, section)) {
                 for (action in actions) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).hairline(c.border, top = false)
                         .selectable(selected = action.selected, enabled = idle || action.page != null, role = Role.Button) {
@@ -309,7 +308,7 @@ fun ActiveChips(model: InboxViewModel, chips: List<JSONObject>, clear: (() -> Un
             val label = chip.getString("label")
             val spoken = chip.menuText("accessibilityLabel")
                 ?: if (excluded) "${t("filters.remove")}: $label (${t("filters.excluded")})" else "${t("filters.remove")}: $label"
-            Row(Modifier.clip(CircleShape).background(c.filterBg).border(1.dp, accent, CircleShape)
+            Row(Modifier.clip(CircleShape).background(c.filterBg).rnBorder(1.dp, accent, CircleShape)
                 .clickable(enabled = idle, role = Role.Button) { removeChip(chip.getJSONObject("action")) }
                 .semantics { contentDescription = spoken }.padding(horizontal = 12.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -319,7 +318,7 @@ fun ActiveChips(model: InboxViewModel, chips: List<JSONObject>, clear: (() -> Un
         }
         clear?.let { onClear ->
             val label = t("filters.clear")
-            Text(label, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.clip(CircleShape).background(c.filterBg).border(1.dp, c.border, CircleShape)
+            Text(label, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.clip(CircleShape).background(c.filterBg).rnBorder(1.dp, c.border, CircleShape)
                 .clickable(enabled = idle, role = Role.Button, onClick = onClear).padding(horizontal = 12.dp, vertical = 6.dp))
         }
     }
@@ -330,7 +329,7 @@ fun ActiveChips(model: InboxViewModel, chips: List<JSONObject>, clear: (() -> Un
 fun ActiveFiltersButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    Row(Modifier.heightIn(min = 44.dp).clip(shape).background(c.filterBg).border(1.dp, c.tint, shape)
+    Row(Modifier.heightIn(min = 44.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.tint, shape)
         .selectable(selected = true, enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = label }
         .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
         Icon(Lucide.SlidersHorizontal, null, tint = c.tint, modifier = Modifier.size(16.dp))
@@ -373,7 +372,7 @@ fun IconEmptyState(icon: ImageVector, title: String, hint: String?, action: Stri
         hint?.takeIf { it.isNotEmpty() }?.let { Text(it, style = rnText(14, 400, 20), color = c.secondaryText, textAlign = TextAlign.Center) }
         action?.let { label ->
             val shape = RoundedCornerShape(8.dp)
-            Text(label, style = rnText(12, 600), color = c.text, modifier = Modifier.padding(top = 12.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            Text(label, style = rnText(12, 600), color = c.text, modifier = Modifier.padding(top = 12.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                 .clickable(role = Role.Button, onClick = onAction).padding(horizontal = 12.dp, vertical = 6.dp))
         }
     }
@@ -403,7 +402,7 @@ fun StatBar(stats: JSONArray, color: Color, trailing: @Composable RowScope.() ->
 @Composable
 fun MoreChip(enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
-    Text(t("common.more"), style = rnText(12, 600), color = c.tint, modifier = Modifier.clip(CircleShape).border(1.dp, c.border, CircleShape)
+    Text(t("common.more"), style = rnText(12, 600), color = c.tint, modifier = Modifier.clip(CircleShape).rnBorder(1.dp, c.border, CircleShape)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
@@ -418,7 +417,7 @@ fun DeferredProjects(model: InboxViewModel, page: MenuPage) = with(model.menu) {
     val c = LocalTheme.current.colors
     var open by rememberSaveable { mutableStateOf(true) }
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .padding(horizontal = 12.dp, vertical = if (open) 12.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val title = deferred.getString("title")
         Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).toggleable(open, role = Role.Button) { open = it }.semantics { contentDescription = title },
@@ -451,11 +450,11 @@ internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate:
     val enabled = menu.idle
     Box {
         if (offset.value > 0f) {
-            Box(Modifier.matchParentSize().clip(shape).background(c.tint).border(1.dp, c.border, shape).padding(horizontal = 16.dp),
+            Box(Modifier.matchParentSize().clip(shape).background(c.tint).rnBorder(1.dp, c.border, shape).padding(horizontal = 16.dp),
                 contentAlignment = Alignment.CenterStart) { Text(activate, style = rnText(14, 600), color = c.onTint) }
         }
         val title = project.getString("title")
-        Row(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Row(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .draggable(rememberDraggableState { delta -> scope.launch { offset.snapTo((offset.value + delta).coerceAtLeast(0f)) } }, Orientation.Horizontal,
                 enabled = enabled, onDragStopped = {
                     val opened = with(density) { offset.value.toDp() } > 72.dp
@@ -624,7 +623,7 @@ internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObje
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val tall = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
         Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
-            .clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+            .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
             .semantics { contentDescription = t("filters.label") }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (picker != null) Text(t("common.back"), style = rnText(13, 600), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
@@ -765,7 +764,7 @@ internal fun SheetLabel(text: String) = Text(text.uppercase(), style = rnText(12
 internal fun OverviewRow(label: String, summary: String, all: String, expanded: Boolean?, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(shape).background(c.bg).border(1.dp, c.border, shape).clickable(role = Role.Button, onClick = onClick)
+    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape).clickable(role = Role.Button, onClick = onClick)
         .semantics { contentDescription = "$label: $summary" }.padding(horizontal = 12.dp, vertical = 9.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Column(Modifier.weight(1f)) {
@@ -806,7 +805,7 @@ internal fun MatchModeRow(label: String, options: List<JSONObject>, enabled: Boo
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, style = rnText(12, 600), color = c.secondaryText)
         val shape = RoundedCornerShape(18.dp)
-        Row(Modifier.heightIn(min = 36.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape).padding(2.dp)) {
+        Row(Modifier.heightIn(min = 36.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(2.dp)) {
             for (option in options) {
                 val on = option.getBoolean("selected")
                 val text = option.getString("label")
@@ -834,7 +833,7 @@ internal fun SheetChip(label: String, selected: Boolean, excluded: Boolean, remo
     val shape = RoundedCornerShape(22.dp)
     val color = if (excluded) c.danger else if (selected) c.onTint else c.text
     Row(Modifier.widthIn(min = 104.dp).heightIn(min = 44.dp).clip(shape).background(if (selected && !excluded) c.tint else c.filterBg)
-        .border(1.dp, if (excluded) c.danger else if (selected) c.tint else c.border, shape)
+        .rnBorder(1.dp, if (excluded) c.danger else if (selected) c.tint else c.border, shape)
         .then(if (remove == null) Modifier.selectable(selected = selected, enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = if (excluded) "$label (${t("filters.excluded")})" else label } else Modifier)
         .padding(horizontal = 10.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
@@ -860,7 +859,7 @@ internal fun SheetField(value: String, placeholder: String, description: String,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         modifier = Modifier.fillMaxWidth().semantics { contentDescription = description },
         decorationBox = { inner ->
-            Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.bg).border(1.dp, c.border, shape).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+            Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) Text(placeholder, style = rnText(15, 400), color = c.secondaryText)
                 inner()
             }
@@ -888,14 +887,14 @@ private fun MoveDialog(model: InboxViewModel, open: JSONObject) = with(model.men
                 val selected = choice.getBoolean("selected")
                 val title = choice.getString("title")
                 Text(title, style = rnText(15, 400), color = if (selected) c.onTint else c.text, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)
-                    .clip(RoundedCornerShape(8.dp)).background(if (selected) c.tint else c.filterBg).border(1.dp, if (selected) c.tint else c.border, RoundedCornerShape(8.dp))
+                    .clip(RoundedCornerShape(8.dp)).background(if (selected) c.tint else c.filterBg).rnBorder(1.dp, if (selected) c.tint else c.border, RoundedCornerShape(8.dp))
                     .selectable(selected = selected, enabled = idle, role = Role.Button) { move(taskIds, choice.menuText("sectionId"), taskRevisions) }
                     .semantics { contentDescription = title }.padding(horizontal = 12.dp, vertical = 12.dp))
             }
             if (choices != null && choices.menuObjects("items").size < choices.getInt("total")) MoreChip(idle) { moreMoveChoices() }
             reply?.getString("newSectionLabel")?.let { label ->
                 Text(label, style = rnText(15, 400), color = c.tint, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
-                    .background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(enabled = idle, role = Role.Button) { openNewSection(taskIds, taskRevisions) }
+                    .background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(enabled = idle, role = Role.Button) { openNewSection(taskIds, taskRevisions) }
                     .semantics { contentDescription = label }.padding(horizontal = 12.dp, vertical = 12.dp))
             }
         }
@@ -931,7 +930,7 @@ private fun CreateDialog(model: InboxViewModel, open: JSONObject) = with(model.m
             keyboardActions = KeyboardActions(onDone = { if (canSave) saveCreate() }),
             modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = label }.testTag("menu-dialog-field"),
             decorationBox = { inner ->
-                Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.bg).border(1.dp, c.border, shape).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                     if (text.isEmpty()) Text(placeholder, style = rnText(16, 400), color = c.secondaryText)
                     inner()
                 }
@@ -939,7 +938,7 @@ private fun CreateDialog(model: InboxViewModel, open: JSONObject) = with(model.m
         open.menuText("error")?.let { Text(it, style = rnText(14, 400), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive }) }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
             val cancel = t("common.cancel")
-            Box(Modifier.heightIn(min = 44.dp).widthIn(min = 88.dp).clip(shape).then(if (section) Modifier.border(1.dp, c.border, shape) else Modifier)
+            Box(Modifier.heightIn(min = 44.dp).widthIn(min = 88.dp).clip(shape).then(if (section) Modifier.rnBorder(1.dp, c.border, shape) else Modifier)
                 .clickable(enabled = !owed && !model.busy, role = Role.Button) { backInDialog() }.semantics { contentDescription = cancel }
                 .padding(horizontal = 14.dp), contentAlignment = Alignment.Center) { Text(cancel, style = rnText(15, 400), color = c.secondaryText) }
             val save = if (owed && !section) addText?.getString("retryLabel") ?: t("common.retry") else t("common.save")
@@ -964,7 +963,7 @@ internal fun DialogCard(model: InboxViewModel, dismissible: Boolean, content: @C
         .then(if (dismissible) Modifier.clickable(role = Role.Button) { if (!model.busy) model.menu.backInDialog() } else Modifier.pointerInput(Unit) { detectTapGestures { } })
         .imePadding(), contentAlignment = Alignment.Center) {
         Column(Modifier.fillMaxWidth(0.88f).heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.8f).dp).clip(RoundedCornerShape(14.dp))
-            .background(c.cardBg).border(1.dp, c.border, RoundedCornerShape(14.dp)).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp),
+            .background(c.cardBg).rnBorder(1.dp, c.border, RoundedCornerShape(14.dp)).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }

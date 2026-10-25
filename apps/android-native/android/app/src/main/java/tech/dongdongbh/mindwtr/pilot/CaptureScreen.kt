@@ -11,7 +11,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -308,7 +307,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                         val pill = RoundedCornerShape(999.dp)
                         val saveAndEdit = copy.getString("saveAndEdit")
                         // RN fades each button whole (opacity 0.5) while the text is blank: the layer comes before the pill's border and fill.
-                        Box(Modifier.fade(if (canSave) 1f else 0.5f).widthIn(min = 112.dp).heightIn(min = 48.dp).clip(pill).border(1.dp, c.border, pill)
+                        Box(Modifier.fade(if (canSave) 1f else 0.5f).widthIn(min = 112.dp).heightIn(min = 48.dp).clip(pill).rnBorder(1.dp, c.border, pill)
                             .clickable(enabled = canSave, role = Role.Button) { focusManager.clearFocus(); saveCapture(openAfterSave = true) }
                             .padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
                             Text(saveAndEdit, style = rnText(13, 700), color = c.text, maxLines = 1)
@@ -345,7 +344,7 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                     }
                     val moreLabel = copy.getString(if (draft.expanded) "hideOptions" else "more")
                     val pill = RoundedCornerShape(999.dp)
-                    Row(Modifier.heightIn(min = 40.dp).widthIn(min = 96.dp).clip(pill).background(c.filterBg).border(1.dp, c.border, pill)
+                    Row(Modifier.heightIn(min = 40.dp).widthIn(min = 96.dp).clip(pill).background(c.filterBg).rnBorder(1.dp, c.border, pill)
                         .clickable(role = Role.Button) { toggleMore() }.semantics { contentDescription = moreLabel }.padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Lucide.SlidersHorizontal, null, tint = c.text, modifier = Modifier.size(16.dp))
@@ -428,7 +427,7 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
             val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
             if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
             enter
-        }.fillMaxWidth().heightIn(min = 44.dp, max = 120.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+        }.fillMaxWidth().heightIn(min = 44.dp, max = 120.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
             .testTag("capture-title").semantics { contentDescription = label },
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
@@ -450,7 +449,7 @@ private fun NoteField(draft: CaptureDraft, placeholder: String, label: String, e
     BasicTextField(field, { typed -> val changed = typed.text != field.text; field = typed; if (changed) send(typed.text) }, enabled = enabled,
         textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint), minLines = 2,
         modifier = Modifier.padding(top = 6.dp).fillMaxWidth().heightIn(min = 64.dp, max = 120.dp).clip(shape).background(c.inputBg)
-            .border(1.dp, c.border, shape).semantics { contentDescription = label },
+            .rnBorder(1.dp, c.border, shape).semantics { contentDescription = label },
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 if (field.text.isEmpty()) Text(placeholder, style = rnText(15, 400), color = c.secondaryText)
@@ -465,7 +464,7 @@ private fun ImportTextButton(enabled: Boolean, pick: () -> Unit) {
     val c = LocalTheme.current.colors
     val pill = RoundedCornerShape(999.dp)
     val label = t("quickAdd.bulkImportTextFileLabel")
-    Row(Modifier.padding(top = 8.dp).heightIn(min = 38.dp).clip(pill).background(c.filterBg).border(1.dp, c.border, pill)
+    Row(Modifier.padding(top = 8.dp).heightIn(min = 38.dp).clip(pill).background(c.filterBg).rnBorder(1.dp, c.border, pill)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = "capture-import-text"; if (enabled) onClick { pick(); true } else disabled() }
         .clickable(enabled = enabled, onClick = pick).padding(horizontal = 10.dp, vertical = 7.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -486,13 +485,13 @@ internal fun PreviewStrip(entries: List<JSONObject>, modifier: Modifier) {
         for (entry in entries.take(PREVIEW_CHIPS)) {
             val warning = entry.getString("tone") == "warning"
             // RN's chip: its padding (8, 2) inside a 1 dp border, and RN's Android text line (font padding) of 13.
-            Row(Modifier.clip(pill).background(if (warning) theme.dangerWash else c.filterBg).border(1.dp, if (warning) c.danger else c.border, pill)
+            Row(Modifier.clip(pill).background(if (warning) theme.dangerWash else c.filterBg).rnBorder(1.dp, if (warning) c.danger else c.border, pill)
                 .padding(horizontal = 9.dp, vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 entry.text("label")?.let { Text(it, style = rnText(11, 400, 13), color = if (warning) c.danger else c.secondaryText, maxLines = 1) }
                 Text(entry.getString("value"), style = rnText(11, 600, 13), color = if (warning) c.danger else c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (entries.size > PREVIEW_CHIPS) Box(Modifier.clip(pill).background(c.filterBg).border(1.dp, c.border, pill).padding(horizontal = 9.dp, vertical = 3.dp)) {
+        if (entries.size > PREVIEW_CHIPS) Box(Modifier.clip(pill).background(c.filterBg).rnBorder(1.dp, c.border, pill).padding(horizontal = 9.dp, vertical = 3.dp)) {
             Text("+${entries.size - PREVIEW_CHIPS}", style = rnText(11, 600, 13), color = c.secondaryText)
         }
     }
@@ -509,7 +508,7 @@ private fun RowScope.OptionChip(icon: ImageVector, label: String?, description: 
     val c = LocalTheme.current.colors
     val pill = RoundedCornerShape(999.dp)
     Row(Modifier.then(if (collapsed || iconOnly) Modifier else Modifier.weight(1f).widthIn(min = 120.dp))
-        .heightIn(min = if (collapsed) 40.dp else 44.dp).clip(pill).background(c.filterBg).border(1.dp, c.border, pill)
+        .heightIn(min = if (collapsed) 40.dp else 44.dp).clip(pill).background(c.filterBg).rnBorder(1.dp, c.border, pill)
         .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = onLongClick, onClick = onClick)
         .semantics { contentDescription = description }.padding(horizontal = if (collapsed) 12.dp else 10.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
@@ -529,7 +528,7 @@ private fun RowScope.FocusChip(model: InboxViewModel, view: JSONObject, collapse
     val label = focus.getString("accessibilityLabel")
     val pill = RoundedCornerShape(999.dp)
     Row(Modifier.then(if (collapsed) Modifier else Modifier.weight(1f).widthIn(min = 120.dp)).heightIn(min = if (collapsed) 40.dp else 44.dp)
-        .clip(pill).background(if (on) theme.starWash else c.filterBg).border(1.dp, if (on) theme.star else c.border, pill)
+        .clip(pill).background(if (on) theme.starWash else c.filterBg).rnBorder(1.dp, if (on) theme.star else c.border, pill)
         .clickable(enabled = !locked, role = Role.Button) { editCapture(focus.getJSONObject("edit")) }
         .semantics { contentDescription = label; selected = on }.padding(horizontal = if (collapsed) 12.dp else 10.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
@@ -549,13 +548,13 @@ private fun DueDates(due: JSONObject, enabled: Boolean, send: (JSONObject) -> Un
             val on = chip.getBoolean("selected")
             val label = chip.getString("label")
             Box(Modifier.weight(1f).widthIn(min = 92.dp).heightIn(min = 34.dp).clip(pill).background(if (on) c.tint else c.filterBg)
-                .border(1.dp, if (on) c.tint else c.border, pill).clickable(enabled = enabled, role = Role.Button) { send(chip.getJSONObject("edit")) }
+                .rnBorder(1.dp, if (on) c.tint else c.border, pill).clickable(enabled = enabled, role = Role.Button) { send(chip.getJSONObject("edit")) }
                 .semantics { contentDescription = label; selected = on }.padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
                 Text(label, style = rnText(12, 600), color = if (on) c.onTint else c.secondaryText, textAlign = TextAlign.Center, maxLines = 2)
             }
         }
         val custom = due.getJSONObject("custom")
-        Row(Modifier.weight(1f).widthIn(min = 120.dp).heightIn(min = 34.dp).clip(pill).border(1.dp, c.border, pill)
+        Row(Modifier.weight(1f).widthIn(min = 120.dp).heightIn(min = 34.dp).clip(pill).rnBorder(1.dp, c.border, pill)
             .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = { send(due.getJSONObject("clear")) }, onClick = pick)
             .semantics { contentDescription = custom.getString("accessibilityLabel") }.padding(horizontal = 10.dp, vertical = 7.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
@@ -573,7 +572,7 @@ internal fun PickerCard(title: String, dismiss: () -> Unit, content: @Composable
     Box(Modifier.fillMaxSize().imePadding().background(theme.scrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.padding(horizontal = 20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
             .padding(16.dp)) {
             Text(title, style = rnText(14, 700), color = c.text, modifier = Modifier.padding(bottom = 8.dp).semantics { heading() })
             content()
@@ -603,7 +602,7 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
     val kind = picker.getString("kind")
     val listShape = RoundedCornerShape(10.dp)
     val list = @Composable { rows: @Composable () -> Unit ->
-        Column(Modifier.padding(top = 10.dp).fillMaxWidth().heightIn(max = 220.dp).clip(listShape).border(1.dp, c.border, listShape)
+        Column(Modifier.padding(top = 10.dp).fillMaxWidth().heightIn(max = 220.dp).clip(listShape).rnBorder(1.dp, c.border, listShape)
             .verticalScroll(rememberScrollState()).padding(vertical = 6.dp)) { rows() }
     }
     PickerCard(picker.getString("title"), this::closeCapturePicker) {
@@ -620,7 +619,7 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
             BasicTextField(field, { typed -> field = typed; if (typed.text != query) captureQuery(typed.text) }, enabled = !locked, singleLine = true,
                 textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { submit() }),
-                modifier = Modifier.fillMaxWidth().clip(listShape).background(c.inputBg).border(1.dp, c.border, listShape)
+                modifier = Modifier.fillMaxWidth().clip(listShape).background(c.inputBg).rnBorder(1.dp, c.border, listShape)
                     .semantics { contentDescription = picker.getString("title") },
                 decorationBox = { inner ->
                     Box(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -639,7 +638,7 @@ private fun InboxViewModel.CapturePicker(model: InboxViewModel, draft: CaptureDr
                     for (chip in chosen) {
                         val pill = RoundedCornerShape(999.dp)
                         Text(chip.getString("label"), style = rnText(12, 600), color = c.text, modifier = Modifier.clip(pill).background(c.filterBg)
-                            .border(1.dp, c.border, pill).clickable(enabled = !locked, role = Role.Button) { pickCapture(chip.getJSONObject("edit"), close = false) }
+                            .rnBorder(1.dp, c.border, pill).clickable(enabled = !locked, role = Role.Button) { pickCapture(chip.getJSONObject("edit"), close = false) }
                             .semantics { contentDescription = chip.getString("accessibilityLabel") }.padding(horizontal = 10.dp, vertical = 6.dp))
                     }
                 }

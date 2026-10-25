@@ -7,7 +7,6 @@ import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -314,7 +313,7 @@ private fun Pill(label: String, tag: String, enabled: Boolean = true, filled: Bo
     val c = LocalTheme.current.colors
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(16.dp)
-    Box(Modifier.padding(top = top.dp).clip(shape).background(if (filled) theme.filledBg else c.filterBg).border(1.dp, c.border, shape)
+    Box(Modifier.padding(top = top.dp).clip(shape).background(if (filled) theme.filledBg else c.filterBg).rnBorder(1.dp, c.border, shape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = tag; if (enabled) onClick { press(); true } else disabled() }
         .clickable(enabled = enabled, onClick = press).padding(horizontal = 10.dp, vertical = 6.dp)) {
         Text(label, style = rnText(13, 700, 17).compact(), color = when { filled -> theme.filledText; enabled || tag != "calendar-add" -> c.text; else -> c.secondaryText },
@@ -395,7 +394,7 @@ private fun PushCard(model: InboxViewModel, push: JSONObject) {
                             val on = option.getBoolean("selected")
                             val enabled = model.menu.idle
                             Box(Modifier.size(34.dp).clip(CircleShape).background(coreColorOrNull(option.getString("color")) ?: c.tint)
-                                .border(if (on) 3.dp else 1.dp, if (on) c.text else c.border, CircleShape)
+                                .rnBorder(if (on) 3.dp else 1.dp, if (on) c.text else c.border, CircleShape)
                                 .clearAndSetSemantics { contentDescription = option.getString("accessibilityLabel"); role = Role.Button; selected = on
                                     if (enabled) onClick { screen.edit(option.getJSONObject("edit")); true } else disabled() }
                                 .clickable(enabled = enabled) { screen.edit(option.getJSONObject("edit")) })
@@ -525,7 +524,7 @@ private fun Swatch(model: InboxViewModel, option: JSONObject) {
     val enabled = model.menu.idle
     val color = coreColorOrNull(option.menuText("color"))
     val fill = coreColorOrNull(option.menuText("fill")) ?: color
-    Box(Modifier.size(22.dp).clip(CircleShape).background(fill ?: c.cardBg).border(if (on) 3.dp else 1.dp, if (on) c.tint else c.border, CircleShape)
+    Box(Modifier.size(22.dp).clip(CircleShape).background(fill ?: c.cardBg).rnBorder(if (on) 3.dp else 1.dp, if (on) c.tint else c.border, CircleShape)
         .clearAndSetSemantics { contentDescription = option.getString("accessibilityLabel"); role = Role.Button; selected = on
             // Picking the color it has writes nothing (core sends no edit).
             if (enabled) onClick { edit?.let(screen::edit); true } else disabled() }
@@ -542,7 +541,7 @@ private fun FeedInput(value: String, field: JSONObject, tag: String, keyboard: K
     val style = rnText(14, 400).copy(color = c.text)
     val placeholder = field.getString("placeholder")
     BasicTextField(value, change, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = style, keyboardOptions = keyboard,
-        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().heightIn(min = 40.dp).clip(shape).border(1.dp, c.border, shape)
+        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().heightIn(min = 40.dp).clip(shape).rnBorder(1.dp, c.border, shape)
             .semantics { contentDescription = field.getString("label") }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {

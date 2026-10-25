@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -174,7 +173,7 @@ private fun SavedChip(label: String, selected: Boolean, deleteLabel: String?, en
     val edge = if (selected) c.tint else c.border
     Row(Modifier.height(IntrinsicSize.Min)) {
         val shape = if (deleteLabel != null) RoundedCornerShape(topStart = 22.dp, bottomStart = 22.dp) else RoundedCornerShape(22.dp)
-        Box(Modifier.widthIn(min = 44.dp, max = 180.dp).heightIn(min = 44.dp).clip(shape).background(fill).border(1.dp, edge, shape)
+        Box(Modifier.widthIn(min = 44.dp, max = 180.dp).heightIn(min = 44.dp).clip(shape).background(fill).rnBorder(1.dp, edge, shape)
             .clearAndSetSemantics {
                 contentDescription = label; role = Role.Button; this.selected = selected
                 if (enabled) {
@@ -188,7 +187,7 @@ private fun SavedChip(label: String, selected: Boolean, deleteLabel: String?, en
         }
         deleteLabel?.let { spoken ->
             val end = RoundedCornerShape(topEnd = 22.dp, bottomEnd = 22.dp)
-            Box(Modifier.width(44.dp).fillMaxHeight().clip(end).background(fill).border(1.dp, edge, end)
+            Box(Modifier.width(44.dp).fillMaxHeight().clip(end).background(fill).rnBorder(1.dp, edge, end)
                 .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (enabled) onClick { onDelete(); true } else disabled() }
                 .clickable(enabled = enabled, onClick = onDelete), contentAlignment = Alignment.Center) {
                 Icon(Lucide.Trash2, null, tint = if (selected) c.onTint else c.secondaryText, modifier = Modifier.size(16.dp))
@@ -258,7 +257,7 @@ fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) 
             Text(screen.getString("title").uppercase(), style = rnText(13, 700, letterSpacing = 1f), color = c.text, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })
             val done = screen.getString("doneLabel")
-            Box(Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(theme.filledBg).border(1.dp, theme.filledBg, RoundedCornerShape(20.dp))
+            Box(Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(theme.filledBg).rnBorder(1.dp, theme.filledBg, RoundedCornerShape(20.dp))
                 .clearAndSetSemantics { contentDescription = done; role = Role.Button; onClick { reorder(false); true } }
                 .clickable { reorder(false) }.padding(horizontal = 18.dp), contentAlignment = Alignment.Center) {
                 Text(done, style = rnText(14, 700), color = theme.filledText)
@@ -281,7 +280,7 @@ fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) 
                 Box(Modifier.height(80.dp).padding(vertical = 4.dp).then(if (active) Modifier.offset { IntOffset(0, shift.roundToInt()) } else Modifier)) {
                     val shape = RoundedCornerShape(12.dp)
                     Row(Modifier.fillMaxSize().then(if (active) Modifier.shadow(4.dp, shape) else Modifier).clip(shape).background(if (active) c.filterBg else c.cardBg)
-                        .border(if (active) 1.dp else 0.5.dp, if (active) c.tint else c.border, shape)
+                        .rnBorder(if (active) 1.dp else 0.5.dp, if (active) c.tint else c.border, shape)
                         .clearAndSetSemantics {
                             contentDescription = row.getString("positionLabel"); role = Role.Button
                             if (enabled) customActions = moves else disabled()
@@ -358,7 +357,7 @@ private fun FocusSheet(model: InboxViewModel, tall: Boolean = false, content: @C
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val height = (LocalConfiguration.current.screenHeightDp * (if (tall) 0.82f else 0.78f)).dp
         Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (tall) Modifier.height(height) else Modifier.heightIn(max = height))
-            .clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+            .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
             .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp), content = content)
     }
 }
@@ -552,7 +551,7 @@ private fun SaveFilterDialog(model: InboxViewModel, controls: JSONObject, open: 
     Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { if (!model.busy && !owed) back() }.imePadding().padding(horizontal = 24.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(14.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
             Text(text.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             val focus = remember { FocusRequester() }
             LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -561,7 +560,7 @@ private fun SaveFilterDialog(model: InboxViewModel, controls: JSONObject, open: 
                 cursorBrush = SolidColor(c.tint), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { if (canSave) save() }),
                 modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = text.getString("placeholder") },
                 decorationBox = { inner ->
-                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).border(1.dp, c.border, field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).rnBorder(1.dp, c.border, field).padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                         if (name.isEmpty()) Text(text.getString("placeholder"), style = rnText(15, 400), color = c.secondaryText)
                         inner()
                     }

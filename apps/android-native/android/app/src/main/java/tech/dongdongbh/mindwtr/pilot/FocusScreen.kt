@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -177,9 +176,11 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                 val reorderable = controls?.optJSONObject("reorder")?.takeIf { section.key == "focus" }
                 val top = if (first) 8.dp else 18.dp
                 item(key = "title:${section.key}") {
-                    Row(Modifier.fillMaxWidth().padding(top = top, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FocusSectionTitle(section.title, section.total, open, section.countLabel) { toggleFocusSection(section.key) }
+                    // RN's sectionHeaderRow: the margins are the title's, so Reorder (36 dp) sits beside them, not inside them.
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FocusSectionTitle(section.title, section.total, open, section.countLabel, Modifier.padding(top = top, bottom = 10.dp)) {
+                            toggleFocusSection(section.key)
+                        }
                         reorderable?.let { ReorderToggle(model, it.getString("label")) }
                     }
                 }
@@ -235,12 +236,13 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
 
 /** RN's Focus section header: ▾ or ▸, the title in capitals, and the count. TalkBack hears core's title and count. */
 @Composable
-private fun RowScope.FocusSectionTitle(title: String, count: Int, open: Boolean, countLabel: String = count.toString(), onToggle: () -> Unit) {
+private fun RowScope.FocusSectionTitle(title: String, count: Int, open: Boolean, countLabel: String = count.toString(), margin: Modifier = Modifier,
+                                       onToggle: () -> Unit) {
     val c = LocalTheme.current.colors
     val state = t(if (open) "markdown.collapse" else "markdown.expand")
     val spoken = "$title · $countLabel"
     Row(
-        Modifier.weight(1f)
+        Modifier.weight(1f).then(margin)
             .clearAndSetSemantics {
                 text = AnnotatedString(spoken); heading()
                 onClick(label = state) { onToggle(); true }
@@ -262,14 +264,14 @@ private fun ReviewProjectCard(model: InboxViewModel, project: ReviewProject) = w
     val shape = RoundedCornerShape(14.dp)
     val label = "${t("common.open")} ${project.title}"
     Row(
-        Modifier.padding(bottom = 8.dp).fillMaxWidth().heightIn(min = 72.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Modifier.padding(bottom = 8.dp).fillMaxWidth().heightIn(min = 72.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clickable(enabled = writable && !busy && failedAction == null, role = Role.Button) { show(Screen.Projects); openProject(project.id) }
             .clearAndSetSemantics { contentDescription = label }
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         val tile = RoundedCornerShape(10.dp)
-        Box(Modifier.size(36.dp).clip(tile).background(c.filterBg).border(1.dp, coreColorOrNull(project.color) ?: c.border, tile),
+        Box(Modifier.size(36.dp).clip(tile).background(c.filterBg).rnBorder(1.dp, coreColorOrNull(project.color) ?: c.border, tile),
             contentAlignment = Alignment.Center) {
             Icon(Lucide.Folder, null, tint = c.text, modifier = Modifier.size(18.dp))
         }

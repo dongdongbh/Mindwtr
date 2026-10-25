@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -80,7 +79,7 @@ fun RowScope.MenuTab(model: InboxViewModel) {
             // after the offset: a layer placed before it drew nothing on the phone.
             coreColorOrNull(model.syncBadge.color)?.let { dot ->
                 Box(Modifier.align(Alignment.TopEnd).offset(x = 7.dp, y = (-2).dp).size(7.dp).fade(0.85f).clip(CircleShape).background(dot)
-                    .border(1.5.dp, c.cardBg, CircleShape).clearAndSetSemantics { }.testTag("menu-sync-dot"))
+                    .rnBorder(1.5.dp, c.cardBg, CircleShape).clearAndSetSemantics { }.testTag("menu-sync-dot"))
             }
         }
         Text(t("tab.menu"), style = rnText(10, if (open) 700 else 600, 12), color = color, maxLines = 1,
@@ -126,7 +125,7 @@ fun MoreSheet(model: InboxViewModel) = with(model.menu) {
                         else scope.launch { offset.animateTo(0f, tween(140)) }
                     },
                 )
-                .clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+                .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
                 .padding(start = 18.dp, end = 18.dp, top = 10.dp, bottom = 16.dp),
         ) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 18.dp).size(44.dp, 5.dp).clip(RoundedCornerShape(3.dp)).background(c.border))
@@ -170,7 +169,7 @@ private fun Tile(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
     val shape = RoundedCornerShape(8.dp)
     val label = item.getString("label")
     Column(
-        modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = 104.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = 104.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             // One accessibility node holds the label, the role and the state (a separate semantics node kept
             // "enabled" on the labelled node, so TalkBack read a missing screen as a working button).
             .clearAndSetSemantics {

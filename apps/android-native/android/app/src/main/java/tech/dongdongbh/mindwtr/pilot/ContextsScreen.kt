@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -95,7 +94,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                         // RN's chip (#1427): a tap switches to core's `next`; a token chip's long-press, also TalkBack's labelled
                         // long-press action, applies core's `additive` selection. All and No context have no long-press.
                         val additive = chip.optJSONObject("additive")
-                        Row(Modifier.heightIn(min = 44.dp).clip(shape).background(if (on) c.tint else c.filterBg).border(1.dp, c.border, shape)
+                        Row(Modifier.heightIn(min = 44.dp).clip(shape).background(if (on) c.tint else c.filterBg).rnBorder(1.dp, c.border, shape)
                             .combinedClickable(enabled = idle, role = Role.Button, onLongClickLabel = additive?.optString("label"),
                                 onLongClick = additive?.let { { contextsChip(it.getJSONObject("next")) } }) { contextsChip(chip.getJSONObject("next")) }
                             .semantics { contentDescription = chip.getString("accessibilityLabel"); this.selected = on }.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -113,7 +112,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                         horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(mode.getString("label"), style = rnText(11, 600), color = c.secondaryText)
                         val control = RoundedCornerShape(8.dp)
-                        Row(Modifier.clip(control).background(c.filterBg).border(1.dp, c.border, control).padding(2.dp)) {
+                        Row(Modifier.clip(control).background(c.filterBg).rnBorder(1.dp, c.border, control).padding(2.dp)) {
                             for (option in mode.menuObjects("options")) {
                                 val on = option.getBoolean("selected")
                                 val label = option.getString("label")
@@ -279,7 +278,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).clickable(role = Role.Button) { keepDialog(null) }.imePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(18.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }
             .padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val title = picker.getString("title")
             Text(title, style = rnText(18, 700), color = c.text, modifier = Modifier.semantics { heading() })
@@ -294,7 +293,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier.fillMaxWidth().focusRequester(focus).semantics { contentDescription = picker.getString("placeholder") }.testTag("menu-dialog-field"),
                     decorationBox = { inner ->
-                        Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.inputBg).border(1.dp, c.border, field).padding(horizontal = 14.dp, vertical = 10.dp),
+                        Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.inputBg).rnBorder(1.dp, c.border, field).padding(horizontal = 14.dp, vertical = 10.dp),
                             contentAlignment = Alignment.CenterStart) {
                             if (text.isEmpty()) Text(picker.getString("placeholder"), style = rnText(15, 400), color = c.secondaryText)
                             inner()
@@ -303,7 +302,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
             }
             val list = RoundedCornerShape(14.dp)
             val tokens = picker.optJSONArray("tokens").ids()
-            Box(Modifier.testTag("token-picker-list").fillMaxWidth().heightIn(max = 240.dp).clip(list).background(c.bg).border(1.dp, c.border, list)
+            Box(Modifier.testTag("token-picker-list").fillMaxWidth().heightIn(max = 240.dp).clip(list).background(c.bg).rnBorder(1.dp, c.border, list)
                 .verticalScroll(rememberScrollState()).padding(12.dp)) {
                 if (tokens.isEmpty()) Text(t("common.noMatches"), style = rnText(14, 400), color = c.secondaryText, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp))
@@ -311,7 +310,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     for (token in tokens) {
                         val on = token in picked
                         Text(token, style = rnText(13, 600), color = if (on) c.onTint else c.text, modifier = Modifier.clip(CircleShape)
-                            .background(if (on) c.tint else c.filterBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+                            .background(if (on) c.tint else c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                             .selectable(selected = on, role = Role.Button) {
                                 // A single pick fills the field (RN's setQuery), so core's search narrows to it; a multi pick leaves the search.
                                 if (multi) keepDialog(JSONObject(open.toString()).put("picked", JSONArray(if (on) picked - token else picked + token)))

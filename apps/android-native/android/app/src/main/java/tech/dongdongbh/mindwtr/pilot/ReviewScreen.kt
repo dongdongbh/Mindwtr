@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -99,7 +98,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
                 val off = expansion.getBoolean("disabled")
                 val shape = RoundedCornerShape(10.dp)
                 val label = expansion.getString("label")
-                Box(Modifier.fade(if (off) 0.45f else 1f).size(42.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                Box(Modifier.fade(if (off) 0.45f else 1f).size(42.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                     .clickable(enabled = idle && !off, role = Role.Button) { reviewExpansion(JSONObject().put("type", "cycle")) }
                     .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
                     Icon(if (expansion.getBoolean("allExpanded")) Lucide.ChevronsUp else Lucide.ChevronsDown, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
@@ -269,7 +268,7 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     ModalTitle(start.getString("label"))
                     for (option in start.menuObjects("options")) {
                         val shape = RoundedCornerShape(10.dp)
-                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                             .clickable(role = Role.Button) { keepDialog(null); openReview(option.getString("id")) }.padding(12.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(option.getString("label"), style = rnText(15, 700), color = c.text, modifier = Modifier.weight(1f))
@@ -285,7 +284,7 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         for (status in move.menuObjects("statuses")) {
                             val shape = RoundedCornerShape(10.dp)
                             Text(status.getString("label"), style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.filterBg)
-                                .border(1.dp, c.border, shape).clickable(enabled = idle && selected.isNotEmpty(), role = Role.Button) {
+                                .rnBorder(1.dp, c.border, shape).clickable(enabled = idle && selected.isNotEmpty(), role = Role.Button) {
                                     keepDialog(null)
                                     act("reviewAction", moveTasks(selected, status.getString("status"), move.getJSONObject("taskRevisions")))
                                 }.padding(horizontal = 10.dp, vertical = 8.dp))
@@ -302,7 +301,7 @@ fun ReviewDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
                         modifier = Modifier.fillMaxWidth().semantics { contentDescription = tag.getString("placeholder") }.testTag("menu-dialog-field"),
                         decorationBox = { inner ->
-                            Box(Modifier.heightIn(min = 40.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
+                            Box(Modifier.heightIn(min = 40.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.CenterStart) {
                                 if (text.isEmpty()) Text(tag.getString("placeholder"), style = rnText(14, 400), color = c.secondaryText)
                                 inner()

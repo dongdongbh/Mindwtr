@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -95,7 +94,7 @@ private fun EmptyLine(model: InboxViewModel, empty: JSONObject) = with(model.men
 private fun EmptyAction(label: String, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
         Text(label, style = rnText(14, 600), color = c.text)

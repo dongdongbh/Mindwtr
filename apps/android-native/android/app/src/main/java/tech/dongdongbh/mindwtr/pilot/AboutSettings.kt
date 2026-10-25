@@ -7,7 +7,6 @@ import android.os.Build
 import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -433,7 +432,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
             .pointerInput(Unit) { detectTapGestures { about.closeFeedback() } }.imePadding().padding(18.dp), contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(18.dp)
             Column(Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.88f).clip(shape).background(c.cardBg)
-                .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("feedback-modal")) {
+                .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("feedback-modal")) {
                 // The header: the title, core's GitHub line (not after a send), and the close X.
                 Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -473,7 +472,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                             val tone = if (on) c.tint else c.secondaryText
                             val buttonShape = RoundedCornerShape(12.dp)
                             Row(Modifier.weight(1f).heightIn(min = 42.dp).clip(buttonShape).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg)
-                                .border(1.dp, if (on) c.tint else c.border, buttonShape)
+                                .rnBorder(1.dp, if (on) c.tint else c.border, buttonShape)
                                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-category-$category"; onClick { about.edit { copy(category = category) }; true } }
                                 .clickable { about.edit { copy(category = category) } }.padding(horizontal = 8.dp),
                                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically) {
@@ -489,7 +488,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                                 val on = place == draft.location
                                 val label = text.getJSONObject("locations").getString(place)
                                 val chip = RoundedCornerShape(18.dp)
-                                Box(Modifier.heightIn(min = 36.dp).clip(chip).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg).border(1.dp, if (on) c.tint else c.border, chip)
+                                Box(Modifier.heightIn(min = 36.dp).clip(chip).background(if (on) c.tint.copy(alpha = 0x18 / 255f) else c.bg).rnBorder(1.dp, if (on) c.tint else c.border, chip)
                                     .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; testTag = "feedback-place-$place"
                                         onClick { about.edit { copy(location = if (on) "" else place) }; true } }
                                     .clickable { about.edit { copy(location = if (on) "" else place) } }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
@@ -508,7 +507,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                     }
                     if (draft.category == "bug") {
                         val rowShape = RoundedCornerShape(12.dp)
-                        Row(Modifier.fillMaxWidth().clip(rowShape).background(c.bg).border(1.dp, c.border, rowShape).padding(12.dp),
+                        Row(Modifier.fillMaxWidth().clip(rowShape).background(c.bg).rnBorder(1.dp, c.border, rowShape).padding(12.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(text.getString("includeDiagnostics"), style = padded(rnText(14, 700)), color = c.text)
@@ -526,7 +525,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                 Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
                     val secondary = RoundedCornerShape(12.dp)
                     val cancel = text.getString("cancel")
-                    Box(Modifier.widthIn(min = 92.dp).heightIn(min = 44.dp).clip(secondary).border(1.dp, c.border, secondary)
+                    Box(Modifier.widthIn(min = 92.dp).heightIn(min = 44.dp).clip(secondary).rnBorder(1.dp, c.border, secondary)
                         .clearAndSetSemantics { contentDescription = cancel; role = Role.Button; onClick { about.closeFeedback(); true } }
                         .clickable { about.closeFeedback() }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                         Text(cancel, style = padded(rnText(14, 700)), color = c.secondaryText)
@@ -552,7 +551,7 @@ private fun FieldLabel(label: String) = Text(label.uppercase(), style = padded(r
 @Composable
 private fun Notice(title: String, description: String?, color: Color, wash: Int) {
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).background(color.copy(alpha = wash / 255f)).border(1.dp, color.copy(alpha = 0x55 / 255f), shape)
+    Column(Modifier.fillMaxWidth().clip(shape).background(color.copy(alpha = wash / 255f)).rnBorder(1.dp, color.copy(alpha = 0x55 / 255f), shape)
         .padding(horizontal = 12.dp, vertical = 10.dp)) {
         Text(title, style = rnText(13, 600, 18), color = color)
         description?.let { Text(it, style = rnText(12, 400, 18), color = color, modifier = Modifier.padding(top = 4.dp)) }
@@ -586,7 +585,7 @@ private fun FeedbackField(value: String, label: String, placeholder: String, mul
     BasicTextField(value, change, singleLine = !multiline, cursorBrush = SolidColor(c.tint),
         textStyle = (if (multiline) rnText(14, 400, 20) else rnText(14, 400)).copy(color = c.text),
         keyboardOptions = if (multiline) KeyboardOptions.Default else KeyboardOptions(keyboardType = KeyboardType.Email, autoCorrectEnabled = false),
-        modifier = Modifier.fillMaxWidth().heightIn(min = if (multiline) 126.dp else 44.dp).clip(shape).background(c.bg).border(1.dp, c.border, shape)
+        modifier = Modifier.fillMaxWidth().heightIn(min = if (multiline) 126.dp else 44.dp).clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape)
             .semantics { contentDescription = label }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = if (multiline) 10.dp else 12.dp), contentAlignment = if (multiline) Alignment.TopStart else Alignment.CenterStart) {

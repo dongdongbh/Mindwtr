@@ -4,7 +4,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -356,7 +355,7 @@ fun AIResponseDialog(model: InboxViewModel, answer: AIAnswer) {
     val ai = model.ai
     Dialog(onDismissRequest = { ai.dismiss() }) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(20.dp).semantics { testTagsAsResourceId = true }.testTag("ai-answer"),
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(20.dp).semantics { testTagsAsResourceId = true }.testTag("ai-answer"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(answer.title, style = rnText(16, 700), color = c.text)
             answer.message?.let { Box(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) { Text(it, style = rnText(14, 400, 20), color = c.secondaryText) } }
@@ -365,7 +364,7 @@ fun AIResponseDialog(model: InboxViewModel, answer: AIAnswer) {
                     val primary = choice.menuText("variant") == "primary"
                     val label = choice.getString("label")
                     val button = RoundedCornerShape(10.dp)
-                    Box(Modifier.fillMaxWidth().clip(button).background(if (primary) c.tint else c.filterBg).border(1.dp, c.border, button)
+                    Box(Modifier.fillMaxWidth().clip(button).background(if (primary) c.tint else c.filterBg).rnBorder(1.dp, c.border, button)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = "ai-answer-$index"; onClick { ai.choose(choice); true } }
                         .clickable { ai.choose(choice) }.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
                         Text(label, style = rnText(14, 600), color = if (primary) c.onTint else c.text, textAlign = TextAlign.Center)
@@ -409,7 +408,7 @@ fun EditorAIRows(model: InboxViewModel, locked: Boolean) {
         for ((label, tag, run) in listOf(Triple(view.getString("clarify"), "ai-clarify", ai::clarify), Triple(view.getString("breakdown"), "ai-breakdown", ai::breakdown))) {
             val enabled = !busy && !locked
             val shape = RoundedCornerShape(16.dp)
-            Box(Modifier.clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+            Box(Modifier.clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = tag; if (enabled) onClick { run(); true } else disabled() }
                 .clickable(enabled = enabled) { run() }.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Text(label, style = rnText(12, 600), color = c.tint)
@@ -446,7 +445,7 @@ fun EditorAIRows(model: InboxViewModel, locked: Boolean) {
 @Composable
 private fun CopilotPill(fill: Color, shape: RoundedCornerShape, modifier: Modifier, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors
-    Column(modifier.clip(shape).background(fill).border(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp)) { content() }
+    Column(modifier.clip(shape).background(fill).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp)) { content() }
 }
 
 /** RN's copilotChip: a part's value on the card color; a tap applies it. */
@@ -454,7 +453,7 @@ private fun CopilotPill(fill: Color, shape: RoundedCornerShape, modifier: Modifi
 private fun CopilotChip(label: String, tag: String, enabled: Boolean, apply: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Box(Modifier.clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Box(Modifier.clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = tag; if (enabled) onClick { apply(); true } else disabled() }
         .clickable(enabled = enabled, onClick = apply).padding(horizontal = 8.dp, vertical = 4.dp)) {
         Text(label, style = rnText(12, 600), color = c.text)

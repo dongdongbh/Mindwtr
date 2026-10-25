@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -124,14 +123,14 @@ private fun TrashItem(model: InboxViewModel, item: MenuItem, labels: JSONObject,
         width = 120.dp, restoreColor = theme.trashRestore) { actions ->
         val shape = RoundedCornerShape(12.dp)
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(shape).background(c.taskItemBg)
-            .border(if (selecting && isSelected) 2.dp else 1.dp, if (selecting && isSelected) c.tint else c.border, shape)
+            .rnBorder(if (selecting && isSelected) 2.dp else 1.dp, if (selecting && isSelected) c.tint else c.border, shape)
             .clickable(enabled = selecting && idle) { toggleTrash(kind, id) }
             .semantics {
                 contentDescription = if (selecting) "${labels.getString("select")} $title" else title
                 if (selecting) selected = isSelected else customActions = actions
             }.testTag("task-row").padding(16.dp)) {
             if (selecting) {
-                Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).border(2.dp, c.tint, CircleShape).background(if (isSelected) c.tint else c.taskItemBg),
+                Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).rnBorder(2.dp, c.tint, CircleShape).background(if (isSelected) c.tint else c.taskItemBg),
                     contentAlignment = Alignment.Center) { if (isSelected) Icon(Lucide.CheckBold, null, tint = c.onTint, modifier = Modifier.size(14.dp)) }
             }
             Column(Modifier.weight(1f)) {
@@ -157,7 +156,7 @@ private fun TrashBulkBar(model: InboxViewModel, view: JSONObject, tasks: List<St
     val labels = view.getJSONObject("labels")
     val shape = RoundedCornerShape(10.dp)
     val count = tasks.size + projects.size
-    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(labels.getString("selected"), style = rnText(12, 600), color = c.secondaryText)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

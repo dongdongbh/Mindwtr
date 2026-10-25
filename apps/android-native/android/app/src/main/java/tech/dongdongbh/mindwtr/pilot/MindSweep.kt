@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -287,7 +286,7 @@ private fun CueList(model: InboxViewModel, group: JSONObject) = with(model.menu.
             cursorBrush = SolidColor(c.tint), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { add() }),
             modifier = Modifier.weight(1f).semantics { contentDescription = placeholder }.testTag("mind-sweep-input"),
             decorationBox = { inner ->
-                Box(Modifier.heightIn(min = 44.dp).clip(shape).border(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
                     if (draft.isEmpty()) Text(placeholder, style = rnText(15, 400), color = c.secondaryText)
                     inner()
                 }
@@ -319,7 +318,7 @@ private fun CueList(model: InboxViewModel, group: JSONObject) = with(model.menu.
 private fun ScopeChip(label: String, selected: Boolean, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(999.dp)
-    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(if (selected) c.tint else c.bg).border(1.dp, if (selected) c.tint else c.border, shape)
+    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(if (selected) c.tint else c.bg).rnBorder(1.dp, if (selected) c.tint else c.border, shape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; this.selected = selected; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = 14.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
         Text(label, style = rnText(14, 600, 18), color = if (selected) c.onTint else c.text, textAlign = TextAlign.Center, maxLines = 2)
@@ -336,7 +335,7 @@ private fun SweepButton(label: String, tag: String, filled: Boolean, enabled: Bo
     val c = theme.colors
     val shape = RoundedCornerShape(10.dp)
     Box(Modifier.fade(if (enabled) 1f else 0.5f).then(if (wide) Modifier.padding(top = 16.dp).fillMaxWidth() else Modifier).heightIn(min = 44.dp).clip(shape)
-        .then(if (filled) Modifier.background(theme.filledBg) else Modifier.border(1.dp, c.border, shape))
+        .then(if (filled) Modifier.background(theme.filledBg) else Modifier.rnBorder(1.dp, c.border, shape))
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = tag; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action)
         .padding(horizontal = if (compact) 16.dp else 24.dp, vertical = if (wide) 12.dp else 10.dp), contentAlignment = Alignment.Center) {

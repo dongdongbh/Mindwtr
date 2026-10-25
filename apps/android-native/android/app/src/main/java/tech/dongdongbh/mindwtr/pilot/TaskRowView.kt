@@ -18,7 +18,6 @@ import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -127,7 +126,7 @@ fun TaskRowItem(
         SwipeAction(enabled = swipeOn, swipe = meta.swipe, shape = shape, onSwipe = onSwipe, onMenu = { showStatusMenu(task) }, onDelete = onDelete) {
             Row(
                 Modifier.fillMaxWidth().clip(shape).background(c.bg).background(if (available && !selecting) theme.availableBg else c.taskItemBg)
-                    .border(if (highlighted || selecting) 2.dp else 1.dp,
+                    .rnBorder(if (highlighted || selecting) 2.dp else 1.dp,
                         if (highlighted || picked) c.tint else if (available && !selecting) theme.availableBorder else c.border, shape)
                     // RN's long-press on a list with selection selects the row (and starts selecting).
                     .pointerInput(canEdit, selecting) {
@@ -142,7 +141,7 @@ fun TaskRowItem(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // RN's selection circle: tint ring, filled with a check when the row is selected.
-                if (selecting) Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).border(1.5.dp, c.tint, CircleShape)
+                if (selecting) Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).rnBorder(1.5.dp, c.tint, CircleShape)
                     .background(if (picked) c.tint else c.taskItemBg), contentAlignment = Alignment.Center) {
                     if (picked) Icon(Lucide.CheckBold, null, tint = theme.onAction, modifier = Modifier.size(12.dp))
                 }
@@ -329,7 +328,7 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                         || failedAction == if (status == "done") completeAction(task.id, task.taskRevision) else statusAction(task, status))
                     Row(
                         Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth(0.42f).clip(RoundedCornerShape(20.dp)).then(if (current) Modifier.background(colors.bg) else Modifier)
-                            .border(1.dp, colors.text, RoundedCornerShape(20.dp))
+                            .rnBorder(1.dp, colors.text, RoundedCornerShape(20.dp))
                             .clickable(enabled = enabled, role = Role.Button) { chooseStatus(task, status) }
                             .semantics { selected = current }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -344,7 +343,7 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
             // RN's Move to section… pill, full width under the statuses (its text capitalized per word, as RN's menuText).
             menu.moveLabel(task)?.let { label ->
                 val enabled = writable && !busy && failedAction == null
-                Row(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().clip(RoundedCornerShape(20.dp)).border(1.dp, c.border, RoundedCornerShape(20.dp))
+                Row(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().clip(RoundedCornerShape(20.dp)).rnBorder(1.dp, c.border, RoundedCornerShape(20.dp))
                     .clickable(enabled = enabled, role = Role.Button) { showStatusMenu(null); menu.openMove(listOf(task.id), JSONObject().put(task.id, task.taskRevision)) }
                     .semantics { contentDescription = label }.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Text(label.split(' ').joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }, style = rnText(14, 500), color = c.text)
@@ -366,7 +365,7 @@ fun ToastCard(model: InboxViewModel, modifier: Modifier) {
     val shape = RoundedCornerShape(18.dp)
     Row(
         modifier.padding(horizontal = 16.dp).widthIn(max = 520.dp).fillMaxWidth().heightIn(min = 56.dp)
-            .shadow(10.dp, shape).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            .shadow(10.dp, shape).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clickable { model.dismissToast() }.semantics { liveRegion = LiveRegionMode.Polite }
             .padding(start = 16.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically,

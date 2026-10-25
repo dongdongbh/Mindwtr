@@ -5,7 +5,6 @@ import android.os.Looper
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -378,7 +377,7 @@ private fun Chips(model: InboxViewModel, options: List<JSONObject>, tag: String,
             val label = option.getString("label")
             val on = enabled && model.menu.idle
             val shape = RoundedCornerShape(16.dp)
-            Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).border(1.dp, c.border, shape)
+            Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).rnBorder(1.dp, c.border, shape)
                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; this.selected = selected; testTag = "$tag-${option.get("value")}"
                     if (on) onClick { choose(option); true } else disabled() }
                 .clickable(enabled = on) { choose(option) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -398,7 +397,7 @@ private fun AIInput(value: String, label: String, placeholder: String?, tag: Str
     BasicTextField(value, change, singleLine = !code, minLines = if (code) 5 else 1, cursorBrush = SolidColor(c.tint), textStyle = style,
         visualTransformation = if (secure) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = keyboard),
-        modifier = modifier.clip(shape).border(1.dp, c.border, shape).onFocusChanged { focus(it.isFocused) }.semantics { contentDescription = label }.testTag(tag),
+        modifier = modifier.clip(shape).rnBorder(1.dp, c.border, shape).onFocusChanged { focus(it.isFocused) }.semantics { contentDescription = label }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 if (value.isEmpty() && placeholder != null) Text(placeholder, style = style.copy(color = c.secondaryText))
@@ -419,7 +418,7 @@ private fun ModelInput(model: InboxViewModel, field: String, row: JSONObject, ta
         }
         val suggestions = row.getString("suggestions")
         val shape = RoundedCornerShape(10.dp)
-        Box(Modifier.clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Box(Modifier.clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clearAndSetSemantics { contentDescription = suggestions; role = Role.Button; testTag = "$tag-suggestions"; onClick { ai.openPicker(picker); true } }
             .clickable { ai.openPicker(picker) }.padding(horizontal = 8.dp, vertical = 10.dp)) {
             Text(suggestions, style = rnText(12, 600, 16), color = c.secondaryText, maxLines = 2, textAlign = TextAlign.Center)
@@ -433,7 +432,7 @@ private fun Dropdown(label: String, value: String, tag: String, open: () -> Unit
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
     Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
-        Row(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Row(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clearAndSetSemantics { contentDescription = "$label: $value"; role = Role.Button; testTag = tag; onClick { open(); true } }
             .clickable(onClick = open).padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -505,7 +504,7 @@ private fun AssistantCard(model: InboxViewModel, card: JSONObject) {
                         modifier = Modifier.padding(top = 6.dp))
                     val save = extra.getString("save")
                     val shape = RoundedCornerShape(10.dp)
-                    Box(Modifier.padding(top = 10.dp).fillMaxWidth().clip(shape).border(1.dp, c.border, shape)
+                    Box(Modifier.padding(top = 10.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape)
                         .clearAndSetSemantics { contentDescription = save; role = Role.Button; testTag = "ai-extra-body-save"
                             if (model.menu.idle) onClick { ai.saveExtra(extra.getString("value")); true } else disabled() }
                         .clickable(enabled = model.menu.idle) { ai.saveExtra(extra.getString("value")) }.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -565,7 +564,7 @@ private fun SpeechCard(model: InboxViewModel, card: JSONObject) {
                 // Download and Delete come with the Whisper pass (D4): core offers them off.
                 val action = whisper.getJSONObject("action")
                 val shape = RoundedCornerShape(16.dp)
-                Box(Modifier.fade(if (action.getBoolean("enabled")) 1f else 0.5f).clip(shape).border(1.dp, c.border, shape)
+                Box(Modifier.fade(if (action.getBoolean("enabled")) 1f else 0.5f).clip(shape).rnBorder(1.dp, c.border, shape)
                     .clearAndSetSemantics { contentDescription = action.getString("label"); role = Role.Button; disabled() }
                     .padding(horizontal = 10.dp, vertical = 6.dp)) {
                     Text(action.getString("label"), style = rnText(13, 700, 17), color = c.text, maxLines = 2, textAlign = TextAlign.Center)
@@ -612,7 +611,7 @@ private fun AIPicker(model: InboxViewModel, view: JSONObject, picker: String) {
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
-            .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("ai-picker")) {
+            .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("ai-picker")) {
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (option in options) {
@@ -620,7 +619,7 @@ private fun AIPicker(model: InboxViewModel, view: JSONObject, picker: String) {
                     val label = option.getString("label")
                     val row = RoundedCornerShape(10.dp)
                     val choose = { close(); ai.set(change(option)) }
-                    Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else Color.Transparent).border(1.dp, c.border, row)
+                    Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else Color.Transparent).rnBorder(1.dp, c.border, row)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; if (model.menu.idle) onClick { choose(); true } else disabled() }
                         .clickable(enabled = model.menu.idle) { choose() }.padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically) {

@@ -5,7 +5,6 @@ import android.content.Context
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -337,7 +336,7 @@ fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
             Icon(if (collapsed) Lucide.ChevronDownPlain else Lucide.ChevronUp, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         }
     }
-    val card = Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).testTag("pomodoro-card")
+    val card = Modifier.padding(bottom = 12.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).testTag("pomodoro-card")
     if (collapsed) {
         Row(card.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(clock, style = cardText(20, 700).copy(fontFeatureSettings = "tnum"), color = c.text, modifier = Modifier.testTag("pomodoro-clock"))
@@ -391,7 +390,7 @@ private fun PomodoroModel.Presets(shown: JSONObject, enabled: Boolean) {
                 act("setDurations", JSONObject().put("durations", JSONObject().put("focusMinutes", preset.getInt("focusMinutes"))
                     .put("breakMinutes", preset.getInt("breakMinutes"))))
             }
-            Box(Modifier.clip(CircleShape).background(if (active) c.tint else c.filterBg).border(1.dp, if (active) c.tint else c.border, CircleShape)
+            Box(Modifier.clip(CircleShape).background(if (active) c.tint else c.filterBg).rnBorder(1.dp, if (active) c.tint else c.border, CircleShape)
                 .clearAndSetSemantics { testTag = "pomodoro-preset-${preset.getString("id")}"; contentDescription = label; role = Role.Button; selected = active; if (enabled) onClick { choose(); true } else disabled() }
                 .clickable(enabled = enabled) { choose() }.padding(horizontal = 10.dp, vertical = 6.dp)) {
                 Text(label, style = cardText(11, 700), color = if (active) c.onTint else c.secondaryText)
@@ -404,7 +403,7 @@ private fun PomodoroModel.Presets(shown: JSONObject, enabled: Boolean) {
 @Composable
 private fun CardButton(label: String, enabled: Boolean, background: Color, border: Color, text: Color, horizontal: Int, tag: String, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
-    Box(Modifier.clip(shape).background(background).border(1.dp, border, shape)
+    Box(Modifier.clip(shape).background(background).rnBorder(1.dp, border, shape)
         .clearAndSetSemantics { testTag = tag; contentDescription = label; role = Role.Button; if (enabled) onClick { onClick(); true } else disabled() }
         .clickable(enabled = enabled, onClick = onClick).padding(horizontal = horizontal.dp, vertical = 9.dp)) {
         Text(label, style = cardText(12, 700), color = text)
@@ -419,7 +418,7 @@ private fun PomodoroModel.LinkRow(shown: JSONObject, text: JSONObject, enabled: 
     val label = text.getString("selectedTask")
     val task = shown.optJSONObject("selectedTask")
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.weight(1f).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+        Row(Modifier.weight(1f).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
             .clearAndSetSemantics { testTag = "pomodoro-link"; contentDescription = label; role = Role.Button; if (enabled) onClick { openPicker(); true } else disabled() }
             .clickable(enabled = enabled) { openPicker() }.padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -432,7 +431,7 @@ private fun PomodoroModel.LinkRow(shown: JSONObject, text: JSONObject, enabled: 
         if (task != null) {
             val spoken = text.getString("markDone")
             val done = { taskDone(task.getString("id"), task.getString("taskRevision")) }
-            Box(Modifier.fillMaxHeight().clip(shape).background(c.success.copy(alpha = 0x18 / 255f)).border(1.dp, c.success, shape)
+            Box(Modifier.fillMaxHeight().clip(shape).background(c.success.copy(alpha = 0x18 / 255f)).rnBorder(1.dp, c.success, shape)
                 .clearAndSetSemantics { testTag = "pomodoro-done"; contentDescription = spoken; role = Role.Button; if (enabled) onClick { done(); true } else disabled() }
                 .clickable(enabled = enabled) { done() }.padding(horizontal = 10.dp, vertical = 8.dp),
                 contentAlignment = Alignment.Center) {
@@ -464,7 +463,7 @@ fun PomodoroPicker(model: InboxViewModel) = with(model.pomodoro) {
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(14.dp)
         Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.72f).dp).clip(shape).background(c.cardBg)
-            .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(12.dp).testTag("pomodoro-picker"),
+            .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(12.dp).testTag("pomodoro-picker"),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(text.getString("selectedTask"), style = cardText(16, 800), color = c.text, modifier = Modifier.semantics { heading() })
             Option(text.getString("timerOnly"), selectedId == null, 1, "pomodoro-timer-only") { choose(null) }
@@ -487,7 +486,7 @@ fun PomodoroPicker(model: InboxViewModel) = with(model.pomodoro) {
 private fun Option(label: String, selected: Boolean, lines: Int, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Box(Modifier.fillMaxWidth().clip(shape).background(if (selected) c.tint.copy(alpha = 0x18 / 255f) else c.filterBg).border(1.dp, if (selected) c.tint else c.border, shape)
+    Box(Modifier.fillMaxWidth().clip(shape).background(if (selected) c.tint.copy(alpha = 0x18 / 255f) else c.filterBg).rnBorder(1.dp, if (selected) c.tint else c.border, shape)
         .clearAndSetSemantics { testTag = tag; contentDescription = label; role = Role.Button; this.selected = selected; onClick { onClick(); true } }
         .clickable(onClick = onClick).padding(10.dp)) {
         Text(label, style = cardText(14, 700), color = if (selected) c.tint else c.text, maxLines = lines, overflow = TextOverflow.Ellipsis)

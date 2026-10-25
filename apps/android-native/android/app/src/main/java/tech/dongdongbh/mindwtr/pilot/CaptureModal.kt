@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -112,20 +111,20 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
                 Column(Modifier.verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(16.dp), verticalArrangement = Arrangement.Center) {
                     val card = RoundedCornerShape(12.dp)
                     // RN's border sits outside its padding; a Compose border is drawn over the padding, so each bordered box here pads 1 dp more.
-                    Column(Modifier.fillMaxWidth().clip(card).background(c.cardBg).border(1.dp, c.border, card).padding(17.dp),
+                    Column(Modifier.fillMaxWidth().clip(card).background(c.cardBg).rnBorder(1.dp, c.border, card).padding(17.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Text(view.getString("title"), style = rnText(20, 600), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 if (WindowInsets.isImeVisible) {
-                                    Box(Modifier.clip(CircleShape).background(c.inputBg).border(1.dp, c.border, CircleShape)
+                                    Box(Modifier.clip(CircleShape).background(c.inputBg).rnBorder(1.dp, c.border, CircleShape)
                                         .control(view.getString("hideKeyboard"), "capture-modal-hide-keyboard", true) { keyboard?.hide() }
                                         .padding(horizontal = 11.dp, vertical = 7.dp)) {
                                         Icon(Lucide.ChevronDown, null, tint = c.text, modifier = Modifier.size(16.dp))
                                     }
                                 }
                                 val help = view.getJSONObject("help")
-                                Box(Modifier.size(28.dp).clip(CircleShape).background(c.inputBg).border(1.dp, c.border, CircleShape)
+                                Box(Modifier.size(28.dp).clip(CircleShape).background(c.inputBg).rnBorder(1.dp, c.border, CircleShape)
                                     .control(help.getString("toggle"), "capture-modal-help", !locked) { edit(help.getJSONObject("edit")) },
                                     contentAlignment = Alignment.Center) {
                                     Text(help.getString("toggle"), style = rnText(14, 700), color = c.secondaryText)
@@ -171,7 +170,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
                                 .padding(horizontal = 14.dp, vertical = 11.dp)) {
                                 Text(actions.getString("cancel"), style = rnText(14, 400, 19), color = c.text)
                             }
-                            Box(Modifier.clip(button).border(1.dp, c.border, button)
+                            Box(Modifier.clip(button).rnBorder(1.dp, c.border, button)
                                 .control(actions.getString("saveAndEdit"), "capture-modal-save-edit", canSave) { keyboard?.hide(); save(openAfterSave = true) }
                                 .padding(horizontal = 15.dp, vertical = 11.dp)) {
                                 Text(actions.getString("saveAndEdit"), style = rnText(14, 400, 19), color = c.text)
@@ -212,7 +211,7 @@ private fun ModalField(value: String, placeholder: String, tag: String, enabled:
     val shape = RoundedCornerShape(8.dp)
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled,
         textStyle = rnText(size, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
-        modifier = modifier.fillMaxWidth().heightIn(min = minHeight).clip(shape).background(c.inputBg).border(1.dp, c.border, shape).testTag(tag)
+        modifier = modifier.fillMaxWidth().heightIn(min = minHeight).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).testTag(tag)
             .semantics { contentDescription = placeholder },
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 13.dp, vertical = 11.dp), contentAlignment = Alignment.CenterStart) {

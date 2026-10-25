@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -190,7 +189,7 @@ fun SearchScreen(model: InboxViewModel, state: SearchState) = with(model) {
             val filters = t("filters.label")
             val focusManager = LocalFocusManager.current
             val shape = RoundedCornerShape(8.dp)
-            Box(Modifier.clip(shape).then(if (active) Modifier.background(c.filterBg) else Modifier).border(1.dp, if (active) c.tint else c.border, shape)
+            Box(Modifier.clip(shape).then(if (active) Modifier.background(c.filterBg) else Modifier).rnBorder(1.dp, if (active) c.tint else c.border, shape)
                 // RN's openFilters blurs the search field first, so the keyboard leaves and the sheet gets the screen.
                 .clickable(enabled = view != null, role = Role.Button) { focusManager.clearFocus(); showSearchFilters(true) }.semantics { contentDescription = filters }.padding(6.dp)) {
                 Icon(Lucide.SlidersHorizontal, null, tint = if (active) c.tint else c.secondaryText, modifier = Modifier.size(18.dp))
@@ -218,7 +217,7 @@ fun SearchScreen(model: InboxViewModel, state: SearchState) = with(model) {
             val hidden = t("search.hiddenCompletedMatches").replace("{{count}}", "${view.hiddenCompleted}")
             Text(hidden, style = rnText(13, 600), color = c.tint,
                 textAlign = TextAlign.Center, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp).fillMaxWidth().clip(shape)
-                    .background(c.cardBg).border(1.dp, c.border, shape)
+                    .background(c.cardBg).rnBorder(1.dp, c.border, shape)
                     .clickable(role = Role.Button) { setSearchFilters((state.filters ?: view.defaultFilters).withValue("includeCompleted", true)) }
                     .padding(horizontal = 12.dp, vertical = 8.dp))
         }
@@ -293,7 +292,7 @@ private fun ResultRow(segments: List<Pair<String, Boolean>>, title: String, subt
                       opens: Boolean, leading: @Composable () -> Unit, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Row(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Row(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .then(if (opens) Modifier.clickable(enabled = enabled, onClick = onClick) else Modifier)
         .padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         leading()
@@ -315,7 +314,7 @@ private fun ResultRow(segments: List<Pair<String, Boolean>>, title: String, subt
 private fun FilterChip(label: String, description: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(16.dp)
-    Box(Modifier.clip(shape).background(if (selected) c.tint else c.filterBg).border(1.dp, c.border, shape)
+    Box(Modifier.clip(shape).background(if (selected) c.tint else c.filterBg).rnBorder(1.dp, c.border, shape)
         .semantics { contentDescription = description }.selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 6.dp)) {
         Text(label, style = rnText(12, 600), color = if (selected) c.onTint else c.text)
@@ -340,7 +339,7 @@ private fun FilterSheet(model: InboxViewModel, state: SearchState, view: SearchV
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { showSearchFilters(false) } }) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.align(Alignment.BottomCenter).imePadding().padding(12.dp).fillMaxWidth()
-            .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            .heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.82f).dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(12.dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(t("filters.label"), style = rnText(14, 600), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
@@ -371,7 +370,7 @@ private fun FilterSheet(model: InboxViewModel, state: SearchState, view: SearchV
                 val inputShape = RoundedCornerShape(8.dp)
                 PlainField(filters.getString("locationQuery"), { set(filters.withValue("locationQuery", it)) }, location.getString("placeholder"),
                     location.getString("label"), rnText(13, 400), Modifier.fillMaxWidth().clip(inputShape).background(c.filterBg)
-                        .border(1.dp, c.border, inputShape).padding(horizontal = 10.dp, vertical = 8.dp))
+                        .rnBorder(1.dp, c.border, inputShape).padding(horizontal = 10.dp, vertical = 8.dp))
                 val tokens = sections.getString("tokens")
                 chips(tokens) {
                     for (token in options.texts("tokens")) {
@@ -417,14 +416,14 @@ private fun SaveSearchDialog(model: InboxViewModel, state: SearchState, name: St
     BackHandler(enabled = !owed) { if (!busy) showSaveSearch(null) }
     Box(Modifier.fillMaxSize().background(theme.menuScrim).pointerInput(Unit) { detectTapGestures { } }.padding(24.dp), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(max = 520.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(16.dp),
+        Column(Modifier.widthIn(max = 520.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(t("search.saveSearch"), style = rnText(16, 600), color = c.text, modifier = Modifier.semantics { heading() })
             val focus = remember { FocusRequester() }
             LaunchedEffect(Unit) { focus.requestFocus() }
             val prompt = t("search.saveSearchPrompt")
             val inputShape = RoundedCornerShape(8.dp)
-            PlainField(state.submitted ?: name, { showSaveSearch(it) }, prompt, prompt, rnText(16, 400), Modifier.fillMaxWidth().clip(inputShape).border(1.dp, c.border, inputShape)
+            PlainField(state.submitted ?: name, { showSaveSearch(it) }, prompt, prompt, rnText(16, 400), Modifier.fillMaxWidth().clip(inputShape).rnBorder(1.dp, c.border, inputShape)
                 .padding(horizontal = 12.dp, vertical = 8.dp).focusRequester(focus), enabled = !owed && !busy)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
                 val sent = state.submitted ?: name

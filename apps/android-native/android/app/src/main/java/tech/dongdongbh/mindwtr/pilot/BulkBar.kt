@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -206,7 +205,7 @@ private fun ModalInput(value: String, placeholder: String, description: String, 
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = onDone?.let { done -> KeyboardActions(onDone = { done() }) } ?: KeyboardActions.Default,
         modifier = modifier.fillMaxWidth().semantics { contentDescription = description },
         decorationBox = { inner ->
-            Box(Modifier.heightIn(min = 42.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
+            Box(Modifier.heightIn(min = 42.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
                 contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) Text(placeholder, style = rnText(14, 400), color = c.secondaryText)
                 inner()
@@ -231,7 +230,7 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
         .semantics { contentDescription = close }.imePadding().padding(20.dp), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.86f).dp).clip(shape)
-            .background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }) {
+            .background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }) {
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Icon(Lucide.ClipboardCheck, null, tint = c.tint, modifier = Modifier.size(18.dp))
                 Column(Modifier.weight(1f)) {
@@ -314,7 +313,7 @@ private fun Section(label: String, content: @Composable () -> Unit) = Column(ver
 @Composable
 private fun OrganizeChip(label: String, selected: Boolean, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
-    Box(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = 34.dp).clip(CircleShape).background(if (selected) c.tint else c.filterBg).border(1.dp, if (selected) c.tint else c.border, CircleShape)
+    Box(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = 34.dp).clip(CircleShape).background(if (selected) c.tint else c.filterBg).rnBorder(1.dp, if (selected) c.tint else c.border, CircleShape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; this.selected = selected; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = 12.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
         Text(label, style = rnText(12, 700), color = if (selected) c.onTint else c.text)
@@ -326,7 +325,7 @@ private fun OrganizeChip(label: String, selected: Boolean, enabled: Boolean, act
 private fun PickerRow(description: String, value: String, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Row(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().heightIn(min = 42.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+    Row(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().heightIn(min = 42.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
         .clearAndSetSemantics { contentDescription = description; role = Role.Button; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -354,7 +353,7 @@ private fun DateField(model: InboxViewModel, open: JSONObject, date: JSONObject,
             val calendar = date.getString("calendarAccessibilityLabel")
             val shape = RoundedCornerShape(8.dp)
             val openCalendar = { keepDialog(JSONObject(open.toString()).put("datePicker", field)) }
-            Box(Modifier.size(44.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+            Box(Modifier.size(44.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
                 .clearAndSetSemantics { contentDescription = calendar; role = Role.Button; if (!locked) onClick { openCalendar(); true } else disabled() }
                 .clickable(enabled = !locked) { openCalendar() }, contentAlignment = Alignment.Center) {
                 Icon(Lucide.Calendar, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
@@ -365,7 +364,7 @@ private fun DateField(model: InboxViewModel, open: JSONObject, date: JSONObject,
                 val on = chip.getBoolean("selected")
                 val spoken = chip.getString("accessibilityLabel")
                 val pick = { organizeDate(field, chip.getJSONObject("edit")) }
-                Box(Modifier.widthIn(min = 44.dp).heightIn(min = 44.dp).clip(CircleShape).background(if (on) c.tint else c.filterBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+                Box(Modifier.widthIn(min = 44.dp).heightIn(min = 44.dp).clip(CircleShape).background(if (on) c.tint else c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                     .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; selected = on; if (!locked) onClick { pick(); true } else disabled() }
                     .clickable(enabled = !locked) { pick() }.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
                     Text(chip.getString("label"), style = rnText(12, 600), color = if (on) c.onTint else c.text)
@@ -393,7 +392,7 @@ private fun OrganizePicker(model: InboxViewModel, open: JSONObject, kind: String
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(14.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.8f).dp).clip(shape)
-            .background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp),
+            .background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(title, style = rnText(17, 700), color = c.text, modifier = Modifier.semantics { heading() })
             val owed = model.failedAction?.takeIf { it.kind == "bulkCreate" }

@@ -9,7 +9,6 @@ import androidx.activity.compose.LocalActivity
 import androidx.biometric.BiometricManager.Authenticators
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -303,7 +302,7 @@ private fun AppLockScreen(model: InboxViewModel) {
     BoxWithConstraints(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("app-lock")) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Box(Modifier.padding(bottom = 22.dp).size(72.dp).clip(tile).background(c.filterBg).border(1.dp, c.border, tile), contentAlignment = Alignment.Center) {
+            Box(Modifier.padding(bottom = 22.dp).size(72.dp).clip(tile).background(c.filterBg).rnBorder(1.dp, c.border, tile), contentAlignment = Alignment.Center) {
                 Icon(LockKeyhole, null, tint = c.tint, modifier = Modifier.size(34.dp))
             }
             Text(t("appLock.title"), style = rnText(24, 700), color = c.text, textAlign = TextAlign.Center,

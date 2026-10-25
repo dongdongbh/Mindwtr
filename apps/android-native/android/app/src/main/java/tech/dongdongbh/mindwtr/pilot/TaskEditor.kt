@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -523,7 +522,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
                         val starLabel = blocked ?: if (star.getBoolean("queued")) {
                             if (focused) "$actionLabel. ${t("agenda.focusWhenAvailable")}" else t("agenda.focusWhenAvailable")
                         } else actionLabel
-                        Box(Modifier.padding(end = 12.dp).size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(7.dp))
+                        Box(Modifier.padding(end = 12.dp).size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(7.dp))
                             .clickable(enabled = starEnabled, role = Role.Button) { editFields(mapOf("focusedToday" to !focused)) }
                             .semantics { contentDescription = starLabel; selected = focused; if (!starEnabled) disabled() }
                             .testTag("task-edit-focus-star"), contentAlignment = Alignment.Center) {
@@ -531,7 +530,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
                         }
                     }
                     val helpLabel = t("taskEdit.editorLayoutHelpLabel")
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(7.dp))
+                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(7.dp))
                         .clickable(role = Role.Button) { help = true }.semantics { contentDescription = helpLabel }, contentAlignment = Alignment.Center) {
                         Icon(Lucide.CircleHelp, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
                     }
@@ -849,7 +848,7 @@ private fun QuickDateChips(fieldLabel: String, chips: List<QuickDate>, enabled: 
         for (chip in chips) {
             val shape = RoundedCornerShape(999.dp)
             Box(Modifier.weight(1f).widthIn(min = 92.dp).heightIn(min = 34.dp).clip(shape).background(if (chip.selected) c.tint else c.filterBg)
-                .border(1.dp, if (chip.selected) c.tint else c.border, shape)
+                .rnBorder(1.dp, if (chip.selected) c.tint else c.border, shape)
                 .semantics { contentDescription = "$fieldLabel: ${chip.label}" }
                 .selectable(selected = chip.selected, enabled = enabled, role = Role.Tab) { choose(chip.value) }
                 .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
@@ -937,7 +936,7 @@ private fun Reminders(model: InboxViewModel, editor: TaskEditor, locked: Boolean
     val value = reminders.getString("repeatValueLabel")
     val shape = RoundedCornerShape(10.dp)
     Row(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(if (on) c.filterBg else c.cardBg)
-        .border(1.dp, if (expanded || on) c.tint else c.border, shape)
+        .rnBorder(1.dp, if (expanded || on) c.tint else c.border, shape)
         .clickable(enabled = !locked, role = Role.Button) { expanded = !expanded }.semantics { contentDescription = "$label: $value" }
         .padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = rnText(13, 600), color = c.text, modifier = Modifier.weight(1f), maxLines = 1)
@@ -986,7 +985,7 @@ private fun RecurrenceField(model: InboxViewModel, editor: TaskEditor, locked: B
             val on = day.getBoolean("selected")
             val short = day.getString("label")
             val long = day.getString("longLabel")
-            Box(Modifier.size(44.dp).clip(CircleShape).background(if (on) c.tint else c.cardBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+            Box(Modifier.size(44.dp).clip(CircleShape).background(if (on) c.tint else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                 .semantics { contentDescription = long }
                 .toggleable(value = on, enabled = !locked, role = Role.Checkbox) { edit(JSONObject().put("kind", "weekday").put("day", day.getString("day"))) },
                 contentAlignment = Alignment.Center) {
@@ -1056,7 +1055,7 @@ private fun SmallTextButton(text: String, description: String, enabled: Boolean,
     val shape = RoundedCornerShape(8.dp)
     Box(Modifier.padding(start = 8.dp).heightIn(min = 44.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
-        Box(Modifier.clip(shape).background(c.filterBg).border(1.dp, c.border, shape).padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Box(Modifier.clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 10.dp, vertical = 8.dp)) {
             Text(text, style = rnText(12, 600), color = c.secondaryText)
         }
     }
@@ -1174,7 +1173,7 @@ private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: 
     if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled, singleLine = singleLine, textStyle = rnText(16, 400).copy(color = if (enabled) c.text else c.secondaryText),
         cursorBrush = SolidColor(c.tint),
-        modifier = Modifier.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+        modifier = Modifier.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         decorationBox = { inner ->
@@ -1195,7 +1194,7 @@ private fun Chip(active: Boolean, enabled: Boolean, description: String, onClick
                  shape: RoundedCornerShape = RoundedCornerShape(16.dp), compact: Boolean = false, horizontal: Int = if (compact) 10 else 12,
                  toggle: Boolean = false, content: @Composable (androidx.compose.ui.graphics.Color) -> Unit) {
     val c = LocalTheme.current.colors
-    Row(modifier.fade(if (enabled || active) 1f else 0.6f).heightIn(min = 44.dp).clip(shape).background(if (active) c.tint else c.filterBg).border(1.dp, if (active) c.tint else c.border, shape)
+    Row(modifier.fade(if (enabled || active) 1f else 0.6f).heightIn(min = 44.dp).clip(shape).background(if (active) c.tint else c.filterBg).rnBorder(1.dp, if (active) c.tint else c.border, shape)
         // One node for TalkBack and the checks: the click, the label, and the state.
         .semantics { contentDescription = description }
         .then(if (toggle) Modifier.toggleable(value = active, enabled = enabled, role = Role.Button, onValueChange = { onClick() })
@@ -1230,7 +1229,7 @@ private fun InboxViewModel.ChoiceChips(editor: TaskEditor, field: String, values
 private fun CompactRow(icon: ImageVector, label: String, value: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = "$label: $value" }
         .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(14.dp))
@@ -1244,7 +1243,7 @@ private fun CompactRow(icon: ImageVector, label: String, value: String, enabled:
 private fun DateButton(text: String, label: String, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Box(modifier.clip(shape).background(c.inputBg).border(1.dp, c.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+    Box(modifier.clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .semantics { contentDescription = "$label: $text" }.padding(12.dp)) {
         Text(text, style = rnText(14, 400), color = c.text)
     }
@@ -1257,7 +1256,7 @@ private fun SmallButton(icon: ImageVector, description: String, enabled: Boolean
     val shape = RoundedCornerShape(8.dp)
     Box(Modifier.padding(start = 8.dp).size(44.dp).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .semantics { contentDescription = description }, contentAlignment = Alignment.Center) {
-        Box(Modifier.clip(shape).background(c.filterBg).border(1.dp, c.border, shape).padding(horizontal = 10.dp, vertical = 8.dp)) {
+        Box(Modifier.clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 10.dp, vertical = 8.dp)) {
             Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(14.dp))
         }
     }
@@ -1268,7 +1267,7 @@ private fun SmallButton(icon: ImageVector, description: String, enabled: Boolean
 internal fun SwitchRow(label: String, hint: String, on: Boolean, enabled: Boolean, onToggle: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Column(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on) c.tint else c.border, shape)
+    Column(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, shape)
         .toggleable(value = on, enabled = enabled, role = Role.Switch, onValueChange = { onToggle() }).padding(12.dp)) {
         Text(label, style = rnText(13, 600), color = c.text)
         Text(hint, style = rnText(12, 400, 16), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
@@ -1284,7 +1283,7 @@ private fun SuggestionMenu(matches: List<Pair<String, String>>, enabled: Boolean
     // The menu opens under the field, where the keyboard can cover it: scroll it into view (run 48's tap hit the keyboard).
     val reveal = remember { BringIntoViewRequester() }
     LaunchedEffect(matches) { reveal.bringIntoView() }
-    Column(Modifier.bringIntoViewRequester(reveal).padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)) {
+    Column(Modifier.bringIntoViewRequester(reveal).padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)) {
         matches.forEachIndexed { index, (value, text) ->
             Text(value, style = rnText(14, 500), color = c.text, modifier = Modifier.fillMaxWidth()
                 .clickable(enabled = enabled, role = Role.Button) { choose(text) }
@@ -1306,7 +1305,7 @@ private fun WaitingPrompt(model: InboxViewModel, text: String, locked: Boolean) 
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { closeWaitingPrompt() } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
             val title = t("process.waitingFor")
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
@@ -1335,10 +1334,10 @@ private fun PickerDialog(title: String, dismiss: () -> Unit, items: @Composable 
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
-            Column(Modifier.heightIn(max = 260.dp).fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+            Column(Modifier.heightIn(max = 260.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
                 .verticalScroll(rememberScrollState()).padding(vertical = 4.dp), content = items)
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.End) {
                 Box(Modifier.heightIn(min = 44.dp).clickable(role = Role.Button, onClick = dismiss).padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {

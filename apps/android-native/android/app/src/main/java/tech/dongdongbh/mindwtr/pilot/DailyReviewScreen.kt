@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -114,7 +113,7 @@ private fun FooterButton(label: String, filled: Boolean, modifier: Modifier, ena
 private fun LazyListScope.infoBox(count: Int, unit: String, description: String) = item(key = "info") {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(14.dp)
-    Column(Modifier.padding(bottom = 14.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(14.dp),
+    Column(Modifier.padding(bottom = 14.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("$count") }; append(" $unit") }, style = rnText(14, 700), color = c.text)
         Text(description, style = rnText(13, 400, 18), color = c.secondaryText)
@@ -200,7 +199,7 @@ private fun TodayCalendar(menu: MenuModel, calendar: JSONObject) {
     val count = calendar.getInt("count")
     Column(Modifier.padding(bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         val shape = RoundedCornerShape(12.dp)
-        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .clickable(role = Role.Button) { menu.editOwn("daily") { if (open) put("calendarClosed", true) else remove("calendarClosed") } }
             .semantics { contentDescription = label }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -214,7 +213,7 @@ private fun TodayCalendar(menu: MenuModel, calendar: JSONObject) {
             Icon(if (open) Lucide.ChevronUp else Lucide.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         }
         if (open) for (day in calendar.menuObjects("days")) {
-            Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(day.getString("title").uppercase(), style = rnText(11, 700, letterSpacing = 0.4f), color = c.secondaryText)
                 day.menuText("notice")?.let { Text(it, style = rnText(12, 400), color = c.secondaryText) }
                 for (event in day.menuObjects("events")) {

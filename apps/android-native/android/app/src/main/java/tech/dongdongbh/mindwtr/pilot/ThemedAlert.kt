@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -57,7 +56,7 @@ fun ThemedAlert(title: String, message: String?, buttons: List<AlertButton>, onD
         Box(Modifier.fillMaxSize().background(theme.alertScrim).clickable(role = Role.Button) { onDismiss() }.semantics { contentDescription = title }
             .padding(24.dp), contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(18.dp)
-            Column(Modifier.fillMaxWidth().shadow(14.dp, shape).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            Column(Modifier.fillMaxWidth().shadow(14.dp, shape).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                 .pointerInput(Unit) { detectTapGestures { } }.testTag("themed-alert").padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(title, style = rnText(20, 700), color = c.text, modifier = Modifier.semantics { heading() })
                 message?.takeIf { it.isNotEmpty() }?.let {
@@ -68,7 +67,7 @@ fun ThemedAlert(title: String, message: String?, buttons: List<AlertButton>, onD
                     buttons.forEachIndexed { index, button ->
                         val fill = when { button.style == "destructive" -> c.danger; index == primary -> c.tint; else -> c.filterBg }
                         Box(weight.heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp)).background(fill)
-                            .border(1.dp, if (fill == c.filterBg) c.border else fill, RoundedCornerShape(12.dp))
+                            .rnBorder(1.dp, if (fill == c.filterBg) c.border else fill, RoundedCornerShape(12.dp))
                             .clearAndSetSemantics { contentDescription = button.label; role = Role.Button; onClick { button.onPress(); true } }
                             .clickable { button.onPress() }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
                             Text(button.label, style = rnText(14, 700), color = if (fill == c.filterBg) c.text else c.onTint, textAlign = TextAlign.Center)

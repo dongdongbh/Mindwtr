@@ -11,7 +11,6 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -380,7 +379,7 @@ fun PillButton(label: String, filled: Boolean = false, onClick: () -> Unit, enab
     val c = LocalTheme.current.colors
     Box(
         Modifier.fade(if (enabled) 1f else 0.5f).widthIn(min = if (filled) 104.dp else 0.dp).heightIn(min = if (filled) 48.dp else 40.dp).clip(CircleShape)
-            .then(if (filled) Modifier.background(c.tint) else Modifier.border(1.dp, c.text, CircleShape))
+            .then(if (filled) Modifier.background(c.tint) else Modifier.rnBorder(1.dp, c.text, CircleShape))
             .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
             .padding(horizontal = 16.dp),
@@ -396,7 +395,7 @@ fun EmptyState(message: String, hint: String?, action: String? = null, onAction:
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
     Column(
-        Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .padding(horizontal = 20.dp, vertical = 36.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {

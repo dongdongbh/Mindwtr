@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -133,7 +132,7 @@ internal fun DirectControl(icon: ImageVector, label: String, selected: Boolean?,
             if (enabled) onClick { action(); true } else disabled()
         }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = if (count != null) 6.dp else 0.dp), contentAlignment = Alignment.Center) {
-        Row(Modifier.heightIn(min = 32.dp).widthIn(min = 32.dp).clip(CircleShape).background(c.filterBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+        Row(Modifier.heightIn(min = 32.dp).widthIn(min = 32.dp).clip(CircleShape).background(c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
             .padding(horizontal = if (count != null) 9.dp else 0.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally)) {
             Icon(icon, null, tint = if (on) c.tint else c.secondaryText, modifier = Modifier.size(16.dp))
@@ -147,7 +146,7 @@ internal fun DirectControl(icon: ImageVector, label: String, selected: Boolean?,
 private fun MindSweepPill(mindSweep: JSONObject, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
     val label = mindSweep.getString("accessibilityLabel")
-    Row(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = 36.dp).clip(RoundedCornerShape(18.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(18.dp))
+    Row(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = 36.dp).clip(RoundedCornerShape(18.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(18.dp))
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -175,7 +174,7 @@ private fun ActionButton(icon: ImageVector, label: String, enabled: Boolean, des
     val shape = RoundedCornerShape(12.dp)
     val material = theme.isMaterial
     Row(Modifier.fade(if (dimmed) 0.45f else 1f).padding(bottom = 12.dp).fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(if (material) theme.filledBg else theme.processWash)
-        .then(if (material) Modifier else Modifier.border(1.dp, c.tint, shape))
+        .then(if (material) Modifier else Modifier.rnBorder(1.dp, c.tint, shape))
         .clearAndSetSemantics { contentDescription = description; role = Role.Button; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).padding(horizontal = 16.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {

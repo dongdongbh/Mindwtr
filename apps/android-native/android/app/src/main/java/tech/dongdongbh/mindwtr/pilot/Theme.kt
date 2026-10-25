@@ -1,6 +1,8 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -13,12 +15,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
@@ -324,6 +328,13 @@ fun MindwtrTheme(reply: ThemeChoice.Reply?, content: @Composable () -> Unit) {
     )
     CompositionLocalProvider(LocalTheme provides theme) { MaterialTheme(colorScheme = scheme, content = content) }
 }
+
+/**
+ * RN's borderWidth: the border takes layout space inside the box (RN lays out border-box), so the content starts [width] in from each
+ * edge. Compose's border only draws over the content, which made each bordered box 2 dp shorter than RN's (a task row, a Pomodoro
+ * button, a preset chip).
+ */
+fun Modifier.rnBorder(width: Dp, color: Color, shape: Shape): Modifier = border(width, color, shape).padding(width)
 
 /** RN's COMPACT_TEXT_MAX_SCALE (constants/text-scale.ts): a control label's text grows with the font scale up to 1.2x. */
 const val COMPACT_TEXT_MAX_SCALE = 1.2f

@@ -9,7 +9,6 @@ import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -119,7 +118,7 @@ private fun SettingsMenu(model: InboxViewModel, view: JSONObject) = with(model.m
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
     val placeholder = view.getString("searchPlaceholder")
-    Row(Modifier.padding(top = 16.dp).fillMaxWidth().height(44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(horizontal = 12.dp),
+    Row(Modifier.padding(top = 16.dp).fillMaxWidth().height(44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(Lucide.Search, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         BasicTextField(query, { search(it) }, singleLine = true, textStyle = rnText(15, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
@@ -257,7 +256,7 @@ private fun Segmented(model: InboxViewModel, options: List<JSONObject>, text: (J
                       write: (JSONObject) -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(14.dp)
-    Row(Modifier.fillMaxWidth().clip(shape).background(c.bg).border(1.dp, c.border, shape).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(Modifier.fillMaxWidth().clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         for (option in options) {
             val on = option.getBoolean("selected")
             val label = text(option)
@@ -285,7 +284,7 @@ private fun SettingInput(value: String, label: String, placeholder: String?, mod
         textStyle = rnText(14, 400).copy(color = c.text, textAlign = if (center) TextAlign.Center else TextAlign.Start),
         keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Text, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { onDone?.invoke(); focus.clearFocus() }),
-        modifier = modifier.clip(shape).background(c.bg).border(1.dp, c.border, shape).semantics { contentDescription = label },
+        modifier = modifier.clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape).semantics { contentDescription = label },
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), contentAlignment = if (center) Alignment.Center else Alignment.CenterStart) {
                 if (value.isEmpty() && placeholder != null) Text(placeholder, style = rnText(14, 400), color = c.secondaryText); inner()
@@ -640,7 +639,7 @@ private fun ManagePeople(model: InboxViewModel, page: SettingsPage) = with(model
     for (row in page.list("people")) {
         val name = row.getString("name")
         Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(34.dp).clip(CircleShape).background(c.bg).border(1.dp, c.border, CircleShape), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(34.dp).clip(CircleShape).background(c.bg).rnBorder(1.dp, c.border, CircleShape), contentAlignment = Alignment.Center) {
                 Text(row.getString("initial"), style = rnText(14, 700), color = c.text)
             }
             Column(Modifier.weight(1f).padding(start = 12.dp)) {
@@ -976,10 +975,10 @@ private fun CaptureIntentCard(model: InboxViewModel, card: JSONObject) = with(mo
                 SelectionContainer {
                     Text(stored, style = rnText(13, 400, 19).copy(fontFamily = FontFamily.Monospace), color = c.secondaryText,
                         modifier = Modifier.fillMaxWidth().testTag("android-capture-intent-token").clip(RoundedCornerShape(8.dp)).background(c.bg)
-                            .border(Dp.Hairline, c.border, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
+                            .rnBorder(Dp.Hairline, c.border, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
                 }
                 val copyLabel = token.getString("copyLabel")
-                Box(Modifier.testTag("android-capture-intent-copy").clip(RoundedCornerShape(8.dp)).border(1.dp, c.tint, RoundedCornerShape(8.dp))
+                Box(Modifier.testTag("android-capture-intent-copy").clip(RoundedCornerShape(8.dp)).rnBorder(1.dp, c.tint, RoundedCornerShape(8.dp))
                     .clearAndSetSemantics { contentDescription = copyLabel; role = Role.Button; onClick { copy(context, stored, messages, model); true } }
                     .clickable { copy(context, stored, messages, model) }.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Text(copyLabel, style = rnText(14, 600), color = c.tint)
@@ -1033,7 +1032,7 @@ private fun GtdTaskEditor(model: InboxViewModel, editor: JSONObject) = with(mode
                 val on = option.getBoolean("selected")
                 val label = option.getString("label")
                 val enabled = model.menu.idle
-                Box(Modifier.weight(1f).heightIn(min = 38.dp).clip(CircleShape).background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+                Box(Modifier.weight(1f).heightIn(min = 38.dp).clip(CircleShape).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                     .clearAndSetSemantics { contentDescription = label; role = Role.RadioButton; selected = on; if (enabled) onClick { gtd(option.getJSONObject("edit")); true } else disabled() }
                     .clickable(enabled = enabled) { gtd(option.getJSONObject("edit")) }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
                     Text(label, style = rnText(13, 700), color = if (on) c.tint else c.secondaryText, maxLines = 1)
@@ -1081,7 +1080,7 @@ private fun FieldRow(model: InboxViewModel, field: JSONObject, divider: Boolean)
     Row(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         val label = visibility.getString("accessibilityLabel")
-        Box(Modifier.padding(end = 12.dp).size(34.dp).clip(CircleShape).background(if (visible) c.filterBg else c.cardBg).border(1.dp, if (visible) c.tint else c.border, CircleShape)
+        Box(Modifier.padding(end = 12.dp).size(34.dp).clip(CircleShape).background(if (visible) c.filterBg else c.cardBg).rnBorder(1.dp, if (visible) c.tint else c.border, CircleShape)
             .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = visible; if (enabled) onClick { gtd(visibility.getJSONObject("edit")); true } else disabled() }
             .clickable(enabled = enabled) { gtd(visibility.getJSONObject("edit")) }, contentAlignment = Alignment.Center) {
             Icon(if (visible) SettingsIonicons.EyeOutline else SettingsIonicons.EyeOffOutline, null, tint = if (visible) c.tint else c.secondaryText, modifier = Modifier.size(16.dp))
@@ -1158,7 +1157,7 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
-            .border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("settings-picker")) {
+            .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("settings-picker")) {
             Text(source.getString("pickerTitle"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 groups.forEachIndexed { index, options ->
@@ -1167,12 +1166,12 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
                         val on = option.getBoolean("selected")
                         val label = option.getString("label")
                         val row = RoundedCornerShape(10.dp)
-                        Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on && picker == "defaultArea") c.tint else c.border, row)
+                        Row(Modifier.fillMaxWidth().clip(row).background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on && picker == "defaultArea") c.tint else c.border, row)
                             .clearAndSetSemantics { contentDescription = label; role = Role.RadioButton; selected = on; if (idle) onClick { write(option.getJSONObject("edit")); true } else disabled() }
                             .clickable(enabled = idle) { write(option.getJSONObject("edit")) }.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             SettingsIonicons.byName[option.optString("icon")]?.let { icon ->
-                                Box(Modifier.padding(end = 12.dp).size(32.dp).clip(CircleShape).background(c.filterBg).border(1.dp, if (on) c.tint else c.border, CircleShape),
+                                Box(Modifier.padding(end = 12.dp).size(32.dp).clip(CircleShape).background(c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape),
                                     contentAlignment = Alignment.Center) { Icon(icon, null, tint = if (on) c.tint else c.secondaryText, modifier = Modifier.size(17.dp)) }
                             }
                             Text(label, style = rnText(13, 600), color = if (on) c.tint else c.text, maxLines = 2, modifier = Modifier.weight(1f))
@@ -1213,7 +1212,7 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
     Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(owed) { detectTapGestures { if (!owed) keepDialog(null) } }.imePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(16.dp)
-        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("manage-editor")) {
             Text(text.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             text.menuText("namePlaceholder")?.let { placeholder ->
@@ -1233,7 +1232,7 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
                     val label = swatch.getString("label")
                     val choose = { settings.editField("color", color) }
                     Box(Modifier.size(32.dp).clip(CircleShape).background(coreColorOrNull(color) ?: c.tint)
-                        .border(if (on) 2.dp else 1.dp, if (on) theme.swatchSelected else theme.swatchBorder, CircleShape)
+                        .rnBorder(if (on) 2.dp else 1.dp, if (on) theme.swatchSelected else theme.swatchBorder, CircleShape)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; if (editable) onClick { choose(); true } else disabled() }
                         .clickable(enabled = editable) { choose() }, contentAlignment = Alignment.Center) {
                         if (on) Icon(SettingsIonicons.Checkmark, null, tint = theme.onAction, modifier = Modifier.size(16.dp))
@@ -1243,7 +1242,7 @@ private fun ManageEditor(model: InboxViewModel, view: JSONObject, open: JSONObje
             Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
                 val button = RoundedCornerShape(10.dp)
                 val cancel = text.getString("cancelLabel")
-                Box(Modifier.widthIn(min = 92.dp).heightIn(min = 42.dp).clip(button).border(1.dp, c.border, button)
+                Box(Modifier.widthIn(min = 92.dp).heightIn(min = 42.dp).clip(button).rnBorder(1.dp, c.border, button)
                     .clearAndSetSemantics { contentDescription = cancel; role = Role.Button; if (!owed) onClick { keepDialog(null); true } else disabled() }
                     .clickable(enabled = !owed) { keepDialog(null) }.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                     Text(cancel, style = rnText(14, 600), color = c.secondaryText)
@@ -1274,7 +1273,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
     BackHandler { close() }
     Box(Modifier.fillMaxSize().background(theme.scrim).pointerInput(Unit) { detectTapGestures { close() } }) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(bottom = 24.dp).testTag("settings-field-sheet")) {
             Box(Modifier.padding(top = 10.dp, bottom = 2.dp).align(Alignment.CenterHorizontally).size(42.dp, 5.dp).clip(CircleShape).background(c.border))
             Column(Modifier.padding(16.dp)) {
@@ -1291,7 +1290,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                             val label = option.getString("label")
                             val enabled = model.menu.idle
                             Text(label, style = rnText(12, 600), color = if (on) c.tint else c.secondaryText, modifier = Modifier.clip(CircleShape)
-                                .background(if (on) c.filterBg else c.cardBg).border(1.dp, if (on) c.tint else c.border, CircleShape)
+                                .background(if (on) c.filterBg else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; if (enabled) onClick { gtd(option.getJSONObject("edit")); true } else disabled() }
                                 .clickable(enabled = enabled) { gtd(option.getJSONObject("edit")) }.padding(horizontal = 10.dp, vertical = 6.dp))
                         }
@@ -1308,7 +1307,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                         val can = !move.getBoolean("disabled") && edit != null && model.menu.idle
                         val label = move.getString("label")
                         val button = RoundedCornerShape(12.dp)
-                        Row(Modifier.fade(if (!move.getBoolean("disabled")) 1f else 0.45f).weight(1f).heightIn(min = 44.dp).clip(button).background(c.filterBg).border(1.dp, c.border, button)
+                        Row(Modifier.fade(if (!move.getBoolean("disabled")) 1f else 0.45f).weight(1f).heightIn(min = 44.dp).clip(button).background(c.filterBg).rnBorder(1.dp, c.border, button)
                             .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (can) onClick { gtd(edit!!); true } else disabled() }
                             .clickable(enabled = can) { gtd(edit!!) }.padding(horizontal = 12.dp),
                             horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
@@ -1345,7 +1344,7 @@ internal fun OnboardingHandoffCard(model: InboxViewModel) {
         Text(t("settings.gettingStartedContentContinueDesc"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
         val busy = transfer.busy
         val shape = RoundedCornerShape(16.dp)
-        Box(Modifier.padding(top = 12.dp).clip(shape).background(if (busy) c.filterBg else c.tint).border(1.dp, if (busy) c.border else c.tint, shape)
+        Box(Modifier.padding(top = 12.dp).clip(shape).background(if (busy) c.filterBg else c.tint).rnBorder(1.dp, if (busy) c.border else c.tint, shape)
             .clickable(enabled = !busy, role = Role.Button) { transfer.gettingStarted(openProject = true) }.semantics { if (busy) disabled() }
             .testTag("mobile-onboarding-start-fresh-handoff")
             // RN's padding (10, 6) inside its 1 dp border: Compose draws the border over the padding, so it adds that 1 dp here.

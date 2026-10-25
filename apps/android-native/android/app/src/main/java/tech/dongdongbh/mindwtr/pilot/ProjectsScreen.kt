@@ -2,7 +2,6 @@ package tech.dongdongbh.mindwtr.pilot
 
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -263,7 +262,7 @@ private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: Stri
         val icon = group.areaIcon
         val dot = coreColorOrNull(group.areaColor)
         if (icon != null) Text(icon, style = rnText(14, 400, 18), color = c.secondaryText, modifier = Modifier.padding(end = 8.dp))
-        else if (dot != null) Box(Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape).background(dot).border(1.dp, c.border, CircleShape))
+        else if (dot != null) Box(Modifier.padding(end = 8.dp).size(8.dp).clip(CircleShape).background(dot).rnBorder(1.dp, c.border, CircleShape))
         Text(area.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = c.secondaryText, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
         Icon(if (folded) Lucide.ChevronRight else Lucide.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
@@ -297,7 +296,7 @@ private fun AddProjectField(model: InboxViewModel) = with(model) {
                 keyboardActions = KeyboardActions(onDone = { if (canAdd) createProject(chosen) }),
                 modifier = Modifier.weight(1f).semantics { contentDescription = placeholder },
                 decorationBox = { field ->
-                    Box(Modifier.clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 12.dp)) {
+                    Box(Modifier.clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 12.dp)) {
                         if (projectDraft.isEmpty()) Text(placeholder, style = rnText(16, 400), color = c.secondaryText, maxLines = 1)
                         field()
                     }
@@ -325,7 +324,7 @@ private fun AddProjectField(model: InboxViewModel) = with(model) {
 private fun AreaChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     Text(label, style = rnText(12, 600), color = if (selected) c.onTint else c.text,
-        modifier = Modifier.clip(CircleShape).background(if (selected) c.tint else c.cardBg).border(1.dp, if (selected) c.tint else c.border, CircleShape)
+        modifier = Modifier.clip(CircleShape).background(if (selected) c.tint else c.cardBg).rnBorder(1.dp, if (selected) c.tint else c.border, CircleShape)
             .selectable(selected = selected, enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp))
 }
 
@@ -404,7 +403,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             // RN's project actions button (projectHeaderActionButton): the "..." that opens Duplicate, Complete, Cancel and Delete.
             val actionsLabel = t("projects.actionsLabel")
             val actionsShape = RoundedCornerShape(10.dp)
-            Box(Modifier.padding(start = 8.dp).size(38.dp).clip(actionsShape).background(c.filterBg).border(1.dp, c.border, actionsShape)
+            Box(Modifier.padding(start = 8.dp).size(38.dp).clip(actionsShape).background(c.filterBg).rnBorder(1.dp, c.border, actionsShape)
                 .clickable(enabled = writable && detail != null && failedAction == null, role = Role.Button) { projectDetails.openActions() }
                 .semantics { contentDescription = actionsLabel }.testTag("project-actions-menu-button"), contentAlignment = Alignment.Center) {
                 Icon(Ionicons.EllipsisHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
@@ -419,7 +418,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 if (view.getJSONObject("filters").optInt("activeCount") > 0) {
                     val label = view.getString("filterButtonLabel")
                     val chipShape = RoundedCornerShape(12.dp)
-                    Row(Modifier.heightIn(min = 44.dp).clip(chipShape).background(c.tint.copy(alpha = 0x20 / 255f)).border(1.dp, c.tint, chipShape)
+                    Row(Modifier.heightIn(min = 44.dp).clip(chipShape).background(c.tint.copy(alpha = 0x20 / 255f)).rnBorder(1.dp, c.tint, chipShape)
                         .clickable(enabled = writable && failedAction == null, role = Role.Button) { projectDetails.openFilters() }
                         .semantics { contentDescription = label; selected = true }.testTag("project-task-filter-button").padding(horizontal = 12.dp),
                         horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -434,7 +433,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             val active = projectShowCompleted || projectDetails.customSort
             val optionsShape = RoundedCornerShape(12.dp)
             Box(Modifier.size(44.dp).clip(optionsShape).background(if (active) c.tint.copy(alpha = 0x20 / 255f) else c.filterBg)
-                .border(1.dp, if (active) c.tint else c.border, optionsShape)
+                .rnBorder(1.dp, if (active) c.tint else c.border, optionsShape)
                 .clickable(enabled = writable && detail != null && failedAction == null, role = Role.Button) { projectDetails.openViewOptions() }
                 .semantics { contentDescription = optionsLabel; selected = active }.testTag("project-task-view-options-button"), contentAlignment = Alignment.Center) {
                 Icon(Ionicons.EllipsisHorizontal, null, tint = if (active) c.tint else c.secondaryText, modifier = Modifier.size(20.dp))
@@ -444,7 +443,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 val theme = LocalTheme.current
                 val addLabel = t("nav.addTask")
                 val addShape = RoundedCornerShape(14.dp)
-                Box(Modifier.size(width = 56.dp, height = 44.dp).clip(addShape).background(theme.filledBg).border(1.dp, theme.filledBg, addShape)
+                Box(Modifier.size(width = 56.dp, height = 44.dp).clip(addShape).background(theme.filledBg).rnBorder(1.dp, theme.filledBg, addShape)
                     .clickable(enabled = writable && failedAction == null, role = Role.Button) { openCapture(openProjectId) }
                     .semantics { contentDescription = addLabel }.testTag("project-add-task-button"), contentAlignment = Alignment.Center) {
                     Icon(SettingsIonicons.Add, null, tint = theme.filledText, modifier = Modifier.size(24.dp))

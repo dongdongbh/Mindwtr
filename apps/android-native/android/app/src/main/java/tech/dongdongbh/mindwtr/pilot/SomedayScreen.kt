@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -103,7 +102,7 @@ private fun Heading(model: InboxViewModel, heading: JSONObject) = with(model.men
 private fun SummaryChip(chip: JSONObject, enabled: Boolean, onClear: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(22.dp)
-    Row(Modifier.heightIn(min = 44.dp).clip(shape).background(c.tint).border(1.dp, c.tint, shape).padding(start = 10.dp, end = 4.dp),
+    Row(Modifier.heightIn(min = 44.dp).clip(shape).background(c.tint).rnBorder(1.dp, c.tint, shape).padding(start = 10.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(chip.getString("label"), style = rnText(12, 600), color = c.onTint)
         val remove = chip.getString("removeLabel")

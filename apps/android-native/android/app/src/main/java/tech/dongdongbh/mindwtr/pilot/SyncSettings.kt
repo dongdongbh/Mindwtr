@@ -9,7 +9,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -473,7 +472,7 @@ private fun BackendChip(sync: SyncSettingsModel, option: JSONObject) {
     val selected = option.getBoolean("selected")
     val label = option.getString("label")
     val shape = RoundedCornerShape(16.dp)
-    Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).border(1.dp, if (selected) c.tint else c.border, shape)
+    Box(Modifier.clip(shape).background(if (selected) c.filterBg else Color.Transparent).rnBorder(1.dp, if (selected) c.tint else c.border, shape)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; this.selected = selected; testTag = "sync-backend-${option.getString("option")}"
             onClick { sync.select(option.getString("option")); true } }
         .clickable { sync.select(option.getString("option")) }.padding(horizontal = 10.dp, vertical = 6.dp)) {
@@ -502,7 +501,7 @@ internal fun GuideLink(guide: JSONObject, tag: String, bottom: Int = 12) {
 private fun HelpBox(title: String, lines: List<String>) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(16.dp)) {
+    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) {
         Text(title, style = rnText(15, 600), color = c.text, modifier = Modifier.padding(bottom = 8.dp))
         lines.forEachIndexed { index, line ->
             Text(line, style = rnText(13, 400, 20), color = c.secondaryText, modifier = Modifier.padding(top = if (index > 0) 8.dp else 0.dp))
@@ -538,7 +537,7 @@ private fun SyncInput(value: String, label: String, placeholder: String?, secure
     BasicTextField(value, change, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = rnText(14, 400).copy(color = c.text),
         visualTransformation = if (secure) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = keyboard, imeAction = ImeAction.Done),
-        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape)
+        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
             .semantics { contentDescription = label }.testTag(tag),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {

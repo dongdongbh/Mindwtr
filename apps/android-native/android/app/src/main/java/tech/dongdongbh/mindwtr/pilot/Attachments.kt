@@ -15,7 +15,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -493,7 +492,7 @@ private fun shareIntent(uri: Uri, mimeType: String?): Intent = Intent.createChoo
 private fun AttachmentButton(icon: ImageVector, label: String, enabled: Boolean, modifier: Modifier, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Row(modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = 44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Row(modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = 44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).testTag(tag).padding(horizontal = 8.dp, vertical = 9.dp),
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = c.tint, modifier = Modifier.size(16.dp))
@@ -535,7 +534,7 @@ private fun AttachmentList(rows: List<AttachmentRowView>, enabled: Boolean, open
                            actions: @Composable (AttachmentRowView) -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Column(Modifier.padding(top = top.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)) {
+    Column(Modifier.padding(top = top.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)) {
         for (row in rows) {
             Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 10.dp).testTag("attachment-row"),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -625,7 +624,7 @@ private fun LinkSheetDialog(model: InboxViewModel, sheet: LinkSheet) = with(mode
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).imePadding().padding(20.dp).semantics { testTagsAsResourceId = true }
         .testTag("attachment-link-sheet"), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
             val title = t(if (sheet.editing != null) "common.edit" else "attachments.addLink")
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
@@ -634,7 +633,7 @@ private fun LinkSheetDialog(model: InboxViewModel, sheet: LinkSheet) = with(mode
                 BasicTextField(sheet.text, ::typeLink, singleLine = !multiline, textStyle = rnText(16, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
                     modifier = Modifier.fillMaxWidth().then(if (multiline) Modifier.height(120.dp) else Modifier)
                         .onFocusChanged { state -> if (state.isFocused) focused = true else if (focused) blurLink() }.clip(fieldShape).background(c.inputBg)
-                        .border(1.dp, c.border, fieldShape).testTag("attachment-link-input").semantics { contentDescription = t("attachments.addLink") },
+                        .rnBorder(1.dp, c.border, fieldShape).testTag("attachment-link-input").semantics { contentDescription = t("attachments.addLink") },
                     decorationBox = { inner ->
                         Box(Modifier.padding(12.dp)) {
                             if (sheet.text.isEmpty()) Text(t("attachments.linkPlaceholder"), style = rnText(16, 400), color = c.secondaryText)
@@ -671,7 +670,7 @@ private fun ImagePreview(model: InboxViewModel, shown: AttachmentView) = with(mo
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { closeView() } }.padding(16.dp)
         .testTag("attachment-image-preview"), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(12.dp)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(shown.title.ifEmpty { t("attachments.title") }, style = rnText(16, 700), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f))
@@ -725,7 +724,7 @@ private fun AudioPlayer(model: InboxViewModel, shown: AttachmentView) = with(mod
     Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { closeView() } }.padding(20.dp)
         .testTag("attachment-audio"), contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
             Text(shown.title.ifEmpty { t("quickAdd.audioNoteTitle") }, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp))
             Text(duration?.let { "${clock(position)} / ${clock(it)}" } ?: t("audio.loading"), style = rnText(13, 600), color = c.secondaryText)

@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import android.content.Intent
 import android.util.Log
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -248,7 +247,7 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
             Box(Modifier.systemBarsPadding().padding(18.dp), contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(12.dp)
             val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
-            Column(Modifier.widthIn(max = 460.dp).fillMaxWidth().heightIn(max = maxHeight).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            Column(Modifier.widthIn(max = 460.dp).fillMaxWidth().heightIn(max = maxHeight).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                 .pointerInput(Unit) { detectTapGestures { } }.testTag("startup-prompt")) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.padding(top = 1.dp).size(36.dp).clip(RoundedCornerShape(10.dp)).background(c.tint.copy(alpha = 0x18 / 255f)), contentAlignment = Alignment.Center) {
@@ -266,7 +265,7 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
                 }
                 Box(Modifier.fillMaxWidth().background(c.border).heightIn(min = 1.dp, max = 1.dp))
                 Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
-                    Box(Modifier.heightIn(min = 44.dp).widthIn(min = 92.dp).clip(RoundedCornerShape(12.dp)).border(1.dp, c.border, RoundedCornerShape(12.dp))
+                    Box(Modifier.heightIn(min = 44.dp).widthIn(min = 92.dp).clip(RoundedCornerShape(12.dp)).rnBorder(1.dp, c.border, RoundedCornerShape(12.dp))
                         .clickable(role = Role.Button, onClick = dismiss).padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                         Text(announcement.optString("dismissLabel").ifEmpty { open.getString("notNow") }, style = rnText(14, 700), color = c.secondaryText,
                             maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -303,7 +302,7 @@ private fun WelcomeSheet(prompts: StartupPromptsModel, open: JSONObject) {
         Box(Modifier.fillMaxSize().background(theme.onboardingScrim).systemBarsPadding().padding(horizontal = 16.dp, vertical = 20.dp), contentAlignment = Alignment.Center) {
             val shape = RoundedCornerShape(16.dp)
             val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.92f).dp
-            Box(Modifier.fillMaxWidth().heightIn(max = maxHeight).clip(shape).background(c.cardBg).border(1.dp, c.border, shape).testTag("welcome-sheet")) {
+            Box(Modifier.fillMaxWidth().heightIn(max = maxHeight).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).testTag("welcome-sheet")) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 18.dp).padding(end = 38.dp)) {
                         Text(words.getString("title"), style = rnText(24, 800), color = c.text)
@@ -331,7 +330,7 @@ private fun WelcomeSheet(prompts: StartupPromptsModel, open: JSONObject) {
                         }
                         prompts.seedError?.let { error ->
                             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(c.danger.copy(alpha = 0x18 / 255f))
-                                .border(1.dp, c.danger, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                .rnBorder(1.dp, c.danger, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
                                 Text(error, style = rnText(13, 600, 18), color = c.danger)
                             }
                         }
@@ -367,7 +366,7 @@ private fun WelcomeOption(
     minHeight: Int, disabledAlpha: Float, disabled: Boolean, tag: String, onClick: () -> Unit, icon: @Composable () -> Unit,
 ) {
     val shape = RoundedCornerShape(12.dp)
-    Row(Modifier.fillMaxWidth().heightIn(min = minHeight.dp).fade(if (disabled) disabledAlpha else 1f).clip(shape).background(background).border(1.dp, border, shape)
+    Row(Modifier.fillMaxWidth().heightIn(min = minHeight.dp).fade(if (disabled) disabledAlpha else 1f).clip(shape).background(background).rnBorder(1.dp, border, shape)
         .clickable(enabled = !disabled, role = Role.Button, onClick = onClick).semantics { if (disabled) disabled() }.testTag(tag)
         .padding(horizontal = 16.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
         Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(iconBackground), contentAlignment = Alignment.Center) { icon() }

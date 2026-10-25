@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -74,7 +73,7 @@ private fun PersonFilter(model: InboxViewModel, shown: MenuPage) = with(model.me
         }
         view.menuText("clearLabel")?.let { clear ->
             val shape = RoundedCornerShape(8.dp)
-            Text(clear, style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+            Text(clear, style = rnText(12, 600), color = c.text, modifier = Modifier.clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                 .clickable(enabled = idle, role = Role.Button) { person("") }.padding(horizontal = 8.dp, vertical = 4.dp))
         }
     }
@@ -84,7 +83,7 @@ private fun PersonFilter(model: InboxViewModel, shown: MenuPage) = with(model.me
 private fun PersonChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     Text(label, style = rnText(12, 600), color = if (selected) c.onTint else c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.widthIn(max = 180.dp).clip(CircleShape).background(if (selected) c.tint else c.filterBg).border(1.dp, c.border, CircleShape)
+        modifier = Modifier.widthIn(max = 180.dp).clip(CircleShape).background(if (selected) c.tint else c.filterBg).rnBorder(1.dp, c.border, CircleShape)
             .semantics { contentDescription = label }.selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp))
 }

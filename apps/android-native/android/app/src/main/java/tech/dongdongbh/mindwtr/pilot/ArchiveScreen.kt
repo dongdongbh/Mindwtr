@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -92,7 +91,7 @@ fun ArchiveList(model: InboxViewModel) = with(model.menu) {
                     val label = chip.getString("label")
                     val shape = RoundedCornerShape(16.dp)
                     Text(label, style = rnText(12, 600), color = if (on) c.onTint else c.text, modifier = Modifier.clip(shape)
-                        .background(if (on) c.tint else c.filterBg).border(1.dp, c.border, shape).semantics { contentDescription = label }
+                        .background(if (on) c.tint else c.filterBg).rnBorder(1.dp, c.border, shape).semantics { contentDescription = label }
                         .selectable(selected = on, enabled = idle, role = Role.Tab) { segment(chip.getString("id")) }
                         .padding(horizontal = 12.dp, vertical = 6.dp))
                 }
@@ -152,7 +151,7 @@ private fun ArchivedTask(model: InboxViewModel, item: MenuItem, labels: JSONObje
         onDelete = { trash?.let { confirm(it, JSONObject().put("type", "trashTask").put("taskId", row.id).put("taskRevision", row.taskRevision)) } }) { actions ->
         val shape = RoundedCornerShape(12.dp)
         Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(shape).background(c.taskItemBg)
-            .border(if (selecting && isSelected) 2.dp else 1.dp, if (selecting && isSelected) c.tint else c.border, shape)
+            .rnBorder(if (selecting && isSelected) 2.dp else 1.dp, if (selecting && isSelected) c.tint else c.border, shape)
             .clickable(enabled = model.writable && !model.busy && model.failedAction == null) {
                 if (selecting) toggleSelected(row.id) else model.openEditor(row.id)
             }
@@ -163,7 +162,7 @@ private fun ArchivedTask(model: InboxViewModel, item: MenuItem, labels: JSONObje
                 if (!selecting) customActions = actions
             }.padding(16.dp)) {
             if (selecting) {
-                Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).border(2.dp, c.tint, CircleShape).background(if (isSelected) c.tint else c.taskItemBg),
+                Box(Modifier.padding(end = 12.dp).size(22.dp).clip(CircleShape).rnBorder(2.dp, c.tint, CircleShape).background(if (isSelected) c.tint else c.taskItemBg),
                     contentAlignment = Alignment.Center) { if (isSelected) Icon(Lucide.Check, null, tint = c.onTint, modifier = Modifier.size(14.dp)) }
             }
             Column(Modifier.weight(1f)) {
@@ -200,7 +199,7 @@ private fun ArchivedProject(model: InboxViewModel, json: JSONObject) = with(mode
         val shape = RoundedCornerShape(12.dp)
         val title = json.getString("title")
         val struck = if (json.getBoolean("struck")) TextDecoration.LineThrough else null
-        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(shape).background(c.taskItemBg).border(1.dp, c.border, shape)
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(shape).background(c.taskItemBg).rnBorder(1.dp, c.border, shape)
             .clickable(enabled = model.failedAction == null && !model.busy) { openProjects(id) }
             .semantics { contentDescription = title; customActions = actions }.padding(16.dp)) {
             Column(Modifier.weight(1f)) {
@@ -264,7 +263,7 @@ private fun BulkBar(model: InboxViewModel, view: JSONObject) = with(model.menu) 
     val labels = view.getJSONObject("labels")
     val shape = RoundedCornerShape(10.dp)
     val count = view.getInt("selectedCount")
-    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(labels.getString("selected"), style = rnText(12, 600), color = c.secondaryText)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -304,7 +303,7 @@ fun BulkButton(label: String, color: Color, enabled: Boolean, onClick: () -> Uni
 fun SmallButton(label: String, color: Color, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Text(label, style = rnText(12, 600), color = color, modifier = Modifier.clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Text(label, style = rnText(12, 600), color = color, modifier = Modifier.clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
@@ -316,7 +315,7 @@ private fun SearchBox(value: String, placeholder: String, modifier: Modifier, on
     BasicTextField(value, onChange, singleLine = true, textStyle = rnText(15, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search), modifier = modifier.semantics { contentDescription = placeholder },
         decorationBox = { inner ->
-            Box(Modifier.heightIn(min = 40.dp).clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
+            Box(Modifier.heightIn(min = 40.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(horizontal = 12.dp, vertical = 8.dp),
                 contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) Text(placeholder, style = rnText(15, 400), color = c.secondaryText)
                 inner()

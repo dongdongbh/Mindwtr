@@ -3,7 +3,6 @@ package tech.dongdongbh.mindwtr.pilot
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -129,7 +128,7 @@ private fun FilterBar(model: InboxViewModel, shown: BoardPage) = with(model.menu
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder }.testTag("board-search"),
                 decorationBox = { inner ->
-                    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(if (searching) c.filterBg else c.inputBg).border(1.dp, if (searching) c.tint else c.border, shape)
+                    Box(Modifier.heightIn(min = 44.dp).clip(shape).background(if (searching) c.filterBg else c.inputBg).rnBorder(1.dp, if (searching) c.tint else c.border, shape)
                         .padding(start = 12.dp, end = if (searching) 44.dp else 12.dp, top = 8.dp, bottom = 8.dp), contentAlignment = Alignment.CenterStart) {
                         if (value.isEmpty()) Text(placeholder, style = rnText(14, 400), color = c.secondaryText, maxLines = 1)
                         inner()
@@ -153,7 +152,7 @@ private fun FilterBar(model: InboxViewModel, shown: BoardPage) = with(model.menu
             }
         }
         val label = bar.getString("filterLabel")
-        Row(Modifier.heightIn(min = 44.dp).clip(CircleShape).background(if (active) c.tint else c.filterBg).border(1.dp, if (active) c.tint else c.border, CircleShape)
+        Row(Modifier.heightIn(min = 44.dp).clip(CircleShape).background(if (active) c.tint else c.filterBg).rnBorder(1.dp, if (active) c.tint else c.border, CircleShape)
             .clearAndSetSemantics { contentDescription = label; role = Role.Button; onClick { board.keepSheet(JSONObject()); true } }
             .clickable { board.keepSheet(JSONObject()) }.padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -216,7 +215,7 @@ private fun BoardColumn(model: InboxViewModel, shown: BoardPage, column: JSONObj
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = rnText(15, 600), color = c.text)
             Text("$count", style = rnText(12, 600), color = c.text, modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(c.filterBg)
-                .border(1.dp, tone, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
+                .rnBorder(1.dp, tone, RoundedCornerShape(10.dp)).padding(horizontal = 8.dp, vertical = 2.dp))
         }
         Column(Modifier.fillMaxWidth().heightIn(min = 50.dp).padding(10.dp)) {
             cards.forEachIndexed { index, card ->
@@ -338,13 +337,13 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
                         side?.let { run(if (it == "left") "duplicate" else "trash") }
                     })
                 .graphicsLayer { translationX = swipe.value; translationY = lift; if (held) { scaleX = 1.05f; scaleY = 1.05f; alpha = 0.85f } }
-                .shadow(if (held) 12.dp else 3.dp, shape).clip(shape).background(c.taskItemBg).border(1.dp, c.border, shape).padding(12.dp)) {
+                .shadow(if (held) 12.dp else 3.dp, shape).clip(shape).background(c.taskItemBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) {
                 Text(title, style = rnText(14, 500), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (meta.optBoolean("showMetaRow")) {
                     FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         meta.menuText("projectTitle")?.let { project ->
                             val color = coreColorOrNull(meta.menuText("projectColor")) ?: c.secondaryText
-                            Row(Modifier.clip(RoundedCornerShape(10.dp)).background(c.filterBg).border(1.dp, color, RoundedCornerShape(10.dp))
+                            Row(Modifier.clip(RoundedCornerShape(10.dp)).background(c.filterBg).rnBorder(1.dp, color, RoundedCornerShape(10.dp))
                                 .padding(horizontal = 8.dp, vertical = 1.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Icon(Lucide.Folder, null, tint = c.text, modifier = Modifier.size(12.dp))
                                 Text(project, style = rnText(11, 700, 14), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -352,10 +351,10 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
                         }
                         for (token in meta.optJSONArray("tags").ids() + meta.optJSONArray("contexts").ids()) {
                             Text(token, style = rnText(11, 400, 14), color = c.secondaryText, modifier = Modifier.clip(RoundedCornerShape(4.dp)).background(c.filterBg)
-                                .border(1.dp, c.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
+                                .rnBorder(1.dp, c.border, RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
                         }
                         meta.menuText("timeEstimateLabel")?.let { estimate ->
-                            Row(Modifier.clip(RoundedCornerShape(4.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(4.dp))
+                            Row(Modifier.clip(RoundedCornerShape(4.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(4.dp))
                                 .padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Icon(Lucide.Clock3, null, tint = c.secondaryText, modifier = Modifier.size(12.dp))
                                 Text(estimate, style = rnText(11, 600, 14), color = c.secondaryText)
@@ -373,7 +372,7 @@ private fun BoardCard(model: InboxViewModel, shown: BoardPage, card: JSONObject,
 private fun SwipePanel(label: String, border: Color, align: Alignment, modifier: Modifier) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Box(modifier.clip(shape).background(c.bg).border(1.dp, border, shape).padding(horizontal = 20.dp), contentAlignment = align) {
+    Box(modifier.clip(shape).background(c.bg).rnBorder(1.dp, border, shape).padding(horizontal = 20.dp), contentAlignment = align) {
         Text(label, style = rnText(14, 600), color = c.text)
     }
 }
@@ -401,7 +400,7 @@ private fun BoardFilterSheet(model: InboxViewModel, shown: BoardPage, open: JSON
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val tall = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
         Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
-            .clip(shape).background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("board-filters")
+            .clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("board-filters")
             .semantics { contentDescription = t("filters.label") }.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 12.dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (picker != null) Text(t("common.back"), style = rnText(13, 600), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
@@ -493,7 +492,7 @@ private fun DueSection(model: InboxViewModel, due: JSONObject, open: JSONObject)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val spoken = due.getString("accessibilityLabel")
         val fold = { board.keepSheet(JSONObject(open.toString()).put("due", !expanded)) }
-        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(shape).background(c.bg).border(1.dp, c.border, shape)
+        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(shape).background(c.bg).rnBorder(1.dp, c.border, shape)
             .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; onClick { fold(); true } }
             .clickable { fold() }.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -515,7 +514,7 @@ private fun MatchMode(model: InboxViewModel, kind: String, label: String, mode: 
     val c = LocalTheme.current.colors
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, style = rnText(12, 600), color = c.secondaryText)
-        Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(18.dp)).background(c.filterBg).border(1.dp, c.border, RoundedCornerShape(18.dp)).padding(2.dp)) {
+        Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(18.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(18.dp)).padding(2.dp)) {
             for ((value, text) in listOf("any" to t("filters.matchAny"), "all" to t("common.all"))) {
                 val active = mode == value
                 Box(Modifier.widthIn(min = 52.dp).heightIn(min = 30.dp).clip(RoundedCornerShape(15.dp)).background(if (active) c.tint else Color.Transparent)

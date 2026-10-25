@@ -5,7 +5,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -701,7 +700,7 @@ internal fun SmallButton(label: String, enabled: Boolean, tag: String? = null, c
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
     Text(label, style = rnText(12, 700), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).clip(shape).background(c.cardBg)
-        .border(1.dp, c.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        .rnBorder(1.dp, c.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(horizontal = 10.dp, vertical = 6.dp))
 }
 
@@ -710,7 +709,7 @@ internal fun SmallButton(label: String, enabled: Boolean, tag: String? = null, c
 private fun HelpButton(label: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Box(Modifier.size(30.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape).clickable(role = Role.Button, onClick = onClick)
+    Box(Modifier.size(30.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).clickable(role = Role.Button, onClick = onClick)
         .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
         Icon(Ionicons.HelpCircleOutline, null, tint = c.secondaryText, modifier = Modifier.size(17.dp))
     }
@@ -728,7 +727,7 @@ private fun MetadataRow(label: String, value: String, enabled: Boolean, tag: Str
         DetailsLabel(label, Modifier.padding(end = 12.dp))
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.widthIn(max = most).fade(if (enabled) 1f else 0.5f).heightIn(min = 34.dp).clip(shape)
-                .background(c.inputBg).border(1.dp, c.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .background(c.inputBg).rnBorder(1.dp, c.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
                 .semantics { contentDescription = "$label: $value" }.testTag(tag).padding(horizontal = 10.dp, vertical = 6.dp),
                 contentAlignment = Alignment.CenterStart) {
                 Text(value, style = rnText(13, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -775,7 +774,7 @@ private fun DetailsToggle(model: InboxViewModel, detail: ProjectDetail, metadata
     LaunchedEffect(detail.projectId, detail, model.busy) { if (!model.busy) read() }
     val toggleShape = RoundedCornerShape(10.dp)
     val detailsLabel = t("taskEdit.details")
-    Row(Modifier.padding(top = 6.dp, bottom = 8.dp).fillMaxWidth().clip(toggleShape).background(c.cardBg).border(1.dp, c.border, toggleShape)
+    Row(Modifier.padding(top = 6.dp, bottom = 8.dp).fillMaxWidth().clip(toggleShape).background(c.cardBg).rnBorder(1.dp, c.border, toggleShape)
         .clickable(role = Role.Button) { open = !open }
         .semantics { contentDescription = detailsLabel; stateDescription = t(if (open) "markdown.collapse" else "markdown.expand") }
         .testTag("project-details-toggle").padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -799,7 +798,7 @@ private fun DetailsStatus(model: InboxViewModel, detail: ProjectDetail, metadata
             DetailsLabel(t("projects.statusLabel"), Modifier.weight(1f))
             val shape = RoundedCornerShape(8.dp)
             val label = metadata.getString("statusLabel")
-            Row(Modifier.clip(shape).background(bg).border(1.dp, border, shape).clickable(enabled = enabled && status != null, role = Role.Button) { statusMenu = !statusMenu }
+            Row(Modifier.clip(shape).background(bg).rnBorder(1.dp, border, shape).clickable(enabled = enabled && status != null, role = Role.Button) { statusMenu = !statusMenu }
                 .semantics { contentDescription = "${t("projects.statusLabel")}: $label"; if (archived) disabled() }
                 .testTag("project-status-picker").padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(label, style = rnText(12, 600), color = text)
@@ -808,7 +807,7 @@ private fun DetailsStatus(model: InboxViewModel, detail: ProjectDetail, metadata
         }
         if (statusMenu && !archived) {
             val shape = RoundedCornerShape(8.dp)
-            Column(Modifier.padding(top = 2.dp).fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape)) {
+            Column(Modifier.padding(top = 2.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)) {
                 for ((value, key) in PROJECT_STATUSES) {
                     val (itemText, _, itemBorder) = statusPalette(value)
                     Row(Modifier.fillMaxWidth().background(if (status == value) c.filterBg else Color.Transparent)
@@ -825,7 +824,7 @@ private fun DetailsStatus(model: InboxViewModel, detail: ProjectDetail, metadata
             DetailsLabel(t("projects.projectTypeLabel"), Modifier.weight(1f))
             val shape = RoundedCornerShape(8.dp)
             Box(Modifier.fade(if (archived) 0.5f else 1f).heightIn(min = 30.dp).clip(shape).background(if (sequential) c.tint else c.filterBg)
-                .border(1.dp, if (sequential) c.tint else c.border, shape).clickable(enabled = enabled && flow() != null, role = Role.Button) { setSequential(!sequential) }
+                .rnBorder(1.dp, if (sequential) c.tint else c.border, shape).clickable(enabled = enabled && flow() != null, role = Role.Button) { setSequential(!sequential) }
                 .testTag("project-type-toggle").padding(horizontal = 10.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
                 Text(metadata.getString("typeLabel"), style = rnText(12, 600), color = if (sequential) c.onTint else c.secondaryText)
             }
@@ -852,7 +851,7 @@ private fun DetailsScope(model: InboxViewModel, detail: ProjectDetail, metadata:
                 val on = current == scope
                 val shape = RoundedCornerShape(8.dp)
                 Box(Modifier.weight(1f).fade(if (archived) 0.5f else 1f).heightIn(min = 36.dp).clip(shape).background(if (on) c.tint else c.inputBg)
-                    .border(1.dp, if (on) c.tint else c.border, shape).clickable(enabled = enabled && flow() != null, role = Role.Button) { setScope(scope) }
+                    .rnBorder(1.dp, if (on) c.tint else c.border, shape).clickable(enabled = enabled && flow() != null, role = Role.Button) { setScope(scope) }
                     .semantics { selected = on }.padding(8.dp), contentAlignment = Alignment.Center) {
                     Text(t(key), style = rnText(12, 700), color = if (on) c.onTint else c.text, textAlign = TextAlign.Center)
                 }
@@ -878,7 +877,7 @@ private fun DetailsSections(model: InboxViewModel, detail: ProjectDetail, metada
         }
         if (shown.isNotEmpty()) FlowRow(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             for (section in shown) Text(section.getString("title"), style = rnText(12, 700), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.clip(CircleShape).background(c.inputBg).border(1.dp, c.border, CircleShape).padding(horizontal = 10.dp, vertical = 6.dp))
+                modifier = Modifier.clip(CircleShape).background(c.inputBg).rnBorder(1.dp, c.border, CircleShape).padding(horizontal = 10.dp, vertical = 6.dp))
         }
     }
 }
@@ -944,7 +943,7 @@ private fun ProjectNotes(model: InboxViewModel, projectId: String, archived: Boo
         }
         if (!notesExpanded) return@DetailsBlock
         val shape = RoundedCornerShape(10.dp)
-        if (preview) Box(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.filterBg).border(1.dp, c.border, shape).padding(12.dp)
+        if (preview) Box(Modifier.padding(top = 8.dp).fillMaxWidth().clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(12.dp)
             .testTag("project-notes-preview")) {
             notesView?.takeIf { it.getString("projectId") == projectId }?.let { MarkdownBlocks(it.menuObjects("blocks"), it.getJSONObject("markdownLabels"), link) }
         } else NotesField(model, Modifier.padding(top = 8.dp).fillMaxWidth().heightIn(min = 100.dp), RoundedCornerShape(8.dp), 14, 10) { !notesPreview }
@@ -972,7 +971,7 @@ private fun NotesField(model: InboxViewModel, modifier: Modifier, shape: Rounded
             focused = state.isFocused
         },
         decorationBox = { field ->
-            Box(Modifier.clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(inner.dp)) {
+            Box(Modifier.clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(inner.dp)) {
                 if (value.isEmpty()) Text(placeholder, style = rnText(size, 400), color = c.secondaryText)
                 field()
             }
@@ -995,7 +994,7 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
                     textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 60.dp).semantics { heading() })
                 val modeLabel = t(if (editing) "markdown.preview" else "markdown.edit")
                 val shape = RoundedCornerShape(8.dp)
-                Box(Modifier.align(Alignment.CenterEnd).size(40.dp, 34.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+                Box(Modifier.align(Alignment.CenterEnd).size(40.dp, 34.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                     .clickable(role = Role.Button) { editing = !editing }.semantics { contentDescription = modeLabel },
                     contentAlignment = Alignment.Center) { Icon(if (editing) Lucide.Eye else Lucide.Pencil, null, tint = c.tint, modifier = Modifier.size(18.dp)) }
             }
@@ -1004,7 +1003,7 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
                 LaunchedEffect(model.project, notesDraft, model.busy) { if (!model.busy) readNotes() }
                 val shape = RoundedCornerShape(12.dp)
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
-                    Box(Modifier.fillMaxWidth().heightIn(min = 120.dp).clip(shape).background(c.filterBg).border(1.dp, c.border, shape).padding(16.dp)) {
+                    Box(Modifier.fillMaxWidth().heightIn(min = 120.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) {
                         notesView?.let { MarkdownBlocks(it.menuObjects("blocks"), it.getJSONObject("markdownLabels"), follow) }
                     }
                 }
@@ -1043,7 +1042,7 @@ private fun PickerCard(title: String, dismiss: () -> Unit, tag: String, content:
     val c = theme.colors
     Overlay(dismiss, outsideCloses = true) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(min = 280.dp, max = 360.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(min = 280.dp, max = 360.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag(tag)) {
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             content()
@@ -1077,7 +1076,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
                         .semantics { contentDescription = t("projects.color") + ": " + color; selected = chosen }
                         .testTag("project-color-" + color), contentAlignment = Alignment.Center) {
                         Box(Modifier.size(30.dp).clip(CircleShape).background(coreColorOrNull(color) ?: c.tint)
-                            .border(if (chosen) 3.dp else 1.dp, if (chosen) c.text else c.border, CircleShape))
+                            .rnBorder(if (chosen) 3.dp else 1.dp, if (chosen) c.text else c.border, CircleShape))
                         if (chosen) Text("✓", color = c.text, style = rnText(16, 600))
                     }
                 }
@@ -1093,7 +1092,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
         PickerCard(t("taskEdit.tagsLabel"), ::closeTags, "project-tag-sheet") {
             val current = options.getJSONObject("project").getJSONArray("tagIds").let { list -> List(list.length()) { list.getString(it) } }
             val shape = RoundedCornerShape(8.dp)
-            Row(Modifier.padding(top = 10.dp).fillMaxWidth().clip(shape).background(c.inputBg).border(1.dp, c.border, shape).padding(start = 8.dp),
+            Row(Modifier.padding(top = 10.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(start = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 val label = t("taskEdit.tagsLabel")
                 BasicTextField(tagDraft, { tagDraft = it }, singleLine = true, textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
@@ -1111,7 +1110,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
                 for (tag in options.getJSONArray("suggestions").let { list -> List(list.length()) { list.getString(it) } }) {
                     val on = tag in current
                     Text(tag, style = rnText(12, 600), color = c.text, modifier = Modifier.clip(CircleShape).background(if (on) c.filterBg else c.cardBg)
-                        .border(1.dp, c.border, CircleShape).clickable(enabled = !model.busy, role = Role.Button) { setTag(tag, present = !on) }.semantics { selected = on }
+                        .rnBorder(1.dp, c.border, CircleShape).clickable(enabled = !model.busy, role = Role.Button) { setTag(tag, present = !on) }.semantics { selected = on }
                         .padding(horizontal = 10.dp, vertical = 6.dp))
                 }
             }
@@ -1161,7 +1160,7 @@ private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetai
     val idle = !model.busy && model.failedAction == null
     Overlay({ actionsOpen = false }, outsideCloses = false) {
         val shape = RoundedCornerShape(14.dp)
-        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(14.dp).testTag("project-actions-sheet"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(t("projects.actionsLabel"), style = rnText(17, 800), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
@@ -1170,7 +1169,7 @@ private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetai
                     contentAlignment = Alignment.Center) { Icon(Ionicons.Close, null, tint = c.secondaryText, modifier = Modifier.size(20.dp)) }
             }
             val listShape = RoundedCornerShape(10.dp)
-            Column(Modifier.fillMaxWidth().clip(listShape).border(1.dp, c.border, listShape)) {
+            Column(Modifier.fillMaxWidth().clip(listShape).rnBorder(1.dp, c.border, listShape)) {
                 ProjectOptionRow(SettingsIonicons.CopyOutline, t("projects.duplicate"), "project-duplicate-button", idle) { duplicate() }
                 // Offered when core says the project can become a section; else shown off with core's reason, as RN's.
                 convertRow?.let { row ->
@@ -1203,7 +1202,7 @@ private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(mode
     Overlay(::closeConvert, outsideCloses = false) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.85f).dp).clip(shape)
-            .background(c.cardBg).border(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("project-convert-sheet")) {
+            .background(c.cardBg).rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("project-convert-sheet")) {
             Text(words.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
                 options.menuText("sequentialNote")?.let { Text(it, style = rnText(14, 400), color = c.secondaryText) }
@@ -1218,7 +1217,7 @@ private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(mode
                     Text(nameLabel, style = rnText(14, 400), color = c.text, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
                     val inputShape = RoundedCornerShape(10.dp)
                     BasicTextField(convertTitle, ::typeConvertTitle, enabled = idle, singleLine = true, textStyle = rnText(16, 400).copy(color = c.text),
-                        cursorBrush = SolidColor(c.tint), modifier = Modifier.fillMaxWidth().clip(inputShape).background(c.inputBg).border(1.dp, c.border, inputShape)
+                        cursorBrush = SolidColor(c.tint), modifier = Modifier.fillMaxWidth().clip(inputShape).background(c.inputBg).rnBorder(1.dp, c.border, inputShape)
                             .padding(horizontal = 12.dp, vertical = 10.dp).semantics { contentDescription = nameLabel }.testTag("project-convert-name"))
                 }
                 preview?.let { shown ->
@@ -1229,7 +1228,7 @@ private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(mode
                         for (index in 1 until lines.length()) {
                             // RN's destination-color line leads with the destination's color dot (the fourth line from the end).
                             if (index == lines.length() - 4) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(12.dp).clip(CircleShape).background(shown.menuText("color")?.let(::coreColorOrNull) ?: Color.Transparent).border(1.dp, c.border, CircleShape))
+                                Box(Modifier.size(12.dp).clip(CircleShape).background(shown.menuText("color")?.let(::coreColorOrNull) ?: Color.Transparent).rnBorder(1.dp, c.border, CircleShape))
                                 Text(lines.getString(index), style = rnText(14, 400), color = c.secondaryText)
                             } else Text(lines.getString(index), style = rnText(14, 400), color = c.secondaryText)
                         }
@@ -1267,7 +1266,7 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
     val idle = !model.busy && model.failedAction == null
     Overlay({ viewOptionsOpen = false }, outsideCloses = false) {
         val shape = RoundedCornerShape(14.dp)
-        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(14.dp).testTag("project-view-options-sheet"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(t("taskEdit.moreOptions"), style = rnText(17, 800), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
@@ -1276,7 +1275,7 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
                     contentAlignment = Alignment.Center) { Icon(Ionicons.Close, null, tint = c.secondaryText, modifier = Modifier.size(20.dp)) }
             }
             val listShape = RoundedCornerShape(10.dp)
-            Column(Modifier.fillMaxWidth().clip(listShape).border(1.dp, c.border, listShape)) {
+            Column(Modifier.fillMaxWidth().clip(listShape).rnBorder(1.dp, c.border, listShape)) {
                 // RN's Filters row first: the active count as its value, washed while any filter is on.
                 model.project?.listFilters?.getJSONObject("filters")?.let { filters ->
                     val active = filters.optInt("activeCount")
@@ -1329,7 +1328,7 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
     val title = t("projects.sectionsLabel")
     Overlay(::closeSections, outsideCloses = false) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("project-section-manager"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(title, style = rnText(16, 800), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
@@ -1349,7 +1348,7 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
             val rows = options.menuObjects("sections")
             sectionDraft?.takeIf { canManage }?.let { draft ->
                 val editorShape = RoundedCornerShape(10.dp)
-                Column(Modifier.fillMaxWidth().clip(editorShape).background(c.filterBg).border(1.dp, c.border, editorShape).padding(10.dp),
+                Column(Modifier.fillMaxWidth().clip(editorShape).background(c.filterBg).rnBorder(1.dp, c.border, editorShape).padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text((if (draft.sectionId != null) title else t("projects.addSection")).uppercase(), style = rnText(12, 700), color = c.secondaryText)
                     val inputShape = RoundedCornerShape(8.dp)
@@ -1358,7 +1357,7 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
                         cursorBrush = SolidColor(c.tint), keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { saveSection() }),
                         modifier = Modifier.fillMaxWidth().semantics { contentDescription = placeholder }.testTag("project-section-title-input"),
                         decorationBox = { field ->
-                            Box(Modifier.clip(inputShape).background(c.inputBg).border(1.dp, c.border, inputShape).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                            Box(Modifier.clip(inputShape).background(c.inputBg).rnBorder(1.dp, c.border, inputShape).padding(horizontal = 10.dp, vertical = 8.dp)) {
                                 if (draft.title.isEmpty()) Text(placeholder, style = rnText(16, 400), color = c.secondaryText)
                                 field()
                             }
@@ -1376,10 +1375,10 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
             if (rows.isEmpty()) {
                 val emptyShape = RoundedCornerShape(10.dp)
                 Text(t("common.none"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier.fillMaxWidth().clip(emptyShape).background(c.filterBg)
-                    .border(1.dp, c.border, emptyShape).padding(horizontal = 12.dp, vertical = 10.dp))
+                    .rnBorder(1.dp, c.border, emptyShape).padding(horizontal = 12.dp, vertical = 10.dp))
             } else {
                 val listShape = RoundedCornerShape(10.dp)
-                Column(Modifier.fillMaxWidth().heightIn(max = 280.dp).clip(listShape).background(c.inputBg).border(1.dp, c.border, listShape)
+                Column(Modifier.fillMaxWidth().heightIn(max = 280.dp).clip(listShape).background(c.inputBg).rnBorder(1.dp, c.border, listShape)
                     .verticalScroll(rememberScrollState()).padding(vertical = 2.dp)) {
                     for (section in rows) {
                         val id = section.getString("id")
@@ -1392,7 +1391,7 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
                                     val can = section.getBoolean(if (direction == "up") "canMoveUp" else "canMoveDown") && idle
                                     val label = "${t(key)}: $name"
                                     val iconShape = RoundedCornerShape(8.dp)
-                                    Box(Modifier.padding(end = 4.dp).size(30.dp).fade(if (can) 1f else 0.4f).clip(iconShape).background(c.cardBg).border(1.dp, c.border, iconShape)
+                                    Box(Modifier.padding(end = 4.dp).size(30.dp).fade(if (can) 1f else 0.4f).clip(iconShape).background(c.cardBg).rnBorder(1.dp, c.border, iconShape)
                                         .clickable(enabled = can, role = Role.Button) { moveSection(id, direction) }.semantics { contentDescription = label }
                                         .testTag("project-section-move-$direction-$id"), contentAlignment = Alignment.Center) {
                                         Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
@@ -1525,7 +1524,7 @@ private fun GettingStartedActions(model: InboxViewModel, view: JSONObject) {
                 val action = actions.getJSONObject(index)
                 val id = action.getString("id")
                 val shape = RoundedCornerShape(8.dp)
-                Row(Modifier.heightIn(min = 44.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+                Row(Modifier.heightIn(min = 44.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                     .clickable(role = Role.Button) {
                         model.closeProject()
                         when (id) {

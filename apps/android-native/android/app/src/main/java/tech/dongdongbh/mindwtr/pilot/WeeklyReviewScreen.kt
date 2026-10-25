@@ -1,7 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
@@ -133,7 +132,7 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
             if (finish != null) {
                 // RN's share card is not built: its button keeps RN's look, drawn disabled.
                 val shape = RoundedCornerShape(12.dp)
-                Row(Modifier.fade(0.45f).padding(end = 12.dp).weight(1f, fill = false).heightIn(min = 48.dp).clip(shape).border(1.dp, c.border, shape)
+                Row(Modifier.fade(0.45f).padding(end = 12.dp).weight(1f, fill = false).heightIn(min = 48.dp).clip(shape).rnBorder(1.dp, c.border, shape)
                     .semantics { contentDescription = finish.getString("shareLabel"); disabled() }.padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Icon(Lucide.Share2, null, tint = c.text, modifier = Modifier.size(18.dp))
@@ -188,7 +187,7 @@ private fun StepRail(view: JSONObject) {
             val number = step.getInt("number")
             Row(Modifier.widthIn(min = 104.dp, max = 148.dp).height(32.dp).clip(CircleShape)
                 .background(if (current) theme.railCurrent else if (complete) theme.railDone else c.filterBg)
-                .border(1.dp, if (current) c.tint else if (complete) theme.railDoneBorder else c.border, CircleShape).padding(horizontal = 8.dp),
+                .rnBorder(1.dp, if (current) c.tint else if (complete) theme.railDoneBorder else c.border, CircleShape).padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(18.dp).clip(CircleShape).background(if (current) c.tint else c.cardBg), contentAlignment = Alignment.Center) {
                     if (complete) Icon(Lucide.CheckCircle2, null, tint = c.text, modifier = Modifier.size(12.dp))
@@ -228,12 +227,12 @@ private fun ReviewAnalysisCard(model: InboxViewModel, labels: JSONObject) {
             val selected = id in analysis.selected
             val title = suggestion.getString("title")
             val shape = RoundedCornerShape(10.dp)
-            Row(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            Row(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
                 .clickable(enabled = actionable, role = Role.Checkbox) { ai.toggleSuggestion(id) }
                 .semantics { contentDescription = title; this.selected = selected }.testTag("review-ai-suggestion").padding(12.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val box = RoundedCornerShape(4.dp)
-                Box(Modifier.padding(top = 2.dp).size(18.dp).clip(box).then(if (selected) Modifier.background(c.tint) else Modifier).border(1.dp, c.border, box),
+                Box(Modifier.padding(top = 2.dp).size(18.dp).clip(box).then(if (selected) Modifier.background(c.tint) else Modifier).rnBorder(1.dp, c.border, box),
                     contentAlignment = Alignment.Center) {
                     if (selected) Icon(Lucide.CheckBold, null, tint = c.onTint, modifier = Modifier.size(12.dp))
                 }
@@ -324,7 +323,7 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
                 val c = LocalTheme.current.colors
                 Column {
                     val shape = RoundedCornerShape(8.dp)
-                    Text(labels.getString("addTask"), style = rnText(13, 600), color = c.text, modifier = Modifier.padding(bottom = 10.dp).clip(shape).border(1.dp, c.border, shape)
+                    Text(labels.getString("addTask"), style = rnText(13, 600), color = c.text, modifier = Modifier.padding(bottom = 10.dp).clip(shape).rnBorder(1.dp, c.border, shape)
                         .clickable(enabled = menu.idle, role = Role.Button) { model.openCapture() }.padding(horizontal = 10.dp, vertical = 6.dp))
                     Text(labels.getString("calendarDesc"), style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.padding(bottom = 16.dp))
                     CalendarColumn(labels.getString("calendarUpcoming")) {
@@ -386,7 +385,7 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
 private fun InfoCard(title: String, meta: String) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(title, style = rnText(14, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(meta, style = rnText(12, 400), color = c.secondaryText)
     }
@@ -397,7 +396,7 @@ private fun InfoCard(title: String, meta: String) {
 private fun CalendarColumn(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
-    Column(modifier.fillMaxWidth().heightIn(min = 140.dp).clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(12.dp),
+    Column(modifier.fillMaxWidth().heightIn(min = 140.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 0.4f), color = c.secondaryText)
         content()
@@ -412,7 +411,7 @@ private fun DayCard(menu: MenuModel, day: JSONObject, labels: JSONObject) {
     val open = menu.own("weekly").optJSONObject("days")?.optBoolean(key) == true
     val events = day.getJSONObject("events").menuObjects("items")
     val shape = RoundedCornerShape(8.dp)
-    Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(day.getString("title"), style = rnText(12, 700), color = c.secondaryText)
         for (event in if (open) events else events.take(day.getInt("previewCount"))) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -437,7 +436,7 @@ private fun ContextCard(model: InboxViewModel, shown: MenuPage, card: JSONObject
     val open = menu.own("weekly").optJSONObject("contexts")?.optBoolean(context) == true
     val tasks = shown.collection(name)
     val shape = RoundedCornerShape(10.dp)
-    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)) {
+    Column(Modifier.padding(bottom = 10.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween) {
             Text(context, style = rnText(14, 700), color = c.text)
@@ -466,13 +465,13 @@ private fun ProjectCard(model: InboxViewModel, project: JSONObject, labels: JSON
     val title = project.getString("title")
     val expanded = project.getBoolean("expanded")
     val shape = RoundedCornerShape(8.dp)
-    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+    Column(Modifier.padding(bottom = 8.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
         .clickable(enabled = menu.idle, role = Role.Button) { menu.expandProject(id) }.semantics { contentDescription = title }.padding(12.dp)) {
         Row(Modifier.padding(bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.padding(end = 8.dp).size(12.dp).clip(CircleShape).background(coreColorOrNull(project.menuText("areaColor")) ?: c.tint))
             Text(title, style = rnText(16, 600), color = c.text, modifier = Modifier.weight(1f))
             val small = RoundedCornerShape(8.dp)
-            Text(labels.getString("addTask"), style = rnText(12, 600), color = c.text, modifier = Modifier.padding(end = 8.dp).clip(small).border(1.dp, c.border, small)
+            Text(labels.getString("addTask"), style = rnText(12, 600), color = c.text, modifier = Modifier.padding(end = 8.dp).clip(small).rnBorder(1.dp, c.border, small)
                 .clickable(enabled = menu.idle, role = Role.Button) { menu.openProjectTask(id, title) }.padding(horizontal = 8.dp, vertical = 4.dp))
             val badge = project.getJSONObject("badge")
             Text(badge.getString("label"), style = rnText(12, 500), color = coreColorOrNull(badge.getString("color")) ?: c.text,
@@ -503,7 +502,7 @@ private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JS
         Text(labels.getString("completeDesc"), style = rnText(16, 400), color = c.secondaryText, textAlign = TextAlign.Center,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 32.dp))
         val shape = RoundedCornerShape(10.dp)
-        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(shape).border(1.dp, c.border, shape).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             content.optJSONObject("week")?.let { week ->
                 Column(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(week.getString("heading"), style = rnText(14, 600), color = c.secondaryText)
@@ -514,7 +513,7 @@ private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JS
             for (check in content.menuObjects("checks")) SummaryRow(check.getBoolean("good"), check.getString("text"))
         }
         val card = RoundedCornerShape(12.dp)
-        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(card).background(c.cardBg).border(1.dp, c.border, card).padding(12.dp),
+        Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(card).background(c.cardBg).rnBorder(1.dp, c.border, card).padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(labels.getString("mindSweepTitle"), style = rnText(15, 700), color = c.text)
@@ -540,7 +539,7 @@ private fun SummaryRow(good: Boolean, text: String) {
 private fun MindSweepLink(label: String, bordered: Boolean = false, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(18.dp)
-    Row(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = if (bordered) 36.dp else 44.dp).then(if (bordered) Modifier.clip(shape).border(1.dp, c.tint, shape) else Modifier)
+    Row(Modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = if (bordered) 36.dp else 44.dp).then(if (bordered) Modifier.clip(shape).rnBorder(1.dp, c.tint, shape) else Modifier)
         .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { action(); true } else disabled() }
         .clickable(enabled = enabled, onClick = action).then(if (bordered) Modifier.padding(horizontal = 12.dp) else Modifier), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (bordered) 6.dp else 8.dp)) {
         Icon(Lucide.Brain, null, tint = c.tint, modifier = Modifier.size(if (bordered) 16.dp else 18.dp))
@@ -567,7 +566,7 @@ fun ProjectTaskPrompt(model: InboxViewModel, open: JSONObject) = with(model.menu
     Box(Modifier.fillMaxSize().background(theme.promptScrim).pointerInput(Unit) { detectTapGestures { } }.imePadding().padding(horizontal = 20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
-        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape).padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) {
             Text(labels.getString("addTask"), style = rnText(18, 700), color = c.text, modifier = Modifier.semantics { heading() })
             Text(open.getString("title"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier.padding(top = 4.dp))
             val focus = remember { FocusRequester() }
@@ -579,7 +578,7 @@ fun ProjectTaskPrompt(model: InboxViewModel, open: JSONObject) = with(model.menu
                 modifier = Modifier.padding(top = 12.dp).fillMaxWidth().focusRequester(focus).semantics { contentDescription = labels.getString("addTaskPlaceholder") }
                     .testTag("menu-dialog-field"),
                 decorationBox = { inner ->
-                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).border(1.dp, c.border, field).padding(10.dp), contentAlignment = Alignment.CenterStart) {
+                    Box(Modifier.heightIn(min = 44.dp).clip(field).background(c.bg).rnBorder(1.dp, c.border, field).padding(10.dp), contentAlignment = Alignment.CenterStart) {
                         if (text.isEmpty()) Text(labels.getString("addTaskPlaceholder"), style = rnText(15, 400), color = c.secondaryText)
                         inner()
                     }
@@ -598,7 +597,7 @@ private fun PromptButton(label: String, color: Color, enabled: Boolean, filled: 
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(8.dp)
     Text(label, style = rnText(14, 600), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).heightIn(min = 44.dp).clip(shape)
-        .then(if (filled) Modifier.background(theme.filledBg) else Modifier.border(1.dp, theme.colors.border, shape))
+        .then(if (filled) Modifier.background(theme.filledBg) else Modifier.rnBorder(1.dp, theme.colors.border, shape))
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = label }
         .padding(horizontal = 12.dp, vertical = 12.dp))
 }
