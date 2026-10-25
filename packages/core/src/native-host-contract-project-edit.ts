@@ -5,7 +5,9 @@ import { normalizeProjectTag } from './project-tags';
 import { resolveI18nText, type I18nTemplateValues, type TranslateFn } from './i18n';
 import { revisionOf } from './native-request-receipts';
 import { createProjectToSectionPreviewer, getProjectToSectionEligibility, planProjectToSection, type ProjectToSectionReceipt } from './project-to-section';
+import { projectDuplicateId } from './native-host-contract-project-duplicate';
 import { useTaskStore } from './store';
+import { deterministicHash128 } from './uuid';
 import { ensureDeviceId } from './store-helpers';
 import { getProjectAccentColor } from './task-accent-color';
 
@@ -33,7 +35,7 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'delete' }
     | { kind: 'deleteUndo'; deleteRequestId: string }
     // RN's Convert to section… (the request UUID names the new section) and that conversion's Undo.
-    | { kind: 'toSection'; destinationProjectId: string; title: string }
+    | { kind: 'toSection'; destinationProjectId: string; title: string; expected: string }
     | { kind: 'toSectionUndo'; convertRequestId: string });
 /** [reply] is the prepared command's own answer when it wrote: the copy and its toast (duplicate), RN's Undo toast (delete). */
 export type NativeProjectEditResult = { id: string; kind: NativeProjectEdit['kind']; outcome: 'saved' | 'unchanged' | 'blocked'; reply?: unknown };
@@ -76,7 +78,8 @@ const valid = (input: unknown): input is NativeProjectEdit => {
         case 'duplicate': case 'delete': return keys(edit, []);
         case 'deleteUndo': return keys(edit, ['deleteRequestId']) && typeof edit.deleteRequestId === 'string'
             && UUID.test(edit.deleteRequestId) && edit.deleteRequestId !== edit.requestId;
-        case 'toSection': return keys(edit, ['destinationProjectId', 'title']) && id(edit.destinationProjectId) && text(edit.title, 500);
+        case 'toSection': return keys(edit, ['destinationProjectId', 'title', 'expected']) && id(edit.destinationProjectId) && text(edit.title, 500)
+            && text(edit.expected, 200);
         case 'toSectionUndo': return keys(edit, ['convertRequestId']) && typeof edit.convertRequestId === 'string'
             && UUID.test(edit.convertRequestId) && edit.convertRequestId !== edit.requestId;
         default: return false;
@@ -116,7 +119,7 @@ export function createProjectEditMethods(deps: {
         const { id: _id, ...expected } = options.project as Json;
         return expected;
     };
-    type Plan = { outcome: 'unchanged' | 'blocked' } | { command: string; request: Json } | { conflict: string }
+    type Plan = { outcome: 'unchanged' | 'blocked'; reply?: Json } | { command: string; request: Json } | { conflict: string }
         // A store command run as is (Convert to section and its Undo): its answer is final, never prepared again.
         | { run: () => Promise<NativeHostResult<Json>> };
     // The Deletes this process confirmed, by request UUID: their Undo needs the confirmed Delete. RN's Undo lives as long as its
@@ -124,6 +127,20 @@ export function createProjectEditMethods(deps: {
     const deletes = new Map<string, Json>();
     // The conversions this process made, by request UUID, for their Undo (RN keeps the receipt for its toast's Undo).
     const conversions = new Map<string, ProjectToSectionReceipt>();
+    // The envelope a request prepared while its save is owed, by request UUID: the retry (Try again) commits that same envelope, so
+    // its receipt answers with the first reply (the toast, the Undo) instead of a plan that finds the work already done.
+    const preparedBy = new Map<string, { command: string; request: Json; prepared: Json }>();
+    // Each conversion's plan, by request UUID, so its retry sends the same command (RN retries the same prepared conversion).
+    const convertPlans = new Map<string, Parameters<ReturnType<typeof useTaskStore.getState>['convertProjectToSection']>[0]>();
+    /** What the preview showed: the counts and titles, and every row the conversion moves, at their revisions. */
+    const convertToken = (projectId: string, destinationId: string): string => {
+        const state = useTaskStore.getState();
+        const rows = [state._projectsById.get(projectId), state._projectsById.get(destinationId),
+            ...state._allTasks.filter((row) => row.projectId === projectId || row.projectId === destinationId),
+            ...state._allSections.filter((row) => row.projectId === projectId || row.projectId === destinationId)]
+            .map((row) => row ? `${row.id}@${revisionOf(row)}` : '-').sort();
+        return deterministicHash128(JSON.stringify([projectId, destinationId, rows])).map((part) => part.toString(16)).join('');
+    };
     const remember = <T,>(map: Map<string, T>, key: string, value: T) => {
         map.set(key, value);
         if (map.size > 20) map.delete(map.keys().next().value as string);
@@ -226,24 +243,35 @@ export function createProjectEditMethods(deps: {
                     direction: edit.direction, expectedSections: read.value.token } } };
             }
             case 'toSection': {
-                // The section named by this request exists: the conversion landed (a replay).
-                if (useTaskStore.getState()._allSections.some((row) => row.id === edit.requestId)) return { ok: true, value: { outcome: 'unchanged' } };
+                const converted = (destinationProjectId: string, sectionId: string) => ({ destinationProjectId, sectionId,
+                    title: word('common.done'), message: word('projects.convertSuccess'), undoLabel: word('common.undo') });
+                // The section named by this request exists: the conversion landed (a retry or a replay); its toast again while its Undo
+                // is still known (this process).
+                if (useTaskStore.getState()._allSections.some((row) => row.id === edit.requestId)) {
+                    return { ok: true, value: { outcome: 'unchanged', ...(conversions.has(edit.requestId) ? { reply: converted(edit.destinationProjectId, edit.requestId) } : {}) } };
+                }
+                const cached = convertPlans.get(edit.requestId);
+                // RN converts what its preview showed: a change since (a sync, another edit) refuses with RN's message.
+                if (!cached && convertToken(edit.projectId, edit.destinationProjectId) !== edit.expected) return { ok: true, value: { conflict: word('projects.convertFailure.conflict') } };
                 return { ok: true, value: { run: async () => {
                     const state = useTaskStore.getState();
                     const device = ensureDeviceId(state.settings);
-                    const planned = planProjectToSection(state, edit.projectId, edit.destinationProjectId, edit.title, edit.requestId,
+                    const planned = cached ? { ok: true as const, command: cached } : planProjectToSection(state, edit.projectId, edit.destinationProjectId, edit.title, edit.requestId,
                         new Date().toISOString(), state.settings.deviceId ?? null, device.updated ? device.deviceId : null);
                     if (!planned.ok) return fail('STALE_REVISION', word(`projects.convertBlocked.${planned.reason}`));
+                    remember(convertPlans, edit.requestId, planned.command);
                     const result = await state.convertProjectToSection(planned.command);
-                    if (!result.success) return fail(result.reason === 'save-failed' ? 'SAVE_FAILED' : 'STALE_REVISION', word(`projects.convertFailure.${result.reason}`));
+                    if (!result.success) {
+                        if (result.reason !== 'save-failed') convertPlans.delete(edit.requestId);
+                        return fail(result.reason === 'save-failed' ? 'SAVE_FAILED' : 'STALE_REVISION', word(`projects.convertFailure.${result.reason}`));
+                    }
                     remember(conversions, edit.requestId, result.receipt);
-                    return { ok: true, value: { destinationProjectId: result.destinationProjectId, sectionId: result.sectionId,
-                        title: word('common.done'), message: word('projects.convertSuccess'), undoLabel: word('common.undo') } };
+                    return { ok: true, value: converted(result.destinationProjectId, result.sectionId) };
                 } } };
             }
             case 'toSectionUndo': {
                 const source = useTaskStore.getState()._projectsById.get(edit.projectId);
-                if (source && !source.deletedAt && !source.purgedAt) return { ok: true, value: { outcome: 'unchanged' } };
+                if (source && !source.deletedAt && !source.purgedAt) return { ok: true, value: { outcome: 'unchanged', reply: { sourceProjectId: source.id } } };
                 const receipt = conversions.get(edit.convertRequestId);
                 if (!receipt) return { ok: true, value: { conflict: word('projects.convertUndoFailure.invalid') } };
                 return { ok: true, value: { run: async () => {
@@ -266,7 +294,13 @@ export function createProjectEditMethods(deps: {
                 const request = { ...base, projectRevision: revisionOf(current) };
                 if (edit.kind === 'delete') return { ok: true, value: { command: 'ProjectDelete', request } };
                 // ponytail: a duplicate's replay after it landed is refused by its receipt (new ids, another payload), never written twice.
-                if (edit.kind === 'duplicate') return { ok: true, value: { command: 'ProjectDuplicate', request } };
+                if (edit.kind === 'duplicate') {
+                    // A replay after a restart: the copy this request made (its ids come from the request UUID) answers it.
+                    const made = new Set(Array.from({ length: (current.attachments?.length ?? 0) + 1 }, (_, index) => projectDuplicateId(edit.requestId, index)));
+                    const copy = useTaskStore.getState()._allProjects.find((row) => made.has(row.id));
+                    return { ok: true, value: copy ? { outcome: 'unchanged', reply: { id: copy.id, message: word('projects.duplicated') } }
+                        : { command: 'ProjectDuplicate', request } };
+                }
                 const done = edit.action === 'reactivate' ? current.status !== 'archived'
                     : current.status === 'archived' && Boolean(current.cancelledAt) === (edit.action === 'cancel');
                 return { ok: true, value: done ? { outcome: 'unchanged' } : { command: 'ProjectLifecycle', request: { ...request, action: edit.action } } };
@@ -309,6 +343,8 @@ export function createProjectEditMethods(deps: {
                     word('projects.convertArea', { area: area?.name ?? word('projects.noArea') }),
                     word('projects.convertDestinationColor'), word('projects.convertColor'), word('projects.convertSettings'), word('projects.convertTrash')],
                     color: getProjectAccentColor(destination, areaById) ?? null,
+                    // Sent back with Convert: core converts only what this preview showed.
+                    token: convertToken(input.projectId, destination.id),
                 } : null,
                 blocked: preview && !preview.ok ? word(`projects.convertBlocked.${preview.reason}`) : null,
             } };
@@ -324,6 +360,22 @@ export function createProjectEditMethods(deps: {
                 if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
             } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
             let stale = 'Project changed; the edit could not be applied';
+            const replied = (outcome: NativeProjectEditResult['outcome'], reply: unknown) =>
+                (['duplicate', 'delete'].includes(input.kind) && reply !== undefined ? { ...answer(outcome), reply } : answer(outcome));
+            const commit = async (entry: { command: string; request: Json; prepared: Json }): Promise<Reply> => {
+                const committed = await call(`commitPrepared${entry.command}`, { request: entry.request, prepared: entry.prepared });
+                if (committed.ok || committed.error.code === 'SAVE_FAILED') {
+                    if (entry.command === 'ProjectDelete') remember(deletes, input.requestId, { request: entry.request, prepared: entry.prepared });
+                }
+                // Only a save owed keeps the envelope: once settled, a replay is a plan that finds the work done (unchanged).
+                if (committed.ok || committed.error.code !== 'SAVE_FAILED') preparedBy.delete(input.requestId);
+                return committed;
+            };
+            const retried = preparedBy.get(input.requestId);
+            if (retried) {
+                const committed = await commit(retried);
+                return committed.ok ? { ok: true, value: replied('saved', committed.value) } : committed as NativeHostResult<never>;
+            }
             for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
                 const planned = await plan(input);
                 if (!planned.ok) {
@@ -341,7 +393,7 @@ export function createProjectEditMethods(deps: {
                 }
                 if ('outcome' in step) {
                     const saved = await deps.save();
-                    return saved.ok ? { ok: true, value: answer(step.outcome) } : saved;
+                    return saved.ok ? { ok: true, value: step.reply ? { ...answer(step.outcome), reply: step.reply } : answer(step.outcome) } : saved;
                 }
                 const prepared = await call(`prepare${step.command}`, step.command === 'ProjectDeleteUndo'
                     ? { request: step.request, delete: deletes.get(step.request.deleteRequestId as string) } : step.request) as NativeHostResult<Json>;
@@ -354,10 +406,11 @@ export function createProjectEditMethods(deps: {
                     const saved = await deps.save();
                     return saved.ok ? { ok: true, value: answer(prepared.value.kind === 'blocked' ? 'blocked' : 'unchanged') } : saved;
                 }
-                const committed = await call(`commitPrepared${step.command}`, { request: step.request, prepared: prepared.value.prepared });
-                if (committed.ok && step.command === 'ProjectDelete') remember(deletes, input.requestId, { request: step.request, prepared: prepared.value.prepared });
-                if (committed.ok) return { ok: true, value: ['duplicate', 'delete'].includes(input.kind) ? { ...answer('saved'), reply: committed.value } : answer('saved') };
-                if (committed.error.code !== 'STALE_REVISION') return committed;
+                const entry = { command: step.command, request: step.request, prepared: prepared.value.prepared as Json };
+                remember(preparedBy, input.requestId, entry);
+                const committed = await commit(entry);
+                if (committed.ok) return { ok: true, value: replied('saved', committed.value) };
+                if (committed.error.code !== 'STALE_REVISION') return committed as NativeHostResult<never>;
                 stale = committed.error.message;
             }
             return fail('STALE_REVISION', stale);

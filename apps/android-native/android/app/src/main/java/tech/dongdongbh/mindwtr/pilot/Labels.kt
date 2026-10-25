@@ -21,6 +21,7 @@ val LABEL_KEYS = listOf(
     // The project header's actions sheet (RN ProjectDetailModal's "...") and its confirms; Delete's toast words are core's reply.
     "projects.actionsLabel", "projects.duplicate", "projects.complete", "projects.reactivate", "projects.cancel", "projects.archiveHelp",
     "projects.cancelConfirmTitle", "projects.cancelConfirmBody", "projects.deleteConfirm", "common.notice",
+    "projects.cancelFailed", "projects.duplicateFailed", "projects.deleteFailed", "projects.restoreFailed",
     // RN's capture screen's failure line (its other words are core's view).
     "task.addFailed",
     "common.none", "common.notSet", "taskEdit.titleLabel", "taskEdit.descriptionLabel", "taskEdit.statusLabel",

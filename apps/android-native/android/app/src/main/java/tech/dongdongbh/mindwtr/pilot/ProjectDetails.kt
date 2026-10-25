@@ -148,8 +148,12 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     var convertTitle by mutableStateOf(""); private set
     /** RN's prepared step: the preview with the new section's name, then Convert (or Back). */
     var convertConfirm by mutableStateOf(false)
+    /** The token of the preview Next confirmed: core converts only what it showed. */
+    private var convertExpected: String? = null
     /** What the screen does with an edit's reply, by request UUID: Duplicate opens the copy, Delete offers RN's Undo. */
     private val answers = java.util.Collections.synchronizedMap(HashMap<String, (JSONObject) -> Unit>())
+    /** What the screen shows when core refuses an edit (STALE_REVISION), by request UUID: RN's failure line for that action. */
+    private val refusals = java.util.Collections.synchronizedMap(HashMap<String, (String) -> Unit>())
     /** RN's help Alert: its title and text. */
     var help by mutableStateOf<Pair<String, String>?>(null)
 
@@ -269,11 +273,19 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     /** Complete, Cancel project or Reactivate; the project stays open, as RN's does. */
     fun lifecycle(action: String) {
         actionsOpen = false; actionConfirm = null
-        edit(projectId, "lifecycle") { put("action", action) }
+        // RN's Alert when Cancel project fails; Complete and Reactivate show core's line.
+        edit(projectId, "lifecycle", refused = { message -> shell.showToast(t("common.error"), if (action == "cancel") t("projects.cancelFailed") else message, "error") }) {
+            put("action", action)
+        }
     }
 
-    /** The "..." opens the sheet and asks core whether Convert to section… is offered for this project. */
+    /**
+     * The "..." opens the sheet and asks core whether Convert to section… is offered for this project. A typed title and typed
+     * notes are stored first (RN's onBeforeConvertToSection), so every action acts on what the user typed: a tap on a button does
+     * not take the focus from a field in Compose.
+     */
     fun openActions() {
+        storeTyped()
         actionsOpen = true
         readConvert("convertRow", null, shell.projects?.title(projectId.orEmpty()).orEmpty()) { convertRow = it.getJSONObject("row") }
     }
@@ -305,28 +317,44 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
 
     fun closeConvert() { convert = null; convertConfirm = false }
 
+    /** Next: RN's prepared step, for the preview on screen now. */
+    fun confirmConvert(preview: JSONObject) {
+        convertExpected = preview.getString("token")
+        convertConfirm = true
+    }
+
+    /** A typed title and typed notes not yet stored go now, in order before what follows (RN's end of editing). */
+    private fun storeTyped() {
+        val id = projectId ?: return
+        for ((kind, text) in editsOnLeave(titleDraft, sentTitle ?: shell.projects?.title(id), notesDraft, sentNotes ?: raw?.let { storedNotes() })) {
+            if (kind == "projectRename") rename(text, id) else writeNotes(text, id)
+        }
+    }
+
     /** Convert: the destination opens with core's toast, whose Undo puts the project back and opens it again (RN's). */
     fun convertNow() {
         val id = projectId ?: return
         val destination = convertDestination ?: return
+        val expected = convertExpected ?: return
         val title = convertTitle
         closeConvert()
         var convertId = ""
-        convertId = edit(id, "toSection", answer = { reply ->
+        val failed = { message: String -> shell.showToast(t("common.notice"), message, "error") }
+        convertId = edit(id, "toSection", refused = failed, answer = { reply ->
             val done = reply.optJSONObject("reply") ?: return@edit
             shell.openProject(done.getString("destinationProjectId"))
             shell.showToast(done.getString("title"), done.getString("message"), "success", done.getString("undoLabel")) {
-                edit(id, "toSectionUndo", answer = { undone -> undone.optJSONObject("reply")?.let { shell.openProject(it.getString("sourceProjectId")) } }) {
+                edit(id, "toSectionUndo", refused = failed, answer = { undone -> undone.optJSONObject("reply")?.let { shell.openProject(it.getString("sourceProjectId")) } }) {
                     put("convertRequestId", convertId)
                 }
             }
-        }) { put("destinationProjectId", destination).put("title", title) } ?: return
+        }) { put("destinationProjectId", destination).put("title", title).put("expected", expected) } ?: return
     }
 
     /** RN's Duplicate: the copy opens, with core's "Project duplicated". */
     fun duplicate() {
         actionsOpen = false
-        edit(projectId, "duplicate", answer = { reply ->
+        edit(projectId, "duplicate", refused = { shell.showToast(t("common.notice"), t("projects.duplicateFailed"), "error") }, answer = { reply ->
             reply.optJSONObject("reply")?.let { copy -> shell.openProject(copy.getString("id")); shell.showToast(t("common.done"), copy.getString("message"), "success") }
         })
     }
@@ -336,11 +364,11 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         actionsOpen = false; actionConfirm = null
         val id = projectId ?: return
         var deleteId = ""
-        deleteId = edit(id, "delete", answer = { reply ->
+        deleteId = edit(id, "delete", refused = { shell.showToast(t("common.notice"), t("projects.deleteFailed"), "error") }, answer = { reply ->
             val deletion = reply.optJSONObject("reply")?.optJSONObject("deletion") ?: return@edit
             if (shell.openProjectId == id) shell.closeProject()
             shell.showToast(t("common.notice"), deletion.getString("message"), "info", deletion.getString("undoLabel"), 5_200) {
-                edit(id, "deleteUndo") { put("deleteRequestId", deleteId) }
+                edit(id, "deleteUndo", refused = { shell.showToast(t("common.notice"), t("projects.restoreFailed"), "error") }) { put("deleteRequestId", deleteId) }
             }
         }) ?: return
     }
@@ -428,10 +456,12 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
      * send waits its turn in order (another action, an owed retry); none is dropped. Core's runProjectEdit reads the project as
      * it is then, prepares and commits, preparing again if a sync lands between the steps.
      */
-    private fun edit(projectId: String?, kind: String, answer: ((JSONObject) -> Unit)? = null, fields: JSONObject.() -> Unit = {}): String? {
+    private fun edit(projectId: String?, kind: String, answer: ((JSONObject) -> Unit)? = null, refused: ((String) -> Unit)? = null,
+                     fields: JSONObject.() -> Unit = {}): String? {
         val id = projectId ?: return null
         val requestId = UUID.randomUUID().toString()
         answer?.let { answers[requestId] = it }
+        refused?.let { refusals[requestId] = it }
         val json = projectEdit(requestId, id, kind, JSONObject().apply(fields)).toString()
         runCatching { checkNotNull(shell.coreHost()).journalAhead("projectEdit", json) }
             .onFailure { Log.e(CoreHost.TAG, "Native Android project edit not journaled ahead ${failureForLog(it)}") }
@@ -451,15 +481,28 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     /** [action]'s send (its journal entry is already on disk); a failure owes its exact retry. False while it cannot start. */
     private fun start(action: FailedAction, done: () -> Unit): Boolean {
         if (shell.busy || shell.failedAction != null) return false
-        return shell.tryPerform(action, finished = done) { runtime -> answered(action, runtime.menuCommand(action.kind, action.title)) }
+        return shell.tryPerform(action, finished = done) { runtime -> answered(action, sent(runtime, action)) }
     }
 
     /** The failure banner's Try again: the owed edit, exactly as first sent. */
-    private fun send(action: FailedAction) = shell.perform(action) { runtime -> answered(action, runtime.menuCommand(action.kind, action.title)) }
+    private fun send(action: FailedAction) = shell.perform(action) { runtime -> answered(action, sent(runtime, action)) }
+
+    /** [action]'s send; core's refusal (STALE_REVISION: nothing written, nothing owed) shows the action's failure line, then goes on. */
+    private fun sent(runtime: CoreHost, action: FailedAction): JSONObject = try {
+        runtime.menuCommand(action.kind, action.title)
+    } catch (failure: Exception) {
+        val message = failure.message.orEmpty()
+        if (message.startsWith("STALE_REVISION")) {
+            answers.remove(action.id)
+            refusals.remove(action.id)?.let { refused -> shell.ui { refused(message.substringAfter(": ")) } }
+        }
+        throw failure
+    }
 
     /** [action] is done: its journal entry goes, and the screen gets the reply it waits for (on the main thread). */
     private fun answered(action: FailedAction, reply: JSONObject) {
         shell.acknowledged(action)
+        refusals.remove(action.id)
         answers.remove(action.id)?.let { answer -> shell.ui { answer(reply) } }
     }
 
@@ -1023,7 +1066,7 @@ private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(mode
                 val next = convertConfirm || (preview != null && convertTitle.isNotBlank())
                 ConvertButton(words.getString(if (convertConfirm) "back" else "cancel"), idle) { if (convertConfirm) convertConfirm = false else closeConvert() }
                 ConvertButton(words.getString(if (convertConfirm) "convert" else "next"), idle && next, "project-convert-next") {
-                    if (convertConfirm) convertNow() else convertConfirm = true
+                    if (convertConfirm) convertNow() else preview?.let(::confirmConvert)
                 }
             }
         }

@@ -9625,6 +9625,11 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /"project-duplicate-button"[\s\S]{0,500}"project-convert-to-section-button"[\s\S]{0,300}"project-reactivate-button"[\s\S]{0,300}"project-archive-button"[\s\S]{0,300}"project-cancel-button"[\s\S]{0,300}"project-delete-button"/);
     assert.match(details, /deleteId = edit\(id, "delete", answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo"\) \{ put\("deleteRequestId", deleteId\) \}/);
     assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ answer\(reply\) \} \}/);
+    // Review of b1+b2: the sheet stores a typed title and notes before any action (RN's onBeforeConvertToSection), and a refused
+    // action shows RN's failure line (core's STALE_REVISION is otherwise silent); Convert sends the preview Next confirmed.
+    assert.match(details, /fun openActions\(\) \{\s+storeTyped\(\)\s+actionsOpen = true/);
+    assert.match(details, /if \(message\.startsWith\("STALE_REVISION"\)\) \{\s+answers\.remove\(action\.id\)\s+refusals\.remove\(action\.id\)\?\.let \{ refused -> shell\.ui \{ refused\(message\.substringAfter\(": "\)\) \} \}/);
+    assert.match(details, /put\("destinationProjectId", destination\)\.put\("title", title\)\.put\("expected", expected\)/);
     // b3: the pinned "+" opens the capture popup with RN's preset (the project, status Next), kept in the durable draft and sent
     // with every capture call.
     assert.match(header, /\{ openCapture\(openProjectId\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);

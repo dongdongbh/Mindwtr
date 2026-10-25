@@ -187,7 +187,8 @@ describe('project to section', () => {
 
     it('converts once, with RN\'s Undo toast, and the Undo puts the project and its task back', async () => {
         const { host, data } = await open({ projects, tasks: [task] as never });
-        const convert = { requestId: uuid(30), projectId: 'p', kind: 'toSection', destinationProjectId: 'd', title: ' Kitchen ' } as never;
+        const shown = host.getProjectToSectionOptions({ projectId: 'p', destinationId: 'd', title: ' Kitchen ' }) as { value: { preview: { token: string } } };
+        const convert = { requestId: uuid(30), projectId: 'p', kind: 'toSection', destinationProjectId: 'd', title: ' Kitchen ', expected: shown.value.preview.token } as never;
         expect(await host.runProjectEdit(convert)).toMatchObject({ ok: true, value: { kind: 'toSection', outcome: 'saved',
             reply: { destinationProjectId: 'd', message: 'Project converted to section.', undoLabel: 'Undo' } } });
         expect(data().projects.find((row) => row.id === 'p')?.deletedAt).toEqual(expect.any(String));
@@ -199,5 +200,83 @@ describe('project to section', () => {
         expect(data().projects.find((row) => row.id === 'p')?.deletedAt).toBeUndefined();
         expect(data().tasks.find((row) => row.id === 't1')?.projectId).toBe('p');
         expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+    });
+});
+
+// Review of b1+b2: retries and replays end as RN's first try did, and an Undo that cannot apply refuses and writes nothing.
+describe('project actions: retries, replays and refused Undos', () => {
+    const task = (id: string) => ({ id, title: id, status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at });
+    const restart = async () => {
+        const host = createNativeHostContract();
+        expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+        return host;
+    };
+    const copies = (data: AppData) => data.projects.filter((row) => row.title === 'Kitchen (Copy)');
+
+    it('a Duplicate retried after its save failed answers its copy and toast once; a replay after a restart writes no second copy', async () => {
+        let failing = false;
+        const { host, data } = await open({}, () => failing);
+        const edit = { requestId: uuid(40), projectId: 'p', kind: 'duplicate' } as never;
+        failing = true;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        const retried = await host.runProjectEdit(edit);
+        expect(retried).toMatchObject({ ok: true, value: { reply: { id: expect.any(String), message: 'Project duplicated' } } });
+        expect(copies(data())).toHaveLength(1);
+        const replayed = await (await restart()).runProjectEdit(edit);
+        expect(replayed).toMatchObject({ ok: true, value: { outcome: 'unchanged', reply: { id: (retried as { value: { reply: { id: string } } }).value.reply.id } } });
+        await flushPendingSave();
+        expect(copies(data())).toHaveLength(1);
+    });
+
+    it('a Delete retried after its save failed answers RN\'s toast again, and its Undo still restores it', async () => {
+        let failing = false;
+        const { host, stored } = await open({ tasks: [task('t1')] as never }, () => failing);
+        const edit = { requestId: uuid(41), projectId: 'p', kind: 'delete' } as never;
+        failing = true;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { reply: { deletion: { undoLabel: 'Undo' } } } });
+        expect(await host.runProjectEdit({ requestId: uuid(42), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(41) } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored().deletedAt).toBeUndefined();
+    });
+
+    it('refuses an Undo after a restart (its Delete is gone) and writes nothing', async () => {
+        const { host, saves } = await open({ tasks: [task('t1')] as never });
+        expect(await host.runProjectEdit({ requestId: uuid(43), projectId: 'p', kind: 'delete' } as never)).toMatchObject({ ok: true });
+        const restarted = await restart();
+        const count = saves();
+        expect(await restarted.runProjectEdit({ requestId: uuid(44), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(43) } as never))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+    });
+
+    it('refuses an Undo after a sync changed the deleted project, and writes nothing', async () => {
+        const { host, saves, stored } = await open({ tasks: [task('t1')] as never });
+        expect(await host.runProjectEdit({ requestId: uuid(45), projectId: 'p', kind: 'delete' } as never)).toMatchObject({ ok: true });
+        // A sync lands a newer row for the deleted project.
+        const synced = { ...useTaskStore.getState()._projectsById.get('p')!, title: 'Synced', rev: 99, updatedAt: '2026-10-02T00:00:00.000Z' };
+        useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((row) => row.id === 'p' ? synced : row),
+            _projectsById: new Map(state._projectsById).set('p', synced) }) as never);
+        const count = saves();
+        expect(await host.runProjectEdit({ requestId: uuid(46), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(45) } as never))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+        expect(useTaskStore.getState()._projectsById.get('p')?.deletedAt).toEqual(expect.any(String));
+        expect(stored()).toBeDefined();
+    });
+
+    it('converts only what the preview showed: a task added since refuses with RN\'s message and writes nothing', async () => {
+        const projects = [project('p', { tagIds: [] }), project('d', { tagIds: [], title: 'Home' })];
+        const { host, saves } = await open({ projects, tasks: [task('t1')] as never });
+        const shown = host.getProjectToSectionOptions({ projectId: 'p', destinationId: 'd', title: 'Kitchen' });
+        const expected = (shown as { value: { preview: { token: string } } }).value.preview.token;
+        expect(expected).toEqual(expect.any(String));
+        await useTaskStore.getState().addTask('Synced task', { projectId: 'p', status: 'next' });
+        const count = saves();
+        expect(await host.runProjectEdit({ requestId: uuid(47), projectId: 'p', kind: 'toSection', destinationProjectId: 'd', title: 'Kitchen', expected } as never))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION', message: expect.stringContaining('The project changed. Review the conversion again.') } });
+        expect(saves()).toBe(count);
     });
 });
