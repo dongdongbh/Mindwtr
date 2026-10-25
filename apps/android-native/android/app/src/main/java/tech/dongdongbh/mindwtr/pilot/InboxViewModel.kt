@@ -730,7 +730,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 ?: return@background pumpEdits()
             reply.onSuccess { step ->
                 // The new draft (and checklist) and the removal of the edit it answers go to the draft file in one write.
-                keepEditor(now.viewed(step.view, sent).copy(pending = now.pending.drop(1), checklist = step.checklist ?: now.checklist))
+                keepEditor(now.viewed(step.view, sent).copy(pending = now.pending.drop(1)).withChecklist(step.checklist ?: now.checklist))
                 step.focusId?.let { checklistFocus = it }
                 if (error != null && error == editRefusal) error = null
                 editRefusal = null
@@ -864,7 +864,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     internal fun addAISteps(checklist: String, edit: JSONObject?) {
         val current = editor ?: return
         if (editsPending) { main.postDelayed({ addAISteps(checklist, edit) }, 100); return }
-        keepEditor(current.copy(checklist = checklist).queued(edit?.toString() ?: "", null))
+        keepEditor(current.withChecklist(checklist).queued(edit?.toString() ?: "", null))
         pumpEdits()
     }
 

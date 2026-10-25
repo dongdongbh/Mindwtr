@@ -8,6 +8,7 @@ import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToFilters, areaFi
 import { resolveDefaultNewTaskAreaId } from './area-utils';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
+import { mergeTaskDraftOntoLatest, saveTaskDraftOntoLatest } from './store-latest-updates';
 import { gateStoreCommands } from './store-write-gate';
 import { noopStorage, type StorageAdapter } from './storage';
 import { getTaskSortByLabel, getVisibleTaskSortOptions, resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
@@ -3089,6 +3090,9 @@ export function createNativeHostContract(options: {
          * editor loaded, `value` the edited one (native-host-contract-attachments.ts). Only the
          * fields the editor changed are written over the saved records, and only new attachments
          * are added (mergeTaskDraftAttachments), so a sync's removal, cloudKey or new content stays.
+         * `mergeSyncedChanges` (RN f06e5d1f9): a field another writer changed since `base` is merged as
+         * React Native's editor saves it (mergeTaskDraftOntoLatest) instead of refused: tags and contexts
+         * by token, the checklist by item and field, a single value takes the draft's.
          */
         async saveTaskDraft(input: {
             id: string;
@@ -3097,6 +3101,7 @@ export function createNativeHostContract(options: {
             checklist?: { base: ChecklistItem[]; value: ChecklistItem[] };
             attachments?: { base: Attachment[]; value: Attachment[] };
             requestId?: string;
+            mergeSyncedChanges?: boolean;
         }): Promise<NativeHostResult<{ id: string; draft: TaskDraft }>> {
             const ready = readiness();
             if (!ready.ok) return ready;
@@ -3104,6 +3109,10 @@ export function createNativeHostContract(options: {
             if (!isObjectRecord(input.base) || !isObjectRecord(input.patch)) {
                 return fail('INVALID_INPUT', 'base and patch must be objects');
             }
+            if (input.mergeSyncedChanges !== undefined && typeof input.mergeSyncedChanges !== 'boolean') {
+                return fail('INVALID_INPUT', 'mergeSyncedChanges must be a boolean');
+            }
+            const merging = input.mergeSyncedChanges === true;
             let checklistHalf: { base: ChecklistItem[]; value: ChecklistItem[] } | undefined;
             if (input.checklist !== undefined) {
                 const half: Record<string, unknown> = isObjectRecord(input.checklist) ? input.checklist : {};
@@ -3144,7 +3153,7 @@ export function createNativeHostContract(options: {
             // A repeat answers from the request's receipt: the store may rewrite fields it saved (a
             // recurrence's series stamp, a deferred star), so comparing fields cannot recognise it.
             const payload = JSON.stringify(['saveTaskDraft', input.id, input.base, input.patch, checklistHalf ?? null,
-                ...(attachmentsHalf ? [attachmentsHalf] : [])]);
+                ...(attachmentsHalf ? [attachmentsHalf] : []), ...(merging ? [{ mergeSyncedChanges: true }] : [])]);
             const write = async (): Promise<NativeHostResult<{ id: string; draft: TaskDraft }> | NativeUnsavedWrite<{ id: string; draft: TaskDraft }>> => {
                 const state = useTaskStore.getState();
                 const task = state._tasksById.get(input.id);
@@ -3201,7 +3210,7 @@ export function createNativeHostContract(options: {
                 const nextChecklist = checklistHalf?.value.filter((item) => item.title.trim() !== '');
                 const checklistChanges = checklistHalf && nextChecklist && !sameChecklist(savedChecklist, nextChecklist) ? checklistHalf : null;
                 if (checklistChanges && !sameChecklist(savedChecklist, checklistChanges.base)) conflicts.push('checklist');
-                if (conflicts.length > 0) {
+                if (conflicts.length > 0 && !merging) {
                     return fail('STALE_REVISION', `Task changed while editing: ${conflicts.join(', ')}`);
                 }
                 if (canonicalTokenReplayMatched) {
@@ -3211,9 +3220,27 @@ export function createNativeHostContract(options: {
                     });
                 }
                 // A field that already holds its new value is left alone.
-                const pending = Object.fromEntries(fields
+                const pending: Partial<TaskDraft> = Object.fromEntries(fields
                     .filter((field) => isSameDraftValue(current[field], base[field]))
                     .map((field) => [field, patch[field]]));
+                // A field another writer changed too (mergeSyncedChanges): React Native's editor merge, on the
+                // stored task. The draft's base is the task with the base values the editor loaded.
+                let mergedChecklist: ChecklistItem[] | undefined;
+                for (const field of conflicts as Array<TaskDraftField | 'checklist'>) {
+                    if (field === 'checklist') {
+                        mergedChecklist = mergeTaskDraftOntoLatest({ ...task, checklist: checklistChanges!.base },
+                            { checklist: checklistChanges!.value }, task).checklist ?? checklistChanges!.value;
+                    } else if (field === 'tags' || field === 'contexts') {
+                        const tokens = (value: unknown) => serializeTaskDraftTokens(value as string, field);
+                        const merged = mergeTaskDraftOntoLatest({ ...task, [field]: tokens(base[field]) },
+                            { [field]: tokens(patch[field]) }, task)[field] as string[] | undefined;
+                        // Nothing to write (the draft's tokens equal its base, say a stored `work` shown as `#work`):
+                        // the stored tokens stay, as in RN's merge, never the base written over another device's change.
+                        if (merged) (pending as Record<string, unknown>)[field] = merged.join(', ');
+                    } else {
+                        (pending as Record<string, unknown>)[field] = patch[field];
+                    }
+                }
                 const draft = clearInvalidTaskDraftSection(applyTaskDraftPatch(current, pending), state.sections);
                 if (draft.focusedToday && !task.isFocusedToday) {
                     const focused = taskEditorModel(task, { ...draft, focusedToday: false }, new Date()).focusStar;
@@ -3225,7 +3252,7 @@ export function createNativeHostContract(options: {
                 // One write, as React Native's editor saves: draft fields, checklist and attachments together.
                 const updates = buildTaskEditUpdatePatch({
                     draft,
-                    checklist: checklistChanges ? checklistChanges.value : task.checklist,
+                    checklist: mergedChecklist ?? (checklistChanges ? checklistChanges.value : task.checklist),
                     attachments: attachmentsHalf
                         ? mergeTaskDraftAttachments(task.attachments ?? [], attachmentsHalf.base, attachmentsHalf.value)
                         : task.attachments,
@@ -3233,6 +3260,13 @@ export function createNativeHostContract(options: {
                 if (!updates) return fail('INVALID_INPUT', 'title must not be blank');
                 if (Object.keys(updates).length === 0) return { ok: true, value: { id: input.id, draft: current } };
                 const landed = await runStoreWrite(() => useTaskStore.getState().updateTask(input.id, updates));
+                if (conflicts.length > 0) {
+                    // Field names only, never text: the save kept another writer's change instead of refusing.
+                    logInfo('Native draft saved onto a synced change', {
+                        scope: 'native-host', category: 'sync',
+                        context: { releaseCheck: 'v1.3.8/native-draft-merge', fields: [...conflicts].sort().join(',') },
+                    });
+                }
                 return settleWrite(landed, { id: input.id, draft: createTaskDraft(useTaskStore.getState()._tasksById.get(input.id) ?? task) });
             };
             const result = withoutRequest ? await saveDraftWithoutRequest(input.id, payload, write) : await receipts.run(input.requestId, payload, write);
@@ -3484,8 +3518,12 @@ type InboxProcessingEntry = {
     session: ProcessInboxSession;
     answers: ProcessInboxAnswers;
     draft: ProcessInboxDraft;
-    /** The task's content when it opened; a change by another writer makes the session stale. */
+    /** The task's content when it opened; a change by another writer makes the session stale, unless merging. */
     taskRevision: string;
+    /** The task the draft was filled from: the base of the merge when the session merges synced changes. */
+    base: Task;
+    /** RN 2093d9f1d: a synced change does not end the step; the commit merges the draft onto the latest task. */
+    mergeSyncedChanges: boolean;
     progress: { total: number; processed: number };
     /** The queue is done. Kept until evicted or ended, so the last decision can still be retried. */
     ended: boolean;
@@ -3604,6 +3642,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
         entry.answers = { ...INITIAL_PROCESS_INBOX_ANSWERS };
         entry.draft = createProcessInboxDraft(task, processInboxDefaultAreaId());
         entry.taskRevision = inboxTaskRevision(task);
+        entry.base = task;
         return true;
     };
 
@@ -3651,7 +3690,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
         if (!entry || entry.ended) return fail('STALE_REVISION', 'Process Inbox session ended; start again');
         const { plan, queue } = context();
         const task = getProcessInboxCurrentCandidate(entry.session, queue);
-        if (!task || task.id !== input.taskId || inboxTaskRevision(task) !== entry.taskRevision) {
+        if (!task || task.id !== input.taskId || (!entry.mergeSyncedChanges && inboxTaskRevision(task) !== entry.taskRevision)) {
             return fail('STALE_REVISION', 'The Inbox item changed; start again');
         }
         if (input.step !== resolveProcessInboxStep(entry.answers, entry.mode, plan)) {
@@ -3748,7 +3787,29 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             candidates: queue,
             // Read at call time, like every other contract write.
             actions: {
-                updateTask: (id, updates) => useTaskStore.getState().updateTask(id, updates),
+                // Merging: field by field onto the row as stored now (base: the task the draft was filled from), as
+                // RN's Process Inbox saves, so a field, tag or context another device synced since stays.
+                updateTask: entry.mergeSyncedChanges
+                    ? async (id, updates) => {
+                        const base = entry.base;
+                        const latest = id === base.id ? useTaskStore.getState()._tasksById.get(id) : undefined;
+                        // Field names only, never text: the written fields another device changed since the draft opened.
+                        const synced = latest ? (Object.keys(updates) as Array<keyof Task>)
+                            .filter((field) => JSON.stringify(latest[field] ?? null) !== JSON.stringify(base[field] ?? null)).sort() : [];
+                        const written = await saveTaskDraftOntoLatest(id, base, updates, {
+                            write: (taskId, next) => useTaskStore.getState().updateTask(taskId, next),
+                            read: (taskId) => (taskId === base.id ? useTaskStore.getState()._tasksById.get(taskId) : undefined),
+                            keepUntouched: true,
+                        });
+                        if (synced.length > 0) {
+                            logInfo('Native Process Inbox saved onto a synced change', {
+                                scope: 'native-host', category: 'sync',
+                                context: { releaseCheck: 'v1.3.8/native-draft-merge', fields: synced.join(',') },
+                            });
+                        }
+                        return written;
+                    }
+                    : (id, updates) => useTaskStore.getState().updateTask(id, updates),
                 deleteTask: (id) => useTaskStore.getState().deleteTask(id),
                 addTask: (taskTitle, props) => useTaskStore.getState().addTask(taskTitle, props),
                 addProject: projects.addProject,
@@ -3780,7 +3841,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
     return {
         ...createInboxUndoMethods({ readiness: deps.readiness, receipts: deps.receipts }),
         /** Open the queue: Inbox items and returning Someday items, in store order. */
-        startInboxProcessing(input: { mode?: ProcessInboxMode } = {}): NativeHostResult<{
+        startInboxProcessing(input: { mode?: ProcessInboxMode; mergeSyncedChanges?: boolean } = {}): NativeHostResult<{
             sessionId: string | null;
             queue: { total: number; taskIds: string[] };
             view: NativeInboxProcessingView | null;
@@ -3789,6 +3850,9 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || (input.mode !== undefined && !INBOX_PROCESSING_MODES.has(input.mode as string))) {
                 return fail('INVALID_INPUT', 'mode must be guided or quick');
+            }
+            if (input.mergeSyncedChanges !== undefined && typeof input.mergeSyncedChanges !== 'boolean') {
+                return fail('INVALID_INPUT', 'mergeSyncedChanges must be a boolean');
             }
             const { queue } = context();
             const taskIds = queue.slice(0, NATIVE_HOST_MAX_WINDOW).map((task) => task.id);
@@ -3805,6 +3869,8 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 answers: { ...INITIAL_PROCESS_INBOX_ANSWERS },
                 draft: createProcessInboxDraft(queue[0], processInboxDefaultAreaId()),
                 taskRevision: inboxTaskRevision(queue[0]),
+                base: queue[0],
+                mergeSyncedChanges: input.mergeSyncedChanges === true,
                 progress: { total: 0, processed: 0 },
                 ended: false,
                 requests: new Map(),

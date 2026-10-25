@@ -3866,9 +3866,13 @@ globalThis.MindwtrHost = {
     update(json: string): string {
         return submit(async () => taskResult('update', await contract.updateTask(JSON.parse(json))));
     },
-    /** `json` is the editor's `{ id, base, patch, checklist? }` (draft fields and the edited checklist), passed to core's saveTaskDraft unchanged. */
+    /**
+     * `json` is the editor's `{ id, base, patch, checklist? }` (draft fields and the edited checklist), passed to core's
+     * saveTaskDraft. Android merges a field another device changed meanwhile, as RN's editor saves (f06e5d1f9), where
+     * the refusal's Retry dropped the user's edit; iOS keeps its refusal for now.
+     */
     saveDraft(json: string): string {
-        return submit(async () => taskResult('saveTaskDraft', await contract.saveTaskDraft(JSON.parse(json))));
+        return submit(async () => taskResult('saveTaskDraft', await contract.saveTaskDraft({ ...JSON.parse(json), mergeSyncedChanges: globalThis.__mindwtrHostPlatform !== 'ios' })));
     },
     /** One static Calendar preference intent; exact before/desired values survive journal replay. */
     calendarPreference(json: string): string {
@@ -5014,11 +5018,14 @@ globalThis.MindwtrHost = {
     saveSearch(json: string): string {
         return submit(async () => taskResult('saveSearch', await contract.saveSearch(JSON.parse(json))));
     },
-    /** Core's startInboxProcessing in RN's per-device mode ('guided' or 'quick'). */
+    /**
+     * Core's startInboxProcessing in RN's per-device mode ('guided' or 'quick'). Android merges a change synced
+     * during a step into the commit, as RN's Process Inbox does (2093d9f1d); iOS keeps its refusal for now.
+     */
     inboxStart(mode: string): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(contract.startInboxProcessing({ mode: mode as 'guided' | 'quick' }));
+            return unwrap(contract.startInboxProcessing({ mode: mode as 'guided' | 'quick', mergeSyncedChanges: globalThis.__mindwtrHostPlatform !== 'ios' }));
         });
     },
     /** `json` is `{ sessionId, taskId, step, edit?, mode? }`: one control's edit, passed to core unchanged. */

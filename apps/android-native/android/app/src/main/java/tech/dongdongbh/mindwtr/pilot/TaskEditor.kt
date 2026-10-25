@@ -254,6 +254,11 @@ data class TaskEditor(
      */
     val attachments: String? = null,
     val attachmentsFrom: String? = null,
+    /**
+     * The saved checklist the edited one started from, kept with it as [attachmentsFrom] is: after a restart the model is read
+     * again, and a change synced meanwhile must not become Save's base (core then merges it instead of losing it).
+     */
+    val checklistFrom: String? = null,
 ) {
     val id get() = model.id
     val readOnly get() = model.readOnly
@@ -279,9 +284,10 @@ data class TaskEditor(
     val waiting get() = TYPED_FIELDS.any(::unresolved)
     /** The checklist as edited, or the saved one. */
     val checklistNow get() = checklist ?: model.checklistBase
-    val checklistChanged get() = checklist != null && !sameChecklist(checklist, model.checklistBase)
-    /** saveTaskDraft's `checklist`: the base the editor loaded and the edited items; "" while unchanged. */
-    val checklistSave: String get() = if (!checklistChanged) "" else JSONObject().put("base", JSONArray(model.checklistBase)).put("value", JSONArray(checklistNow)).toString()
+    val checklistChanged get() = checklist != null && !sameChecklist(checklist, checklistFrom ?: model.checklistBase)
+    /** saveTaskDraft's `checklist`: the saved checklist the edit started from and the edited items; "" while unchanged. */
+    val checklistSave: String get() = if (!checklistChanged) "" else
+        JSONObject().put("base", JSONArray(checklistFrom ?: model.checklistBase)).put("value", JSONArray(checklistNow)).toString()
     /** The attachments as the draft holds them, or the saved ones. */
     val attachmentsNow get() = attachments ?: model.attachmentsBase
     val attachmentsChanged get() = attachments != null && !sameAttachments(attachments, attachmentsFrom ?: model.attachmentsBase)
@@ -290,6 +296,8 @@ data class TaskEditor(
         JSONObject().put("base", JSONArray(attachmentsFrom ?: model.attachmentsBase)).put("value", JSONArray(attachmentsNow)).toString()
     /** The draft list after a core attachment command's answer [next]; the first change remembers the list it started from. */
     fun withAttachments(next: String) = copy(attachments = next, attachmentsFrom = attachmentsFrom ?: model.attachmentsBase)
+    /** The draft checklist after core's answer [next] (null keeps the saved one); the first change remembers where it started. */
+    fun withChecklist(next: String?) = copy(checklist = next, checklistFrom = if (next == null) checklistFrom else checklistFrom ?: model.checklistBase)
     /** Unsaved: a changed field, checklist or attachment, or typed text core has not turned into a draft value yet (RN asks before closing any). */
     val dirty get() = patch.isNotEmpty() || waiting || checklistChanged || attachmentsChanged
 
@@ -339,7 +347,7 @@ data class TaskEditor(
         // A new session: a reply to an edit sent before the reload never enters the reloaded editor.
         // The draft attachments stay with the list they started from: core's save merge applies only their own changes.
         return TaskEditor(fresh, edited.filterKeys(kept), inputs.filterKeys(kept), resolved.filterKeys(kept), waitingFor = waitingFor, view = view,
-            checklist = list, tab = tab, attachments = attachments, attachmentsFrom = attachmentsFrom)
+            checklist = list, tab = tab, attachments = attachments, attachmentsFrom = attachmentsFrom, checklistFrom = checklistFrom.takeIf { list != null })
     }
 
     /** The draft's own state, without the model: the edits with their bases, the typed text, and the open prompt. */
@@ -348,6 +356,7 @@ data class TaskEditor(
         .put("edits", JSONArray().apply { pending.forEach { put(JSONObject().put("seq", it.seq).put("edit", it.edit).put("field", it.field ?: JSONObject.NULL)) } })
         .put("nextSeq", nextSeq).put("checklist", checklist ?: JSONObject.NULL).put("tab", tab)
         .put("attachments", attachments ?: JSONObject.NULL).put("attachmentsFrom", attachmentsFrom ?: JSONObject.NULL)
+        .put("checklistFrom", checklistFrom ?: JSONObject.NULL)
 
     companion object {
         fun open(model: EditorModel, tab: String) = TaskEditor(model, emptyMap(), tab = tab)
@@ -364,7 +373,9 @@ data class TaskEditor(
                 pending = edits, nextSeq = saved.optLong("nextSeq", (edits.maxOfOrNull { it.seq } ?: 0) + 1),
                 checklist = if (saved.isNull("checklist")) null else saved.optString("checklist").ifEmpty { null }, tab = saved.optString("tab", "task"),
                 attachments = saved.optString("attachments").takeIf { saved.has("attachments") && !saved.isNull("attachments") },
-                attachmentsFrom = saved.optString("attachmentsFrom").takeIf { saved.has("attachmentsFrom") && !saved.isNull("attachmentsFrom") })
+                attachmentsFrom = saved.optString("attachmentsFrom").takeIf { saved.has("attachmentsFrom") && !saved.isNull("attachmentsFrom") },
+                // A draft saved before this field existed falls back to the model's checklist, as it always did.
+                checklistFrom = saved.optString("checklistFrom").takeIf { saved.has("checklistFrom") && !saved.isNull("checklistFrom") })
         }
     }
 }

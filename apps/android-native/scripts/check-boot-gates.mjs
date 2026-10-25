@@ -948,6 +948,10 @@ assert(guard.indexOf('check(blocked == null)') < guard.indexOf('database.parentF
 assert(guard.indexOf('check(blocked == null)') < guard.indexOf('val preflight = preflightNeeded(state.jsonAhead, state.reconciled, state.backup != null, database.exists())')
     && guard.indexOf('val preflight = preflightNeeded(') < guard.indexOf('database.parentFile!!.mkdirs()'));
 assert.match(guard, /jsonAhead \|\| \(backupPresent && \(!reconciled \|\| !databaseExists\)\)/);
+// RN f06e5d1f9, 2093d9f1d: Android's editor Save and Process Inbox merge a change another device synced meanwhile (core's
+// mergeSyncedChanges, tested in native-host-contract-sync-merge.test.ts) instead of refusing it and losing the user's edit.
+assert.match(hostEntry, /contract\.saveTaskDraft\(\{ \.\.\.JSON\.parse\(json\), mergeSyncedChanges: globalThis\.__mindwtrHostPlatform !== 'ios' \}\)/);
+assert.match(hostEntry, /contract\.startInboxProcessing\(\{ mode: mode as 'guided' \| 'quick', mergeSyncedChanges: globalThis\.__mindwtrHostPlatform !== 'ios' \}\)/);
 assert.match(hostEntry, /legacyCheck\(legacyState: string, legacyBackup: string\): string \{\s*return submit\(async \(\) => \{\s*const state = JSON\.parse\(legacyState\) as LegacyState;\s*assertNativeLegacyBackupSafe\(\{ jsonAhead: state\.jsonAhead, backupJson: state\.backupPresent \? legacyBackup : null \}\);/);
 assert.match(guard, /\/\/ ponytail: copies the whole database on every boot\. Skip it once a native-owned\s*\/\/ marker proves the last shutdown was clean\./);
 // RKStorage and the RN database are only read as bytes: SQLite writes -wal/-shm even through a
@@ -1633,7 +1637,7 @@ assert.match(hostEntry, /const editorJson = \(json: string\): unknown => \{\s*tr
 assert.match(hostEntry, /editChecklist\(json: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.editTaskChecklist\(JSON\.parse\(json\)\)\);/);
 assert.match(hostEntry, /resetChecklist\(json: string\): string \{\s*return submit\(async \(\) => taskResult\('resetChecklist', await contract\.resetTaskChecklist\(JSON\.parse\(json\)\)\)\);/);
 assert.match(hostEntry, /editorSuggestions\(id: string, field: string, query: string, limit: number\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getTaskEditorSuggestions\(\{ id, field: [^,]*, query, limit \}\)\);/);
-assert.match(hostEntry, /saveDraft\(json: string\): string \{\s*return submit\(async \(\) => taskResult\('saveTaskDraft', await contract\.saveTaskDraft\(JSON\.parse\(json\)\)\)\);/);
+assert.match(hostEntry, /saveDraft\(json: string\): string \{\s*return submit\(async \(\) => taskResult\('saveTaskDraft', await contract\.saveTaskDraft\(\{ \.\.\.JSON\.parse\(json\), mergeSyncedChanges: globalThis\.__mindwtrHostPlatform !== 'ios' \}\)\)\);/);
 assert.match(hostEntry, /update\(json: string\): string \{\s*return submit\(async \(\) => taskResult\('update', await contract\.updateTask\(JSON\.parse\(json\)\)\)\);/);
 assert.equal(model.match(/runtime\.taskEditorModel\(id\)/g).length, 1, 'readEditor: open and Reload');
 assert.match(model, /val model = runtime\.taskEditorModel\(id\)\s+val view = runtime\.taskView\(JSONObject\(\)\.put\("id", id\)\.toString\(\)\)[\s\S]{0,300}?return EditorModel\.of\(model, view, field\)/);
@@ -1655,8 +1659,9 @@ assert.match(model, /val current = editor \?: return\s+if \(current\.waiting \|\
 // The attachments ride the same save (pass A2): the list the draft started from and the edited one, sent only when changed.
 assert.match(editorUi, /val attachmentsSave: String get\(\) = if \(!attachmentsChanged\) "" else\s+JSONObject\(\)\.put\("base", JSONArray\(attachmentsFrom \?: model\.attachmentsBase\)\)\.put\("value", JSONArray\(attachmentsNow\)\)\.toString\(\)/);
 assert.match(editorUi, /val attachmentsBase: String = content\.optJSONArray\("attachmentsBase"\)\?\.toString\(\) \?: "\[\]"/);
-// The checklist rides the same save: its base is the checklist the editor loaded (getTaskView's checklistBase), sent only when changed.
-assert.match(editorUi, /val checklistSave: String get\(\) = if \(!checklistChanged\) "" else JSONObject\(\)\.put\("base", JSONArray\(model\.checklistBase\)\)\.put\("value", JSONArray\(checklistNow\)\)\.toString\(\)/);
+// The checklist rides the same save, sent only when changed: its base is the saved checklist the edit started from (checklistFrom,
+// kept across a restart), else the one the editor loaded (getTaskView's checklistBase).
+assert.match(editorUi, /val checklistSave: String get\(\) = if \(!checklistChanged\) "" else\s+JSONObject\(\)\.put\("base", JSONArray\(checklistFrom \?: model\.checklistBase\)\)\.put\("value", JSONArray\(checklistNow\)\)\.toString\(\)/);
 assert.match(editorUi, /val checklistBase: String = content\.getJSONArray\("checklistBase"\)\.toString\(\)/);
 assert.match(model, /private fun sendDraft\(action: FailedAction\) = perform\(action\) \{ runtime ->\s+try \{\s+runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)/);
 // Draft values are core's own JSON, compared and sent as JSON text; null stays JSON null.
@@ -1698,7 +1703,7 @@ assert.match(model, /editor\?\.takeIf \{ discardSettles\(settle, pendingSave != 
 // Pending edits are in the draft file before dispatch; each reply's draft and the removal of its edit are one write;
 // a restore sends them again in order.
 assert.match(model, /keepEditor\(current\.queued\(edit\.toString\(\), field\)\)\s+pumpEdits\(\)/);
-assert.match(model, /keepEditor\(now\.viewed\(step\.view, sent\)\.copy\(pending = now\.pending\.drop\(1\), checklist = step\.checklist \?: now\.checklist\)\)/);
+assert.match(model, /keepEditor\(now\.viewed\(step\.view, sent\)\.copy\(pending = now\.pending\.drop\(1\)\)\.withChecklist\(step\.checklist \?: now\.checklist\)\)/);
 assert.match(editorUi, /\.put\("edits", JSONArray\(\)\.apply \{ pending\.forEach/);
 assert.match(editorUi, /val edits = saved\.optJSONArray\("edits"\)/);
 assert.match(model, /restored\?\.let \{ resumeEditor\(it, savedDraft\.optJSONObject\("pending"\)\) \}\s+\/\/[^\n]*\s+pumpEdits\(\)/);
@@ -8567,12 +8572,14 @@ const editInput = { id: 't', draft: { title: 'a', dueDate: '' }, edit: { type: '
 assert.deepEqual(await poll(ready, ready.MindwtrHost.editDraft(JSON.stringify(editInput))), { ok: true, value: { version: 1, id: 't', draft: editInput.draft } });
 assert.deepEqual(ready.editorInputs, ['{"id":"t"}', '["view",{"id":"t"}]', JSON.stringify(['checklist', checklistInput]), '["suggest",{"id":"t","field":"contexts","query":"home","limit":4}]',
     JSON.stringify(['edit', editInput])]);
-// saveDraft passes Kotlin's { id, base, patch } to core's saveTaskDraft unchanged, and a refusal keeps its code prefix.
+// saveDraft passes Kotlin's { id, base, patch } to core's saveTaskDraft, on Android with mergeSyncedChanges (a change synced
+// meanwhile merges, RN f06e5d1f9), and a refusal keeps its code prefix.
 const draftInput = JSON.stringify({ id: 't', base: { title: 'a', dueDate: '', relativeStartOffset: null }, patch: { title: 'b', dueDate: '2026-09-15T14:05', relativeStartOffset: null } });
 assert.deepEqual(await poll(ready, ready.MindwtrHost.saveDraft(draftInput)), { ok: true, value: { id: 't', draft: { title: 'b' } } });
 ready.saveDraftResult = { ok: false, error: { code: 'STALE_REVISION', message: 'Task changed while editing: title' } };
 assert.deepEqual(await poll(ready, ready.MindwtrHost.saveDraft(draftInput)), { ok: false, error: 'STALE_REVISION: Task changed while editing: title' });
-assert.deepEqual(ready.updateInputs.slice(-2), [JSON.stringify(['draft', JSON.parse(draftInput)]), JSON.stringify(['draft', JSON.parse(draftInput)])]);
+const draftSent = { ...JSON.parse(draftInput), mergeSyncedChanges: true };
+assert.deepEqual(ready.updateInputs.slice(-2), [JSON.stringify(['draft', draftSent]), JSON.stringify(['draft', draftSent])]);
 ready.updateInputs.length = 2;
 ready.saveDraftResult = { ok: true, value: { id: 't', draft: { title: 'b' } } };
 // Focus queries pass Kotlin's arguments to core unchanged; a stale window keeps its code prefix for Kotlin.
@@ -8696,7 +8703,8 @@ assert.deepEqual(ready.newInputs, ['["taskFocus",{"id":"t","focused":true,"taskR
 ready.taskFocusResult = { ok: false, error: { code: 'SAVE_FAILED', message: 'disk full' } };
 assert.deepEqual(await poll(ready, ready.MindwtrHost.taskFocus('t', true)), { ok: false, error: 'SAVE_FAILED: disk full' });
 ready.newInputs.length = 0;
-// Search and Process Inbox pass Kotlin's JSON to core unchanged; a failed answer keeps its code prefix; end answers an object.
+// Search and Process Inbox pass Kotlin's JSON to core unchanged (Android's start adds mergeSyncedChanges, RN 2093d9f1d); a
+// failed answer keeps its code prefix; end answers an object.
 {
     const searchInput = { query: ' milk ', filters: { scope: 'all' }, limit: 50 };
     const stepInput = { sessionId: 'x', taskId: 't', step: 'actionable', edit: { type: 'set', field: 'title', value: 'a' } };
@@ -8709,7 +8717,7 @@ ready.newInputs.length = 0;
     assert.equal((await poll(ready, ready.MindwtrHost.inboxSkip('{"sessionId":"x","taskId":"t","requestId":"s"}'))).value.view, null);
     assert.deepEqual(await poll(ready, ready.MindwtrHost.inboxEnd('x')), { ok: true, value: {} });
     assert.deepEqual(ready.newInputs, [JSON.stringify(['search', searchInput]), '["saveSearch",{"query":"milk","name":"Milk","requestId":"r"}]',
-        '["inboxStart",{"mode":"quick"}]', JSON.stringify(['inboxStep', stepInput]), JSON.stringify(['inboxCommit', commitInput]),
+        '["inboxStart",{"mode":"quick","mergeSyncedChanges":true}]', JSON.stringify(['inboxStep', stepInput]), JSON.stringify(['inboxCommit', commitInput]),
         '["inboxSkip",{"sessionId":"x","taskId":"t","requestId":"s"}]', '["inboxEnd",{"sessionId":"x"}]']);
     // The screen's first read sends no filters: the host fills in core's defaults.
     await poll(ready, ready.MindwtrHost.search('{"query":"","filters":null,"limit":50}'));
