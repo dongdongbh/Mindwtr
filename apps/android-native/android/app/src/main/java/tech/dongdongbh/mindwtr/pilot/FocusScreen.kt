@@ -16,9 +16,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -143,13 +143,16 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
             val pomodoro = pomodoro.panel.pomodoroShown() != null
             if (view != null && pomodoro) item(key = "pomodoro") { Box(Modifier.padding(top = 6.dp)) { PomodoroCard(model) } }
             if (view != null) item(key = "date") {
-                Row(Modifier.fillMaxWidth().padding(top = if (pomodoro) 0.dp else 6.dp, start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                // RN's headerTopRow: the date, 12 dp, then its 44 dp buttons 8 dp apart, so a long date wraps where RN's does.
+                Row(Modifier.fillMaxWidth().padding(top = if (pomodoro) 0.dp else 6.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(view.dateLabel.uppercase(), style = rnText(12, 600, letterSpacing = 0.6f), color = c.secondaryText,
-                        modifier = Modifier.weight(1f))
+                        modifier = Modifier.weight(1f).padding(end = 4.dp))
                     view.controls?.let { FocusHeaderButtons(model, it) }
                     val label = t(if (othersOpen) "agenda.collapseOtherSections" else "agenda.expandOtherSections")
-                    IconButton(onClick = { setOtherFocusSections(!othersOpen) }, enabled = others > 0,
-                        modifier = Modifier.fade(if (others > 0) 1f else 0.4f).semantics { contentDescription = label; selected = !othersOpen }) {
+                    Box(Modifier.size(44.dp).clip(CircleShape).fade(if (others > 0) 1f else 0.4f)
+                        .clickable(enabled = others > 0, role = Role.Button) { setOtherFocusSections(!othersOpen) }
+                        .semantics { contentDescription = label; selected = !othersOpen }, contentAlignment = Alignment.Center) {
                         Icon(if (othersOpen) Lucide.ChevronsUp else Lucide.ChevronsDown, null,
                             tint = if (othersOpen) c.secondaryText else c.tint, modifier = Modifier.size(20.dp))
                     }

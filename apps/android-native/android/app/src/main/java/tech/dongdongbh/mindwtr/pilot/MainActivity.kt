@@ -270,12 +270,13 @@ fun Modifier.hairline(color: Color, top: Boolean) = drawBehind {
 
 /**
  * RN's tab header: card background, a hairline below, the title centered at 17/700, RN's
- * area switcher at the left, and RN's search button (22, in a 44 box) at the right.
+ * area switcher at the left, and RN's search button (22, in a 44 box) at the right. 64 dp tall, as React Navigation's
+ * Android header (getDefaultHeaderHeight).
  */
 @Composable
 private fun TopBar(model: InboxViewModel, title: String) {
     val c = LocalTheme.current.colors
-    Box(Modifier.fillMaxWidth().height(56.dp).background(c.cardBg).hairline(c.border, top = false), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().height(64.dp).background(c.cardBg).hairline(c.border, top = false), contentAlignment = Alignment.Center) {
         Text(title, style = rnText(17, 700), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 72.dp).semantics { heading() })
         AreaTrigger(model, Modifier.align(Alignment.CenterStart).padding(start = 16.dp))

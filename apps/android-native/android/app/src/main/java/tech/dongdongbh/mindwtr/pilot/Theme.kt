@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.Density
@@ -350,10 +351,13 @@ fun TextStyle.compact(density: Density): TextStyle {
  * RN's type: the platform sans (Fonts.sans is 'normal' on Android), at RN's size, weight, and line height. RN's line height
  * is the whole line box, first and last lines too; Compose trims the extra above the first line and below the last by
  * default, which made every settings row about 5 dp shorter than RN's (label 21 and description 18 lost ~2.5 dp each).
+ * With no line height, RN's Android Text keeps the font's padding (TextView's includeFontPadding, on by default), which
+ * Compose leaves out: such a line was 1-3 dp shorter than RN's (the Focus title at 17 sp: 21.0 dp against RN's 24.2).
  */
 fun rnText(size: Int, weight: Int, lineHeight: Int? = null, letterSpacing: Float = 0f) = TextStyle(
     fontFamily = FontFamily.Default, fontSize = size.sp, fontWeight = FontWeight(weight),
     lineHeight = lineHeight?.sp ?: TextUnit.Unspecified, letterSpacing = letterSpacing.sp,
     // RN's CustomLineHeightSpan: the full line height on every line, the extra split in proportion to ascent and descent.
     lineHeightStyle = if (lineHeight == null) null else LineHeightStyle(LineHeightStyle.Alignment.Proportional, LineHeightStyle.Trim.None),
+    platformStyle = if (lineHeight == null) PlatformTextStyle(includeFontPadding = true) else null,
 )
