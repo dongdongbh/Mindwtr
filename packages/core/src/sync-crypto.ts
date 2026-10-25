@@ -127,15 +127,19 @@ export const defaultSyncCryptoPrimitives: SyncCryptoPrimitives = {
 
 export type SyncKeyMaterial = { key: Uint8Array; salt: Uint8Array; params: SyncCryptoKdfParams };
 
+/**
+ * The bytes a passphrase derives its key from: NFC first, so the same passphrase typed with a precomposed accent (é) or a
+ * decomposed one (e + combining acute) derives the identical key. The native hosts' engine check logs these (check-intl-device).
+ */
+export const syncPassphraseBytes = (passphrase: string): Uint8Array => new TextEncoder().encode(passphrase.normalize('NFC'));
+
 export async function deriveSyncKeyMaterial(
     passphrase: string,
     salt: Uint8Array,
     params: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
 ): Promise<SyncKeyMaterial> {
-    // NFC normalization ensures the same passphrase typed with a precomposed accent (é) or a
-    // decomposed one (e + combining acute) derives the identical key.
-    const passBytes = new TextEncoder().encode(passphrase.normalize('NFC'));
+    const passBytes = syncPassphraseBytes(passphrase);
     let key: Uint8Array;
     try {
         key = await prims.argon2id(passBytes, salt, params, KEY_LEN);

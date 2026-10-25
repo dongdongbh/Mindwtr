@@ -136,6 +136,7 @@ import {
     webdavPutFile,
     webdavPutJson,
 } from '@mindwtr/core';
+import { syncPassphraseBytes } from '../../../packages/core/src/sync-crypto';
 import { createNativeAbout } from './host-about';
 import { createNativeAppSearch, type AppSearchCall } from './host-app-search';
 import { createNativeAI } from './host-ai';
@@ -1112,7 +1113,16 @@ const runIntlCheck = () => {
         };
         native().log(`Native Android intl check ${index + 1}/${cases.length} ${JSON.stringify(result)}`);
     });
+    // Sync encryption's passphrase bytes through this engine's String.prototype.normalize (QuickJS) and TextEncoder: a wrong
+    // NFC result derives another key, and the phone could never open its own encrypted folder (it fails closed). Synthetic.
+    PASSPHRASE_CHECK_CASES.forEach((passphrase, index) => {
+        const bytes = attempt(() => Array.from(syncPassphraseBytes(passphrase), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+        native().log(`Native Android passphrase check ${index + 1}/${PASSPHRASE_CHECK_CASES.length} ${JSON.stringify({ index, bytes })}`);
+    });
 };
+
+/** check-intl-device.mjs keeps the same list: decomposed and precomposed Latin, Hangul jamo, Kelvin/Angstrom signs, emoji. */
+const PASSPHRASE_CHECK_CASES = ['cafe\u0301 \u00e9t\u00e9', '\u1112\u1161\u11ab\uae00', 'A\u030a \u212b \u00c5 \u212a', 'pass \ud83d\ude00 \u0130 \u1e9b\u0323', '\u00f1\u006e\u0303\ufb01'];
 
 type Reply = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
 /**

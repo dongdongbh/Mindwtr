@@ -40,6 +40,10 @@ if (apkPackage !== PKG) {
 const ACTIVITY = `${PKG}/${PKG}.MainActivity`;
 const TAG = 'MindwtrNativeDev';
 const MARK = 'Native Android intl check ';
+const PASSPHRASE_MARK = 'Native Android passphrase check ';
+/** host-entry.ts PASSPHRASE_CHECK_CASES, in the same order. */
+const PASSPHRASE_CHECK_CASES = ['cafe\u0301 \u00e9t\u00e9', '\u1112\u1161\u11ab\uae00', 'A\u030a \u212b \u00c5 \u212a', 'pass \ud83d\ude00 \u0130 \u1e9b\u0323', '\u00f1\u006e\u0303\ufb01'];
+const passphraseBytes = (passphrase) => Buffer.from(passphrase.normalize('NFC'), 'utf8').toString('hex');
 const baseline = JSON.parse(readFileSync(resolve(import.meta.dirname, 'intl-hermes-baseline.json'), 'utf8'));
 
 const device = connect({ serial, pkg: PKG, uiFile: '/data/local/tmp/mindwtr-native-dev-ui.xml', adb: adbBin });
@@ -90,10 +94,18 @@ try {
     if (!appPid) fail('the app did not start');
     // Collect by case number: logcat is read again until every case is in.
     const lines = new Map();
+    const passphrases = new Map();
     let total = 0;
-    for (const deadline = Date.now() + 60_000; Date.now() < deadline && (!total || lines.size < total); await sleep(1000)) {
+    for (const deadline = Date.now() + 60_000; Date.now() < deadline
+        && (!total || lines.size < total || passphrases.size < PASSPHRASE_CHECK_CASES.length); await sleep(1000)) {
         for (const entry of device.logs(appPid, TAG).split('\n')) {
             if (entry.includes(`${MARK}failed`)) fail(`the app's intl check failed: ${entry}`);
+            const passphraseAt = entry.indexOf(PASSPHRASE_MARK);
+            if (passphraseAt >= 0) {
+                const { index, bytes } = JSON.parse(entry.slice(passphraseAt + PASSPHRASE_MARK.length).split(' ').slice(1).join(' '));
+                passphrases.set(index, bytes);
+                continue;
+            }
             const at = entry.indexOf(MARK);
             if (at < 0) continue;
             const [count, ...json] = entry.slice(at + MARK.length).split(' ');
@@ -104,6 +116,11 @@ try {
     }
     setProp('');
     if (!total || lines.size < total) fail(`only ${lines.size} of ${total || '?'} intl check lines arrived`);
+    PASSPHRASE_CHECK_CASES.forEach((passphrase, index) => {
+        const phone = passphrases.get(index);
+        if (phone !== passphraseBytes(passphrase)) fail(`passphrase case ${index + 1}: the phone's NFC bytes ${JSON.stringify(phone)}, Node's ${passphraseBytes(passphrase)}`);
+    });
+    console.log(`ok - ${PASSPHRASE_CHECK_CASES.length} sync passphrases normalize to Node's NFC bytes in the phone's engine`);
 
     process.env.TZ = zone;
     const cases = [...lines.keys()].sort((a, b) => a - b).map((index) => lines.get(index));

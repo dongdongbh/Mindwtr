@@ -11,6 +11,7 @@ import {
     inspectSyncArtifact,
     type SyncCryptoKdfParams,
     type SyncCryptoPrimitives,
+    syncPassphraseBytes,
 } from './sync-crypto';
 import vectors from './__fixtures__/sync-crypto/vectors.json';
 import primitiveVectors from './__fixtures__/sync-crypto/primitive-vectors.json';
@@ -289,5 +290,14 @@ describe('sync-crypto primitive vectors', () => {
         for (const vector of primitiveVectors.sha256) {
             expect(await computeSha256Hex(fromHex(vector.inputHex))).toBe(vector.digestHex);
         }
+    });
+});
+
+describe('syncPassphraseBytes', () => {
+    it('derives the same bytes from a passphrase typed precomposed or decomposed (NFC)', () => {
+        const hex = (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+        expect(hex(syncPassphraseBytes('cafe\u0301'))).toBe(hex(syncPassphraseBytes('caf\u00e9')));
+        expect(hex(syncPassphraseBytes('\u1112\u1161\u11ab'))).toBe(hex(syncPassphraseBytes('\ud55c')));
+        expect(hex(syncPassphraseBytes('caf\u00e9'))).toBe('636166c3a9');
     });
 });
