@@ -246,7 +246,7 @@ export const withRequestProject = (projects: readonly Project[], id: string, tit
  * Settings › Sync's screen commands (NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS in native-host-contract-settings-sync.ts,
  * the same names).
  */
-export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction']);
+export const NATIVE_UNJOURNALED_COMMANDS: ReadonlySet<string> = new Set<string>(['calendarFeedAdd', 'setAIKey', 'setAIEndpoint', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection', 'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction', 'continueSyncWithoutFiles']);
 
 const commandOf = (payload: string): string => /^\["([^"\\]{1,64})"/.exec(payload)?.[1] ?? '';
 /** Bounded non-sensitive domain tuples are exact; established commands keep their compact hash. */

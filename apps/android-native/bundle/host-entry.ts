@@ -796,7 +796,7 @@ type DataCommand = 'gettingStarted';
 type StartupPromptCommand = 'supportPromptShown';
 /** Settings › Sync's screen commands: never journaled (core's NATIVE_UNJOURNALED_COMMANDS), sent by CoreHost.syncCommand. */
 type SyncScreenCommand = 'openSyncSettings' | 'closeSyncSettings' | 'selectSyncBackend' | 'saveSyncBackend' | 'syncNow' | 'testSyncConnection'
-    | 'pickSyncFolder' | 'connectDropbox' | 'disconnectDropbox' | 'runSyncEncryptionAction';
+    | 'pickSyncFolder' | 'connectDropbox' | 'disconnectDropbox' | 'runSyncEncryptionAction' | 'continueSyncWithoutFiles';
 /**
  * Settings › AI's screen writes, sent by AISettings.kt itself: its open (journaled; target-state), and a key or a base URL (never
  * journaled: core's NATIVE_UNJOURNALED_COMMANDS, a key or a URL that may hold a password).
@@ -1403,6 +1403,7 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     connectDropbox: (input) => contract.connectDropbox(input),
     disconnectDropbox: (input) => contract.disconnectDropbox(input),
     runSyncEncryptionAction: (input) => contract.runSyncEncryptionAction(input),
+    continueSyncWithoutFiles: (input) => contract.continueSyncWithoutFiles(input),
     // Settings › AI: a control's change (journaled, target-state), the screen's open (journaled), a key and a base URL (never journaled).
     setAISetting: (input) => contract.setAISetting(input),
     openAISettings: (input) => contract.openAISettings(input),

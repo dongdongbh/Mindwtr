@@ -28,9 +28,11 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -89,7 +91,7 @@ import java.util.concurrent.Executors
  * and never journals them (WriteJournal.UNJOURNALED; several carry a password).
  */
 val SYNC_COMMANDS = setOf("openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection",
-    "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction")
+    "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction", "continueSyncWithoutFiles")
 
 /**
  * The WebDAV or self-hosted form as typed (RN's panel state). A null [password] or [token] was not edited: the field shows core's
@@ -121,6 +123,11 @@ class SyncSettingsModel(private val menu: MenuModel) {
     var historyOpen by mutableStateOf(false); private set
     var preferencesOpen by mutableStateOf(false); private set
     var snapshotsOpen by mutableStateOf(false); private set
+    /**
+     * Core's question when a new sync location cannot find some attachment files (a command's `missingFiles`, RN's Alert):
+     * Cancel closes it, Continue sends continueSyncWithoutFiles with its ids. File names show here only, never in the log.
+     */
+    var missingFiles by mutableStateOf<JSONObject?>(null); private set
     /** How many commands run now (each its own thread, as RN's run side by side); core's view shows each control's spinner. */
     var running by mutableStateOf(0); private set
     /** The commands running, by key (a name, a backend choice): a second identical tap before core's view disables the control sends nothing. Main thread. */
@@ -236,6 +243,16 @@ class SyncSettingsModel(private val menu: MenuModel) {
         run("syncNow", input)
     }
 
+    /** The missing-files question's buttons: Continue reruns the asking command with those files accepted. */
+    fun answerMissingFiles(continueWithout: Boolean) {
+        val question = missingFiles ?: return
+        missingFiles = null
+        if (!continueWithout) return
+        val ids = question.getJSONArray("ids")
+        Log.i(CoreHost.TAG, "Native Android sync screen missing files continue count=${ids.length()}")
+        run("continueSyncWithoutFiles", JSONObject().put("requestId", uuid()).put("ids", ids))
+    }
+
     /** The panel's Test connection (Dropbox sends no fields). */
     fun test() = run("testSyncConnection", formFields()?.let { (name, fields) -> JSONObject().put(name, fields) } ?: JSONObject())
 
@@ -326,7 +343,7 @@ class SyncSettingsModel(private val menu: MenuModel) {
             }
             shell.ui {
                 if (!light) { inFlight.remove(key); running -= 1 }
-                result.onSuccess { reply -> toasts(name, reply); done(reply) }
+                result.onSuccess { reply -> toasts(name, reply); reply.optJSONObject("missingFiles")?.let { missingFiles = it }; done(reply) }
                 result.exceptionOrNull()?.let { error ->
                     Log.w(CoreHost.TAG, "Sync screen command failed command=$name code=${error.message?.substringBefore(':')}")
                     val message = error.message.orEmpty()
@@ -412,6 +429,27 @@ internal fun SyncSettings(model: InboxViewModel, view: JSONObject) {
     view.optJSONObject("encryption")?.let { EncryptionCard(sync, it) }
     PreferencesCard(model, view.getJSONObject("preferences"), view.getJSONObject("disclosure"))
     SnapshotsCard(model, sync, view.getJSONObject("recoverySnapshots"), view.getJSONObject("disclosure"))
+    sync.missingFiles?.let { question -> MissingFilesDialog(sync, question) }
+}
+
+/** RN's Alert for files a new sync location cannot find: its title, the listed files, Cancel and "Continue without these files". */
+@Composable
+private fun MissingFilesDialog(sync: SyncSettingsModel, question: JSONObject) {
+    AlertDialog(
+        onDismissRequest = { sync.answerMissingFiles(false) },
+        title = { Text(question.getString("title")) },
+        text = { Text(question.getString("message")) },
+        confirmButton = {
+            TextButton(onClick = { sync.answerMissingFiles(true) }, Modifier.testTag("sync-missing-files-continue")) {
+                Text(question.getString("continueLabel"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { sync.answerMissingFiles(false) }, Modifier.testTag("sync-missing-files-cancel")) {
+                Text(question.getString("cancelLabel"))
+            }
+        },
+    )
 }
 
 /** RN's backendOption chip: the chosen one outlined in the tint on the filter wash. */

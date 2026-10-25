@@ -2768,3 +2768,59 @@ describe('native Settings › Sync recovery snapshot rows (pass D1a)', () => {
         expect(card).toMatchObject({ restoreLabel: t('settings.recoverySnapshotsRestore'), loading: t('settings.recoverySnapshotsLoading'), enabled: true });
     });
 });
+
+describe('native host contract: Settings › Sync activation without some attachment files', () => {
+    const files = [{ id: 'att-1', ownerType: 'task' as const, ownerId: 't1', title: 'scan.pdf', ownerTitle: 'Tax return' }];
+    const startRefusing = async () => {
+        const { dev, contract } = await start({});
+        value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
+        const accepted: (readonly string[] | null)[] = [];
+        dev.host.performSync = async (_path, options) => {
+            if (options?.activationProbe) accepted.push(options.acceptMissingAttachmentIds ?? null);
+            if (options?.activationProbe && !options.acceptMissingAttachmentIds) {
+                return { success: false, error: 'Candidate attachment proof failed', activationMissingAttachments: files };
+            }
+            return { success: true };
+        };
+        const save = () => contract.saveSyncBackend({
+            requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision, webdav: { ...webdavFields, password: 'pw' },
+        });
+        return { dev, contract, accepted, save };
+    };
+
+    it('answers a save the new location cannot fully prove with React Native\'s question, and stores nothing', async () => {
+        const { dev, save } = await startRefusing();
+
+        const refused = value(await save());
+
+        expect(refused.missingFiles).toEqual({
+            ids: ['att-1'],
+            title: en['settings.syncMissingFilesTitle'],
+            message: en['settings.syncMissingFilesBody'].replace('{files}', '• scan.pdf (Tax return)'),
+            continueLabel: en['settings.syncMissingFilesContinue'],
+            cancelLabel: en['common.cancel'],
+        });
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+    });
+
+    it('reruns the same save accepting the shown files on Continue, and stores the new location', async () => {
+        const { dev, contract, accepted, save } = await startRefusing();
+        value(await save());
+
+        const continued = value(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), ids: ['att-1'] }));
+
+        expect(continued.missingFiles).toBeUndefined();
+        expect(accepted).toContainEqual(['att-1']);
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBe(webdavFields.url);
+    });
+
+    it('refuses Continue for files the screen did not show', async () => {
+        const { dev, contract, save } = await startRefusing();
+        expect(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), ids: ['att-1'] }))
+            .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        value(await save());
+        expect(await contract.continueSyncWithoutFiles({ requestId: generateUUID(), ids: ['att-2'] }))
+            .toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+    });
+});
