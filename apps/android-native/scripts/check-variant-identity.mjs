@@ -8,7 +8,9 @@
 // alias opens a declared activity, the widget providers are exported with their filter and provider XML, and the shortcuts are
 // RN's (build-shortcuts.mjs's output for the build), with the build's scheme as RN's widget module's mindwtr_link_scheme. The
 // permissions are RN's, so an upgrade keeps every grant. The alias takes RN's shares (app.json's expo-share-intent filters). The
-// debug build's check entries (its widget host, quick capture alias, and file share provider and sender) are in no other build. Gradle's checkVariantIdentity runs it for each variant (app/build.gradle.kts);
+// debug build's check entries (its widget host, quick capture alias, and file share provider and sender) are in no other build. A
+// FOSS build (BuildConfig.FOSS) declares no Google Play services entry and no install referrer permission, as RN's FOSS build
+// strips them (df75a3584, a13d1184e); checkFossDependencies checks its libraries. Gradle's checkVariantIdentity runs it for each variant (app/build.gradle.kts);
 // it prints every problem and fails on any; check-variant-identity.test.mjs proves what it catches.
 // Usage: node check-variant-identity.mjs <build type> <merged AndroidManifest.xml> <mindwtr_shortcuts.xml> <BuildConfig.java>
 //     <mindwtr_link_scheme.xml>
@@ -47,6 +49,10 @@ const RN_PERMISSIONS = ['ACCESS_NETWORK_STATE', 'ACCESS_WIFI_STATE', 'FOREGROUND
     'POST_NOTIFICATIONS', 'READ_CALENDAR', 'RECEIVE_BOOT_COMPLETED', 'RECORD_AUDIO', 'SCHEDULE_EXACT_ALARM', 'USE_BIOMETRIC',
     'USE_FINGERPRINT', 'VIBRATE', 'WAKE_LOCK', 'WRITE_CALENDAR'].map((name) => `android.permission.${name}`);
 const PLAY_REFERRER = 'com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE';
+/** What RN's FOSS build strips (df75a3584, a13d1184e; scripts/verify_foss_no_google_services.py's packages): no component or
+ *  metadata of these in a FOSS build's manifest. An intent action's name (Assistant's CREATE_NOTE) is no component. */
+const GOOGLE_SERVICE_PREFIXES = ['com.google.android.gms.', 'com.google.firebase.', 'com.google.mlkit.', 'com.google.android.play.',
+    'com.google.android.datatransport.', 'com.google.android.ump.', 'com.android.billingclient.', 'com.android.installreferrer.'];
 const SHARE_CONFIG = app.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === 'expo-share-intent')[1];
 /** The debug build's exported check entries (src/debug): never in a build a user installs. */
 const DEBUG_ONLY = ['tech.dongdongbh.mindwtr.pilot.WidgetHostActivity', 'tech.dongdongbh.mindwtr.pilot.ShareTestProvider',
@@ -124,6 +130,14 @@ export async function identityProblems(type, manifest, shortcuts, buildConfig, l
     const permissions = (root['uses-permission'] ?? []).map((node) => attr(node, 'name'))
         .filter((name) => name !== `${pkg}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` && name !== PLAY_REFERRER).sort();
     expect('the permissions', JSON.stringify(permissions), JSON.stringify(RN_PERMISSIONS));
+    if (field(buildConfig, 'FOSS') === 'true') {
+        if ((root['uses-permission'] ?? []).some((node) => attr(node, 'name') === PLAY_REFERRER)) problems.push('a FOSS build declares the install referrer permission');
+        const entries = ['activity', 'activity-alias', 'service', 'receiver', 'provider', 'meta-data']
+            .flatMap((kind) => (application[kind] ?? []).map((node) => attr(node, 'name') ?? ''));
+        for (const name of entries.filter((entry) => GOOGLE_SERVICE_PREFIXES.some((prefix) => entry.startsWith(prefix)))) {
+            problems.push(`a FOSS build declares the Google service entry ${name}`);
+        }
+    }
     expect('supportsRtl', attr(application, 'supportsRtl'), 'true');
     // RN's shortcuts for this build (their ids, labels, targets and links), each target a component the build declares.
     if (shortcuts !== buildShortcuts(identity.scheme, identity.pkg).xml) problems.push('the shortcuts are not RN\'s for this build');

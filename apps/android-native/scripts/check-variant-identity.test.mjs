@@ -115,6 +115,25 @@ test('a permission RN declares and the build drops is caught', async () => {
     assert.notDeepEqual(await problems('release', { ...files, manifest: dropped }), []);
 });
 
+// RN's df75a3584 and a13d1184e: a FOSS build (BuildConfig.FOSS) declares no Google Play services component or metadata and no
+// install referrer permission; the Play build keeps the referrer (PlayServices.kt reads it).
+test('a FOSS build with the install referrer permission or a Google Play services entry is caught', async () => {
+    const play = await variant('release');
+    const foss = { ...play, buildConfig: `${play.buildConfig}  public static final boolean FOSS = true;\n` };
+    assert.deepEqual(await problems('release', foss), []);
+    const referrer = '<uses-permission android:name="com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE"/>';
+    const withReferrer = (files) => ({ ...files, manifest: files.manifest.replace('<application', `${referrer}<application`) });
+    assert.deepEqual(await problems('release', withReferrer(play)), []);
+    assert.notDeepEqual(await problems('release', withReferrer(foss)), []);
+    for (const entry of ['<service android:name="com.google.android.gms.metadata.ModuleDependencies" android:exported="false"/>',
+        '<meta-data android:name="com.google.android.gms.version" android:value="12451000"/>',
+        '<activity android:name="com.google.android.play.core.common.PlayCoreDialogWrapperActivity"/>',
+        '<provider android:name="com.google.firebase.provider.FirebaseInitProvider" android:authorities="x"/>']) {
+        const manifest = foss.manifest.replace('</application>', `${entry}</application>`);
+        assert.notDeepEqual(await problems('release', { ...foss, manifest }), [], entry);
+    }
+});
+
 test('narrower share filters, or the debug build\'s check entries in another build, are caught', async () => {
     const files = await variant('release');
     const root = (await parseStringPromise(files.manifest)).manifest;

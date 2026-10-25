@@ -216,7 +216,21 @@ androidComponents {
         tasks.named("checkVariantIdentity") { dependsOn(check) }
     }
 }
-val checkVariantIdentity by tasks.registering
+// RN's FOSS build ships no Google Play library (apps/mobile/scripts/verify_foss_no_google_services.py scans RN's APK for their
+// packages): the FOSS variants' runtime classpaths resolve none of their groups. The manifests' half is check-variant-identity.mjs.
+val checkFossDependencies by tasks.registering {
+    doLast {
+        val banned = listOf("com.google.android.gms", "com.google.firebase", "com.google.mlkit", "com.google.android.play",
+            "com.google.android.datatransport", "com.google.android.ump", "com.android.billingclient", "com.android.installreferrer")
+        val found = listOf("fossDebugRuntimeClasspath", "fossReleaseRuntimeClasspath").flatMap { name ->
+            configurations.getByName(name).incoming.resolutionResult.allComponents
+                .mapNotNull { (it.id as? org.gradle.api.artifacts.component.ModuleComponentIdentifier)?.let { id -> "${id.group}:${id.module}" } }
+        }.distinct().filter { module -> banned.any { group -> module.startsWith("$group:") || module.startsWith("$group.") } }
+        if (found.isNotEmpty()) throw GradleException("The FOSS build depends on Google Play libraries: ${found.joinToString()}")
+        logger.lifecycle("checkFossDependencies: the FOSS runtime classpaths hold no Google Play library")
+    }
+}
+val checkVariantIdentity by tasks.registering { dependsOn(checkFossDependencies) }
 
 dependencies {
     implementation("wang.harlon.quickjs:wrapper-android:3.2.0")
