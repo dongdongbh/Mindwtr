@@ -54,7 +54,7 @@ class WriteJournal(
             // Settings › Sync's screen commands: never on disk (UNJOURNALED), so their shapes are never checked.
             "openSyncSettings" to "{}", "closeSyncSettings" to "{}", "selectSyncBackend" to "{requestId}", "saveSyncBackend" to "{requestId,revision}",
             "syncNow" to "{requestId}", "testSyncConnection" to "{}", "pickSyncFolder" to "{requestId}", "connectDropbox" to "{requestId}",
-            "disconnectDropbox" to "{requestId}", "runSyncEncryptionAction" to "{}", "continueSyncWithoutFiles" to "{requestId}",
+            "disconnectDropbox" to "{requestId}", "runSyncEncryptionAction" to "{}", "answerSyncMissingFiles" to "{questionId}",
             // Settings › AI's key and base URL: never on disk either (UNJOURNALED).
             "setAIKey" to "{requestId}", "setAIEndpoint" to "{requestId}",
             // Settings › Calendar's new subscription: never on disk (UNJOURNALED), its URL may carry a password.
@@ -77,7 +77,7 @@ class WriteJournal(
          * NATIVE_UNJOURNALED_COMMANDS, a payload that can carry a secret. check-boot-gates.mjs keeps it equal to core's set.
          */
         val UNJOURNALED = setOf("openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection",
-            "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction", "continueSyncWithoutFiles", "setAIKey", "setAIEndpoint",
+            "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction", "answerSyncMissingFiles", "setAIKey", "setAIEndpoint",
             "calendarFeedAdd")
 
         /** Whether [method] with [args] is an [UNJOURNALED] write: CoreHost's long calls (callLong) take only these. */

@@ -93,7 +93,7 @@ import java.util.concurrent.Executors
  * and never journals them (WriteJournal.UNJOURNALED; several carry a password).
  */
 val SYNC_COMMANDS = setOf("openSyncSettings", "closeSyncSettings", "selectSyncBackend", "saveSyncBackend", "syncNow", "testSyncConnection",
-    "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction", "continueSyncWithoutFiles")
+    "pickSyncFolder", "connectDropbox", "disconnectDropbox", "runSyncEncryptionAction", "answerSyncMissingFiles")
 
 /**
  * The WebDAV or self-hosted form as typed (RN's panel state). A null [password] or [token] was not edited: the field shows core's
@@ -126,10 +126,10 @@ class SyncSettingsModel(private val menu: MenuModel) {
     var preferencesOpen by mutableStateOf(false); private set
     var snapshotsOpen by mutableStateOf(false); private set
     /**
-     * Core's question when a new sync location cannot find some attachment files (a command's `missingFiles`, RN's Alert):
-     * Cancel closes it, Continue sends continueSyncWithoutFiles with its ids. File names show here only, never in the log.
+     * The missing-files question this visit already answered (its questionId): hidden until core's view drops it. The question
+     * itself is core's view's `missingFiles`, shown while the asking command's activation waits (RN's Alert).
      */
-    var missingFiles by mutableStateOf<JSONObject?>(null); private set
+    var answeredQuestion by mutableStateOf<String?>(null); private set
     /** How many commands run now (each its own thread, as RN's run side by side); core's view shows each control's spinner. */
     var running by mutableStateOf(0); private set
     /** The commands running, by key (a name, a backend choice): a second identical tap before core's view disables the control sends nothing. Main thread. */
@@ -219,6 +219,7 @@ class SyncSettingsModel(private val menu: MenuModel) {
         opened = false
         form = null
         followed = null
+        answeredQuestion = null
         passphrases.clear()
         historyOpen = false
         preferencesOpen = false
@@ -245,14 +246,15 @@ class SyncSettingsModel(private val menu: MenuModel) {
         run("syncNow", input)
     }
 
-    /** The missing-files question's buttons: Continue reruns the asking command with those files accepted. */
-    fun answerMissingFiles(continueWithout: Boolean) {
-        val question = missingFiles ?: return
-        missingFiles = null
-        if (!continueWithout) return
-        val ids = question.getJSONArray("ids")
-        Log.i(CoreHost.TAG, "Native Android sync screen missing files continue count=${ids.length()}")
-        run("continueSyncWithoutFiles", JSONObject().put("requestId", uuid()).put("ids", ids))
+    /**
+     * The missing-files question's buttons: Continue lets the waiting activation go on with those files accepted, Cancel ends it
+     * with nothing stored. The command that asked answers itself. File names show on screen only, never in the log.
+     */
+    fun answerMissingFiles(questionId: String, continueWithout: Boolean) {
+        if (answeredQuestion == questionId) return
+        answeredQuestion = questionId
+        Log.i(CoreHost.TAG, "Native Android sync screen missing files answer=${if (continueWithout) "continue" else "cancel"}")
+        run("answerSyncMissingFiles", JSONObject().put("questionId", questionId).put("continue", continueWithout), light = true)
     }
 
     /** The panel's Test connection (Dropbox sends no fields). */
@@ -345,7 +347,7 @@ class SyncSettingsModel(private val menu: MenuModel) {
             }
             shell.ui {
                 if (!light) { inFlight.remove(key); running -= 1 }
-                result.onSuccess { reply -> toasts(name, reply); reply.optJSONObject("missingFiles")?.let { missingFiles = it }; done(reply) }
+                result.onSuccess { reply -> toasts(name, reply); done(reply) }
                 result.exceptionOrNull()?.let { error ->
                     Log.w(CoreHost.TAG, "Sync screen command failed command=$name code=${error.message?.substringBefore(':')}")
                     val message = error.message.orEmpty()
@@ -431,24 +433,24 @@ internal fun SyncSettings(model: InboxViewModel, view: JSONObject) {
     view.optJSONObject("encryption")?.let { EncryptionCard(sync, it) }
     PreferencesCard(model, view.getJSONObject("preferences"), view.getJSONObject("disclosure"))
     SnapshotsCard(model, sync, view.getJSONObject("recoverySnapshots"), view.getJSONObject("disclosure"))
-    sync.missingFiles?.let { question -> MissingFilesDialog(sync, question) }
+    view.optJSONObject("missingFiles")?.takeIf { it.getString("questionId") != sync.answeredQuestion }?.let { question -> MissingFilesDialog(sync, question) }
 }
 
 /** RN's Alert for files a new sync location cannot find: its title, the listed files, Cancel and "Continue without these files". */
 @Composable
 private fun MissingFilesDialog(sync: SyncSettingsModel, question: JSONObject) {
     AlertDialog(
-        onDismissRequest = { sync.answerMissingFiles(false) },
+        onDismissRequest = { sync.answerMissingFiles(question.getString("questionId"), false) },
         title = { Text(question.getString("title")) },
         // RN's Alert.alert on Android: the message scrolls, and the buttons draw in capitals with Cancel at the left.
         text = { Text(question.getString("message"), modifier = Modifier.verticalScroll(rememberScrollState())) },
         confirmButton = {
-            TextButton(onClick = { sync.answerMissingFiles(true) }, Modifier.testTag("sync-missing-files-continue")) {
+            TextButton(onClick = { sync.answerMissingFiles(question.getString("questionId"), true) }, Modifier.testTag("sync-missing-files-continue")) {
                 Text(question.getString("continueLabel").uppercase())
             }
         },
         dismissButton = {
-            TextButton(onClick = { sync.answerMissingFiles(false) }, Modifier.testTag("sync-missing-files-cancel")) {
+            TextButton(onClick = { sync.answerMissingFiles(question.getString("questionId"), false) }, Modifier.testTag("sync-missing-files-cancel")) {
                 Text(question.getString("cancelLabel").uppercase())
             }
         },

@@ -1298,7 +1298,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         'submitCaptureModal', 'submitCaptureModalLines',
         // Settings › Sync: its option (a receipt of its own) and the screen's commands (never journaled: core keeps no payload of theirs).
         'setSyncPreference', 'openSyncSettings', 'closeSyncSettings', 'selectSyncBackend', 'saveSyncBackend', 'syncNow', 'testSyncConnection',
-        'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction', 'continueSyncWithoutFiles',
+        'pickSyncFolder', 'connectDropbox', 'disconnectDropbox', 'runSyncEncryptionAction', 'answerSyncMissingFiles',
         // Settings › AI (pass C1): a control's change and the screen's open (receipts of their own), a key and a base URL (never journaled).
         'setAISetting', 'openAISettings', 'setAIKey', 'setAIEndpoint', 'ingestPendingCaptures',
         // Attachments (pass A2): Add file and Add photo, the link sheet's Save, Remove (a project's written at once, receipts of their own).

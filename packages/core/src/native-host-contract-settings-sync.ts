@@ -133,7 +133,7 @@ import {
     WEBDAV_URL_KEY,
     WEBDAV_USERNAME_KEY,
 } from './sync-storage-keys';
-import { deterministicHash128Hex } from './uuid';
+import { deterministicHash128Hex, generateUUID } from './uuid';
 import type { ActivationMissingAttachment } from './sync-run-ports';
 import { formatActivationMissingAttachments } from './unreachable-attachments';
 
@@ -201,7 +201,7 @@ export const NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS = [
     'connectDropbox',
     'disconnectDropbox',
     'runSyncEncryptionAction',
-    'continueSyncWithoutFiles',
+    'answerSyncMissingFiles',
 ] as const;
 
 export type SyncSettingsDeps = {
@@ -350,17 +350,19 @@ export type NativeSyncSettings = {
     /** The disclosure glyphs React Native draws after a folded card's title. */
     disclosure: { closed: string; open: string };
     busy: { syncing: boolean; testing: boolean; dropbox: boolean; encryption: boolean };
+    /**
+     * React Native's question (its Alert) while a running command's activation waits on it: the new sync location
+     * cannot find these attachment files. The host shows it as a dialog and answers with `answerSyncMissingFiles`.
+     */
+    missingFiles: NativeSyncMissingFilesPrompt | null;
 };
+
+export type NativeSyncMissingFilesPrompt = { questionId: string; title: string; message: string; continueLabel: string; cancelLabel: string };
 
 /** A form's fields as the host sends them; a null password or token keeps the stored one. */
 export type NativeSyncWebDavFields = { url: string; username: string; password: string | null; allowInsecureHttp: boolean };
 export type NativeSyncSelfHostedFields = { url: string; token: string | null; allowInsecureHttp: boolean };
-/**
- * React Native's question when a new sync location cannot find some attachment files (its Alert): the host shows it
- * as a dialog. Cancel sends nothing; Continue sends `continueSyncWithoutFiles` with these `ids`.
- */
-export type NativeSyncMissingFilesPrompt = { ids: string[]; title: string; message: string; continueLabel: string; cancelLabel: string };
-export type NativeSyncCommandResult = { toasts: NativeSyncToast[]; missingFiles?: NativeSyncMissingFilesPrompt };
+export type NativeSyncCommandResult = { toasts: NativeSyncToast[] };
 
 type Screen = {
     host: NativeSyncSettingsHost;
@@ -380,13 +382,12 @@ type Screen = {
     generation: number;
     configRevision: string;
     unsubscribe: () => void;
-    /** The files the running action's activation could not find, asked through the transport's confirm. */
-    askedMissing: ActivationMissingAttachment[] | null;
-    /** The last action that asked, with the files it showed: `continueSyncWithoutFiles` reruns it. */
-    missingFiles: { ids: string[]; rerun: () => Promise<NativeHostResult<never> | void> | NativeHostResult<never> | void } | null;
-    /** While a Continue reruns its action: the ids the user accepted. */
-    acceptMissingIds: ReadonlySet<string> | null;
+    /** The activation waiting on the missing-files question; `answer` resolves the transport's confirm. */
+    question: { id: string; files: ActivationMissingAttachment[]; answer: (accepted: boolean) => void } | null;
 };
+
+/** A question nobody answers is a Cancel before the host's 30-minute wait on the command ends (CoreHost SYNC_WAIT_MS). */
+const MISSING_FILES_QUESTION_TIMEOUT_MS = 25 * 60 * 1000;
 
 const MONTH_FIRST_LOCALE = /^en(?:[-_]US)?$/i;
 /** Date.prototype.toLocaleString's options (ECMA-402 ToDateTimeOptions "any", "all"). */
@@ -505,26 +506,40 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             showToast: push,
             supportsNativeICloudSync: host.platform.os === 'ios' && host.platform.cloudKitAvailable === true,
             t,
-            // The command answers with the question (its `missingFiles`); Continue reruns the action with these ids accepted.
-            confirmActivationWithoutFiles: async (files) => {
+            // React Native's Alert: the activation waits here while the screen shows the question (its `missingFiles`), then
+            // goes on as RN's does: Continue reruns only the activation with these files accepted, Cancel changes nothing.
+            confirmActivationWithoutFiles: (files) => new Promise<boolean>((resolve) => {
                 const current = screen;
-                if (!current || current.host !== host) return false;
-                const accepted = current.acceptMissingIds;
-                if (accepted && files.every((file) => accepted.has(file.id))) return true;
-                current.askedMissing = files;
-                return false;
-            },
+                if (!current || current.host !== host) {
+                    resolve(false);
+                    return;
+                }
+                current.question?.answer(false);
+                const id = generateUUID();
+                const timer = setTimeout(() => current.question?.id === id && current.question.answer(false), MISSING_FILES_QUESTION_TIMEOUT_MS);
+                current.question = {
+                    id,
+                    files,
+                    answer: (accepted) => {
+                        clearTimeout(timer);
+                        if (current.question?.id === id) current.question = null;
+                        current.generation += 1;
+                        resolve(accepted);
+                    },
+                };
+                current.generation += 1;
+            }),
         };
     };
 
-    const missingFilesPrompt = (files: ActivationMissingAttachment[]): NativeSyncMissingFilesPrompt => {
+    const missingFilesPrompt = (question: NonNullable<Screen['question']>): NativeSyncMissingFilesPrompt => {
         const t = deps.t();
         const tr = createSyncSettingsTranslator(t);
         return {
-            ids: files.map((file) => file.id),
+            questionId: question.id,
             title: tr('settings.syncMissingFilesTitle'),
             message: tr('settings.syncMissingFilesBody', {
-                files: formatActivationMissingAttachments(files, (count) => tr('settings.syncMissingFilesMore', { count })),
+                files: formatActivationMissingAttachments(question.files, (count) => tr('settings.syncMissingFilesMore', { count })),
             }),
             continueLabel: tr('settings.syncMissingFilesContinue'),
             cancelLabel: t('common.cancel'),
@@ -662,7 +677,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const current: Screen = {
             host, transport, card: null, cardCancels: [], edgeRefresh: null, lastBusy: false, lastBackend: 'off', effectsQueued: false, opening: true,
             snapshots: [], cancels: [], pending: new Set(), generation: 0, configRevision: '', unsubscribe: () => undefined,
-            askedMissing: null, missingFiles: null, acceptMissingIds: null,
+            question: null,
         };
         screen = current;
         // React Native runs these after the render a state change causes: after the
@@ -698,6 +713,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
 
     function closeScreen() {
         if (!screen) return;
+        // Leaving the screen answers an open question with Cancel: nothing was stored.
+        screen.question?.answer(false);
         screen.unsubscribe();
         for (const cancel of [...screen.cancels, ...screen.cardCancels]) cancel();
         screen.card?.closeFlow();
@@ -1186,6 +1203,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             },
             disclosure: { closed: '▸', open: '▾' },
             busy: { syncing: state.isSyncing, testing: state.isTestingConnection, dropbox: state.dropboxBusy, encryption: card?.busy === true },
+            missingFiles: current.question ? missingFilesPrompt(current.question) : null,
         };
     };
 
@@ -1236,7 +1254,6 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const result = (async (): Promise<NativeHostResult<NativeSyncCommandResult>> => {
             if (screen !== current) return fail('ACTION_FAILED', 'Settings › Sync was closed; open it again');
             let cleanupUnconfirmed = false;
-            current.askedMissing = null;
             try {
                 const refused = await run();
                 if (refused && !refused.ok) return fail(refused.error.code, current.transport.redactText(refused.error.message));
@@ -1253,11 +1270,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                     current.configRevision = await readConfigRevision(current.host).catch(() => current.configRevision);
                 }
             }
-            // Set by the transport's confirm while the action ran (TypeScript cannot see that write).
-            const asked = current.askedMissing as ActivationMissingAttachment[] | null;
-            current.askedMissing = null;
-            current.missingFiles = asked ? { ids: asked.map((file) => file.id), rerun: run } : null;
-            const value: NativeSyncCommandResult = { toasts: takeToasts(), ...(asked ? { missingFiles: missingFilesPrompt(asked) } : {}) };
+            const value = { toasts: takeToasts() };
             finished.set(requestId, { identity: print, value });
             if (finished.size > 50) finished.delete(finished.keys().next().value as string);
             return { ok: true, value };
@@ -1484,31 +1497,20 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         },
 
         /**
-         * The answer to a command's `missingFiles` question: rerun that command with exactly those files accepted. Their
-         * rows stay as missing files and nothing is deleted (sync-run.ts). New missing files ask again.
+         * The answer to the view's `missingFiles` question: Continue lets the waiting activation go on with those files accepted
+         * (their rows stay as missing files, nothing is deleted: sync-run.ts); Cancel ends it with nothing stored. The command that
+         * asked answers with its own result.
          */
-        async continueSyncWithoutFiles(input: { requestId: string; ids: string[] }): Promise<NativeHostResult<NativeSyncCommandResult>> {
+        answerSyncMissingFiles(input: { questionId: string; continue: boolean }): NativeHostResult<null> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
             const current = opened.value;
-            if (!isObjectRecord(input) || !isRequestId(input.requestId) || !Array.isArray(input.ids)
-                || input.ids.length > 10_000 || !input.ids.every((id) => isText(id, 200))) {
-                return fail('INVALID_INPUT', 'A request UUID and the question\'s attachment ids are required');
+            if (!isObjectRecord(input) || !isText(input.questionId, 100) || typeof input.continue !== 'boolean') {
+                return fail('INVALID_INPUT', 'The question\'s id and the answer are required');
             }
-            const ids = [...input.ids].sort();
-            const pending = current.missingFiles;
-            const shown = pending ? [...pending.ids].sort() : null;
-            if (!pending || !shown || shown.length !== ids.length || shown.some((id, index) => id !== ids[index])) {
-                return fail('ACTION_FAILED', 'No such question is open; read the screen again');
-            }
-            return runScreenAction(input.requestId, ['continueSyncWithoutFiles', ids], current, async () => {
-                current.acceptMissingIds = new Set(ids);
-                try {
-                    return await pending.rerun();
-                } finally {
-                    current.acceptMissingIds = null;
-                }
-            });
+            if (current.question?.id !== input.questionId) return fail('ACTION_FAILED', 'This question is no longer open; read the screen again');
+            current.question.answer(input.continue);
+            return { ok: true, value: null };
         },
 
         /** The shown panel's Test connection; it stores nothing but the WebDAV capability proof. */
