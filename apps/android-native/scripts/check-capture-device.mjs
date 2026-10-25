@@ -11,7 +11,9 @@
 // recovery snapshot (it parses and holds the tasks the data had before the batch), and store one task per line in one
 // write; (e) an unreadable date command shows core's notice and stores nothing; (f) a failed commit keeps its
 // exact retry, and Try again stores it once; (g) Save & edit on a task with no project opens its editor over Focus, as RN's
-// openTaskScreen does. It touches only the development package (it refuses any other
+// openTaskScreen does; (h) the keyboard's own Done key saves the popup, as Save does (RN's b13f04019), with no line added;
+// (i) More with the keyboard up waits for the keyboard to go, so the field stays on screen above the panel (RN's #1120,
+// d73c7f2c1). It touches only the development package (it refuses any other
 // APK), never launches over another app, clears its debug properties and leaves "Add another" off on exit.
 // Leave the device on its home screen before running. It needs host `bun`.
 // Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
@@ -49,7 +51,8 @@ const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 // The picker's project: one fixed name, created once through the picker, then picked, so runs add no projects.
 const PROJECT = '5600';
-const titles = { a: `53${run}`, b1: `54${run}`, b2: `55${run}`, c: `56${run}`, d1: `57${run}1`, d2: `57${run}2`, e: `58${run}`, f: `59${run}`, g: `56${run}1` };
+const titles = { a: `53${run}`, b1: `54${run}`, b2: `55${run}`, c: `56${run}`, d1: `57${run}1`, d2: `57${run}2`, e: `58${run}`, f: `59${run}`, g: `56${run}1`,
+    h: `56${run}2`, i: `56${run}3` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tapExpecting } = device;
@@ -132,6 +135,21 @@ const pickerField = (nodes) => {
     return nodes.find((node) => node.class === 'android.widget.EditText' && labels.some((label) => label === node || within(label, node)));
 };
 const addAnother = (nodes) => withDescription(nodes, en['quickAdd.addAnother']);
+const keyboardShown = () => /mInputShown=true/.test(sh('dumpsys input_method'));
+/**
+ * The keyboard's own Done key. The field asks for it (imeOptions IME_ACTION_DONE without IME_FLAG_NO_ENTER_ACTION), and the
+ * check's keyboard (Samsung Keyboard, en_US, requireEnglishKeyboard) draws it at the bottom right of its keys: 91% across,
+ * 77% down the keyboard window below its top inset. A miss leaves the popup open, so the step fails rather than passes.
+ */
+const tapKeyboardDone = () => {
+    const ime = sh('dumpsys input_method');
+    const options = [...ime.matchAll(/imeOptions=0x([0-9a-f]+)/g)].map((match) => parseInt(match[1], 16)).filter((value) => value !== 0).pop() ?? 0;
+    if ((options & 0xff) !== 6 || (options & 0x40000000) !== 0) fail(`the capture field does not ask the keyboard for Done (imeOptions 0x${options.toString(16)})`);
+    const window = sh('dumpsys window windows').split(/\n  Window #/).find((part) => part.includes('InputMethod')) ?? fail('no keyboard window');
+    const top = Number(/ frame=\[0,(\d+)\]/.exec(window)?.[1] ?? fail('no keyboard frame')) + Number(/mGivenContentInsets=\[0,(\d+)\]/.exec(window)?.[1] ?? fail('no keyboard insets'));
+    const [width, height] = sh('wm size').match(/(\d+)x(\d+)/).slice(1).map(Number);
+    sh(`input tap ${Math.round(width * 0.913)} ${Math.round(top + (height - top) * 0.772)}`);
+};
 /**
  * The Save pill's fill beside its label (inside its 16dp padding) and the sheet's own color at the same height, read from a
  * screenshot with ImageMagick.
@@ -286,6 +304,29 @@ try {
         (current) => !inEditor(current) && tabSelected(current, en['tab.next']), 'Focus under the editor');
     check(core('', titles.g).stored[titles.g].length === 1, '(g) Save & edit stored the capture once and opened its editor over Focus');
     await tapExpecting(tab(nodes, en['tab.inbox']) ?? fail('no Inbox tab'), onInbox, 'the Inbox again');
+
+    // (h) The keyboard's Done key saves the popup, as Save does: the popup closes and the title is stored once, with no line.
+    await typeCapture(titles.h, titles.h);
+    for (let wait = 0; wait < 15 && !keyboardShown(); wait += 1) await sleep(200);
+    check(keyboardShown(), '(h) the keyboard is up for the typed capture');
+    tapKeyboardDone();
+    await waitFor('the popup to close on the keyboard\'s Done', onInbox, 15_000);
+    check(core('', titles.h).stored[titles.h].length === 1, '(h) the keyboard\'s Done key stored the capture once, its title without a line');
+
+    // (i) More with the keyboard up: the keyboard goes first, then the panel opens with the field still on screen above it.
+    await typeCapture(titles.i, titles.i);
+    for (let wait = 0; wait < 15 && !keyboardShown(); wait += 1) await sleep(200);
+    check(keyboardShown(), '(i) the keyboard is up before More');
+    nodes = await tapExpecting(withDescription(await screen(), en['common.more']) ?? fail('no More'), (current) => Boolean(withDescription(current, projectChip)), 'More open');
+    nodes = await device.settle(nodes);
+    const [screenWidth, screenHeight] = sh('wm size').match(/(\d+)x(\d+)/).slice(1).map(Number);
+    const [, fieldTop, , fieldBottom] = box(tagged(nodes, 'capture-title') ?? fail('no capture field with More open'));
+    const [, chipTop] = box(withDescription(nodes, projectChip));
+    check(!keyboardShown() && fieldTop >= 0 && fieldBottom <= chipTop && fieldBottom <= screenHeight && screenWidth > 0,
+        `(i) More waited for the keyboard: it is down, and the field [${fieldTop},${fieldBottom}] sits on screen above the panel (${chipTop})`);
+    check(title(nodes) === titles.i, '(i) the typed title is kept');
+    await save(onInbox, 'the capture to close the popup');
+    check(core('', titles.i).stored[titles.i].length === 1, '(i) the capture typed before More is stored once');
     console.log('Capture device check passed');
 } catch (error) {
     evidenced(error);
