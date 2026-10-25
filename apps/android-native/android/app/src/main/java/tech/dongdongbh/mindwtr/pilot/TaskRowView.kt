@@ -106,13 +106,13 @@ fun TaskRowItem(
     val canComplete = writable && !busy &&
         (failedAction == null || failedAction == completeAction(task.id, task.taskRevision))
     val canEdit = writable && !busy && failedAction == null
-    // Done keeps its own command (core's completeTask); Restore and Next are RN's status change, with its exact retry.
-    // A list whose contract writes its rows sends that list's own status action instead; a selecting list has no swipe.
+    // Done keeps its own command (core's completeTask) on every list, with RN's Undo toast; Restore and Next are RN's status change,
+    // with its exact retry. A list whose contract writes its rows sends that list's own action for them; a selecting list has no swipe.
     val canMove = writable && !busy && (failedAction == null || failedAction == statusAction(task, target))
     val selecting = actions?.selecting == true
     val listed = actions?.status
-    val swipeOn = !selecting && if (listed != null) canEdit else completable && (if (target == "done") canComplete else canMove)
-    val onSwipe = listed?.let { status -> { status(target) } } ?: { if (target == "done") complete(task.id, task.taskRevision) else changeStatus(task, target) }
+    val swipeOn = !selecting && if (target == "done") completable && canComplete else if (listed != null) canEdit else completable && canMove
+    val onSwipe = if (target == "done") { { complete(task.id, task.taskRevision) } } else listed?.let { status -> { status(target) } } ?: { changeStatus(task, target) }
     val onDelete = actions?.delete?.takeIf { canEdit && !selecting }
     val onTap = { if (selecting) actions?.select?.invoke() else openEditor(task.id) }
     val shape = RoundedCornerShape(theme.rowRadius)
@@ -325,11 +325,12 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                 for (status in MENU_STATUSES) {
                     val colors = theme.status(status)
                     val current = status == task.status
-                    val enabled = writable && !busy && (failedAction == null || failedAction == statusAction(task, status))
+                    val enabled = writable && !busy && (failedAction == null
+                        || failedAction == if (status == "done") completeAction(task.id, task.taskRevision) else statusAction(task, status))
                     Row(
                         Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth(0.42f).clip(RoundedCornerShape(20.dp)).then(if (current) Modifier.background(colors.bg) else Modifier)
                             .border(1.dp, colors.text, RoundedCornerShape(20.dp))
-                            .clickable(enabled = enabled, role = Role.Button) { if (!menu.rowStatus(task, status)) changeStatus(task, status) }
+                            .clickable(enabled = enabled, role = Role.Button) { chooseStatus(task, status) }
                             .semantics { selected = current }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,

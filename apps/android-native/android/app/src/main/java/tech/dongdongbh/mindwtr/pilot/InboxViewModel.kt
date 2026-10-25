@@ -1182,6 +1182,15 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     fun statusAction(task: TaskRow, status: String) =
         withRequestId(FailedAction("update", task.id, base = mapOf("status" to task.status), patch = mapOf("status" to status)), failedAction)
 
+    /**
+     * A status menu choice. Done is core's completeTask with RN's Undo toast on every list (RN's handleStatusChange, cafdac02d);
+     * another status is the list's own action (Contexts, the Review screens) or updateTask.
+     */
+    fun chooseStatus(task: TaskRow, status: String) {
+        if (status == "done" && task.status != "done") { statusMenu = null; complete(task.id, task.taskRevision) }
+        else if (!menu.rowStatus(task, status)) changeStatus(task, status)
+    }
+
     /** RN's status menu: core's updateTask with the status the row was loaded with, so core refuses a stale change. */
     fun changeStatus(task: TaskRow, status: String) {
         statusMenu = null

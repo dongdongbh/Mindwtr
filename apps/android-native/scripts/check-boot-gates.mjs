@@ -786,11 +786,12 @@ for (const [name, text] of Object.entries({ rowUi, model, focusUi, projectsUi, a
 }
 assert.doesNotMatch(code(rowUi), /swipeTarget|archived\.restoreToInbox/);
 assert.match(rowUi, /when \(swipe\.icon\) \{ "restore" -> Lucide\.RotateCcw; "done" -> Lucide\.Check; else -> Lucide\.ArrowRight \}/);
-// A list whose contract writes its rows (Contexts, the Review screens) sends its own status action, with the same enabled rule for swipe and TalkBack.
-// A selecting row has no swipe; a list with core's bulk contract (RowActions without a status) keeps the row's own swipe.
-assert.match(rowUi, /val listed = actions\?\.status\s+val swipeOn = !selecting && if \(listed != null\) canEdit else completable && \(if \(target == "done"\) canComplete else canMove\)/);
+// Done is core's completeTask on every list, with RN's Undo toast (13a review: RN's swipeable-task-item shows it on Review and Contexts
+// too). Another status on a list whose contract writes its rows (Contexts, the Review screens) is that list's own action, with the
+// same enabled rule for swipe and TalkBack. A selecting row has no swipe; a list with core's bulk contract keeps the row's own swipe.
+assert.match(rowUi, /val listed = actions\?\.status\s+val swipeOn = !selecting && if \(target == "done"\) completable && canComplete else if \(listed != null\) canEdit else completable && canMove/);
 assert.match(rowUi, /val canMove = writable && !busy && \(failedAction == null \|\| failedAction == statusAction\(task, target\)\)/);
-assert.match(rowUi, /val onSwipe = listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ if \(target == "done"\) complete\(task\.id, task\.taskRevision\) else changeStatus\(task, target\) \}/);
+assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
 assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete\)/);
 assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
@@ -2503,8 +2504,11 @@ assert.match(listActionsKt, /\.put\("taskRevisions", selected\.getJSONObject\("t
 for (const text of [contextsUi, reviewUi, weeklyUi, dailyUi]) {
     assert.doesNotMatch(code(text), /setTaskStatus\(row\.id, status\)|trashTask\(row\.id\)/, 'a row action sends the row\'s taskRevision');
 }
-// The status menu on a list whose contract writes its rows sends that list's setTaskStatus; elsewhere it keeps updateTask.
-assert.match(rowUi, /\.clickable\(enabled = enabled, role = Role\.Button\) \{ if \(!menu\.rowStatus\(task, status\)\) changeStatus\(task, status\) \}/);
+// The status menu's Done is core's completeTask with RN's Undo toast on every list; another status on a list whose contract writes
+// its rows is that list's setTaskStatus, elsewhere updateTask.
+assert.match(rowUi, /\.clickable\(enabled = enabled, role = Role\.Button\) \{ chooseStatus\(task, status\) \}/);
+assert.match(model, /if \(status == "done" && task\.status != "done"\) \{ statusMenu = null; complete\(task\.id, task\.taskRevision\) \}\s+else if \(!menu\.rowStatus\(task, status\)\) changeStatus\(task, status\)/);
+assert.match(rowUi, /failedAction == if \(status == "done"\) completeAction\(task\.id, task\.taskRevision\) else statusAction\(task, status\)\)/);
 assert.match(menuModel, /private val ROW_KINDS = mapOf\("contexts" to "contextsAction", "review" to "reviewAction", "weekly" to "reviewAction", "daily" to "reviewAction"\)/);
 // The Weekly Review's project Add task creates a task: its exact request (the request UUID core makes the task's id) is on disk first.
 assert.match(menuModel, /private val CREATES = setOf\("somedayTask", "somedaySection", "reviewTask", "calendarCreate", "boardCreate", "focusSave", "manageEditor", "bulkCreate", "mindSweepAdd"\)/);
