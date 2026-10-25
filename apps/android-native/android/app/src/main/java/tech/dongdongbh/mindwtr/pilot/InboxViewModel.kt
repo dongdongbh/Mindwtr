@@ -1905,7 +1905,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** Opens one project's detail at core's first window. */
     fun openProject(id: String) {
-        if (id != openProjectId) projectCompletedCollapsed = true
+        if (id != openProjectId) { projectCompletedCollapsed = true; projectDetails.resetFilters() }
         val mine = ++issued
         perform { runtime ->
             val detail = readProject(runtime, id, null, PAGE)
@@ -1968,11 +1968,28 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         project = detail
     }
 
-    /** RN's Show completed and Completed pile shape the window: core's project view (getProjectDetailView) for both. */
-    private fun projectWindow(runtime: CoreHost, id: String, offset: Int, revision: String): JSONObject =
-        runtime.menuRead("projectDetailView", JSONObject().put("projectId", id).put("offset", offset).put("limit", PAGE)
+    /**
+     * RN's Show completed, Completed pile and task filters shape the window: core's project filter view (getProjectDetailFilterView),
+     * with the filter sheet's tokens while it is open, and [filterEdit] applied to the filters when one is sent.
+     */
+    private fun projectWindow(runtime: CoreHost, id: String, offset: Int, revision: String, filterEdit: JSONObject? = null): JSONObject =
+        runtime.menuRead("projectDetailFilterView", JSONObject().put("projectId", id).put("offset", offset).put("limit", PAGE)
             .apply { if (revision.isNotEmpty()) put("revision", revision) }
-            .put("showCompleted", projectShowCompleted).put("completedCollapsed", projectCompletedCollapsed).toString())
+            .put("showCompleted", projectShowCompleted).put("completedCollapsed", projectCompletedCollapsed)
+            .put("filters", projectDetails.listFilterState).put("filterSheetOpen", projectDetails.listFilterSheet != null)
+            .apply { filterEdit?.let { put("filterEdit", it) } }.toString())
+
+    /** A filter sheet edit: core applies it and answers the first window, whose filters become the project's (RN's TaskList state). */
+    fun editProjectFilters(edit: JSONObject) {
+        val id = openProjectId ?: return
+        menu.whenIdle {
+            background(listOf(Part.Project), { runtime -> ProjectDetail.parse(projectWindow(runtime, id, 0, "", edit)) }) { detail, mine ->
+                if (id != openProjectId || !fresh(mine, Part.Project)) return@background
+                detail.listFilters?.getJSONObject("filters")?.getJSONObject("state")?.let(projectDetails::keepFilters)
+                project = detail
+            }
+        }
+    }
 
     /** RN's Show completed / Hide completed: stored at once, in RN's key; the project reads again. */
     fun showProjectCompleted(on: Boolean) {

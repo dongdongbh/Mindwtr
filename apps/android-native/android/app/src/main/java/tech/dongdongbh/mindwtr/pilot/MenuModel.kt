@@ -157,7 +157,7 @@ private val OWN_READS = setOf("calendar", "board", "settings", "mindSweep")
  * The Menu tab's state, held by InboxViewModel (so rotation keeps it) and saved in the Bundle (so process death keeps the
  * open sheet, screen, History tab, dialog, and RN's session choices). Rows reload from core.
  */
-class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStateHandle, internal val prefs: SharedPreferences, dir: File) {
+class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStateHandle, internal val prefs: SharedPreferences, dir: File) : FilterSheetHost {
     private val store = MenuStore(dir)
     private val main = Handler(Looper.getMainLooper())
 
@@ -198,7 +198,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     /** The bulk action running now (a key of core's `labels.busy`), for the bar's spinner and label. */
     var bulkBusy by mutableStateOf<String?>(null); private set
     /** The filter picker's search: core's tokens or projects matching the typed query, from offset zero, at the list's revision. */
-    var pickerFound by mutableStateOf<JSONObject?>(null); private set
+    override var pickerFound by mutableStateOf<JSONObject?>(null); private set
     /** RN's Settings: its own screens, reads and writes (SettingsModel.kt). */
     val settings = SettingsModel(this, saved)
     /** RN's Mind Sweep (MindSweep.kt): its screen state on disk while it is open. */
@@ -234,7 +234,11 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     val firstPagePending get() = list.let { it != null && it !in OWN_READS } && page == null
 
     /** No command runs and no retry is owed: the lists' controls are enabled. */
-    val idle get() = shell.writable && !shell.busy && shell.failedAction == null
+    override val idle get() = shell.writable && !shell.busy && shell.failedAction == null
+    override val filterRevision: String? get() = page?.revision
+    override fun collection(name: String): List<JSONObject> = page?.collection(name).orEmpty()
+    override fun collectionTotal(name: String): Int = page?.collectionTotal(name) ?: 0
+    override fun closeFilters() = keepDialog(null)
 
     fun own(list: String): JSONObject = session.optJSONObject(list) ?: JSONObject()
 
@@ -700,7 +704,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
     /** The next window of a collection (people, parked projects, tokens, projects, saved searches), as for items. */
-    fun loadCollection(name: String) {
+    override fun loadCollection(name: String) {
         val sheetPage = name == "savedSearches"
         val shown = (if (sheetPage) more else page) ?: return
         val list = if (sheetPage) "more" else list ?: return
@@ -730,7 +734,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
      * A filter control's exact edit, as core put it on the control, read at once with the screen's filters. Clear (or a
      * text chip's removal) also resets the sheet's typed text, so its fields show core's values again.
      */
-    fun filterEdit(edit: JSONObject) {
+    override fun filterEdit(edit: JSONObject) {
         val type = edit.optString("type")
         dialog?.takeIf { it.optString("kind") == "filters" }?.let { open ->
             if (type == "clear" || type == "setSearch" || type == "setLocation") {
@@ -749,7 +753,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
      * Typed filter text (RN's search and location fields): kept with the sheet as typed, then core's setSearch or
      * setLocation with it once typing pauses. Only typed text builds an edit here; every choice sends core's own.
      */
-    fun typeFilter(type: String, text: String) {
+    override fun typeFilter(type: String, text: String) {
         dialog?.let { keepDialog(JSONObject(it.toString()).put("typed:$type", text)) }
         if (list == "archive" && type == "setSearch") editOwn("archive") { put("search", text) }
         val mine = ++filterTyped
@@ -763,13 +767,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     internal fun whenIdle(read: () -> Unit) { if (shell.busy) main.postDelayed({ whenIdle(read) }, 200) else read() }
 
     /** A header chip's removal: its filter edit, or Reference's archived-projects switch turned off (core's chip action). */
-    fun removeChip(action: JSONObject) {
+    override fun removeChip(action: JSONObject) {
         action.optJSONObject("filterEdit")?.let { filterEdit(it); return }
         archivedProjects(false)
     }
 
     /** Reference's filter sheet switch. */
-    fun archivedProjects(on: Boolean) { editOwn("reference") { put("includeArchivedProjects", on) }; reload() }
+    override fun archivedProjects(on: Boolean) { editOwn("reference") { put("includeArchivedProjects", on) }; reload() }
 
     /** Someday's sort and grouping (RN's session choices), and Reference's and Done's grouping. */
     fun group(value: String) {
@@ -895,13 +899,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
     /** A sub-page of the open dialog (null: its first page): the overflow menu's Sort or Group panel, or the filter sheet's picker (its search starts empty). */
-    fun dialogPage(page: String?) {
+    override fun dialogPage(page: String?) {
         pickerFound = null
         dialog?.let { keepDialog(JSONObject(it.toString()).apply { remove("query"); if (page == null) remove("page") else put("page", page) }) }
     }
 
     /** The filter picker's search box: kept with the sheet as typed, then core's matching tokens or projects once typing pauses. */
-    fun pickerQuery(name: String, text: String) {
+    override fun pickerQuery(name: String, text: String) {
         dialog?.let { keepDialog(JSONObject(it.toString()).put("query", text)) }
         val mine = ++filterTyped
         main.postDelayed({ if (mine == filterTyped) searchPicker(name, text) }, 200)
@@ -912,7 +916,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
      * one window deeper); a blank query shows the list's own. A list that changed meanwhile keeps the last results: the sheet asks
      * again for its new revision.
      */
-    fun searchPicker(name: String, query: String, depth: Int = WINDOW) {
+    override fun searchPicker(name: String, query: String, depth: Int) {
         val shown = page ?: return
         val list = list ?: return
         if (query.isBlank()) { pickerFound = null; return }
@@ -940,7 +944,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
     /** The filter sheet's disclosure rows (time estimate, energy, more filters) that are open. */
-    fun toggleDisclosure(id: String) {
+    override fun toggleDisclosure(id: String) {
         val open = dialog ?: return
         keepDialog(JSONObject(open.toString()).put(id, !open.optBoolean(id)))
     }

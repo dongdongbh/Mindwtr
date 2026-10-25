@@ -194,6 +194,28 @@ try {
     await pickSort(en['sort.default']);
     nodes = await waitFor('the "..." plain again', (current) => { const options = tagged(current, 'project-task-view-options-button'); return Boolean(options) && !isOn(options); }, 15_000);
     check(true, '(c) Default again clears it');
+    // b4b: Filters is the view options' first row. Its sheet narrows the project to core's @computer tasks, the pinned row then shows
+    // core's "Filters · 1" chip, and the sheet's Clear removes it.
+    nodes = await openView();
+    const filterRow = tagged(nodes, 'project-view-filter-option');
+    check(Boolean(filterRow) && centerY(filterRow) < centerY(tagged(nodes, 'project-view-sort-option')), '(c) Filters comes first in the view options');
+    // The shared FilterSheet's rows merge into one description each (as check-toolbars-device reads the Inbox's).
+    const sheetUp = (current) => Boolean(withDescription(current, en['filters.label'])) && hasText(current, en['filters.label']);
+    nodes = await tapExpecting(filterRow, sheetUp, 'the filter sheet');
+    shot('project-filters');
+    const pickerSearch = `${en['common.search']} ${en['filters.contexts']}`;
+    nodes = await tapExpecting(withDescription(nodes, `${en['filters.contexts']}: ${en['common.all']}`) ?? fail('no Contexts & tags row'),
+        (current) => Boolean(withDescription(current, pickerSearch)) && Boolean(withDescription(current, '@computer')), 'the contexts page');
+    await tapExpecting(withDescription(nodes, '@computer'), (current) => isOn(withDescription(current, '@computer'))
+        || current.some((node) => node.text === en['bulk.selected']), '@computer chosen');
+    nodes = await tapExpecting(button(await screen(), en['common.back']) ?? fail('no Back on the contexts page'),
+        (current) => Boolean(withDescription(current, `${en['filters.contexts']}: @computer`)), 'the sheet overview');
+    nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => Boolean(tagged(current, 'project-task-filter-button')), 'the filter chip');
+    check(tagged(nodes, 'project-task-filter-button')?.['content-desc'] === `${en['filters.label']} · 1`, '(c) the pinned row shows core\'s "Filters · 1"');
+    nodes = await tapExpecting(tagged(nodes, 'project-task-filter-button'), sheetUp, 'the filter sheet again');
+    nodes = await tapExpecting(button(nodes, en['filters.clear']) ?? fail('no Clear'), (current) => !button(current, en['filters.clear']), 'the filters cleared');
+    nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => !sheetUp(current) && !tagged(current, 'project-task-filter-button'), 'the chip gone');
+    check(true, '(c) Clear removes the filter and its chip');
     // The pinned "+" (RN's openProjectQuickAdd): the popup opens with Getting Started chosen, and the task saves as Next in it.
     nodes = await tapExpecting(tagged(nodes, 'project-add-task-button') ?? fail('no project "+"'),
         (current) => Boolean(tagged(current, 'quick-capture')) && hasText(current, STARTER_TITLE), 'the capture popup with Getting Started chosen', 15_000);

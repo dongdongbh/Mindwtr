@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class ProjectRow(
@@ -127,12 +128,14 @@ private val CUE_KEYS = mapOf("available" to "projects.availableNextAction", "lat
  * [metadata] for the project's Details (getProjectDetailsPresentation: the summary and every value's label).
  */
 data class ProjectDetail(val revision: String, val projectId: String, val readOnly: Boolean, val total: Int, val items: List<DetailItem>,
-                         val metadata: JSONObject? = null, val gettingStarted: JSONObject? = null, val controls: JSONObject? = null) {
+                         val metadata: JSONObject? = null, val gettingStarted: JSONObject? = null, val controls: JSONObject? = null,
+                         /** Core's filter view parts of the first window: `filters`, `chips`, `filterButtonLabel`, `empty` (the filter sheet's view). */
+                         val listFilters: JSONObject? = null) {
     /** Adds one later window after the items already loaded. */
     fun append(window: JSONObject): ProjectDetail {
         val next = parse(window)
         check(next.revision == revision && next.projectId == projectId) { "Unexpected project window" }
-        return next.copy(items = items + next.items)
+        return next.copy(items = items + next.items, listFilters = listFilters ?: next.listFilters)
     }
 
     companion object {
@@ -142,6 +145,8 @@ data class ProjectDetail(val revision: String, val projectId: String, val readOn
             return ProjectDetail(json.getString("revision"), json.getString("projectId"), json.getBoolean("readOnly"),
                 json.getInt("total"), metadata = json.optJSONObject("metadata"), gettingStarted = json.optJSONObject("gettingStarted"),
                 controls = json.optJSONObject("controls"),
+                listFilters = json.optJSONObject("filters")?.let { filters -> JSONObject().put("filters", filters).put("chips", json.optJSONArray("chips") ?: JSONArray())
+                    .put("filterButtonLabel", json.optString("filterButtonLabel")).put("empty", json.opt("empty") ?: JSONObject.NULL) },
                 items = List(items.length()) { index ->
                     items.getJSONObject(index).let { item ->
                         if (item.getString("type") == "section") {
@@ -409,6 +414,20 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         // takes none).
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            // RN's filter chip before the "..." while any filter is on: core's "Filters · N", opening the sheet.
+            detail?.listFilters?.let { view ->
+                if (view.getJSONObject("filters").optInt("activeCount") > 0) {
+                    val label = view.getString("filterButtonLabel")
+                    val chipShape = RoundedCornerShape(12.dp)
+                    Row(Modifier.heightIn(min = 44.dp).clip(chipShape).background(c.tint.copy(alpha = 0x20 / 255f)).border(1.dp, c.tint, chipShape)
+                        .clickable(enabled = writable && failedAction == null, role = Role.Button) { projectDetails.openFilters() }
+                        .semantics { contentDescription = label; selected = true }.testTag("project-task-filter-button").padding(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Ionicons.FilterOutline, null, tint = c.tint, modifier = Modifier.size(18.dp))
+                        Text(label, style = rnText(13, 700), color = c.tint)
+                    }
+                }
+            }
             // RN's view options "..." (More options): washed in the tint while the project's sort or Show completed is on.
             LaunchedEffect(openProjectId) { projectDetails.readSort() }
             val optionsLabel = t("taskEdit.moreOptions")
@@ -462,6 +481,15 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 is DetailTask -> item(key = "task:${entry.row.id}") {
                     TaskRowItem(model, entry.row, status = RowStatus.Badge, completable = completable,
                         note = entry.sequenceCue?.let(CUE_KEYS::get)?.let(::t), available = entry.sequenceCue == "available")
+                }
+            }
+            // RN's ListEmptyState: core's words when the filters match nothing (with Clear), or the plain empty list.
+            detail?.listFilters?.optJSONObject("empty")?.takeIf { detail.items.none { it is DetailTask } }?.let { empty ->
+                item(key = "empty") {
+                    val clear = empty.optJSONObject("action")?.optJSONObject("filterEdit")
+                    EmptyState(empty.getString("message"), empty.optString("hint").ifEmpty { null }, empty.menuText("actionLabel")) {
+                        clear?.let(projectDetails::filterEdit)
+                    }
                 }
             }
             if (detail != null && detail.items.size < detail.total) item(key = "more") {

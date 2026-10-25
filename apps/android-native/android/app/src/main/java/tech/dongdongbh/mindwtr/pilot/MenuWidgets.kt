@@ -486,7 +486,7 @@ fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
     val controls = if (list == "inbox") view?.optJSONObject("toolbar") else view
     when (open.optString("kind")) {
         "overflow" -> view?.let { OverflowFor(model, it, open) }
-        "filters" -> view?.let { FilterSheet(model, it, open) }
+        "filters" -> view?.let { FilterSheet(model.menu, it, open) }
         "sort" -> controls?.getJSONObject("sort")?.let { modal ->
             ChoiceModal(model, modal.getString("title"), modal.menuObjects("options").map { option ->
                 Choice(option.getString("label"), option.getBoolean("selected")) { sort(option.optJSONObject("edit")?.getString("sortBy") ?: option.getString("value")) }
@@ -581,20 +581,46 @@ private fun OverflowFor(model: InboxViewModel, view: JSONObject, open: JSONObjec
  * disclosure folded as RN starts it. Every chip and row sends the exact edit core put on it; typed text sends core's
  * setSearch or setLocation once typing pauses. Done closes it.
  */
+/**
+ * What RN's filter sheet reads and sends, for whichever list it filters: a Menu list (MenuModel) or an open project
+ * (ProjectDetailsModel). Every name is the Menu's own; the sheet draws core's filter view the same way for both.
+ */
+interface FilterSheetHost {
+    val idle: Boolean
+    /** The revision of the view the sheet shows: picker results for another revision are not shown. */
+    val filterRevision: String?
+    /** The picker search's results (`{ name, query, revision, total, items }`), or null. */
+    val pickerFound: JSONObject?
+    fun collection(name: String): List<JSONObject>
+    fun collectionTotal(name: String): Int
+    fun filterEdit(edit: JSONObject)
+    fun removeChip(action: JSONObject)
+    fun typeFilter(type: String, text: String)
+    fun toggleDisclosure(id: String)
+    fun dialogPage(page: String?)
+    fun closeFilters()
+    fun pickerQuery(name: String, text: String)
+    /** [depth]: how many results to read; core windows them by 100 (NATIVE_HOST_MAX_WINDOW). */
+    fun searchPicker(name: String, query: String, depth: Int = 100)
+    fun loadCollection(name: String)
+    /** Reference's archived-projects switch; a list without one never shows it. */
+    fun archivedProjects(on: Boolean) {}
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FilterSheet(model: InboxViewModel, view: JSONObject, open: JSONObject) = with(model.menu) {
+internal fun FilterSheet(host: FilterSheetHost, view: JSONObject, open: JSONObject) = with(host) {
     val theme = LocalTheme.current
     val c = theme.colors
     val filters = view.getJSONObject("filters")
     val state = filters.getJSONObject("state")
     val visibility = filters.getJSONObject("visibility")
-    val shown = page ?: return
+    val revision = filterRevision ?: return
     val picker = open.menuText("page")
     val all = t("common.all")
     val excluded = t("filters.excluded")
     val close = t("common.close")
-    Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { keepDialog(null) }.semantics { contentDescription = close }) {
+    Box(Modifier.fillMaxSize().background(theme.scrim).clickable(role = Role.Button) { closeFilters() }.semantics { contentDescription = close }) {
         val shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
         val tall = (LocalConfiguration.current.screenHeightDp * 0.82f).dp
         Column(Modifier.align(Alignment.BottomCenter).imePadding().fillMaxWidth().then(if (picker != null) Modifier.height(tall) else Modifier.heightIn(max = tall))
@@ -616,12 +642,12 @@ private fun FilterSheet(model: InboxViewModel, view: JSONObject, open: JSONObjec
                 // RN's picker search: core's matching options (the query from offset zero), read again whenever the list changes,
                 // since a tap changes the options' states.
                 val query = open.optString("query")
-                val found = pickerFound?.takeIf { it.getString("name") == name && it.getString("query") == query && it.getString("revision") == shown.revision }
-                LaunchedEffect(shown.revision, name) { if (query.isNotBlank()) searchPicker(name, query, pickerFound?.optJSONArray("items")?.length() ?: 0) }
+                val found = pickerFound?.takeIf { it.getString("name") == name && it.getString("query") == query && it.getString("revision") == revision }
+                LaunchedEffect(revision, name) { if (query.isNotBlank()) searchPicker(name, query, pickerFound?.optJSONArray("items")?.length() ?: 0) }
                 Box(Modifier.padding(bottom = 10.dp)) {
                     SheetField(query, t("common.search"), "${t("common.search")} ${t(if (name == "tokens") "filters.contexts" else "filters.projects")}") { pickerQuery(name, it) }
                 }
-                val options = if (query.isBlank()) shown.collection(name) else found?.menuObjects("items").orEmpty()
+                val options = if (query.isBlank()) collection(name) else found?.menuObjects("items").orEmpty()
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                     if (options.isEmpty() && (query.isBlank() || found != null)) Text(t("search.noResults"), style = rnText(14, 400), color = c.secondaryText, textAlign = TextAlign.Center,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp))
@@ -638,7 +664,7 @@ private fun FilterSheet(model: InboxViewModel, view: JSONObject, open: JSONObjec
                             if (on || out) Text(if (out) excluded else t("bulk.selected"), style = rnText(12, 600), color = if (out) c.danger else c.tint)
                         }
                     }
-                    if (query.isBlank() && options.size < shown.collectionTotal(name)) Box(Modifier.padding(vertical = 8.dp)) { MoreChip(idle) { loadCollection(name) } }
+                    if (query.isBlank() && options.size < collectionTotal(name)) Box(Modifier.padding(vertical = 8.dp)) { MoreChip(idle) { loadCollection(name) } }
                     if (found != null && options.size < found.getInt("total")) Box(Modifier.padding(vertical = 8.dp)) { MoreChip(idle) { searchPicker(name, query, options.size + 100) } }
                     // RN's footer: Any or All for two or more chosen contexts (or tags), core's edits.
                     if (name == "tokens") Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -681,12 +707,12 @@ private fun FilterSheet(model: InboxViewModel, view: JSONObject, open: JSONObjec
                             Disclosure(dates.getString("label"), dates.menuObjects("options"), all, open.optBoolean("taskDates"), idle,
                                 { toggleDisclosure("taskDates") }) { filterEdit(it) }
                         }
-                        val tokens = shown.collection("tokens")
-                        if (tokens.isNotEmpty() || shown.collectionTotal("tokens") > 0) {
+                        val tokens = collection("tokens")
+                        if (tokens.isNotEmpty() || collectionTotal("tokens") > 0) {
                             val picked = state.optJSONArray("tokens").strings() + state.optJSONArray("excludedTokens").strings().map { "$excluded: $it" }
                             OverviewRow(t("filters.contexts"), picked.joinToString(", ").ifEmpty { all }, all, null) { dialogPage("tokens") }
                         }
-                        val projects = shown.collection("projects")
+                        val projects = collection("projects")
                         if (projects.isNotEmpty()) {
                             val chosen = projects.chosenLabels().joinToString(", ")
                             OverviewRow(t("filters.projects"), chosen.ifEmpty { all }, all, null) { dialogPage("projects") }
@@ -721,7 +747,7 @@ private fun FilterSheet(model: InboxViewModel, view: JSONObject, open: JSONObjec
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
                 Text(t("common.done"), style = rnText(14, 700), color = c.tint, modifier = Modifier.heightIn(min = 44.dp)
-                    .clickable(role = Role.Button) { keepDialog(null) }.padding(horizontal = 10.dp, vertical = 12.dp))
+                    .clickable(role = Role.Button) { closeFilters() }.padding(horizontal = 10.dp, vertical = 12.dp))
             }
         }
     }

@@ -2070,8 +2070,9 @@ assert.match(labelCalls, /contract\.getStrings\(\{ keys: JSON\.parse\(keysJson\)
 assert.doesNotMatch(labelCalls, /requireSaved/);
 assert.equal(model.match(/runtime\.projects\(\)/g).length, 2, 'read() after boot and commands, and the resume refresh');
 // The open project reads core's project view (RN's Show completed and Completed pile, O2f-parity b4a): the first window and the next.
-assert.equal(model.match(/projectWindow\(runtime, /g).length, 2, 'the first window and the next');
-assert.match(model, /runtime\.menuRead\("projectDetailView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)/);
+// b4b: core's filter view, with the project's filters and the sheet's tokens while it is open; a filter edit reads the first window.
+assert.equal(model.match(/projectWindow\(runtime, /g).length, 3, 'the first window, the next, and a filter edit\'s first window');
+assert.match(model, /runtime\.menuRead\("projectDetailFilterView", JSONObject\(\)\.put\("projectId", id\)[\s\S]{0,200}\.put\("showCompleted", projectShowCompleted\)\.put\("completedCollapsed", projectCompletedCollapsed\)\s+\.put\("filters", projectDetails\.listFilterState\)\.put\("filterSheetOpen", projectDetails\.listFilterSheet != null\)/);
 assert.match(source('ViewState.kt'), /const val PROJECT_SHOW_COMPLETED_KEY = "mindwtr:view:project-detail:show-completed:v1"/);
 assert.match(model, /prefs\.edit\(\)\.putString\(PROJECT_SHOW_COMPLETED_KEY, on\.toString\(\)\)\.apply\(\)/);
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.projects\(\)|projectDetail\(/g), null);
@@ -2730,7 +2731,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(archiveUi, /DayPickerDialog\(open\.getString\("day"\), [^\n]*\) \{ pickCompletedDay\(it\) \}/, 'the date dialog starts on core\'s day');
     assert.match(archiveUi, /val \(hour, minute\) = pickerClock\(open\.getString\("time"\)\)/, 'the time dialog starts on core\'s time');
     // Picker search (menu lists, the Inbox, Archive): core's matches for the typed query, read again when the list changes.
-    assert.match(menuUi, /LaunchedEffect\(shown\.revision, name\) \{ if \(query\.isNotBlank\(\)\) searchPicker\(name, query,/);
+    // The sheet reads its host's revision (FilterSheetHost: the Menu list's page, or an open project's view, O2f-parity b4b).
+    assert.match(menuUi, /LaunchedEffect\(revision, name\) \{ if \(query\.isNotBlank\(\)\) searchPicker\(name, query,/);
     assert.match(menuUi, /for \(mode in filters\.menuObjects\("matchModes"\)\) MatchModeRow\(mode\.getString\("label"\), mode\.menuObjects\("options"\), idle\) \{ filterEdit\(it\) \}/);
     // Focus: every read sends the control state (asserted with the Focus bridge above); core's answer becomes the state; the state,
     // the open sheet and reorder mode ride the Bundle; reorder mode ends once core no longer offers it.
@@ -9747,5 +9749,17 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /"project-view-sort-option"[\s\S]{0,600}"project-view-completed-option"/);
     assert.match(details, /edit\(projectId, "sort", answer = \{ readSort\(\) \}\) \{ put\("sortBy", sortBy\) \}/);
     assert.match(hostEntry, /projectTaskSortOptions: \(input\) => contract\.getProjectTaskSortOptions\(input\)/);
+}
+// Pass O2f-parity b4b: the project's task filters drive the Menu's own filter sheet through FilterSheetHost; core's project
+// filter view and token picker answer them, a project starts with none, and core's "Filters · N" chip opens the sheet.
+{
+    const details = source('ProjectDetails.kt'), header = source('ProjectsScreen.kt'), menuModelKt = source('MenuModel.kt');
+    assert.match(details, /class ProjectDetailsModel\(private val shell: InboxViewModel\) : FilterSheetHost \{/);
+    assert.match(menuModelKt, /class MenuModel\([^)]*\) : FilterSheetHost \{/);
+    assert.match(details, /FilterSheet\(this, view, open\)/);
+    assert.match(details, /runtime\.menuRead\("projectDetailFilterOptions", /);
+    assert.match(details, /fun resetFilters\(\) \{ listFilterState = JSONObject\(\); listFilterSheet = null;/);
+    assert.match(header, /testTag\("project-task-filter-button"\)/);
+    assert.match(details, /"project-view-filter-option"[\s\S]{0,800}"project-view-sort-option"/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

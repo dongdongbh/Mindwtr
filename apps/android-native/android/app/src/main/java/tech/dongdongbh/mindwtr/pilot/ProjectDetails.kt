@@ -109,7 +109,7 @@ data class SectionDraft(val sectionId: String?, val title: String)
  * RN's Project details (ProjectDetailModal's Details panel and its pickers) on core's project contracts: what it reads to draw
  * the raw values core's labels leave out (the status, the type and scope, the notes' text), and every write.
  */
-class ProjectDetailsModel(private val shell: InboxViewModel) {
+class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     /** The project these details are for; a new project starts with everything folded and shut, as RN's. */
     var projectId by mutableStateOf<String?>(null); private set
     var open by mutableStateOf(false)
@@ -142,6 +142,124 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     /** RN's header "..." sheet (projectActionsVisible), and the confirm Cancel project or Delete asks first. */
     var actionsOpen by mutableStateOf(false)
     var actionConfirm by mutableStateOf<String?>(null)
+    // ---- RN's project task filters (TaskList's filter sheet), on core's project filter view ----
+
+    /** The filters the open project's list is read with: core's ListFilterState, as its view sent it back; empty for each project. */
+    var listFilterState by mutableStateOf(JSONObject()); private set
+    /** The open filter sheet (`{ kind, page?, query?, typed:<edit>?, <disclosure>? }`, the Menu's dialog shape), or null. */
+    var listFilterSheet by mutableStateOf<JSONObject?>(null); private set
+    /** Token windows read past the view's first one (the sheet's More), at the view's revision. */
+    private var tokenPages by mutableStateOf<Pair<String, List<JSONObject>>?>(null)
+    override var pickerFound by mutableStateOf<JSONObject?>(null); private set
+    private var filterTyped = 0
+
+    fun keepFilters(state: JSONObject) { listFilterState = state }
+
+    override val idle: Boolean get() = shell.writable && !shell.busy && shell.failedAction == null
+    override val filterRevision: String? get() = shell.project?.revision
+    private val listFilters: JSONObject? get() = shell.project?.listFilters
+
+    override fun collection(name: String): List<JSONObject> {
+        if (name != "tokens") return emptyList()
+        tokenPages?.takeIf { it.first == filterRevision }?.let { return it.second }
+        return listFilters?.getJSONObject("filters")?.optJSONObject("tokens")?.menuObjects("items").orEmpty()
+    }
+
+    override fun collectionTotal(name: String): Int =
+        if (name == "tokens") listFilters?.getJSONObject("filters")?.optJSONObject("tokens")?.optInt("total") ?: 0 else 0
+
+    /** RN's Filters (the view options row, or the pinned row's chip): the sheet opens and the list is read with its tokens. */
+    fun openFilters() {
+        viewOptionsOpen = false
+        listFilterSheet = JSONObject().put("kind", "filters")
+        shell.refreshProjects()
+    }
+
+    override fun closeFilters() {
+        listFilterSheet = null
+        tokenPages = null
+        pickerFound = null
+    }
+
+    override fun filterEdit(edit: JSONObject) {
+        val type = edit.optString("type")
+        if (type == "clear" || type == "setSearch" || type == "setLocation") {
+            listFilterSheet?.let { listFilterSheet = JSONObject(it.toString()).apply { remove("typed:setSearch"); remove("typed:setLocation") } }
+        }
+        shell.editProjectFilters(edit)
+    }
+
+    override fun removeChip(action: JSONObject) { action.optJSONObject("filterEdit")?.let(::filterEdit) }
+
+    /** Typed search or location text: kept with the sheet as typed, then core's edit once typing pauses (the Menu's 200 ms). */
+    override fun typeFilter(type: String, text: String) {
+        listFilterSheet?.let { listFilterSheet = JSONObject(it.toString()).put("typed:$type", text) }
+        val mine = ++filterTyped
+        main.postDelayed({ if (mine == filterTyped) shell.editProjectFilters(JSONObject().put("type", type).put("value", text)) }, 200)
+    }
+
+    override fun toggleDisclosure(id: String) {
+        val open = listFilterSheet ?: return
+        listFilterSheet = JSONObject(open.toString()).put(id, !open.optBoolean(id))
+    }
+
+    override fun dialogPage(page: String?) {
+        pickerFound = null
+        listFilterSheet?.let { listFilterSheet = JSONObject(it.toString()).apply { remove("query"); if (page == null) remove("page") else put("page", page) } }
+    }
+
+    override fun pickerQuery(name: String, text: String) {
+        listFilterSheet?.let { listFilterSheet = JSONObject(it.toString()).put("query", text) }
+        val mine = ++filterTyped
+        main.postDelayed({ if (mine == filterTyped) searchPicker(name, text) }, 200)
+    }
+
+    /** Core's project tokens (getProjectDetailFilterOptions) for [query] from offset zero, to [depth]: the picker's search. */
+    override fun searchPicker(name: String, query: String, depth: Int) {
+        val revision = filterRevision ?: return
+        if (name != "tokens" || query.isBlank()) { pickerFound = null; return }
+        val read = tokenRead(query) ?: return
+        shell.background(emptyList(), { runtime -> collectTokens(runtime, read, 0, depth) }) { (total, items), _ ->
+            if (filterRevision == revision && listFilterSheet?.optString("query") == query) {
+                pickerFound = JSONObject().put("name", name).put("query", query).put("revision", revision).put("total", total).put("items", JSONArray(items))
+            }
+        }
+    }
+
+    /** The sheet's More under the tokens: the next window of the project's tokens at the view's revision. */
+    override fun loadCollection(name: String) {
+        val revision = filterRevision ?: return
+        if (name != "tokens") return
+        val have = collection("tokens")
+        val read = tokenRead("") ?: return
+        shell.background(emptyList(), { runtime -> collectTokens(runtime, read, have.size, have.size + 100) }) { (_, items), _ ->
+            if (filterRevision == revision) tokenPages = revision to (have + items)
+        }
+    }
+
+    /** The options read's fixed part for [query]: this project, its view controls and filters. */
+    private fun tokenRead(query: String): JSONObject? {
+        val id = projectId ?: return null
+        return input(id).put("showCompleted", shell.projectShowCompleted).put("completedCollapsed", shell.projectCompletedCollapsed)
+            .put("filters", listFilterState).put("picker", "tokens").put("query", query)
+    }
+
+    /** Windows of core's matching tokens from [offset] until [depth] or the end, at one revision. */
+    private fun collectTokens(runtime: CoreHost, read: JSONObject, offset: Int, depth: Int): Pair<Int, List<JSONObject>> {
+        val items = ArrayList<JSONObject>()
+        var revision: String? = null
+        var total: Int
+        do {
+            val window = runtime.menuRead("projectDetailFilterOptions", JSONObject(read.toString()).put("offset", offset + items.size).put("limit", 100)
+                .apply { revision?.let { put("revision", it) } }.toString())
+            revision = window.getString("revision")
+            total = window.getInt("total")
+            val next = window.menuObjects("items")
+            items += next
+        } while (next.isNotEmpty() && offset + items.size < minOf(depth, total))
+        return total to items
+    }
+
     /** RN's view options sheet (the pinned row's "..."), and its sort modal on core's sort choices for this project. */
     var viewOptionsOpen by mutableStateOf(false)
     var sortOpen by mutableStateOf(false)
@@ -187,7 +305,11 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         sections = null; sectionDraft = null; sectionDelete = null; help = null; actionsOpen = false; actionConfirm = null
         convertRow = null; convert = null; convertConfirm = false
         viewOptionsOpen = false; sortOpen = false; sort = null
+        resetFilters()
     }
+
+    /** RN's TaskList starts each project with no filters and its sheet shut. */
+    fun resetFilters() { listFilterState = JSONObject(); listFilterSheet = null; tokenPages = null; pickerFound = null }
 
     private fun input(id: String) = JSONObject().put("projectId", id)
 
@@ -1002,6 +1124,13 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
     sections?.let { options -> SectionManager(model, options) }
     if (actionsOpen) ProjectActionsSheet(model)
     if (viewOptionsOpen) ViewOptionsSheet(model)
+    // RN's TaskList filter sheet on the project's filter view; Back leaves a picker page first.
+    listFilterSheet?.let { open ->
+        model.project?.listFilters?.let { view ->
+            BackHandler { if (open.has("page")) dialogPage(null) else closeFilters() }
+            FilterSheet(this, view, open)
+        }
+    }
     if (sortOpen) sort?.let { options ->
         BackHandler { sortOpen = false }
         ChoiceModal(model, options.getString("label"), options.menuObjects("choices").map { choice ->
@@ -1128,8 +1257,8 @@ private fun ConvertButton(label: String, enabled: Boolean, tag: String? = null, 
 }
 
 /**
- * RN's view options sheet (ProjectOptionsModal titled More options): Sort with the current choice (off on a filed project, with
- * RN's Reactivate hint), and Show completed / Hide completed (not on a filed project).
+ * RN's view options sheet (ProjectOptionsModal titled More options): Filters with the active count, Sort with the current choice
+ * (off on a filed project, with RN's Reactivate hint), and Show completed / Hide completed (not on a filed project).
  */
 @Composable
 private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails) {
@@ -1148,6 +1277,12 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
             }
             val listShape = RoundedCornerShape(10.dp)
             Column(Modifier.fillMaxWidth().clip(listShape).border(1.dp, c.border, listShape)) {
+                // RN's Filters row first: the active count as its value, washed while any filter is on.
+                model.project?.listFilters?.getJSONObject("filters")?.let { filters ->
+                    val active = filters.optInt("activeCount")
+                    ProjectOptionRow(Ionicons.FilterOutline, t("filters.label"), "project-view-filter-option", idle,
+                        value = active.takeIf { it > 0 }?.toString(), selected = active > 0) { openFilters() }
+                }
                 sort?.let { options ->
                     val current = options.menuObjects("choices").firstOrNull { it.getBoolean("selected") }?.getString("label")
                     ProjectOptionRow(Ionicons.SwapVerticalOutline, options.getString("label"), "project-view-sort-option", idle && !archived,
