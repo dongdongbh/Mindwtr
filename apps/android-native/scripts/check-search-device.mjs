@@ -9,7 +9,8 @@
 // clears it again; (c) the result opens the editor and Close returns to the search; (d) Mark
 // Done stores `done` once and core's hidden-matches line shows; (e) Save Search stores one
 // saved search for a fixed query (a second run finds it and adds none); (f) Back returns to
-// the Inbox. It touches only the development package (it refuses any other APK), never
+// the Inbox; (g) a project hit opens that project (RN's 006c4babf): a live project with a digits-only title (the capture check's
+// 5600 when it is there) is searched, its Project row tapped, and its screen shows its title. It touches only the development package (it refuses any other APK), never
 // launches over another app, restores rotation and clears its debug properties on exit.
 // Leave the device on its home screen before running. It needs host `bun`.
 // Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
@@ -17,7 +18,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { box, button, chipOn, check, connect, draftText, evidenced, fail, field, inEditor, inboxCount, isOn, Stopped, tagged, withDescription } from './device.mjs';
+import { box, button, chipOn, check, connect, draftText, evidenced, fail, field, inEditor, inboxCount, isOn, Stopped, tab, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -90,6 +91,15 @@ const core = (query, filters = {}) => JSON.parse(execFileSync('bun', ['-e', `
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase(), CHECK_QUERY: query, CHECK_FILTERS: JSON.stringify(filters),
     CHECK_TITLE: title, CHECK_SAVED: SAVED_QUERY } }).trim().split('\n').pop());
+
+/** A live, unarchived project whose title is digits only (the keyboard guard types digits), the capture check's 5600 first. */
+const digitProject = () => JSON.parse(execFileSync('bun', ['-e', `
+    import { Database } from 'bun:sqlite';
+    const db = new Database(process.env.CHECK_DB);
+    const rows = db.query("SELECT title FROM projects WHERE deletedAt IS NULL AND status != 'archived'").all().map((row) => row.title)
+        .filter((title) => /^[0-9]{3,12}$/.test(title));
+    console.log(JSON.stringify(rows.includes('5600') ? '5600' : rows.sort()[0] ?? null));
+`], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase() } }).trim().split('\n').pop());
 
 // ---- UI (core's English) ----
 const inbox = () => waitFor('the Inbox', (nodes) => !inEditor(nodes) && !tagged(nodes, 'global-search') && Number.isFinite(inboxCount(nodes)), 60_000);
@@ -221,6 +231,23 @@ try {
     sh('input keyevent KEYCODE_BACK');
     await inbox();
     check(true, '(f) Back returns to the Inbox');
+
+    // (g) A project hit opens that project: its Project row (a search-result whose subtitle is core's "Project") is tapped.
+    const projectTitle = digitProject() ?? fail('no live project with a digits-only title: run check-capture-device first (it creates 5600)');
+    nodes = await tapExpecting(withDescription(await screen(), en['search.title']) ?? fail('no Search button in the header'), inSearch, 'the search screen');
+    await typeQuery(projectTitle);
+    const projectHit = (current) => current.find((node, index) => (node['resource-id'] ?? '').endsWith('search-result')
+        && (node['content-desc'] || node.text) === projectTitle && current[index + 1]?.text === en['search.resultProject']);
+    nodes = await waitFor(`the project hit ${projectTitle}`, (current) => Boolean(projectHit(current)), 20_000);
+    const opened = (current) => tagged(current, 'project-title-input')?.text === projectTitle && !tagged(current, 'global-search');
+    nodes = await tapExpecting(projectHit(nodes), opened, `the project ${projectTitle}`);
+    check(true, `(g) the project hit ${projectTitle} opened that project's screen`);
+    requireAppFront();
+    sh('input keyevent KEYCODE_BACK');
+    await waitFor('the project screen to close', (current) => !tagged(current, 'project-title-input'), 15_000);
+    // The Inbox tab, where the other checks start (Back past the Projects list could leave the app).
+    nodes = await waitFor('the tabs', (current) => Boolean(tab(current, en['tab.inbox'])), 15_000);
+    await tapExpecting(tab(nodes, en['tab.inbox']), (current) => Number.isFinite(inboxCount(current)), 'the Inbox again');
     console.log('Search device check passed');
 } catch (error) {
     evidenced(error);
