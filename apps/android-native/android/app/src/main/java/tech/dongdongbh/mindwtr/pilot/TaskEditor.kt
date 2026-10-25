@@ -259,6 +259,8 @@ data class TaskEditor(
      * again, and a change synced meanwhile must not become Save's base (core then merges it instead of losing it).
      */
     val checklistFrom: String? = null,
+    /** The View tab's add-item text, typed but not yet added (RN's checklistDraftRef): Save adds it, and Close counts it as unsaved. */
+    val checklistAdd: String = "",
 ) {
     val id get() = model.id
     val readOnly get() = model.readOnly
@@ -299,7 +301,12 @@ data class TaskEditor(
     /** The draft checklist after core's answer [next] (null keeps the saved one); the first change remembers where it started. */
     fun withChecklist(next: String?) = copy(checklist = next, checklistFrom = if (next == null) checklistFrom else checklistFrom ?: model.checklistBase)
     /** Unsaved: a changed field, checklist or attachment, or typed text core has not turned into a draft value yet (RN asks before closing any). */
-    val dirty get() = patch.isNotEmpty() || waiting || checklistChanged || attachmentsChanged
+    val dirty get() = patch.isNotEmpty() || waiting || checklistChanged || attachmentsChanged || checklistAdd.isNotBlank()
+
+    /** The View tab's typed item as core's append edit, queued like any checklist edit; the field empties. Nothing typed: unchanged. */
+    fun checklistAddQueued(): TaskEditor = checklistAdd.trim().takeIf { it.isNotEmpty() }?.let { title ->
+        copy(checklistAdd = "").queued(JSONObject().put("checklist", JSONObject().put("kind", "append").put("title", title)).toString(), null)
+    } ?: this
 
     fun typed(field: String, text: String) = copy(inputs = inputs + (field to text))
 
@@ -347,7 +354,8 @@ data class TaskEditor(
         // A new session: a reply to an edit sent before the reload never enters the reloaded editor.
         // The draft attachments stay with the list they started from: core's save merge applies only their own changes.
         return TaskEditor(fresh, edited.filterKeys(kept), inputs.filterKeys(kept), resolved.filterKeys(kept), waitingFor = waitingFor, view = view,
-            checklist = list, tab = tab, attachments = attachments, attachmentsFrom = attachmentsFrom, checklistFrom = checklistFrom.takeIf { list != null })
+            checklist = list, tab = tab, attachments = attachments, attachmentsFrom = attachmentsFrom, checklistFrom = checklistFrom.takeIf { list != null },
+            checklistAdd = checklistAdd)
     }
 
     /** The draft's own state, without the model: the edits with their bases, the typed text, and the open prompt. */
@@ -357,6 +365,7 @@ data class TaskEditor(
         .put("nextSeq", nextSeq).put("checklist", checklist ?: JSONObject.NULL).put("tab", tab)
         .put("attachments", attachments ?: JSONObject.NULL).put("attachmentsFrom", attachmentsFrom ?: JSONObject.NULL)
         .put("checklistFrom", checklistFrom ?: JSONObject.NULL)
+        .put("checklistAdd", checklistAdd)
 
     companion object {
         fun open(model: EditorModel, tab: String) = TaskEditor(model, emptyMap(), tab = tab)
@@ -375,7 +384,8 @@ data class TaskEditor(
                 attachments = saved.optString("attachments").takeIf { saved.has("attachments") && !saved.isNull("attachments") },
                 attachmentsFrom = saved.optString("attachmentsFrom").takeIf { saved.has("attachmentsFrom") && !saved.isNull("attachmentsFrom") },
                 // A draft saved before this field existed falls back to the model's checklist, as it always did.
-                checklistFrom = saved.optString("checklistFrom").takeIf { saved.has("checklistFrom") && !saved.isNull("checklistFrom") })
+                checklistFrom = saved.optString("checklistFrom").takeIf { saved.has("checklistFrom") && !saved.isNull("checklistFrom") },
+                checklistAdd = saved.optString("checklistAdd"))
         }
     }
 }

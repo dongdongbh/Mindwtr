@@ -251,16 +251,19 @@ private fun ViewChecklist(model: InboxViewModel, row: JSONObject, labels: JSONOb
     }
 }
 
-/** RN's View tab add input: typed text stays with the screen; Done appends it (core's append edit) and clears the field. */
+/**
+ * RN's View tab add input: the typed text is the draft's (kept with it, counted as unsaved on Close, added by Save); Done appends it
+ * (core's append edit) and clears the field.
+ */
 @Composable
 private fun ChecklistAddInput(model: InboxViewModel, add: JSONObject, enabled: Boolean) {
     val c = LocalTheme.current.colors
-    var text by rememberSaveable { mutableStateOf("") }
+    val text = model.editor?.checklistAdd.orEmpty()
     val placeholder = add.getString("placeholder")
     val label = add.getString("label")
-    BasicTextField(text, { text = it }, enabled = enabled, singleLine = true, textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
+    BasicTextField(text, model::typeChecklistAdd, enabled = enabled, singleLine = true, textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { if (text.isNotBlank()) { model.editChecklist(JSONObject().put("kind", "append").put("title", text)); text = "" } }),
+        keyboardActions = KeyboardActions(onDone = { model.submitChecklistAdd() }),
         modifier = Modifier.fillMaxWidth().semantics { contentDescription = label }.testTag("view-checklist-add").padding(start = 26.dp, top = 6.dp, bottom = 6.dp),
         decorationBox = { inner -> Box { if (text.isEmpty()) Text(placeholder, style = rnText(14, 400), color = c.secondaryText); inner() } })
 }

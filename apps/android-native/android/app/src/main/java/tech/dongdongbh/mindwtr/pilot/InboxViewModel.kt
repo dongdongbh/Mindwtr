@@ -816,6 +816,18 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** The focus request for a new checklist item is used. */
     fun checklistFocused() { checklistFocus = null }
 
+    /** The View tab's add-item text as typed; it stays with the draft until Done adds it, or Save does. */
+    fun typeChecklistAdd(text: String) { editor?.takeIf { it.checklistAdd != text }?.let { keepEditor(it.copy(checklistAdd = text)) } }
+
+    /** The View tab's Done key: the typed item joins the checklist edits (core's append), and the field empties. */
+    fun submitChecklistAdd() {
+        val current = editor ?: return
+        val queued = current.checklistAddQueued()
+        if (queued === current) return
+        keepEditor(queued)
+        pumpEdits()
+    }
+
     /** RN's editor tabs: the Form tab ("task") or the View tab, kept with the draft. */
     fun editorTab(tab: String) { editor?.let { keepEditor(it.copy(tab = tab)) } }
 
@@ -996,6 +1008,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * The exact request is on disk before the call, so an outcome lost with the process is sent again.
      */
     fun saveEditor() {
+        // RN's Save adds an item typed in the View tab but never submitted (9d3a7c87d); the save then waits for core's append.
+        if (editor?.checklistAdd?.isNotBlank() == true) submitChecklistAdd()
         val current = editor ?: return
         if (current.waiting || editsPending) { saveQueued = true; return }
         if (current.patch.isEmpty() && !current.checklistChanged && !current.attachmentsChanged) { closeEditor(); return }
