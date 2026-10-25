@@ -2636,14 +2636,20 @@ export function createTaskActions({ set, get, getStorage, debouncedSave, flushPe
             const tasks = planSkippedRecurringOccurrence({ task: currentTask, allTasks: state._allTasks,
                 now, deviceId: deviceState.deviceId,
                 createId: uuidv4 }).tasks;
+            // The same catalogue writes as the native prepared Skip: the archived source and its new follow-up.
+            const settings = retainTaxonomyEffects(deviceState.settings, tasks.flatMap((after) => {
+                const before = state._tasksById.get(after.id);
+                return before === after ? [] : [{ before, after }];
+            }));
+            const settingsChanged = settings !== state.settings;
             persist(set, debouncedSave, state, {
                 tasks,
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                ...(settingsChanged ? { settings } : {}),
             });
             return {
                 _allTasks: tasks,
                 lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt, changeAt),
-                ...(deviceState.updated ? { settings: deviceState.settings } : {}),
+                ...(settingsChanged ? { settings } : {}),
             };
         });
         try {

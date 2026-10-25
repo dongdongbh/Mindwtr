@@ -6,6 +6,7 @@ import { compactPurgedProjectForLocalStorage, compactPurgedProjectSectionTombsto
 import { clearDerivedCache, timestampAtLeastAfter } from './store-settings';
 import { logInfo } from './logger';
 import { settingsWithPurgedParentAttachmentDeletes } from './attachment-cleanup';
+import { retainTaxonomyEffects } from './taxonomy-catalog';
 
 type Context = {
     set: (partial: Partial<TaskStore> | ((state: TaskStore) => Partial<TaskStore> | TaskStore)) => void;
@@ -100,14 +101,18 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
                 && !preview.legacyTaskIds.length && !preview.legacyProjectIds.length) return state;
             const device = ensureDeviceId(state.settings);
             const backfill = backfillArchiveClocks({ tasks: state._allTasks, projects: state._allProjects }, preview, now, device.deviceId);
-            const settings = settingsWithPurgedParentAttachmentDeletes(device.settings,
-                state._allTasks, state._allProjects, taskIds, projectIds);
             const tasks = backfill.tasks.map((task) => taskIds.has(task.id)
                 ? compactPurgedTaskForLocalStorage({ ...task, deletedAt: now, purgedAt: now, updatedAt: now,
                     rev: nextRevision(task.rev), revBy: device.deviceId }) : task);
             const projects = backfill.projects.map((project) => projectIds.has(project.id)
                 ? compactPurgedProjectForLocalStorage({ ...project, deletedAt: now, purgedAt: now, updatedAt: now,
                     rev: nextRevision(project.rev), revBy: device.deviceId }) : project);
+            // Purging archived rows can leave their tokens unused (a Project-only tag), so keep them saved.
+            const changedPairs = <T>(before: T[], after: T[]) => after.flatMap((row, index) =>
+                row !== before[index] ? [{ before: before[index], after: row }] : []);
+            const settings = retainTaxonomyEffects(settingsWithPurgedParentAttachmentDeletes(device.settings,
+                state._allTasks, state._allProjects, taskIds, projectIds),
+            changedPairs(state._allTasks, tasks), changedPairs(state._allProjects, projects));
             const sections = state._allSections.map((section) => sectionIds.has(section.id)
                 ? compactPurgedProjectSectionTombstone({ ...section, deletedAt: now, updatedAt: now,
                     rev: nextRevision(section.rev), revBy: device.deviceId }, now) : section);

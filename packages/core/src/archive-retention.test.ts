@@ -10,6 +10,7 @@ import { repairMergedSyncReferences } from './sync-normalization';
 import { mockAppData } from './sync-test-utils';
 import { markArchiveRetentionSyncCompleted } from './store-archive-retention';
 import { withQuickJsArgumentLimit } from './quickjs-test-utils';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 
 const NOW = '2026-10-01T12:00:00.000Z';
 const OLD = '2026-08-01T12:00:00.000Z';
@@ -174,6 +175,16 @@ describe('Archive retention', () => {
         saveData.mockClear();
         expect((await useTaskStore.getState().runArchiveRetention({ syncConfigured: false })).success).toBe(true);
         expect(saveData).not.toHaveBeenCalled();
+    });
+
+    it('keeps a purged archived Project\'s and task\'s legacy tokens in the saved list (#828)', async () => {
+        install([task('standalone', { tags: ['#TaskOnly'], contexts: ['@TaskOnly'] })],
+            [project('group', { tagIds: ['#ProjectOnly'] })]);
+        expect((await useTaskStore.getState().runArchiveRetention({ syncConfigured: false })).success).toBe(true);
+        const saved = saveData.mock.calls.at(-1)?.[0] as AppData;
+        expect(saved.projects[0].purgedAt).toBe(NOW);
+        expect(getSavedTaxonomyTokens(saved.settings, 'tag')).toEqual(['#ProjectOnly', '#TaskOnly']);
+        expect(getSavedTaxonomyTokens(saved.settings, 'context')).toEqual(['@TaskOnly']);
     });
 
     it('waits for this session to sync so a restore on another device is not purged (R-2)', async () => {
