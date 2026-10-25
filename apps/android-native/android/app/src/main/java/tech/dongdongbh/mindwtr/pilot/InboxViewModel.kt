@@ -781,7 +781,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 // Core refused the edit: the draft stays as it was, the typed text and core's message stay on
                 // screen, and a Save queued behind it is cancelled.
                 Log.w(CoreHost.TAG, "Editor edit refused", failure)
-                keepEditor(now.copy(pending = now.pending.drop(1)))
+                keepEditor(now.refused(now.pending.first()))
                 editRefusal = failure.message ?: failure.javaClass.simpleName
                 error = editRefusal
                 saveQueued = false

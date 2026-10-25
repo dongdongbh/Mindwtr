@@ -51,4 +51,18 @@ class TaskEditorChecklistAddTest {
         val blank = TaskEditor.open(model, "view").copy(checklistAdd = " ")
         assertSame(blank, blank.checklistAddQueued())
     }
+
+    /** Core refused the append: the typed text goes back into the add box, so Close still asks (review of 671562759, P3). */
+    @Test fun aRefusedAppendPutsTheTypedTextBack() {
+        val queued = TaskEditor.open(model, "view").copy(checklistAdd = "Buy milk").checklistAddQueued()
+        val refused = queued.refused(queued.pending.first())
+        assertEquals("Buy milk", refused.checklistAdd)
+        assertTrue(refused.pending.isEmpty())
+        assertTrue(refused.dirty)
+        // Text typed again while core answered stays as typed.
+        assertEquals("Eggs", queued.copy(checklistAdd = "Eggs").refused(queued.pending.first()).checklistAdd)
+        // Another refused edit puts nothing into the box.
+        val other = TaskEditor.open(model, "view").queued(JSONObject().put("type", "pickTime").toString(), null)
+        assertEquals("", other.refused(other.pending.first()).checklistAdd)
+    }
 }

@@ -2946,6 +2946,13 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // sent, from the checklist as the edits before it left it, and an edit whose item is gone is dropped. The screen never sends a position.
     assert.doesNotMatch(code(taskViewUi), /put\("(index|from|to)"/, 'the checklist screens send no position');
     assert.equal(code(taskViewUi).match(/put\("itemId", /g).length, 9, 'every item edit (the View and Form ticks and moves, each semantics and click; rename, Return, remove) names its item');
+    // Audit 10-25 gap 4 (RN 9d3a7c87d): the View tab add box binds to the draft's checklistAdd, Save adds it before it saves, and a
+    // refused edit goes through TaskEditor.refused (a refused append puts its text back).
+    assert.match(taskViewUi, /val text = model\.editor\?\.checklistAdd\.orEmpty\(\)\n[\s\S]*?BasicTextField\(text, model::typeChecklistAdd,/,
+        'the View tab add box binds to the draft\'s checklistAdd');
+    assert.match(model, /fun saveEditor\(\) \{\n(?:\s*\/\/.*\n)*\s+if \(editor\?\.checklistAdd\?\.isNotBlank\(\) == true\) submitChecklistAdd\(\)\n/,
+        'Save adds the add box text before it saves');
+    assert.match(model, /keepEditor\(now\.refused\(now\.pending\.first\(\)\)\)/, 'a refused edit goes through TaskEditor.refused');
     assert.match(model, /private fun currentChecklistEdit\(edit: JSONObject, checklist: String\): JSONObject\? \{\s+if \(!edit\.has\("itemId"\)\) return edit\s+val items = JSONArray\(checklist\)\s+val index = \(0 until items\.length\(\)\)\.firstOrNull \{ items\.getJSONObject\(it\)\.getString\("id"\) == edit\.getString\("itemId"\) \} \?: return null/);
     assert.match(model, /val to = index \+ edit\.getInt\("step"\)\s+return if \(to in 0 until items\.length\(\)\) sent\.put\("from", index\)\.put\("to", to\) else null/);
     assert.match(model, /val listEdit = queued\?\.let \{ currentChecklistEdit\(it, current\.checklistNow\) \}/);

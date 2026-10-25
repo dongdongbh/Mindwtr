@@ -212,6 +212,9 @@ class EditorFields(json: JSONObject) {
     val timeSpent = json.getJSONObject("timeSpent").getBoolean("enabled")
 }
 
+/** The [PendingEdit.field] of the View tab add box's append. */
+const val CHECKLIST_ADD = "checklistAdd"
+
 /** The token and person fields: their text is typed freely, and core's getTaskEditorSuggestions turns it into the draft value. */
 val TYPED_FIELDS = listOf("contexts", "tags", "assignedTo")
 
@@ -305,8 +308,14 @@ data class TaskEditor(
 
     /** The View tab's typed item as core's append edit, queued like any checklist edit; the field empties. Nothing typed: unchanged. */
     fun checklistAddQueued(): TaskEditor = checklistAdd.trim().takeIf { it.isNotEmpty() }?.let { title ->
-        copy(checklistAdd = "").queued(JSONObject().put("checklist", JSONObject().put("kind", "append").put("title", title)).toString(), null)
+        copy(checklistAdd = "").queued(JSONObject().put("checklist", JSONObject().put("kind", "append").put("title", title)).toString(), CHECKLIST_ADD)
     } ?: this
+
+    /** Core refused [edit], the first pending one: it leaves the queue, and a refused add-box item goes back into an empty add box. */
+    fun refused(edit: PendingEdit): TaskEditor = copy(pending = pending.drop(1)).let { next ->
+        if (edit.field != CHECKLIST_ADD || next.checklistAdd.isNotBlank()) next
+        else next.copy(checklistAdd = JSONObject(edit.edit).getJSONObject("checklist").getString("title"))
+    }
 
     fun typed(field: String, text: String) = copy(inputs = inputs + (field to text))
 

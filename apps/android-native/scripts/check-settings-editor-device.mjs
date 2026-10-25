@@ -12,7 +12,8 @@
 // is stored once; rotation and process death keep the open GTD screen; (f) History's Done opens the Done list task on the View
 // tab, and rotation and process death keep that tab; (g) a tick in the View tab and an item added on the Form tab save in ONE
 // write (the task's rev + 1) with the status core's checklist edit sets (Next); (h) Reset checklist (from search) opens every
-// saved item in one write. Every setting it changes (week start, language, Focus task limit, Manage's open Areas) is put back
+// saved item in one write; (i) an item typed in the View tab's add box but never submitted makes Close ask first, and Save adds it
+// in one write, as RN's editor does (9d3a7c87d). Every setting it changes (week start, language, Focus task limit, Manage's open Areas) is put back
 // through the app before it ends, on failure too. It touches only the development package (it refuses any other APK), never
 // launches over another app, leaves the app on its Inbox tab, restores rotation and clears its debug properties on exit. Leave the
 // device on its home screen. It needs host `bun`.
@@ -22,7 +23,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, field, inboxCount, inEditor, isOn, mainList, owedRetry, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, field, inboxCount, inEditor, isOn, mainList, owedRetry, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -50,7 +51,7 @@ const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 // Digits only: the keyboard guard allows only an English layout, and digits never compose.
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
-const names = { task: `70${run}1`, area: `70${run}2`, items: [`72${run}1`, `72${run}2`], added: `73${run}` };
+const names = { task: `70${run}1`, area: `70${run}2`, items: [`72${run}1`, `72${run}2`], added: `73${run}`, pending: `74${run}` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
@@ -488,7 +489,26 @@ try {
     after = core('views').task;
     check(after.checklist.every(([, done]) => !done) && after.rev === before.rev + 2, `(h) Reset checklist opened every saved item in one write (rev ${after.rev})`);
     await sleep(1000);
-    await tapExpecting(withDescription(await screen(), en['common.close']) ?? fail('no Close'), (current) => !inEditor(current), 'the editor to close');
+
+    // (i) The View tab's add box: typed text never submitted (no Done key) makes Close ask first, and Save adds it in one write.
+    nodes = await tapExpecting(withDescription(await screen(), en['markdown.preview']) ?? fail('no View tab'), inView, 'the View tab');
+    const { node: pendingBox } = await revealTagged('view-checklist-add', 'the View tab add box');
+    await device.focusAtEnd(pendingBox);
+    requireAppFront();
+    sh(`input text '${names.pending}'`);
+    await waitFor(`"${names.pending}" in the add box`, (current) => tagged(current, 'view-checklist-add')?.text === names.pending, 15_000);
+    await hideKeyboard();
+    nodes = await tapExpecting(withDescription(await screen(), en['common.close']) ?? fail('no Close'),
+        (current) => Boolean(button(current, en['common.discard'])), 'the discard question');
+    check(nodes.some((node) => node.text === en['taskEdit.discardChanges']), '(i) Close with typed add-box text asks before it drops it');
+    nodes = await tapExpecting(button(nodes, en['common.cancel']) ?? fail('no Cancel'), (current) => inView(current) && !button(current, en['common.discard']), 'the View tab again');
+    check(tagged(nodes, 'view-checklist-add')?.text === names.pending, '(i) Cancel keeps the typed text in the add box');
+    const pendingSaves = commands('saveTaskDraft');
+    await tapExpecting(withDescription(await screen(), en['common.save']) ?? (await screen()).find((node) => node.text === en['common.save']) ?? fail('no Save'), (current) => !inEditor(current), 'the editor to close');
+    await waitFor('the save', () => commands('saveTaskDraft') === pendingSaves + 1, 15_000);
+    after = core('views').task;
+    check(after.rev === before.rev + 3 && after.checklist.at(-1)?.[0] === names.pending && after.checklist.at(-1)?.[1] === false,
+        `(i) Save added the typed item in one write (rev ${after.rev}): ${JSON.stringify(after.checklist)}`);
     console.log('Settings and editor device check passed');
 } catch (error) {
     evidenced(error);
