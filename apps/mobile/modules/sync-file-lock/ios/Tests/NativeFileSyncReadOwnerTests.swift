@@ -948,6 +948,125 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     await refuses { _ = try await reader.read("late", using: handle) }
   }
 
+  // Two explicitly selected test processes retain these fixtures between orderly closes.
+  private let restartQuarantine = ".mindwtr-et-q-restart-observed"
+  private let restartSentinel = "unrelated-sentinel.bin"
+
+  private func restartDocument(_ id: String) throws -> Data {
+    try JSONSerialization.data(withJSONObject: [
+      "tasks": [["id": id, "title": id, "status": "inbox", "createdAt": "2026-10-25T00:00:00.000Z", "updatedAt": "2026-10-25T00:00:00.000Z"]],
+      "projects": [], "sections": [], "areas": [], "settings": [:],
+    ], options: [.sortedKeys])
+  }
+
+  private func restartEnvironment(_ phase: String) throws -> (root: URL, artifact: URL) {
+    let environment = ProcessInfo.processInfo.environment
+    guard let selectedPhase = environment["NATIVE_FILE_SYNC_RESTART_PHASE"] else {
+      throw XCTSkip("Requires the explicit two-process restart controller")
+    }
+    guard selectedPhase == phase,
+          let root = environment["NATIVE_FILE_SYNC_RESTART_ROOT"], root.hasPrefix("/"),
+          let artifact = environment["NATIVE_FILE_SYNC_RESTART_ARTIFACT"], artifact.hasPrefix("/"),
+          !root.split(separator: "/").contains(".."), !artifact.split(separator: "/").contains("..") else { throw Owner.Failure.unavailable }
+    let url = URL(fileURLWithPath: root, isDirectory: true).standardizedFileURL
+    guard url.resolvingSymlinksInPath() == url else { throw Owner.Failure.unavailable }
+    return (url, URL(fileURLWithPath: artifact))
+  }
+
+  private func restartObservations(_ reader: Owner, _ handle: Owner.Handle, root: URL, label: String) async throws -> [String: Any] {
+    let listing = try await reader.list(using: handle)
+    let names = Set(listing.map(\.name)).union([
+      "data.json", "mindwtr-sync.json", "data.json.enc", "mindwtr-sync.json.enc", "data.json.bak", "data.json.enc.bak",
+      "data.json.bak.previous", "data.json.enc.bak.previous", "data.json.previous", "data.json.enc.previous", "data.json.tmp",
+      "attachments", restartQuarantine, restartSentinel,
+    ]).sorted()
+    var files = [[String: Any]]()
+    for name in names {
+      let entry = try await reader.metadata(name, using: handle)
+      var row: [String: Any] = ["name": name, "exists": entry != nil, "kind": NSNull(), "size": NSNull()]
+      if let entry {
+        row["kind"] = entry.kind == .file ? "file" : "directory"
+        if let count = entry.byteCount { row["size"] = count }
+      }
+      if entry?.kind == .directory {
+        row["read"] = ["state": "directory"]
+      } else {
+        switch try await reader.read(name, using: handle) {
+        case .absent: row["read"] = ["state": "absent"]
+        case .bytes(let bytes): row["read"] = ["state": "bytes", "base64": bytes.base64EncodedString()]
+        }
+      }
+      files.append(row)
+    }
+    return ["name": label, "root": root.path, "listing": listing.map(\.name), "files": files]
+  }
+
+  private func restartClose(_ reader: Owner, _ handle: Owner.Handle, root: URL, counts: Counts) async throws -> [String: Any] {
+    try await reader.close(handle)
+    XCTAssertEqual(counts.count("scope-start"), 1); XCTAssertEqual(counts.count("scope-stop"), 1)
+    let competing = SyncFileLockEngine(); defer { competing.drain() }
+    let token = try competing.acquireDirectory(root); try competing.release(token)
+    return ["scopeStarts": counts.count("scope-start"), "scopeStops": counts.count("scope-stop"), "leaseReleased": true]
+  }
+
+  func testOrderlyRestartPrepareArtifact() async throws {
+    let context = try restartEnvironment("prepare")
+    // No teardown deletion: process B must see the exact native-produced endpoint.
+    try FileManager.default.createDirectory(at: context.root, withIntermediateDirectories: false)
+    var cases = [[String: Any]]()
+    for label in ["missing-primary", "valid-primary"] {
+      let root = try folder(context.root, label), counts = Counts()
+      let writer = owner(root, counts), handle = try await writer.open()
+      var operations = [String]()
+      for (name, bytes) in [(restartSentinel, Data([0, 255, 7, 0, 42])), ("data.json", try restartDocument("restart-retained-row"))] {
+        guard try await writer.createExclusive(name, using: handle) == .created else { throw Owner.Failure.unavailable }
+        operations.append("create:" + name)
+        try await writer.writeCreated(name, bytes: bytes, using: handle); operations.append("write:" + name)
+      }
+      let observed = try await writer.read("data.json", using: handle)
+      guard case .bytes(let bytes) = observed else { throw Owner.Failure.incompleteRead }
+      try await writer.renameObserved("data.json", to: restartQuarantine, expectedBytes: bytes, using: handle)
+      operations.append("quarantine:data.json")
+      if label == "valid-primary" {
+        guard try await writer.createExclusive("data.json", using: handle) == .created else { throw Owner.Failure.unavailable }
+        operations.append("create:data.json")
+        try await writer.writeCreated("data.json", bytes: restartDocument("restart-primary-row"), using: handle)
+        operations.append("write:data.json")
+      }
+      var sample = try await restartObservations(writer, handle, root: root, label: label)
+      sample["operations"] = operations
+      sample["close"] = try await restartClose(writer, handle, root: root, counts: counts)
+      XCTAssertEqual(counts.count("quarantine-completed"), 1); XCTAssertEqual(counts.count("delete-completed"), 0)
+      cases.append(sample)
+    }
+    let artifact: [String: Any] = ["schema": "actual-native-orderly-restart-v1", "phase": "prepare",
+      "processID": ProcessInfo.processInfo.processIdentifier, "root": context.root.path, "cases": cases]
+    try JSONSerialization.data(withJSONObject: artifact, options: [.sortedKeys]).write(to: context.artifact, options: [.withoutOverwriting])
+  }
+
+  func testOrderlyRestartObserveArtifact() async throws {
+    let context = try restartEnvironment("observe")
+    guard let previousPath = ProcessInfo.processInfo.environment["NATIVE_FILE_SYNC_RESTART_PREPARE_ARTIFACT"],
+          let previous = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: previousPath))) as? [String: Any],
+          previous["schema"] as? String == "actual-native-orderly-restart-v1", previous["phase"] as? String == "prepare",
+          previous["root"] as? String == context.root.path,
+          let previousPID = previous["processID"] as? Int, previousPID != Int(ProcessInfo.processInfo.processIdentifier) else { throw Owner.Failure.unavailable }
+    var cases = [[String: Any]]()
+    for label in ["missing-primary", "valid-primary"] {
+      let root = context.root.appendingPathComponent(label, isDirectory: true), counts = Counts()
+      let reader = owner(root, counts), handle = try await reader.open()
+      var sample = try await restartObservations(reader, handle, root: root, label: label)
+      sample["operations"] = [] as [String]
+      sample["close"] = try await restartClose(reader, handle, root: root, counts: counts)
+      XCTAssertEqual(counts.count("write-completed"), 0); XCTAssertEqual(counts.count("quarantine-completed"), 0)
+      XCTAssertEqual(counts.count("delete-completed"), 0)
+      cases.append(sample)
+    }
+    let artifact: [String: Any] = ["schema": "actual-native-orderly-restart-v1", "phase": "observe",
+      "processID": ProcessInfo.processInfo.processIdentifier, "prepareProcessID": previousPID, "root": context.root.path, "cases": cases]
+    try JSONSerialization.data(withJSONObject: artifact, options: [.sortedKeys]).write(to: context.artifact, options: [.withoutOverwriting])
+  }
+
   /// Optional artifact is produced by actual owner IO, never a replacement fixture transcript.
   func testSharedReadPolicyArtifactComesFromActualOwnerResults() async throws {
     let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
