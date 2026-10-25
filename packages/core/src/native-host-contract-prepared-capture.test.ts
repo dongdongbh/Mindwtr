@@ -66,7 +66,7 @@ describe('prepared native quick capture', () => {
         const { host, options, saveData } = await open();
         process.env.TZ = 'Pacific/Honolulu';
         vi.setSystemTime(new Date('2026-09-26T23:50:00.000Z'));
-        const command = prepare(host, { text: 'Review /due:tomorrow', options: { ...options, note: 'Frozen note', addAnother: true, startTime: '2026-10-01T14:30:00.000Z' }, captureId: generateUUID() });
+        const command = prepare(host, { text: 'Review /inbox /due:tomorrow', options: { ...options, note: 'Frozen note', addAnother: true, startTime: '2026-10-01T14:30:00.000Z' }, captureId: generateUUID() });
         expect(command.prepared.task.status).toBe('inbox');
         value(await host.commitPreparedQuickCapture(command));
         const row = taskToSqliteRow(command.prepared.task);

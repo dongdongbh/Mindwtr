@@ -13,6 +13,14 @@
      "a preset project deleted elsewhere is not saved; the task goes to the area the popup shows",
      "a bad line refuses the whole batch before any project is created"
     ]
+   },
+   {
+    "commit": "9aae5be6976a5e3b163bdf2b074164755fdb6f7d",
+    "reason": "#1452 (accepted): a capture with a start date and no chosen status is created as Next, the same as adding a start date to an Inbox task.",
+    "scenarios": [
+     "date commands without natural-language dates and with a default time",
+     "due date chips, a picked date and time, and clearing them"
+    ]
    }
   ]
  },
@@ -2591,7 +2599,7 @@
       "addTask",
       "Dentist",
       {
-       "status": "inbox",
+       "status": "next",
        "startTime": "2026-09-24T13:00:00.000Z",
        "areaId": "<undefined>"
       }
@@ -2602,7 +2610,7 @@
        {
         "title": "Dentist",
         "initialProps": {
-         "status": "inbox",
+         "status": "next",
          "startTime": "2026-09-24T13:00:00.000Z",
          "areaId": "<undefined>"
         }
@@ -10598,7 +10606,7 @@
       "addTask",
       "Submit form",
       {
-       "status": "inbox",
+       "status": "next",
        "startTime": "2026-09-25",
        "dueDate": "2026-10-09T11:00:00.000Z",
        "areaId": "<undefined>"
@@ -10610,7 +10618,7 @@
        {
         "title": "Submit form",
         "initialProps": {
-         "status": "inbox",
+         "status": "next",
          "startTime": "2026-09-25",
          "dueDate": "2026-10-09T11:00:00.000Z",
          "areaId": "<undefined>"
