@@ -186,7 +186,7 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
                     projectId == null -> { seedError = words.getString("errorNotCreated"); shell.showToast(null, words.getString("toastNotCreated"), "info") }
                     else -> {
                         close("dismiss")
-                        shell.menu.openProjects(projectId)
+                        shell.menu.whenIdle { shell.menu.openProjects(projectId) }
                         shell.showToast(null, words.getString("toastReady"), "success")
                     }
                 }

@@ -9635,10 +9635,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /if \(message\.startsWith\("STALE_REVISION"\)\) \{\s+answers\.remove\(action\.id\)\s+refusals\.remove\(action\.id\)\?\.let \{ refused -> shell\.ui \{ refused\(message\.substringAfter\(": "\)\) \} \}/);
     assert.match(details, /put\("destinationProjectId", destination\)\.put\("title", title\)\.put\("expected", expected\)/);
     // RN resets the detail list for each project and shows Getting Started's actions at the top again after Reactivate.
-    assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,200}LazyColumn\([^\n]*state = listState/);
+    assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,1400}LazyColumn\([^\n]*state = listState/);
     // A toast with an action (Undo) honors Android's "Time to take action" (TalkBack and switch users), never below RN's time.
     assert.match(source('InboxViewModel.kt'), /if \(action != null\) actionTimeout\(shown\) else shown/);
     assert.match(source('InboxViewModel.kt'), /getRecommendedTimeoutMillis\(shown\.toInt\(\),\s+android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_TEXT or android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_CONTROLS\)/);
+    // b3: RN highlights the task a project's "+" saved and its TaskList scrolls to it once (#916); every follow-up that opens a
+    // project after another write waits for it to settle (phone runs 3 and 6).
+    assert.match(source('InboxViewModel.kt'), /val project = current\.preset\?\.optString\("projectId"\)\s+keepCapture\(null\)\s+if \(project != null\) highlight\(reply\.getString\("taskId"\), project\)/);
+    assert.match(header, /LaunchedEffect\(highlightTaskId, detail\) \{[\s\S]{0,600}listState\.animateScrollToItem\(/);
+    assert.match(source('DataTransfer.kt'), /else if \(openProject\) \{ menu\.whenIdle \{ menu\.openProjects\(projectId\) \}/);
+    assert.match(source('StartupPrompts.kt'), /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
     // b3: the pinned "+" opens the capture popup with RN's preset (the project, status Next), kept in the durable draft and sent
     // with every capture call.
     assert.match(header, /\{ openCapture\(openProjectId\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);

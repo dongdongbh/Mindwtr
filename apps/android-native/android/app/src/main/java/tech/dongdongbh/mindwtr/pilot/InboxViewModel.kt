@@ -1402,7 +1402,12 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     keepCapture(fresh.copy(text = reset.getString("text"), options = reset.getJSONObject("options"), picker = null, confirm = null).reading())
                     pumpCapture()
                 }
-                else -> keepCapture(null)
+                else -> {
+                    // RN's quick capture highlights the task a project's "+" saved, on that project, once the popup closes (#916).
+                    val project = current.preset?.optString("projectId")
+                    keepCapture(null)
+                    if (project != null) highlight(reply.getString("taskId"), project)
+                }
             }
             "refused" -> {
                 reply.getJSONObject("notice").let { showToast(it) }

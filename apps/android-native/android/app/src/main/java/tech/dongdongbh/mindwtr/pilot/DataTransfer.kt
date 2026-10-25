@@ -600,8 +600,9 @@ class DataTransferModel(private val menu: MenuModel, private val saved: SavedSta
             shell.ui {
                 finish()
                 if (projectId == null) shell.showToast(null, row.getString("notCreated"), "info")
-                else if (openProject) { menu.openProjects(projectId); shell.showToast(null, row.getString("ready"), "success") }
-                else shell.showToast(null, row.getString("ready"), "success", row.getString("open")) { menu.openProjects(projectId) }
+                // The open waits for any running action to settle (a perform started while busy is dropped).
+                else if (openProject) { menu.whenIdle { menu.openProjects(projectId) }; shell.showToast(null, row.getString("ready"), "success") }
+                else shell.showToast(null, row.getString("ready"), "success", row.getString("open")) { menu.whenIdle { menu.openProjects(projectId) } }
             }
         }
     }

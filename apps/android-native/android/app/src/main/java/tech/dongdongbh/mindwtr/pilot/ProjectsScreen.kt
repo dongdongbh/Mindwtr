@@ -32,6 +32,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -403,6 +406,18 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         val listState = remember(openProjectId) { LazyListState() }
         val gettingStarted = detail?.gettingStarted != null
         LaunchedEffect(openProjectId, gettingStarted) { if (gettingStarted && listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0) }
+        // RN's TaskList centres a highlighted task once (#916): the task a project's "+" just saved scrolls into view when it lands.
+        var scrolledTo by remember(openProjectId) { mutableStateOf<String?>(null) }
+        LaunchedEffect(highlightTaskId, detail) {
+            val id = highlightTaskId ?: return@LaunchedEffect
+            val items = detail?.items ?: return@LaunchedEffect
+            val entry = items.indexOfFirst { it is DetailTask && it.row.id == id }
+            if (entry < 0 || scrolledTo == id || !isHighlighted(id)) return@LaunchedEffect
+            scrolledTo = id
+            // The rows come after the header items; the More row, when shown, after them.
+            val after = items.size - entry + (if (items.size < detail.total) 1 else 0)
+            listState.animateScrollToItem(maxOf(0, listState.layoutInfo.totalItemsCount - after))
+        }
         LazyColumn(Modifier.weight(1f).background(c.bg).imePadding(), state = listState, contentPadding = PaddingValues(12.dp)) {
             // RN's Details toggle and panel (its Attachments card inside), scrolling away with the rows as RN's list header.
             openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
