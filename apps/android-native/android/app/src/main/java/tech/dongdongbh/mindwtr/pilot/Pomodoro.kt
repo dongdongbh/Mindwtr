@@ -74,6 +74,23 @@ import java.util.UUID
  * completion alarms planned after each (PomodoroAlarms.kt).
  */
 
+/**
+ * When a card read plans the alerts (design R2b §3 "Runs on"): for a session state they were not planned for, as after the boot's
+ * journal replay of a control, which commits outside the card; and once for a requested plan (a resume) even when a newer read took
+ * that read's place.
+ */
+internal class PomodoroPlanGate {
+    private var requested = false
+    private var last: String? = null
+
+    fun request() { requested = true }
+
+    fun planned(state: String) { last = state; requested = false }
+
+    /** Whether the read of [state] plans; it then counts as planned. */
+    fun take(state: String): Boolean = (requested || state != last).also { if (it) planned(state) }
+}
+
 /** The card's state: core's panel, the open picker's rows, and the two presentation values core takes back (collapsed, the last feedback). */
 class PomodoroModel(private val shell: InboxViewModel) {
     var panel by mutableStateOf<JSONObject?>(null); private set
@@ -97,13 +114,18 @@ class PomodoroModel(private val shell: InboxViewModel) {
      * settled. [planAlarms]: plan the alerts after it (a start or resume, never before the ended phase settled: design §3b K5).
      */
     fun refresh(planAlarms: Boolean = false) {
+        if (planAlarms) planGate.request()
         shell.background(listOf(Part.Pomodoro), { runtime -> runtime.pomodoroPanelRead(presentation()) }) { next, mine ->
             if (!shell.fresh(mine, Part.Pomodoro)) return@background
             panel = next
             if (owed(next) != null) settle(null, null)
-            else if (planAlarms) planInBackground()
+            else if (planGate.take(planned(next))) planInBackground()
         }
     }
+
+    /** Which session state the alerts were last planned for (UI thread only). */
+    private val planGate = PomodoroPlanGate()
+    private fun planned(shown: JSONObject) = "${shown.optString("sessionID")}:${shown.optLong("generation")}"
 
     /** A control's transition ([action] and its fields), then the card and the alarms again. */
     fun act(action: String, fields: JSONObject? = null) = settle(action, fields)
@@ -125,7 +147,11 @@ class PomodoroModel(private val shell: InboxViewModel) {
     private fun settle(requested: String?, fields: JSONObject?) = shell.menu.whenIdle {
         shell.perform { runtime ->
             val next = transition(runtime, requested, fields)
-            shell.ui { panel = next }
+            shell.ui {
+                panel = next
+                // transition() planned once nothing was owed.
+                if (owed(next) == null) planGate.planned(planned(next))
+            }
         }
     }
 
