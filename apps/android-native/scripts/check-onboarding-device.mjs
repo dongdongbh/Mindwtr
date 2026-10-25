@@ -51,9 +51,9 @@ const wipe = async () => {
     runAs('rm -rf files no_backup shared_prefs cache databases');
     runAs('mkdir -p files');
 };
-const start = async (done, description) => {
+const start = async (done, description, options) => {
     await device.stopApp();
-    device.launch(ACTIVITY);
+    device.launch(ACTIVITY, options);
     requireAppFront();
     return waitFor(description, done, 60_000);
 };
@@ -78,7 +78,9 @@ try {
 
     // (a) The sheet on an empty library, RN's order; Skip is stored.
     await wipe();
-    let nodes = await start(sheet, 'the welcome sheet');
+    // The app's own start (no harness start tab): an empty library opens on Focus, RN's home tab, under the sheet.
+    let nodes = await start(sheet, 'the welcome sheet', { startTab: '' });
+    check(tabSelected(nodes, en['tab.next']), '(a) the welcome sheet opens over Focus, RN\'s home tab');
     const options = [en['onboarding.startFreshTitle'], en['onboarding.syncTitle'], en['onboarding.importTitle']].map((title) => byText(nodes, title));
     check(options.every(Boolean) && centerY(options[0]) < centerY(options[1]) && centerY(options[1]) < centerY(options[2]),
         '(a) an empty library opens the welcome sheet: Start using Mindwtr, then Set up sync, then Import tasks');
@@ -118,6 +120,9 @@ try {
     // (d) The editor's Scheduling help: closed, then open with core's hint.
     const row = nodes.find((node) => node.text === en['starter.sampleBuyMilk']) ?? nodes.find((node) => (node['resource-id'] ?? '').endsWith('task-row'));
     nodes = await tapExpecting(row ?? fail('no sample Inbox item'), (current) => current.some((node) => /(^|\/)task-editor$/.test(node['resource-id'] ?? '')), 'the editor');
+    // RN's Focus star sits in the Title row (15c42df63), not in the top bar.
+    check(Boolean(tagged(nodes, 'task-edit-focus-star')), '(d) the editor shows the Focus star in the Title row');
+    shot('editor');
     const helpLabel = `${en['onboarding.help']}: ${en['taskEdit.scheduling']}`;
     // Scroll until the Scheduling heading sits clear of the bottom edge (the gesture bar takes taps there).
     const clear = (current) => { const heading = withDescription(current, en['taskEdit.scheduling']); return heading && centerY(heading) < 1700; };
