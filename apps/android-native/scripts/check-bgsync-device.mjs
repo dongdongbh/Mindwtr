@@ -139,7 +139,7 @@ const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) =
 const RUN_STARTED = 'Mobile background sync started';
 const RUN_FINISHED = 'Mobile background sync finished';
 const SYNC_JOB = ['Native Android core work', '"job":"backgroundSync"'];
-const INGEST_JOB = ['Native Android core work', '"job":"ingest","outcome":"success"'];
+const INGEST_JOB = ['Native Android core work', '"job":"ingest"', '"outcome":"success"'];
 /**
  * The scheduled job run now by JobScheduler, the app closed: its JobScheduler id from WorkManager's database (a process start
  * may move it to a new id, so it is read again and forced again until core's run starts). Resolves to the log once the job ended.

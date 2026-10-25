@@ -157,7 +157,7 @@ const contextTrigger = (action, name) => broadcast(CONTEXT, `tech.dongdongbh.min
 const allLogs = () => execFileSync(adbBin, ['-s', serial, 'logcat', '-d', '-s', `${TAG}:*`], { encoding: 'utf8', maxBuffer: 64 << 20 }).replace(/\\/g, '');
 const count = (text, ...needles) => text.split('\n').filter((line) => needles.every((needle) => line.includes(needle))).length;
 // The runner's lines, through core's logger: the message, then its fields in context.
-const INGESTED = ['Native Android core work', '"job":"ingest","outcome":"success"'];
+const INGESTED = ['Native Android core work', '"job":"ingest"', '"outcome":"success"'];
 const CONTEXT_DONE = ['Native Android core work', '"job":"context","outcome":"success"'];
 const POSTED = ['Native Android notification', '"kind":"context-automation","outcome":"posted"'];
 /** Taps this run's context notification in the shade: the app opens and the notification goes (auto-cancelled). */

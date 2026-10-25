@@ -93,7 +93,7 @@ const storedPayload = () => widgetPrefs(runAs(`cat ${WIDGET_PREFS} 2>/dev/null |
 
 // ---- the log ----
 const allLogs = () => execFileSync(adbBin, ['-s', serial, 'logcat', '-d', '-s', `${TAG}:*`], { encoding: 'utf8', maxBuffer: 64 << 20 }).replace(/\\/g, '');
-const INGESTED = ['Native Android core work', '"job":"ingest","outcome":"success"'];
+const INGESTED = ['Native Android core work', '"job":"ingest"', '"outcome":"success"'];
 /** The inputs the last publication used, from its log line's context. */
 const lastInputs = () => publicationContext(allLogs()) ?? fail('no publication line');
 const waitUntil = async (description, predicate, timeoutMs = 60_000, everyMs = 1000) => {
