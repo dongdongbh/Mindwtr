@@ -30,6 +30,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { box, button, check, connect, evidenced, fail, inboxCount, inEditor, inList, isOn, linesAfter, logStamp, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
+import { removeNowhereFiles } from './nowhere-files.mjs';
 import { hostDevice, serveWebdav, webdavDocument } from './sync-harness.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
@@ -200,12 +201,6 @@ const capture = async (text) => {
     await waitFor(`"${text}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === text, 15_000);
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
-/** Earlier runs' project files that exist nowhere (a run cut off before step (8) removed its kept file): each would stall the
- *  next switch of sync location on the missing-files question. */
-const leftovers = () => sqlite(pullFile(`files/${DB}`, 'db'),
-    "SELECT p.title AS project, j.value->>'title' AS file FROM projects p, json_each(p.attachments) j WHERE p.deletedAt IS NULL "
-    + "AND p.title LIKE 'A2 project %' AND j.value->>'kind' = 'file' AND j.value->>'deletedAt' IS NULL "
-    + "AND (j.value->>'localStatus' = 'missing' OR coalesce(j.value->>'uri', '') = '')");
 /** Projects showing its list (Back from an open project: the tab keeps the last project open). */
 const projectList = async () => {
     let nodes = await toTabs();
@@ -363,11 +358,8 @@ try {
     device.launch(ACTIVITY);
     await waitFor('the Inbox', onInbox, 60_000);
 
-    for (const { project, file } of leftovers()) {
-        console.log(`note - removing an earlier run's file that exists nowhere: ${file} (${project})`);
-        await removeProjectFile(project, file);
-    }
-    check(leftovers().length === 0, 'no earlier run left a project file that exists nowhere');
+    await removeNowhereFiles({ query: (sql) => sqlite(pullFile(`files/${DB}`, 'db'), sql), removeProjectFile });
+    check(true, 'no file that exists nowhere is left from an earlier run (it would stall a switch of sync location)');
 
     // (1) The phone and the second device on one local WebDAV folder; the second device adds the project.
     let nodes = await openSync();

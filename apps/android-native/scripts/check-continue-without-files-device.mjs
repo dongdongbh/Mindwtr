@@ -22,6 +22,7 @@ import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { box, check, connect, evidenced, fail, inboxCount, inEditor, inList, logStamp, linesAfter, Stopped, switchOn, tab, tabSelected, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
+import { removeNowhereFiles } from './nowhere-files.mjs';
 import { hostDevice, serveWebdav } from './sync-harness.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
@@ -153,10 +154,6 @@ const runCommand = async (tag, operation, description, timeoutMs = 240_000) => {
     const since = logStamp(logs());
     await tapTag(tag, () => commands(operation, since) > 0, description, timeoutMs);
 };
-/** Projects of earlier runs that still hold a live file attachment. */
-const leftovers = () => sqlite(pullFile(`files/${DB}`, 'db'),
-    "SELECT p.title AS project, j.value->>'title' AS file FROM projects p, json_each(p.attachments) j WHERE p.deletedAt IS NULL "
-    + "AND p.title LIKE 'CWF project %' AND j.value->>'kind' = 'file' AND j.value->>'deletedAt' IS NULL");
 /** Projects showing its list (Back from an open project: the tab keeps the last project open). */
 const projectList = async () => {
     let nodes = await toTabs();
@@ -217,11 +214,8 @@ try {
     device.launch(ACTIVITY);
     await waitFor('the Inbox', onInbox, 60_000);
 
-    for (const { project, file } of leftovers()) {
-        console.log(`note - removing an earlier run's attachment ${file} (${project})`);
-        await removeProjectFile(project, file);
-    }
-    check(leftovers().length === 0, 'no earlier run left a file attachment that exists nowhere');
+    await removeNowhereFiles({ query: (sql) => sqlite(pullFile(`files/${DB}`, 'db'), sql), removeProjectFile });
+    check(true, 'no file that exists nowhere is left from an earlier run (it would stall a switch of sync location)');
 
     // (1) Folder A: the phone, then the second device's project file, which A then loses.
     let nodes = await openSync();
