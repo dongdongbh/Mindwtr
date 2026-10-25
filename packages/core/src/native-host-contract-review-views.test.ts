@@ -181,6 +181,21 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         expect(daily.content.step === 'today' && daily.content.calendar.days[0].title).toBe(`${formatDate(new Date(2026, 8, 23), 'P')} · ${daily.content.calendar.label}`);
     });
 
+    // RN 36c6cd6e4 (#1279): the Daily Review lists every calendar event of the day, not a five-event preview.
+    it('lists every calendar event of the day in the Daily Review', async () => {
+        freezeClock();
+        const { host } = await openHost();
+        const events = Array.from({ length: 7 }, (_, index) => ({
+            id: `e-${index}`, sourceId: 'cal', title: `Event ${index}`,
+            start: `2026-09-23T1${index}:00:00.000Z`, end: `2026-09-23T1${index}:30:00.000Z`, allDay: false,
+        }));
+
+        const daily = value(host.getDailyReview({ calendar: { status: 'ready', events }, ...page }));
+
+        if (daily.content.step !== 'today') throw new Error('Expected the today step');
+        expect(daily.content.calendar.days[0].events.map((event) => event.title)).toEqual(events.map((event) => event.title));
+    });
+
     it('pages within one revision and refuses a stale page after an edit', async () => {
         freezeClock();
         const { host } = await openHost();

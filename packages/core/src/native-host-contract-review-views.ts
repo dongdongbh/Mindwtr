@@ -876,7 +876,8 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             const today = getReviewDay(now);
             const tomorrow = new Date(today);
             tomorrow.setDate(tomorrow.getDate() + 1);
-            const days = [today, tomorrow].map((day) => getDailyReviewCalendarDay(calendar.events, day, text, formatDate));
+            // Every event of the day, as RN's Daily Review lists them (36c6cd6e4, #1279), not core's five-event preview.
+            const days = [today, tomorrow].map((day) => getDailyReviewCalendarDay(calendar.events, day, text, formatDate, Infinity));
             const buckets = getDailyReviewBuckets(state.tasks, state.projects, { now: today, sortBy, sections: state.sections });
             const flags: ReviewStepFlags[] = buildReviewSteps(buckets, {
                 kind: 'daily', includeFocusStep,
