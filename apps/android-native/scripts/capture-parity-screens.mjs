@@ -31,6 +31,10 @@
 // screens. It writes rn-*.png, native-*.png, and side-by-side pair-*.png (RN left) to
 // /home/dd/.mindwtr-harness/parity/<timestamp>/.
 //
+// PARITY_ONLY=13a shoots only audit row 13a's, in light mode, against RN 155 (RN 154 predates RN's Daily Review fix 36c6cd6e4):
+// a completion's "marked Done" toast with Undo and the task back after Undo, a Process Inbox Trash's toast with Undo and the item
+// back in the Inbox, and the Daily Review with seven of the feed's events tomorrow, at its top and scrolled to the last event.
+//
 // PARITY_ONLY=c3-fixes shoots only C3's 10-10 fixes, in light mode: the Calendar's month with today's details while the same
 // range reloads (the feed answers after 15 s: RN's Loading… line over the events kept), and Settings › Calendar's pills at
 // system font scale 2.0 and 1.0 (RN's CompactText 1.2x cap). The font scale is restored at the end.
@@ -43,7 +47,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, chipOn, connect, evidenced, fail, hasText, inEditor, inList, Stopped, switchOn, tab, tabSelected, withDescription } from './device.mjs';
+import { box, button, check, chipOn, connect, EDGE_SAFE_X, evidenced, fail, hasText, inEditor, inList, Stopped, switchOn, tab, tabSelected, withDescription } from './device.mjs';
 import { icsCalendar, serveCalendar } from './calendar-feed-server.mjs';
 
 const [serial] = process.argv.slice(2);
@@ -63,10 +67,11 @@ const R2_ONLY = process.env.PARITY_ONLY === 'r2';
 const D1B_ONLY = process.env.PARITY_ONLY === 'd1b';
 const S5_ONLY = process.env.PARITY_ONLY === 's5';
 const R2B_ONLY = process.env.PARITY_ONLY === 'r2b';
+const A13_ONLY = process.env.PARITY_ONLY === '13a';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
-    apks = { rn: built.rn154.path, native: built.native153.path };
+    apks = { rn: (A13_ONLY ? built.rn155 : built.rn154).path, native: built.native153.path };
 } catch {
     console.error(`REFUSED: no ${harness}/apks/manifest.json; run build-upgrade-harness.mjs first`);
     process.exit(2);
@@ -95,6 +100,8 @@ const T = {
  */
 const CALENDAR_PORT = Number(process.env.MINDWTR_CALENDAR_PORT ?? 18784);
 const CALENDAR_EVENTS = { timed: 'Design review', allDay: 'Team offsite' };
+/** Pass 13a: six more all-day events tomorrow, so the Daily Review's day holds seven, past core's five-event preview. */
+const MORE_EVENTS = A13_ONLY ? ['Budget sync', 'Dentist check-up', 'School pickup', 'Gym class', 'Book club', 'Car service'] : [];
 const CALENDAR_FEED = { id: 'parity-feed', name: 'Team calendar', url: `http://127.0.0.1:${CALENDAR_PORT}/parity.ics`, enabled: true };
 /** One task in Trash (not among T's live tasks), for the Trash screen. */
 const TRASHED = 'Old grocery list';
@@ -850,6 +857,86 @@ const shootR2b = async (prefix, rn) => {
     await press(en['pomodoro.timerOnly']);
     await waitFor('the idle card again', (current) => shown('25:00', en['common.start'])(current) && !labeled(current, en['pomodoro.markTaskDone']), 30_000);
 };
+/**
+ * Pass 13a, in light mode: (1) Done on Focus's T.milk (RN's swipe action) shows the "marked Done" toast with Undo, and Undo brings
+ * the row back; (2) Process Inbox's Trash on its first item shows the toast with Undo, and Undo puts the item back in the Inbox;
+ * (3) the Daily Review lists all seven of tomorrow's events (shot at its top and at the last one).
+ */
+const shoot13a = async (prefix, rn) => {
+    const labeled = (nodes, label) => nodes.findLast((node) => node.text === label || node['content-desc'] === label);
+    const undoShown = (current) => Boolean(labeled(current, en['common.undo']));
+    // A toast lasts 5.2 s and one UI dump takes 1-2 s: the shot and the Undo tap use the dump that found it, with no wait between.
+    const shootAndUndo = async (name, nodes) => {
+        requireAppFront();
+        writeFileSync(resolve(out, `${name}.png`), adbRaw('exec-out', 'screencap', '-p'));
+        shots.push(name);
+        console.log(`shot ${name}.png`);
+        await tap(labeled(nodes, en['common.undo']));
+    };
+    const showTab = async (name) => {
+        if (rn) { openLink(name.toLowerCase()); return; }
+        const tabs = await waitFor('the native tabs', (current) => Boolean(tab(current, name)), 60_000);
+        if (!tabSelected(tabs, name)) await tap(tab(tabs, name));
+    };
+    // (1) Done from Focus, then Undo.
+    await showTab('Focus');
+    const row = await waitFor(`${T.milk} in Focus`, (current) => Boolean(inList(current, T.milk)), 45_000);
+    const [x1, y1, , y2] = box(inList(row, T.milk));
+    const y = Math.round((y1 + y2) / 2);
+    requireAppFront();
+    sh(`input swipe ${Math.max(x1 + 10, EDGE_SAFE_X)} ${y} ${Math.max(x1 + 10, EDGE_SAFE_X) + 440} ${y} 400`);
+    const doneAction = en['task.aria.action'].replace('{{action}}', en['status.done']);
+    const action = (current) => current.find((node) => (node['content-desc'] === doneAction || (node['resource-id'] ?? '').endsWith('swipe-action'))
+        && box(node)[1] <= y && box(node)[3] >= y);
+    await tap(action(await waitFor('the Done action', (current) => Boolean(action(current)), 8_000)));
+    const marked = `${T.milk} marked Done`;
+    const toast = (current) => undoShown(current) && current.some((node) => (node.text ?? '').includes(marked) || (node['content-desc'] ?? '').includes(marked));
+    await shootAndUndo(`${prefix}-complete-toast-light`, await waitFor(`"${marked}" with Undo`, toast, 10_000));
+    await waitFor(`${T.milk} back in Focus`, (current) => Boolean(inList(current, T.milk)), 15_000);
+    check(true, `(13a-1) ${prefix}: Undo after Done brought ${T.milk} back to Focus`);
+    await shoot(`${prefix}-complete-undone-light`, (current) => Boolean(inList(current, T.milk)) && !undoShown(current));
+    // (2) Trash in Process Inbox, then Undo.
+    await showTab('Inbox');
+    const inbox = await waitFor('the Process Inbox button', (current) => current.some((node) => node['content-desc'] === PROCESS), 45_000);
+    await tap(inbox.find((node) => node['content-desc'] === PROCESS));
+    const first = (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === T.call);
+    await hideKeyboard();
+    const step = await waitFor('Process Inbox\'s Trash', (current) => first(current) && Boolean(labeled(current, en['inbox.trash'])), 30_000);
+    await tap(labeled(step, en['inbox.trash']));
+    await shootAndUndo(`${prefix}-inbox-trash-toast-light`, await waitFor('the Trash toast with Undo', (current) => undoShown(current) && !first(current), 10_000));
+    await sleep(1500);
+    for (let close = 0; close < 3 && (await screen()).some((node) => node.class === 'android.widget.EditText'); close += 1) {
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(1000);
+    }
+    await showTab('Inbox');
+    await waitFor(`${T.call} back in the Inbox`, (current) => Boolean(inList(current, T.call)), 15_000);
+    check(true, `(13a-2) ${prefix}: Undo after Trash put ${T.call} back in the Inbox`);
+    await shoot(`${prefix}-inbox-trash-undone-light`, (current) => Boolean(inList(current, T.call)));
+    // (3) The Daily Review with all seven of tomorrow's events.
+    if (rn) openLink('review');
+    else {
+        const menu = await waitFor('the Menu tab', (current) => Boolean(tab(current, 'Menu')), 30_000);
+        await tap(tab(menu, 'Menu'));
+        const sheet = await waitFor('the Review tile', (current) => current.some((node) => node['content-desc'] === en['nav.review']), 15_000);
+        await tap(sheet.find((node) => node['content-desc'] === en['nav.review']));
+    }
+    const start = await waitFor('Start Review', (current) => Boolean(button(current, en['review.startReview'])), 15_000);
+    await tap(button(start, en['review.startReview']));
+    const choice = await waitFor('the Daily Review choice', (current) => Boolean(button(current, en['dailyReview.title'])), 15_000);
+    await tap(button(choice, en['dailyReview.title']));
+    const event = (title) => (current) => hasText(current, title) || current.some((node) => (node['content-desc'] ?? '').includes(title));
+    await shoot(`${prefix}-daily-events-top-light`, event(CALENDAR_EVENTS.timed));
+    const last = MORE_EVENTS.at(-1);
+    let nodes = await screen();
+    for (let swipe = 0; swipe < 8 && !event(last)(nodes); swipe += 1) nodes = await device.swipe(nodes, 'down');
+    check(event(last)(nodes), `(13a-3) ${prefix}: the Daily Review lists "${last}", tomorrow's seventh event`);
+    await shoot(`${prefix}-daily-events-end-light`, event(last));
+    const close = await waitFor('the review\'s Close', (current) => Boolean(button(current, en['common.close'])), 15_000);
+    await tap(button(close, en['common.close']));
+    await sleep(1000);
+};
 const c3FixesOnly = process.env.PARITY_ONLY === 'c3-fixes';
 const originalFontScale = sh('settings get system font_scale');
 /** Opens the Calendar (RN: its link; native: the Menu sheet's tile). */
@@ -977,7 +1064,7 @@ try {
     pushDataFiles();
     sh('settings put system accelerometer_rotation 0');
     sh('settings put system user_rotation 0');
-    calendarServer = await serveCalendar(CALENDAR_PORT, icsCalendar({ ...CALENDAR_EVENTS, name: CALENDAR_FEED.name }));
+    calendarServer = await serveCalendar(CALENDAR_PORT, icsCalendar({ ...CALENDAR_EVENTS, moreAllDay: MORE_EVENTS, name: CALENDAR_FEED.name }));
     adbRaw('reverse', `tcp:${CALENDAR_PORT}`, `tcp:${CALENDAR_PORT}`);
 
     // RN 154, fresh, with the fixture as its database before its first launch.
@@ -1007,6 +1094,7 @@ try {
             device.launch(RN_ACTIVITY);
         }
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('rn', true); continue; }
+        if (A13_ONLY) { if (mode === 'no') await shoot13a('rn', true); continue; }
         if (R2_ONLY) { await shootR2('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (S5_ONLY) { await shootS5('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (D1B_ONLY) { await shootD1b('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
@@ -1051,6 +1139,7 @@ try {
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         if (mode === 'yes') await setNight('yes');
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('native', false); continue; }
+        if (A13_ONLY) { if (mode === 'no') await shoot13a('native', false); continue; }
         if (R2_ONLY) { await shootR2('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (S5_ONLY) { await shootS5('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (D1B_ONLY) { await shootD1b('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
