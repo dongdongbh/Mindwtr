@@ -18,6 +18,7 @@ import {
     type AppData,
 } from '@mindwtr/core';
 import { createDeadlineFetch, createNativeSync } from './host-sync';
+import { serveWebdav, webdavDocument } from '../scripts/webdav-harness.mjs';
 import type { NativeAttachmentBindings } from './host-attachments';
 import { createMemoryFileSystem, CACHE, DOCUMENTS, MANAGED } from '../../../packages/core/src/__fixtures__/mobile-attachment-fakes';
 
@@ -1090,4 +1091,125 @@ it.each(['android', 'ios'] as const)('binds sliceYield on %s only when the host 
         await slice;
         expect(resumed).toBe(true);
     }
+});
+
+// Audit 10-25 gap 10: leaving the app during a sync (core's lifecycle and remote-fence race), on the real native binding and a
+// local WebDAV folder. Leaving aborts the running cycle mid-write; core then syncs once on the way out (its app-left sync). That
+// sync must publish the whole library, and no remote-mutation fence may be left behind, or every device would wait on it.
+describe('leaving the app during a sync', () => {
+    const waitFor = async (what: string, holds: () => boolean, ms = 20_000) => {
+        for (const deadline = Date.now() + ms; !holds(); await new Promise((done) => setTimeout(done, 50))) {
+            if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+        }
+    };
+
+    it('aborts a write in flight, then publishes the library and leaves no fence', async () => {
+        resetForTests();
+        // An earlier test's afterEach leaves the core logger unset; the cycle logs through it.
+        setLogger(() => undefined);
+        globals.__mindwtrHostPlatform = 'android';
+        globalThis.fetch = realFetch;
+        const dav = await serveWebdav({ port: 18_796, username: 'alice', password: 'secret' });
+        const folder = `/dav/leave-${Date.now()}`;
+        const url = `http://127.0.0.1:18796${folder}/data.json`;
+        const task = { id: 't-leave', title: 'Kept through a leave', status: 'inbox', createdAt: '2026-10-25T00:00:00.000Z',
+            updatedAt: '2026-10-25T00:00:00.000Z' };
+        let data: AppData = { tasks: [task as AppData['tasks'][number]], projects: [], sections: [], areas: [], settings: {} };
+        core.setStorageAdapter({ getData: async () => structuredClone(data), saveData: async (next) => { data = structuredClone(next); } });
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: url, '@mindwtr_webdav_username': 'alice' }, false,
+            async () => structuredClone(data));
+        fixture.bindings.secrets.getSecret = async (key) => (key.includes('webdav_password') ? 'secret' : null);
+        // A sliced Android cycle saves with the read token of the snapshot it merged (D9b); this store's token never moves.
+        fixture.bindings.localData = () => ({
+            getData: async () => structuredClone(data),
+            saveData: async (next: AppData) => { data = structuredClone(next); },
+            readTokenOf: () => ({ epoch: 0, generation: 0 }),
+            prepareSaveRows: function* () { /* nothing to prepare */ },
+        }) as unknown as ReturnType<typeof fixture.bindings.localData>;
+        let release!: () => void;
+        dav.state.holdWrites = new Promise<void>((done) => { release = done; });
+        const fences = () => [...dav.state.files.keys()].filter((path) => path.startsWith(`${folder}/`) && path.includes('fence'));
+        try {
+            await core.useTaskStore.getState().fetchData();
+            fixture.sync.start('active');
+            await waitFor('the cycle\'s write of the sync document', () => dav.state.heldAt.length > 0);
+
+            fixture.sync.appState('background');
+            release();
+            dav.state.holdWrites = null;
+            await waitFor('the library in the folder', () => webdavDocument(dav, folder)?.tasks?.some((row: { id: string }) => row.id === 't-leave') === true, 60_000);
+            await waitFor('the fence released', () => fences().length === 0, 20_000);
+
+            const document = webdavDocument(dav, folder);
+            // Earlier tests of this file leave rows in the shared store: the leave's library is what matters here.
+            expect(document.tasks.map((row: { id: string }) => row.id)).toContain('t-leave');
+            expect(data.tasks.map((row) => row.id)).toContain('t-leave');
+            fixture.sync.appState('active');
+        } finally {
+            release?.();
+            dav.state.holdWrites = null;
+            await dav.close();
+            resetForTests();
+        }
+    }, 90_000);
+});
+
+// Audit 10-25 gap 10: a keystore error, then a restart. The secret read throws (Android's keystore can fail on a locked or
+// busy device); the sync must fail without deleting the secret, the stored backend or anything else, and the restarted app
+// (a new binding on the same storage) must sync with the same secret.
+describe('a keystore error, then a restart', () => {
+    it('fails the sync without deleting anything, and the restarted app syncs with the same secret', async () => {
+        resetForTests();
+        setLogger(() => undefined);
+        globals.__mindwtrHostPlatform = 'android';
+        globalThis.fetch = realFetch;
+        const dav = await serveWebdav({ port: 18_797, username: 'alice', password: 'secret' });
+        const folder = `/dav/keystore-${Date.now()}`;
+        const stored = { [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: `http://127.0.0.1:18797${folder}/data.json`, '@mindwtr_webdav_username': 'alice' };
+        const task = { id: 't-keystore', title: 'Kept through a keystore error', status: 'inbox', createdAt: '2026-10-25T00:00:00.000Z',
+            updatedAt: '2026-10-25T00:00:00.000Z' };
+        let data: AppData = { tasks: [task as AppData['tasks'][number]], projects: [], sections: [], areas: [], settings: {} };
+        core.setStorageAdapter({ getData: async () => structuredClone(data), saveData: async (next) => { data = structuredClone(next); } });
+        const secrets = new Map([['mindwtr_webdav_password', 'secret']]);
+        const deleted: string[] = [];
+        const boot = (keystoreFails: boolean) => {
+            const fixture = host(stored, false, async () => structuredClone(data));
+            fixture.bindings.localData = () => ({
+                getData: async () => structuredClone(data),
+                saveData: async (next: AppData) => { data = structuredClone(next); },
+                readTokenOf: () => ({ epoch: 0, generation: 0 }),
+                prepareSaveRows: function* () { /* nothing to prepare */ },
+            }) as unknown as ReturnType<typeof fixture.bindings.localData>;
+            fixture.bindings.secrets = {
+                getSecret: async (key) => {
+                    if (keystoreFails) throw new Error('android.security.KeyStoreException: Keystore operation failed');
+                    return [...secrets].find(([name]) => key.includes(name) || name.includes(key))?.[1] ?? null;
+                },
+                setSecret: async (key, value) => { secrets.set(key, value); },
+                deleteSecret: async (key) => { deleted.push(key); secrets.delete(key); },
+            };
+            return fixture;
+        };
+        try {
+            await core.useTaskStore.getState().fetchData();
+            const failing = boot(true);
+            const failed = await failing.sync.settingsHost.performSync(undefined, { manual: true }).catch((error: unknown) => ({ success: false, error }));
+            expect(failed).toMatchObject({ success: false });
+            expect(deleted).toEqual([]);
+            expect(secrets.get('mindwtr_webdav_password')).toBe('secret');
+            expect(Object.fromEntries([...failing.kv].filter(([key]) => key in stored))).toEqual(stored);
+            expect(webdavDocument(dav, folder)).toBeNull();
+
+            // The restart: a new binding over the same key-value store and keystore, which answers again.
+            const restarted = boot(false);
+            for (const [key, value] of failing.kv) restarted.kv.set(key, value);
+            expect(await restarted.sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
+            // The folder takes only the stored user's password: a document there proves the same secret signed in.
+            expect(webdavDocument(dav, folder)).not.toBeNull();
+            expect(deleted).toEqual([]);
+        } finally {
+            await dav.close();
+            resetForTests();
+        }
+    }, 60_000);
 });
