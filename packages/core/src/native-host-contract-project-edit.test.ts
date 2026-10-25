@@ -117,3 +117,51 @@ describe('runProjectEdit', () => {
         expect(data().projects.find((item) => item.id === 'p')?.supportNotes).toBe('Kept');
     });
 });
+
+// The project header's actions sheet (RN ProjectDetailModal's "..."): core's prepared lifecycle, duplicate and delete run inside
+// the same journaled edit, each a target state on replay; Delete answers RN's toast words and its Undo restores the task links.
+describe('runProjectEdit project actions', () => {
+    const task = (id: string) => ({ id, title: id, status: 'next', projectId: 'p', tags: [], contexts: [], createdAt: at, updatedAt: at });
+
+    it('completes, reactivates and cancels the project, and a replay writes nothing', async () => {
+        const { host, stored, saves } = await open();
+        const run = (n: number, action: string) => host.runProjectEdit({ requestId: uuid(n), projectId: 'p', kind: 'lifecycle', action } as never);
+        expect(await run(20, 'complete')).toEqual({ ok: true, value: { id: 'p', kind: 'lifecycle', outcome: 'saved' } });
+        expect(stored()).toMatchObject({ status: 'archived' });
+        expect(stored().cancelledAt).toBeUndefined();
+        const count = saves();
+        expect(await run(20, 'complete')).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        expect(await run(21, 'reactivate')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ status: 'active' });
+        expect(await run(22, 'cancel')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ status: 'archived' });
+        expect(stored().cancelledAt).toEqual(expect.any(String));
+        expect(await run(22, 'cancel')).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+    });
+
+    it('duplicates the project and answers the copy and RN\'s toast words', async () => {
+        const { host, data } = await open();
+        const reply = await host.runProjectEdit({ requestId: uuid(23), projectId: 'p', kind: 'duplicate' } as never);
+        expect(reply).toMatchObject({ ok: true, value: { id: 'p', kind: 'duplicate', outcome: 'saved', reply: { id: expect.any(String), message: 'Project duplicated' } } });
+        const copy = (reply as { value: { reply: { id: string } } }).value.reply.id;
+        expect(copy).not.toBe('p');
+        expect(data().projects.find((item) => item.id === copy)).toMatchObject({ title: expect.stringContaining('Kitchen') });
+    });
+
+    it('moves the project to Trash with RN\'s Undo, and the Undo restores it and its tasks\' links', async () => {
+        const { host, stored, data } = await open({ tasks: [task('t1'), task('t2')] as never });
+        const deleted = await host.runProjectEdit({ requestId: uuid(24), projectId: 'p', kind: 'delete' } as never);
+        expect(deleted).toMatchObject({ ok: true, value: { kind: 'delete', outcome: 'saved',
+            reply: { deletion: { message: expect.any(String), undoLabel: 'Undo' } } } });
+        expect(stored().deletedAt).toEqual(expect.any(String));
+        expect(data().tasks.filter((row) => row.projectId === 'p')).toHaveLength(0);
+        expect(await host.runProjectEdit({ requestId: uuid(24), projectId: 'p', kind: 'delete' } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        const undo = { requestId: uuid(25), projectId: 'p', kind: 'deleteUndo', deleteRequestId: uuid(24) } as never;
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { kind: 'deleteUndo', outcome: 'saved' } });
+        expect(stored().deletedAt).toBeUndefined();
+        expect(data().tasks.filter((row) => row.projectId === 'p').map((row) => row.id).sort()).toEqual(['t1', 't2']);
+        expect(await host.runProjectEdit(undo)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+    });
+});

@@ -9617,4 +9617,13 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(calendar, /ActivityResultContracts\.GetContent/);
     assert.match(calendar, /fun addFile\(uri: Uri, revision: String\) \{[^}]*keepPickedFileReadable \{ flags -> resolver\.takePersistableUriPermission\(uri, flags\) \}/);
 }
+// Pass O2f-parity b1: RN's project header "..." (ProjectDetailModal's actions sheet) on core's runProjectEdit, in RN's row order;
+// Delete closes the project and its Undo is core's deleteUndo of that very Delete.
+{
+    const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
+    assert.match(header, /ProjectTitleField\([^\n]*\n[\s\S]{0,800}\{ projectDetails\.actionsOpen = true \}[\s\S]{0,200}testTag\("project-actions-menu-button"\)/);
+    assert.match(details, /"project-duplicate-button"[\s\S]{0,300}"project-reactivate-button"[\s\S]{0,300}"project-archive-button"[\s\S]{0,300}"project-cancel-button"[\s\S]{0,300}"project-delete-button"/);
+    assert.match(details, /deleteId = edit\(id, "delete", answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo"\) \{ put\("deleteRequestId", deleteId\) \}/);
+    assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ answer\(reply\) \} \}/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

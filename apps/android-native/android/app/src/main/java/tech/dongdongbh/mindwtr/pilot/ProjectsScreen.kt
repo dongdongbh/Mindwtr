@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -368,6 +369,14 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 Icon(Lucide.ChevronLeft, null, tint = c.tint, modifier = Modifier.size(24.dp))
             }
             ProjectTitleField(model, projects?.title(openProjectId.orEmpty()).orEmpty(), detail?.readOnly != false, Modifier.weight(1f).padding(start = 8.dp))
+            // RN's project actions button (projectHeaderActionButton): the "..." that opens Duplicate, Complete, Cancel and Delete.
+            val actionsLabel = t("projects.actionsLabel")
+            val actionsShape = RoundedCornerShape(10.dp)
+            Box(Modifier.padding(start = 8.dp).size(38.dp).clip(actionsShape).background(c.filterBg).border(1.dp, c.border, actionsShape)
+                .clickable(enabled = writable && detail != null && failedAction == null, role = Role.Button) { projectDetails.actionsOpen = true }
+                .semantics { contentDescription = actionsLabel }.testTag("project-actions-menu-button"), contentAlignment = Alignment.Center) {
+                Icon(Ionicons.EllipsisHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
+            }
         }
         // RN's KeyboardAvoidingView: the open keyboard shortens the list, so a focused Details field scrolls into view.
         LazyColumn(Modifier.weight(1f).background(c.bg).imePadding(), contentPadding = PaddingValues(12.dp)) {

@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -132,6 +133,11 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     var sections by mutableStateOf<JSONObject?>(null); private set
     var sectionDraft by mutableStateOf<SectionDraft?>(null)
     var sectionDelete by mutableStateOf<JSONObject?>(null)
+    /** RN's header "..." sheet (projectActionsVisible), and the confirm Cancel project or Delete asks first. */
+    var actionsOpen by mutableStateOf(false)
+    var actionConfirm by mutableStateOf<String?>(null)
+    /** What the screen does with an edit's reply, by request UUID: Duplicate opens the copy, Delete offers RN's Undo. */
+    private val answers = java.util.Collections.synchronizedMap(HashMap<String, (JSONObject) -> Unit>())
     /** RN's help Alert: its title and text. */
     var help by mutableStateOf<Pair<String, String>?>(null)
 
@@ -153,7 +159,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         projectId = id
         open = false; statusMenu = false; raw = null; notesExpanded = false; notesPreview = false; notesFullscreen = false
         notesDraft = null; notesView = null; areaPicker = null; tagPicker = null; tagDraft = ""; datePicker = null
-        sections = null; sectionDraft = null; sectionDelete = null; help = null
+        sections = null; sectionDraft = null; sectionDelete = null; help = null; actionsOpen = false; actionConfirm = null
     }
 
     private fun input(id: String) = JSONObject().put("projectId", id)
@@ -245,6 +251,36 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
         edit(projectId, "title") { put("title", text) }
     }
 
+    // ---- The header's actions sheet (RN's "..."): core's prepared lifecycle, duplicate and delete, inside runProjectEdit ----
+
+    /** Complete, Cancel project or Reactivate; the project stays open, as RN's does. */
+    fun lifecycle(action: String) {
+        actionsOpen = false; actionConfirm = null
+        edit(projectId, "lifecycle") { put("action", action) }
+    }
+
+    /** RN's Duplicate: the copy opens, with core's "Project duplicated". */
+    fun duplicate() {
+        actionsOpen = false
+        edit(projectId, "duplicate", answer = { reply ->
+            reply.optJSONObject("reply")?.let { copy -> shell.openProject(copy.getString("id")); shell.showToast(t("common.done"), copy.getString("message"), "success") }
+        })
+    }
+
+    /** RN's Delete: the project goes to Trash and closes; core's toast offers Undo, which restores it and its tasks' links. */
+    fun delete() {
+        actionsOpen = false; actionConfirm = null
+        val id = projectId ?: return
+        var deleteId = ""
+        deleteId = edit(id, "delete", answer = { reply ->
+            val deletion = reply.optJSONObject("reply")?.optJSONObject("deletion") ?: return@edit
+            if (shell.openProjectId == id) shell.closeProject()
+            shell.showToast(t("common.notice"), deletion.getString("message"), "info", deletion.getString("undoLabel"), 5_200) {
+                edit(id, "deleteUndo") { put("deleteRequestId", deleteId) }
+            }
+        }) ?: return
+    }
+
     fun setStatus(status: String) {
         statusMenu = false
         edit(projectId, "status") { put("status", status) }
@@ -328,14 +364,16 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
      * send waits its turn in order (another action, an owed retry); none is dropped. Core's runProjectEdit reads the project as
      * it is then, prepares and commits, preparing again if a sync lands between the steps.
      */
-    private fun edit(projectId: String?, kind: String, fields: JSONObject.() -> Unit) {
-        val id = projectId ?: return
+    private fun edit(projectId: String?, kind: String, answer: ((JSONObject) -> Unit)? = null, fields: JSONObject.() -> Unit = {}): String? {
+        val id = projectId ?: return null
         val requestId = UUID.randomUUID().toString()
+        answer?.let { answers[requestId] = it }
         val json = projectEdit(requestId, id, kind, JSONObject().apply(fields)).toString()
         runCatching { checkNotNull(shell.coreHost()).journalAhead("projectEdit", json) }
             .onFailure { Log.e(CoreHost.TAG, "Native Android project edit not journaled ahead ${failureForLog(it)}") }
         writes.add(FailedAction("projectEdit", requestId, json))
         pump()
+        return requestId
     }
 
     /** Starts the next send when the shell is free; looks again shortly while one waits. */
@@ -349,16 +387,16 @@ class ProjectDetailsModel(private val shell: InboxViewModel) {
     /** [action]'s send (its journal entry is already on disk); a failure owes its exact retry. False while it cannot start. */
     private fun start(action: FailedAction, done: () -> Unit): Boolean {
         if (shell.busy || shell.failedAction != null) return false
-        return shell.tryPerform(action, finished = done) { runtime ->
-            runtime.menuCommand(action.kind, action.title)
-            shell.acknowledged(action)
-        }
+        return shell.tryPerform(action, finished = done) { runtime -> answered(action, runtime.menuCommand(action.kind, action.title)) }
     }
 
     /** The failure banner's Try again: the owed edit, exactly as first sent. */
-    private fun send(action: FailedAction) = shell.perform(action) { runtime ->
-        runtime.menuCommand(action.kind, action.title)
+    private fun send(action: FailedAction) = shell.perform(action) { runtime -> answered(action, runtime.menuCommand(action.kind, action.title)) }
+
+    /** [action] is done: its journal entry goes, and the screen gets the reply it waits for (on the main thread). */
+    private fun answered(action: FailedAction, reply: JSONObject) {
         shell.acknowledged(action)
+        answers.remove(action.id)?.let { answer -> shell.ui { answer(reply) } }
     }
 
     fun retry(action: FailedAction) = send(action)
@@ -816,6 +854,70 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
         DayPickerDialog(picker.getString("date"), ::closeDate) { day -> setDate(field, day, if (field == "reviewAt") picker.getString("instant") else null) }
     }
     sections?.let { options -> SectionManager(model, options) }
+    if (actionsOpen) ProjectActionsSheet(model)
+    actionConfirm?.let { action ->
+        // RN's Alert before Cancel project and Delete, with its words.
+        val cancel = action == "cancel"
+        val confirm = t(if (cancel) "projects.cancel" else "common.delete")
+        AlertDialog(onDismissRequest = { actionConfirm = null },
+            title = { Text(t(if (cancel) "projects.cancelConfirmTitle" else "projects.title")) },
+            text = { Text(t(if (cancel) "projects.cancelConfirmBody" else "projects.deleteConfirm")) },
+            dismissButton = { TextButton(onClick = { actionConfirm = null }) { Text(t("common.cancel")) } },
+            confirmButton = { TextButton(onClick = { if (cancel) lifecycle("cancel") else delete() }) { Text(confirm, color = LocalTheme.current.colors.danger) } })
+    }
+}
+
+/**
+ * RN's project actions sheet (ProjectDetailModal's ProjectOptionsModal under the title's "..."): Duplicate, Complete (with RN's
+ * archive help) or Reactivate, Cancel project and Delete. Back closes it; a tap outside does nothing, as RN's.
+ */
+@Composable
+private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetails) {
+    val c = LocalTheme.current.colors
+    val archived = model.project?.readOnly == true
+    val idle = !model.busy && model.failedAction == null
+    Overlay({ actionsOpen = false }, outsideCloses = false) {
+        val shape = RoundedCornerShape(14.dp)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).border(1.dp, c.border, shape)
+            .pointerInput(Unit) { detectTapGestures { } }.padding(14.dp).testTag("project-actions-sheet"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(t("projects.actionsLabel"), style = rnText(17, 800), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })
+                val close = t("common.close")
+                Box(Modifier.size(34.dp).clickable(role = Role.Button) { actionsOpen = false }.semantics { contentDescription = close },
+                    contentAlignment = Alignment.Center) { Icon(Ionicons.Close, null, tint = c.secondaryText, modifier = Modifier.size(20.dp)) }
+            }
+            val listShape = RoundedCornerShape(10.dp)
+            Column(Modifier.fillMaxWidth().clip(listShape).border(1.dp, c.border, listShape)) {
+                ProjectOptionRow(SettingsIonicons.CopyOutline, t("projects.duplicate"), "project-duplicate-button", idle) { duplicate() }
+                if (archived) ProjectOptionRow(SettingsIonicons.RefreshOutline, t("projects.reactivate"), "project-reactivate-button", idle) { lifecycle("reactivate") }
+                else ProjectOptionRow(Ionicons.ArchiveOutline, t("projects.complete"), "project-archive-button", idle, t("projects.archiveHelp")) { lifecycle("complete") }
+                if (!archived) ProjectOptionRow(Ionicons.CloseCircleOutline, t("projects.cancel"), "project-cancel-button", idle, danger = true) {
+                    actionsOpen = false; actionConfirm = "cancel"
+                }
+                ProjectOptionRow(SettingsIonicons.TrashOutline, t("common.delete"), "project-delete-button", idle, danger = true) {
+                    actionsOpen = false; actionConfirm = "delete"
+                }
+            }
+        }
+    }
+}
+
+/** RN's ProjectOptionRow: a 32-dp icon tile, the label (and its description), a hairline under it. */
+@Composable
+private fun ProjectOptionRow(icon: ImageVector, label: String, tag: String, enabled: Boolean, description: String? = null, danger: Boolean = false,
+                             onClick: () -> Unit) {
+    val c = LocalTheme.current.colors
+    Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).fade(if (enabled) 1f else 0.45f).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+        .hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 9.dp).testTag(tag),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(32.dp).clip(RoundedCornerShape(9.dp)).background(c.filterBg), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = if (danger) c.danger else c.secondaryText, modifier = Modifier.size(19.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = rnText(14, 700), color = if (danger) c.danger else c.text)
+            description?.let { Text(it, style = rnText(11, 400, 15), color = c.secondaryText) }
+        }
+    }
 }
 
 /** RN's ProjectSectionManagerModal: Add Section, the editor, and each section with Move up, Move down, Edit and Delete. */

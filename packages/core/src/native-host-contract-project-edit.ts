@@ -2,6 +2,7 @@ import { isValidProjectColorOverride } from './color-constants';
 import type { NativeHostResult } from './native-host-contract';
 import { projectReviewPickerValue } from './project-details-presentation';
 import { normalizeProjectTag } from './project-tags';
+import { revisionOf } from './native-request-receipts';
 import { useTaskStore } from './store';
 
 /**
@@ -21,8 +22,14 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'sectionCreate'; title: string }
     | { kind: 'sectionRename'; sectionId: string; title: string }
     | { kind: 'sectionDelete'; sectionId: string }
-    | { kind: 'sectionMove'; sectionId: string; direction: 'up' | 'down'; order: string[] });
-export type NativeProjectEditResult = { id: string; kind: NativeProjectEdit['kind']; outcome: 'saved' | 'unchanged' | 'blocked' };
+    | { kind: 'sectionMove'; sectionId: string; direction: 'up' | 'down'; order: string[] }
+    // The header's actions sheet (RN's "..."): Complete, Cancel or Reactivate, Duplicate, Delete and that Delete's Undo.
+    | { kind: 'lifecycle'; action: 'complete' | 'cancel' | 'reactivate' }
+    | { kind: 'duplicate' }
+    | { kind: 'delete' }
+    | { kind: 'deleteUndo'; deleteRequestId: string });
+/** [reply] is the prepared command's own answer when it wrote: the copy and its toast (duplicate), RN's Undo toast (delete). */
+export type NativeProjectEditResult = { id: string; kind: NativeProjectEdit['kind']; outcome: 'saved' | 'unchanged' | 'blocked'; reply?: unknown };
 
 type Reply = NativeHostResult<unknown>;
 type Json = Record<string, unknown>;
@@ -58,6 +65,10 @@ const valid = (input: unknown): input is NativeProjectEdit => {
         case 'sectionMove': return keys(edit, ['sectionId', 'direction', 'order']) && id(edit.sectionId)
             && (edit.direction === 'up' || edit.direction === 'down') && Array.isArray(edit.order)
             && edit.order.length <= 1_000 && edit.order.every(id);
+        case 'lifecycle': return keys(edit, ['action']) && ['complete', 'cancel', 'reactivate'].includes(edit.action as string);
+        case 'duplicate': case 'delete': return keys(edit, []);
+        case 'deleteUndo': return keys(edit, ['deleteRequestId']) && typeof edit.deleteRequestId === 'string'
+            && UUID.test(edit.deleteRequestId) && edit.deleteRequestId !== edit.requestId;
         default: return false;
     }
 };
@@ -94,6 +105,9 @@ export function createProjectEditMethods(deps: {
         return expected;
     };
     type Plan = { outcome: 'unchanged' | 'blocked' } | { command: string; request: Json } | { conflict: string };
+    // The Deletes this process confirmed, by request UUID: their Undo needs the confirmed Delete. RN's Undo lives as long as its
+    // toast and is gone after a restart; these are gone after a restart too.
+    const deletes = new Map<string, Json>();
 
     /** The request one edit makes from core's options for the project as it is now. */
     const plan = async (edit: NativeProjectEdit): Promise<NativeHostResult<Plan>> => {
@@ -191,6 +205,24 @@ export function createProjectEditMethods(deps: {
                 return { ok: true, value: { command: 'ProjectSectionOrder', request: { ...base, sectionId: edit.sectionId,
                     direction: edit.direction, expectedSections: read.value.token } } };
             }
+            case 'lifecycle': case 'duplicate': case 'delete': case 'deleteUndo': {
+                const current = useTaskStore.getState()._projectsById.get(edit.projectId);
+                const gone = !current || Boolean(current.deletedAt) || Boolean(current.purgedAt);
+                if (edit.kind === 'deleteUndo') {
+                    // Back in place (a replay, or the Undo already ran): nothing to restore.
+                    return { ok: true, value: !gone ? { outcome: 'unchanged' }
+                        : !deletes.has(edit.deleteRequestId) ? { conflict: 'The Delete can no longer be undone' }
+                            : { command: 'ProjectDeleteUndo', request: { requestId: edit.requestId, deleteRequestId: edit.deleteRequestId } } };
+                }
+                if (gone) return { ok: true, value: edit.kind === 'delete' ? { outcome: 'unchanged' } : { conflict: 'The Project is no longer there' } };
+                const request = { ...base, projectRevision: revisionOf(current) };
+                if (edit.kind === 'delete') return { ok: true, value: { command: 'ProjectDelete', request } };
+                // ponytail: a duplicate's replay after it landed is refused by its receipt (new ids, another payload), never written twice.
+                if (edit.kind === 'duplicate') return { ok: true, value: { command: 'ProjectDuplicate', request } };
+                const done = edit.action === 'reactivate' ? current.status !== 'archived'
+                    : current.status === 'archived' && Boolean(current.cancelledAt) === (edit.action === 'cancel');
+                return { ok: true, value: done ? { outcome: 'unchanged' } : { command: 'ProjectLifecycle', request: { ...request, action: edit.action } } };
+            }
         }
     };
 
@@ -218,7 +250,8 @@ export function createProjectEditMethods(deps: {
                     const saved = await deps.save();
                     return saved.ok ? { ok: true, value: answer(step.outcome) } : saved;
                 }
-                const prepared = await call(`prepare${step.command}`, step.request) as NativeHostResult<Json>;
+                const prepared = await call(`prepare${step.command}`, step.command === 'ProjectDeleteUndo'
+                    ? { request: step.request, delete: deletes.get(step.request.deleteRequestId as string) } : step.request) as NativeHostResult<Json>;
                 if (!prepared.ok) {
                     if (prepared.error.code !== 'STALE_REVISION') return prepared;
                     stale = prepared.error.message;
@@ -229,7 +262,11 @@ export function createProjectEditMethods(deps: {
                     return saved.ok ? { ok: true, value: answer(prepared.value.kind === 'blocked' ? 'blocked' : 'unchanged') } : saved;
                 }
                 const committed = await call(`commitPrepared${step.command}`, { request: step.request, prepared: prepared.value.prepared });
-                if (committed.ok) return { ok: true, value: answer('saved') };
+                if (committed.ok && step.command === 'ProjectDelete') {
+                    deletes.set(input.requestId, { request: step.request, prepared: prepared.value.prepared });
+                    if (deletes.size > 20) deletes.delete(deletes.keys().next().value as string);
+                }
+                if (committed.ok) return { ok: true, value: ['duplicate', 'delete'].includes(input.kind) ? { ...answer('saved'), reply: committed.value } : answer('saved') };
                 if (committed.error.code !== 'STALE_REVISION') return committed;
                 stale = committed.error.message;
             }

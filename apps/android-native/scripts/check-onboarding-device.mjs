@@ -7,7 +7,8 @@
 // (a) An empty library with sync off opens the welcome sheet, RN's options in order (Start, Set up sync, Import tasks); Skip
 // stores the dismissal, so a new start opens no sheet. (b) Set up sync closes the sheet for this run only and opens Settings ›
 // Sync with RN's Getting Started card, whose Start seeds and opens Getting Started; the next start opens the sheet again. (c) Start using Mindwtr seeds Getting Started and
-// opens it with RN's actions; Open Inbox shows the Inbox with the two sample items. (d) The editor's Scheduling help starts
+// opens it with RN's actions; its header "..." lists RN's project actions in order, Complete and Reactivate swap, Duplicate opens
+// the copy, and the copy's Delete closes it with Undo, which puts it back; Open Inbox shows the Inbox with the two sample items. (d) The editor's Scheduling help starts
 // closed and opens with core's hint. (e) A debug preview (debug.mindwtr.native.startup_prompt) opens the announcement, the
 // update reminder and the donation window; the close button dismisses each. GitHub is never called: about_stub points the
 // update check at a closed local port. Screenshots of each surface go to [screenshot-dir] for the side-by-side with RN.
@@ -15,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { check, connect, evidenced, fail, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { button, check, connect, evidenced, fail, hasText, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, seedApk, shotsArg] = process.argv.slice(2);
 if (!serial || !seedApk) {
@@ -115,6 +116,45 @@ try {
     nodes = await waitFor('the Getting Started title', (current) => projectTitled(current, STARTER_TITLE), 15_000);
     check(true, '(c) the project screen shows the Getting Started title');
     shot('getting-started');
+
+    // (c) The header's "..." (RN's project actions, O2f-parity b1): Duplicate, Complete, Cancel project and Delete, in RN's order.
+    const sheetOpen = (current) => Boolean(tagged(current, 'project-actions-sheet'));
+    const openActions = async () => tapExpecting(tagged(await screen(), 'project-actions-menu-button') ?? fail('no project actions button'), sheetOpen, 'the project actions');
+    const closeActions = async (current) => tapExpecting(button(current, en['common.close']) ?? fail('no Close on the sheet'), (next) => !sheetOpen(next), 'the sheet closed');
+    // The sheet once it offers [tag]: a write's reply lands a moment after the tap.
+    const actionsOffer = async (tag, description) => {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+            const open = await openActions();
+            if (tagged(open, tag)) return open;
+            await closeActions(open);
+            await sleep(500);
+        }
+        return fail(`the project actions never offered ${description}`);
+    };
+    nodes = await openActions();
+    const actionRows = ['project-duplicate-button', 'project-archive-button', 'project-cancel-button', 'project-delete-button'].map((tag) => tagged(nodes, tag));
+    check(actionRows.every(Boolean) && actionRows.every((row, index) => index === 0 || centerY(actionRows[index - 1]) < centerY(row)),
+        '(c) the project\'s "..." lists Duplicate, Complete, Cancel project and Delete in RN\'s order');
+    shot('project-actions');
+    // Complete files it (Reactivate offered, no Cancel project); Reactivate makes it active again.
+    await tapExpecting(tagged(nodes, 'project-archive-button'), (current) => !sheetOpen(current), 'the sheet closed');
+    nodes = await actionsOffer('project-reactivate-button', 'Reactivate after Complete');
+    check(!tagged(nodes, 'project-cancel-button'), '(c) Complete files the project: its actions offer Reactivate and no Cancel project');
+    await tapExpecting(tagged(nodes, 'project-reactivate-button'), (current) => !sheetOpen(current), 'the sheet closed');
+    nodes = await actionsOffer('project-archive-button', 'Complete after Reactivate');
+    check(Boolean(tagged(nodes, 'project-cancel-button')), '(c) Reactivate makes the project active again');
+    // Duplicate opens the copy; its Delete asks first, closes it, and core's toast offers Undo, which puts it back in Projects.
+    const COPY = `${STARTER_TITLE} (Copy)`;
+    nodes = await tapExpecting(tagged(nodes, 'project-duplicate-button'), (current) => projectTitled(current, COPY), 'the copy', 30_000);
+    check(true, '(c) Duplicate opens the copy');
+    nodes = await openActions();
+    nodes = await tapExpecting(tagged(nodes, 'project-delete-button'), (current) => !sheetOpen(current) && Boolean(button(current, en['common.delete'])), 'the delete confirm');
+    nodes = await tapExpecting(button(nodes, en['common.delete']), (current) => hasText(current, en['projects.deleted']), 'the deleted toast', 30_000);
+    check(!projectTitled(nodes, COPY) && Boolean(button(nodes, en['common.undo'])), '(c) Delete closes the copy and core\'s toast offers Undo');
+    nodes = await tapExpecting(button(nodes, en['common.undo']), (current) => hasText(current, COPY), 'the copy back in Projects', 30_000);
+    check(true, '(c) Undo puts the copy back');
+    nodes = await tapExpecting(byText(nodes, STARTER_TITLE) ?? fail('no Getting Started row'),
+        (current) => projectTitled(current, STARTER_TITLE) && Boolean(tagged(current, 'getting-started-actions')), 'Getting Started again');
     nodes = await tapExpecting(byText(nodes, en['starter.processInbox.check1']) ?? fail('no Open Inbox'), (current) => tabSelected(current, en['tab.inbox']), 'the Inbox');
     check(tabSelected(nodes, en['tab.inbox']), '(c) Open Inbox closes the project and shows the Inbox');
 
