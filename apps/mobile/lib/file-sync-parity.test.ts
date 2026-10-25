@@ -270,7 +270,7 @@ const digest = (bytes: Uint8Array | string) => createHash('sha256').update(bytes
 const normalizer = () => {
   const names = new Map<string, string>();
   const text = (value: string): string => value
-    .replace(/\.mindwtr-et-([sqb])-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+/g, (match, kind: string) => {
+    .replace(/\.mindwtr-et-([sqbp])-[a-z0-9]+-[a-z0-9]+-[a-z0-9]+/g, (match, kind: string) => {
       if (!names.has(match)) names.set(match, `.mindwtr-et-${kind}-${names.size}`);
       return names.get(match)!;
     })

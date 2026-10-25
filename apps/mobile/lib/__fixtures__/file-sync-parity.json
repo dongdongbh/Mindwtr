@@ -2300,17 +2300,45 @@
     "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-0"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
+    "saf.create",
+    "content://provider/tree/root/document/root/attachments",
+    ".mindwtr-et-p-1",
+    "application/octet-stream"
+   ],
+   [
+    "native.stat",
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-p-1"
+   ],
+   [
+    "saf.create",
+    "content://provider/tree/root/document/root/attachments",
+    ".mindwtr-et-p-1",
+    "application/octet-stream"
+   ],
+   [
+    "native.stat",
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-p-1.provider-copy"
+   ],
+   [
+    "saf.delete",
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-p-1"
+   ],
+   [
+    "saf.delete",
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-p-1.provider-copy"
+   ],
+   [
+    "native.stat",
+    "content://provider/tree/root/document/root/attachments/a1.png"
    ],
    [
     "native.rename",
     "content://provider/tree/root/document/root/attachments/a1.png",
-    ".mindwtr-et-q-1"
+    ".mindwtr-et-q-2"
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-1"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-2"
    ],
    [
     "saf.create",
@@ -2321,10 +2349,6 @@
    [
     "native.stat",
     "content://provider/tree/root/document/root/attachments/a1.png"
-   ],
-   [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
    ],
    [
     "saf.write",
@@ -2340,7 +2364,7 @@
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-1"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-2"
    ],
    [
     "saf.delete",
@@ -2348,7 +2372,7 @@
    ],
    [
     "saf.delete",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-1"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-2"
    ],
    [
     "native.lock.revalidate",
@@ -2361,16 +2385,16 @@
    [
     "saf.create",
     "content://provider/tree/root/document/root/attachments",
-    ".mindwtr-et-s-2",
+    ".mindwtr-et-s-3",
     "application/octet-stream"
    ],
    [
     "native.stat",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-2"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-3"
    ],
    [
     "saf.write",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-2",
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-3",
     "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp5ywM1uiG9IX5NNKY6R4AAAAAAAAA7dIBNtP879U5WhRT6Ph+rZ4VldDffc7I8xhtGT1U",
     {
      "encoding": "base64"
@@ -2378,20 +2402,20 @@
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-2"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-3"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
+    "native.stat",
+    "content://provider/tree/root/document/root/attachments/a2.txt"
    ],
    [
     "native.rename",
     "content://provider/tree/root/document/root/attachments/a2.txt",
-    ".mindwtr-et-q-3"
+    ".mindwtr-et-q-4"
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-3"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-4"
    ],
    [
     "saf.create",
@@ -2404,10 +2428,6 @@
     "content://provider/tree/root/document/root/attachments/a2.txt"
    ],
    [
-    "native.listChildren",
-    "content://provider/tree/root/document/root/attachments"
-   ],
-   [
     "saf.write",
     "content://provider/tree/root/document/root/attachments/a2.txt",
     "TVdFTkMxAQEATAAAAgAAAAEBHPGQ6RSh3A4ZHFRsqTxp5ywM1uiG9IX5NNKY6R4AAAAAAAAA7dIBNtP879U5WhRT6Ph+rZ4VldDffc7I8xhtGT1U",
@@ -2421,15 +2441,15 @@
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-3"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-4"
    ],
    [
     "saf.delete",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-2"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-s-3"
    ],
    [
     "saf.delete",
-    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-3"
+    "content://provider/tree/root/document/root/attachments/.mindwtr-et-q-4"
    ],
    [
     "native.lock.revalidate",
@@ -2442,16 +2462,16 @@
    [
     "saf.create",
     "content://provider/tree/root/document/root",
-    ".mindwtr-et-s-4",
+    ".mindwtr-et-s-5",
     "application/octet-stream"
    ],
    [
     "native.stat",
-    "content://provider/tree/root/document/root/.mindwtr-et-s-4"
+    "content://provider/tree/root/document/root/.mindwtr-et-s-5"
    ],
    [
     "saf.write",
-    "content://provider/tree/root/document/root/.mindwtr-et-s-4",
+    "content://provider/tree/root/document/root/.mindwtr-et-s-5",
     "<text:284:4f75a8e07d0e2f6b>",
     {
      "encoding": "base64"
@@ -2459,7 +2479,7 @@
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/.mindwtr-et-s-4"
+    "content://provider/tree/root/document/root/.mindwtr-et-s-5"
    ],
    [
     "saf.create",
@@ -2493,7 +2513,7 @@
    ],
    [
     "saf.delete",
-    "content://provider/tree/root/document/root/.mindwtr-et-s-4"
+    "content://provider/tree/root/document/root/.mindwtr-et-s-5"
    ],
    [
     "native.lock.revalidate",
@@ -2510,11 +2530,11 @@
    [
     "native.rename",
     "content://provider/tree/root/document/root/data.json",
-    ".mindwtr-et-q-5"
+    ".mindwtr-et-q-6"
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/.mindwtr-et-q-5"
+    "content://provider/tree/root/document/root/.mindwtr-et-q-6"
    ],
    [
     "native.listChildren",
@@ -2522,11 +2542,11 @@
    ],
    [
     "native.read",
-    "content://provider/tree/root/document/root/.mindwtr-et-q-5"
+    "content://provider/tree/root/document/root/.mindwtr-et-q-6"
    ],
    [
     "saf.delete",
-    "content://provider/tree/root/document/root/.mindwtr-et-q-5"
+    "content://provider/tree/root/document/root/.mindwtr-et-q-6"
    ],
    [
     "native.lock.revalidate",

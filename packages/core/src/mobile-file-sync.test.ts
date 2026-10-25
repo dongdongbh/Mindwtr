@@ -330,6 +330,39 @@ describe('File Sync encryption transition guards kept while cutting its cost', (
             .toEqual([JSON.stringify(data)]);
     });
 
+    it('refuses to move aside an attachment a peer replaced with a new document, on a provider proved to rename a taken name', async () => {
+        const folder = safFolder();
+        let replaced = false;
+        folder.peer((op, name) => {
+            if (replaced || op !== 'write' || !name.startsWith('.mindwtr-et-s-')) return;
+            replaced = true;
+            const [uri, doc] = [...folder.docs].find(([, entry]) => entry.name === 'file-0.txt')!;
+            folder.docs.delete(uri);
+            folder.add(doc.parent, 'file-0.txt', encodeText('PEER-REPLACEMENT'));
+        });
+        const { outcome } = await enableOver(folder);
+        expect(outcome).toBe('SyncEncryptionRemoteConflictError');
+        expect([...folder.docs.values()].filter((doc) => doc.name === 'file-0.txt').map((doc) => decodeText(doc.bytes)))
+            .toEqual(['PEER-REPLACEMENT']);
+    });
+
+    it('refuses an attachment install when a peer took its name after the old copy was moved aside, keeping both copies', async () => {
+        const folder = safFolder();
+        let taken = false;
+        folder.peer((op, name) => {
+            if (taken || op !== 'read' || !name.startsWith('.mindwtr-et-q-')) return;
+            taken = true;
+            const dir = [...folder.docs.values()].find((doc) => doc.name === name)!.parent;
+            folder.add(dir, 'file-0.txt', encodeText('PEER-COPY'));
+        });
+        const { outcome } = await enableOver(folder);
+        expect(outcome).toBe('SyncEncryptionRemoteConflictError');
+        expect([...folder.docs.values()].filter((doc) => doc.name === 'file-0.txt').map((doc) => decodeText(doc.bytes)))
+            .toEqual(['PEER-COPY']);
+        expect([...folder.docs.values()].filter((doc) => doc.name.startsWith('.mindwtr-et-q-')).map((doc) => decodeText(doc.bytes)))
+            .toEqual(['attachment 0']);
+    });
+
     it('logs the transition line from a transition only, not from a listing that wrote nothing', async () => {
         const folder = safFolder();
         const { outcome, logged } = await enableOver(folder);
@@ -347,8 +380,8 @@ describe('File Sync encryption transition cost', () => {
     // over hundreds of attachments took minutes on the S23. Each attachment may cost at most two listings (the exact-name
     // checks before its old copy is moved aside and after its new copy is created) and five reads (the copy as it stands,
     // the staged copy, the moved-aside copy twice and the installed copy), plus one read each in the inventory and the final check.
-    const run = async (count: number) => {
-        const folder = safFolder();
+    const run = async (count: number, create: 'decorate' | 'duplicate' | 'return-existing' = 'decorate') => {
+        const folder = safFolder({ create });
         const encode = (text: string) => new TextEncoder().encode(text);
         folder.add(folder.root, 'data.json', encode(JSON.stringify(data)));
         const attachmentsDir = folder.add(folder.root, 'attachments', null);
@@ -379,7 +412,10 @@ describe('File Sync encryption transition cost', () => {
         const lines = logged.filter((entry) => entry.message === 'File Sync transition final check listed names only');
         expect(lines.map((entry) => (entry.context as { extra: { entries: number; writes: number } }).extra))
             .toMatchObject([{ entries: count + 10, writes: count + 1 }, { entries: count + 10, writes: count + 1 }]);
-        return { enable, disable };
+        // Each transition probes once how the provider names a second document under a taken name (v1.3.8/file-sync-name-probe).
+        const modes = logged.filter((entry) => entry.message === 'File Sync transition chose its name check')
+            .map((entry) => (entry.context as { extra: { mode: string; outcome: string } }).extra);
+        return { enable, disable, modes };
     };
 
     it('costs each attachment at most two folder listings and seven reads, Enable and Disable alike', async () => {
@@ -388,6 +424,27 @@ describe('File Sync encryption transition cost', () => {
         for (const kind of ['enable', 'disable'] as const) {
             expect((large[kind].list - small[kind].list) / 20, `${kind} listings per attachment`).toBeLessThanOrEqual(2);
             expect((large[kind].read - small[kind].read) / 20, `${kind} reads per attachment`).toBeLessThanOrEqual(7);
+        }
+    });
+
+    it('lists no folder per attachment on a provider proved to rename a taken name, as Android\'s external storage does', async () => {
+        const small = await run(10);
+        const large = await run(30);
+        for (const kind of ['enable', 'disable'] as const) {
+            expect(large[kind].list - small[kind].list, `${kind} listings for 20 more attachments`).toBe(0);
+        }
+        expect(large.modes).toEqual([{ releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed' },
+            { releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed' }]);
+    });
+
+    it('keeps both listings per attachment where the probe sees a taken name kept or handed back', async () => {
+        for (const [create, outcome] of [['duplicate', 'kept-name'], ['return-existing', 'handed-back']] as const) {
+            const small = await run(10, create);
+            const large = await run(30, create);
+            for (const kind of ['enable', 'disable'] as const) {
+                expect((large[kind].list - small[kind].list) / 20, `${create} ${kind} listings per attachment`).toBe(2);
+            }
+            expect(large.modes.map((line) => [line.mode, line.outcome])).toEqual([['full-listing', outcome], ['full-listing', outcome]]);
         }
     });
 });

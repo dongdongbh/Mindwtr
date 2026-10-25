@@ -289,10 +289,11 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         resolve(name: string, options: { createIfMissing: boolean; mimeType?: string }): Promise<string | null>;
         listExact(name: string): Promise<string[]>;
         /** `repairDecoratedName: false` refuses a provider-decorated create instead of renaming it
-         *  onto `name` (a rename that may replace a document a peer just published there). `scratch`
-         *  skips the closing listing that proves no peer holds `name` too: a transition scratch name
-         *  is random, and the provider's own report of the created name still has to match. */
-        createNew(name: string, mimeType?: string, options?: { repairDecoratedName?: boolean; scratch?: boolean }): Promise<string>;
+         *  onto `name` (a rename that may replace a document a peer just published there). `skipClosingListing`
+         *  skips the closing listing that proves no peer holds `name` too, where something else proves it: a
+         *  transition scratch name is random, and a provider proved to rename a taken name cannot hold it twice.
+         *  The provider's own report of the created name still has to match. */
+        createNew(name: string, mimeType?: string, options?: { repairDecoratedName?: boolean; skipClosingListing?: boolean }): Promise<string>;
         rename(uri: string, name: string): Promise<string>;
     };
 
@@ -402,7 +403,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 if (!created) {
                     throw new SyncEncryptionRemoteConflictError(`${name} was created or renamed by another writer`);
                 }
-                if (options.scratch) {
+                if (options.skipClosingListing) {
                     entries.set(name, created);
                     return created;
                 }
@@ -657,9 +658,9 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
     let transitionScratchCounter = 0;
 
 
-    const transitionScratchName = (kind: 'stage' | 'quarantine' | 'backup'): string => {
+    const transitionScratchName = (kind: 'stage' | 'quarantine' | 'backup' | 'probe'): string => {
         transitionScratchCounter += 1;
-        const kindCode = kind === 'stage' ? 's' : kind === 'quarantine' ? 'q' : 'b';
+        const kindCode = kind === 'stage' ? 's' : kind === 'quarantine' ? 'q' : kind === 'probe' ? 'p' : 'b';
         const nonce = Math.random().toString(36).slice(2, 10);
         return `${TRANSITION_SCRATCH_MARKER}${kindCode}-${Date.now().toString(36)}-${transitionScratchCounter.toString(36)}-${nonce}`;
     };
@@ -697,6 +698,46 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
         const documents = await openDirectory(target.dirUri);
         const attachments = target.attachmentsDirUri ? await openDirectory(target.attachmentsDirUri) : null;
         const desktopRecoveryLocations = new Map<string, ArtifactLocation>();
+
+        /**
+         * Whether attachments/ is proved to hold at most one document per name, asked once per port: two empty documents
+         * created under one random name, then deleted. Only a provider that renames the second one ("x (1)", as Android's
+         * external storage does) is proved; then an attachment's exact-name checks are a stat of its listed document and the
+         * provider's report of the created name, with no folder listing. A provider that keeps the name twice (Google Drive)
+         * or hands back the first document, or any failure, keeps both full listings per attachment.
+         */
+        let attachmentNamesUnique: Promise<boolean> | null = null;
+        const probeAttachmentNames = async (): Promise<boolean> => {
+            const dirUri = target.attachmentsDirUri;
+            if (!dirUri || !isSaf(dirUri) || !host.saf) return false;
+            const saf = host.saf;
+            const name = transitionScratchName('probe');
+            const created: string[] = [];
+            let outcome: 'renamed' | 'kept-name' | 'handed-back' | 'failed' = 'failed';
+            try {
+                const first = await saf.createFile(dirUri, name, DEFAULT_ARTIFACT_MIME);
+                if (first) created.push(first);
+                if (first && (await saf.stat(first))?.name === name) {
+                    const second = await saf.createFile(dirUri, name, DEFAULT_ARTIFACT_MIME);
+                    if (second === first) {
+                        outcome = 'handed-back';
+                    } else if (second) {
+                        created.push(second);
+                        const secondName = (await saf.stat(second))?.name;
+                        outcome = secondName === name ? 'kept-name' : secondName ? 'renamed' : 'failed';
+                    }
+                }
+            } catch {
+                outcome = 'failed';
+            }
+            for (const uri of created) await deleteSyncArtifact(uri).catch(() => undefined);
+            const unique = outcome === 'renamed';
+            host.log.info('File Sync transition chose its name check', {
+                scope: 'sync',
+                extra: { releaseCheck: 'v1.3.8/file-sync-name-probe', mode: unique ? 'unique-names' : 'full-listing', outcome },
+            });
+            return unique;
+        };
 
         const collectDesktopRecoveryDirectory = async (dirUri: string): Promise<void> => {
             const directory = await openDirectory(dirUri);
@@ -942,7 +983,7 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 }
                 if (!location) throw new Error(`sync encryption: cannot create ${name} in the sync folder`);
                 const stageName = transitionScratchName('stage');
-                const stageUri = await location.directory.createNew(stageName, location.mimeType, { scratch: stageListed });
+                const stageUri = await location.directory.createNew(stageName, location.mimeType, { skipClosingListing: stageListed });
                 stageListed = true;
                 await writeArtifactPayload(stageUri, bytes);
                 const stagedBytes = await readSyncArtifactBytes(stageUri);
@@ -952,14 +993,27 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
 
                 let quarantineUri: string | null = null;
                 let quarantineName: string | null = null;
+                const uniqueNames = location.directory === attachments && await (attachmentNamesUnique ??= probeAttachmentNames());
                 if (expectedVersion !== null) {
                     await testHooks.onMutationPoint?.('before-quarantine', name);
-                    const exact = await location.directory.listExact(location.leaf);
-                    if (exact.length !== 1) {
-                        throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+                    let currentUri: string;
+                    if (uniqueNames) {
+                        // The one document under this name is the listed one, if it still carries the name; the quarantine
+                        // read below proves its bytes.
+                        const listed = location.directory.entries.get(location.leaf);
+                        if (!listed || (await saf().stat(listed))?.name !== location.leaf) {
+                            throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+                        }
+                        currentUri = listed;
+                    } else {
+                        const exact = await location.directory.listExact(location.leaf);
+                        if (exact.length !== 1) {
+                            throw new SyncEncryptionRemoteConflictError(`${name} changed during sync encryption transition`);
+                        }
+                        currentUri = exact[0];
                     }
                     quarantineName = transitionScratchName('quarantine');
-                    quarantineUri = await location.directory.rename(exact[0], quarantineName);
+                    quarantineUri = await location.directory.rename(currentUri, quarantineName);
                     const displaced = await readSyncArtifactBytes(quarantineUri);
                     if (!displaced || await versionFor(displaced) !== expectedVersion) {
                         if (displaced) await restoreDisplacedGeneration(location, displaced);
@@ -975,8 +1029,9 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                 // createNew's closing listing proved the canonical name is this one new document. A document
                 // is listed once more after its bytes land: a provider that allows duplicate names (Google
                 // Drive) may take a peer's second document under the name meanwhile, and a later listing
-                // keeps only the first per name. An attachment skips it: two listings per attachment.
-                const installedUri = await location.directory.createNew(location.leaf, location.mimeType);
+                // keeps only the first per name. An attachment skips it: two listings per attachment, or none
+                // where the provider was proved to rename a taken name (createNew then trusts its own name check).
+                const installedUri = await location.directory.createNew(location.leaf, location.mimeType, { skipClosingListing: uniqueNames });
                 await writeArtifactPayload(installedUri, stagedBytes);
                 if (location.directory !== attachments) {
                     const canonical = await location.directory.listExact(location.leaf);
