@@ -158,6 +158,22 @@ describe('native host contract: the capture popup', () => {
         expect(chip(edited.view, 'start')).toBe('2026-09-25');
     });
 
+    it('reads typed dates with the date format and language settings, including a synced change (#1006, #1059)', async () => {
+        const { host } = await openHost('base');
+        const options = value(host.openQuickCapture()).options;
+        const dueDay = async (text: string) => {
+            const saved = value(await host.submitQuickCapture({ text, options, captureId: generateUUID() }));
+            if (saved.kind !== 'saved') throw new Error(JSON.stringify(saved));
+            return useTaskStore.getState()._tasksById.get(saved.taskId)?.dueDate?.slice(5, 10);
+        };
+        await useTaskStore.getState().updateSettings({ dateFormat: 'dmy' });
+        expect(await dueDay('Pay rent /due:10/8')).toBe('08-10');
+        // A sync replaces settings without updateSettings; the next parse still follows it.
+        useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, dateFormat: 'mdy', language: 'de' } });
+        expect(await dueDay('Pay rent /due:10/8')).toBe('10-08');
+        expect(await dueDay('Miete zahlen morgen')).toBe('09-24');
+    });
+
     it('refuses bad input and explains a refused edit', async () => {
         const { host } = await openHost('focusFull');
         const view = value(host.openQuickCapture());

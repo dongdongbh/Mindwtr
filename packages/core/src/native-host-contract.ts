@@ -51,7 +51,7 @@ import { computeGlobalSearchResults, type DuePreset, type GlobalSearchScope } fr
 import { clearGlobalSearchActiveChip, DEFAULT_GLOBAL_SEARCH_FILTERS, fetchGlobalSearchAdapterResults, getGlobalSearchActiveChips, getGlobalSearchFilterOptions, getGlobalSearchResultDate, getGlobalSearchTaskListTarget, resolveSavedSearch, GLOBAL_SEARCH_DUE_OPTIONS, GLOBAL_SEARCH_SCOPE_OPTIONS, GLOBAL_SEARCH_STATUS_OPTIONS, type GlobalSearchFilterState } from './global-search-model';
 import type { SearchProjectResult } from './storage';
 import { createSearchHighlighter } from './search-highlight';
-import { createDateFormatter, hasTimeComponent, normalizeClockTimeInput, safeParseDate, setHostSystemLocale, type DateFormatter, type DateFormattingConfig } from './date';
+import { configureDateFormatting, createDateFormatter, hasTimeComponent, normalizeClockTimeInput, safeParseDate, setHostSystemLocale, type DateFormatter, type DateFormattingConfig } from './date';
 import { normalizeDueReminderLeadMinutes } from './schedule-utils';
 import { WEEKDAY_ORDER } from './recurrence-constants';
 import {
@@ -1202,6 +1202,19 @@ export function createNativeHostContract(options: {
             systemLocale,
         };
     };
+    // Quick-add parses typed dates with core's global configuration, which mobile's root layout
+    // sets on every change: apply it here too, after a language change and any settings change, synced or local.
+    let appliedDateFormatting = '';
+    const applyDateFormatting = () => {
+        const config = dateFormatting();
+        const key = JSON.stringify(config);
+        if (key === appliedDateFormatting) return;
+        appliedDateFormatting = key;
+        configureDateFormatting(config);
+    };
+    useTaskStore.subscribe((state, previous) => {
+        if (state.settings !== previous.settings) applyDateFormatting();
+    });
 
     const rowMeta = (task: Task, now: Date, options: RowMetaOptions = {}): NativeTaskRowMeta => {
         const state = useTaskStore.getState();
@@ -2131,6 +2144,7 @@ export function createNativeHostContract(options: {
                 // Week start follows the device locale; the host runtime has no Intl locale of its own.
                 setHostSystemLocale(input.systemLocale);
                 translate = getTranslator(language);
+                applyDateFormatting();
                 return { ok: true, value: { language } };
             } catch (error) {
                 return fail('ACTION_FAILED', error instanceof Error ? error.message : String(error));
