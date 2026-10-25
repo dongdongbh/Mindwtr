@@ -1246,6 +1246,8 @@ export const plOverrides: Record<string, string> = {
         'agenda.upcoming': 'Nadchodzące',
         'widget.upcomingStarts': 'Rozpoczyna się',
         'widget.upcomingReturns': 'Powraca',
+        'widget.background': 'Tło',
+        'widget.backgroundTransparent': 'Przezroczyste',
         'agenda.allClear': 'Wszystko jasne!',
         'agenda.noTasks': 'Nie ma teraz na czym się skupić. Oznacz zadanie gwiazdką lub nadaj mu termin, a pojawi się tutaj.',
         'agenda.emptyStart': 'Nie ma jeszcze zadań. Dodaj wszystko, co masz w głowie, do Skrzynki odbiorczej i uporządkuj później.',

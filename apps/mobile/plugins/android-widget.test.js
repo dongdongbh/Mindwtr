@@ -122,8 +122,9 @@ describe('android-widget', () => {
     expect(compactXml).toContain('android:targetCellHeight="2"');
     expect(compactXml).toContain('android:initialLayout="@layout/mindwtr_compact_widget"');
     expect(compactXml).toContain('android:previewImage="@drawable/mindwtr_compact_widget_preview"');
-    expect(compactXml).not.toContain('android:configure');
-    expect(compactXml).not.toContain('reconfigurable');
+    // Compact's settings hold only the background choice; placement still skips them.
+    expect(compactXml).toContain(`android:configure="${CONFIGURE_ACTIVITY_NAME}"`);
+    expect(compactXml).toContain('android:widgetFeatures="reconfigurable|configuration_optional"');
   });
 
   it('derives the dialog theme from the AppCompat DayNight dialog without a title', () => {

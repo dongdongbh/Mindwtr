@@ -1573,6 +1573,8 @@ export const csOverrides: Record<string, string> = {
         'agenda.upcoming': 'Nadcházející',
         'widget.upcomingStarts': 'Začíná',
         'widget.upcomingReturns': 'Vrací se',
+        'widget.background': 'Pozadí',
+        'widget.backgroundTransparent': 'Průhledné',
         'agenda.allClear': 'Vše čisté!',
         'agenda.noTasks': 'Teď není na co se soustředit. Označte úkol hvězdičkou nebo mu nastavte termín a objeví se tady.',
         'agenda.emptyStart': 'Zatím žádné úkoly. Přidejte vše, co máte v hlavě, do Schránky a roztřiďte to později.',

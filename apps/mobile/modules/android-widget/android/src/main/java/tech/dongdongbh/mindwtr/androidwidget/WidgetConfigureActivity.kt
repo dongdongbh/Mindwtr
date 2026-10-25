@@ -23,10 +23,11 @@ import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Picks which list a Tasks widget shows (#1173): the fixed GTD lists, then
- * saved filters, contexts and tags. Runs on placement (`android:configure`), from the launcher's
- * edit action (`reconfigurable`), and as a dropdown sheet when the widget's
- * own header chevron is tapped. OK stores the choice for this widget id and
- * redraws it; Cancel on first placement cancels the placement.
+ * saved filters, contexts and tags, and its background (Default or Transparent).
+ * A Compact widget gets the background row only. Runs on placement (`android:configure`),
+ * from the launcher's edit action (`reconfigurable`), and, for Tasks, as a list-only
+ * dropdown sheet when the widget's own header chevron is tapped. OK stores the choice
+ * for this widget id and redraws it; Cancel on first placement cancels the placement.
  */
 class WidgetConfigureActivity : AppCompatActivity() {
   private var appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID
@@ -34,6 +35,8 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private var dropdown = false
   private var pendingSelection = WidgetListStore.DEFAULT_LIST
   private var groupingOptions = WidgetListStore.GROUPINGS
+  private var kind = WidgetKind.TASKS
+  private var pendingTransparent = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -48,19 +51,29 @@ class WidgetConfigureActivity : AppCompatActivity() {
       finish()
       return
     }
-    dropdown = intent?.getBooleanExtra(EXTRA_DROPDOWN, false) == true
+    kind = kindFor(packageName, info.provider.className)
+    if (kind == WidgetKind.QUICK_CAPTURE) {
+      finish()
+      return
+    }
+    dropdown = kind == WidgetKind.TASKS && intent?.getBooleanExtra(EXTRA_DROPDOWN, false) == true
     setContentView(R.layout.mindwtr_widget_configure)
+    if (kind == WidgetKind.COMPACT) {
+      findViewById<View>(R.id.mindwtr_widget_configure_lists).visibility = View.GONE
+    }
     if (dropdown) {
       window.setGravity(android.view.Gravity.TOP)
       window.attributes = window.attributes.apply { y = dp(56) }
       findViewById<View>(R.id.mindwtr_widget_configure_buttons).visibility = View.GONE
       findViewById<View>(R.id.mindwtr_widget_configure_title).visibility = View.GONE
+      findViewById<View>(R.id.mindwtr_widget_configure_background_row).visibility = View.GONE
     }
     val payload = WidgetPayloadStore.read(this)
     groupingOptions = WidgetListStore.GROUPINGS.filter { it != "priority" || payload.prioritiesEnabled }
     val palette = payload.resolvedPalette(this)
     val current = WidgetListStore.read(this, appWidgetId)
     pendingSelection = savedInstanceState?.getString("listSelection") ?: current
+    pendingTransparent = savedInstanceState?.getBoolean("transparent") ?: WidgetListStore.isTransparent(this, appWidgetId)
 
     val list = findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val textColor = palette?.text ?: getColor(R.color.mindwtr_widget_text)
@@ -83,14 +96,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
     findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping).apply {
       val labels = listOf("groupDefault" to "Default", "groupNone" to "None", "groupContext" to "Context", "groupProject" to "Project") +
         if (payload.prioritiesEnabled) listOf("groupPriority" to "Priority") else emptyList()
-      this.adapter = object : ArrayAdapter<String>(this@WidgetConfigureActivity, android.R.layout.simple_spinner_dropdown_item,
-        labels.map { (key, fallback) -> payload.listTitles[key] ?: fallback }) {
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = super.getView(position, convertView, parent).apply {
-          (this as TextView).setTextColor(textColor)
-          palette?.let { setBackgroundColor(it.background) }
-        }
-        override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = getView(position, convertView, parent)
-      }
+      this.adapter = spinnerAdapter(labels.map { (key, fallback) -> payload.listTitles[key] ?: fallback }, textColor, palette)
       setSelection((groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0))
       onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
         override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -101,11 +107,24 @@ class WidgetConfigureActivity : AppCompatActivity() {
       }
     }
     updateGroupingVisibility()
+    findViewById<TextView>(R.id.mindwtr_widget_configure_background_label).apply {
+      text = payload.listTitles["background"] ?: "Background"
+      setTextColor(textColor)
+    }
+    findViewById<Spinner>(R.id.mindwtr_widget_configure_background).apply {
+      this.adapter = spinnerAdapter(listOf(payload.listTitles["groupDefault"] ?: "Default",
+        payload.listTitles["backgroundTransparent"] ?: "Transparent"), textColor, palette)
+      setSelection(if (pendingTransparent) 1 else 0)
+      onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { pendingTransparent = position == 1 }
+        override fun onNothingSelected(parent: AdapterView<*>?) {}
+      }
+    }
     findViewById<EditText>(R.id.mindwtr_widget_configure_search).apply {
       hint = payload.listTitles["search"] ?: "Search"
       setTextColor(textColor)
       setHintTextColor(mutedColor)
-      visibility = if (options.sumOf { it.second.size } > 12) View.VISIBLE else View.GONE
+      visibility = if (kind == WidgetKind.TASKS && options.sumOf { it.second.size } > 12) View.VISIBLE else View.GONE
       addTextChangedListener(object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
         override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { adapter.search(s?.toString() ?: "") }
@@ -126,14 +145,15 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   override fun onSaveInstanceState(outState: Bundle) {
     outState.putString("listSelection", pendingSelection)
+    outState.putBoolean("transparent", pendingTransparent)
     super.onSaveInstanceState(outState)
   }
 
   private fun save() {
-    val listId = pendingSelection
-    WidgetListStore.write(this, appWidgetId, listId)
+    if (kind == WidgetKind.TASKS) WidgetListStore.write(this, appWidgetId, pendingSelection)
+    WidgetListStore.writeTransparent(this, appWidgetId, pendingTransparent)
     val manager = AppWidgetManager.getInstance(this)
-    WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), WidgetKind.TASKS)
+    WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), kind)
     CaptureSyncHeadlessService.startWidgetRefresh(this)
     setResult(Activity.RESULT_OK, Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId))
     finish()
@@ -141,7 +161,8 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   private fun updateGroupingVisibility() {
     val focus = WidgetListStore.baseListId(pendingSelection) == WidgetListStore.DEFAULT_LIST
-    findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility = if (dropdown || focus) View.GONE else View.VISIBLE
+    findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility =
+      if (dropdown || focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
     findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping).setSelection(
       (groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0),
     )
@@ -156,6 +177,15 @@ class WidgetConfigureActivity : AppCompatActivity() {
       setTextColor(palette.onAccent)
     }
   }
+
+  private fun spinnerAdapter(labels: List<String>, textColor: Int, palette: WidgetPayload.Palette?) =
+    object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, labels) {
+      override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = super.getView(position, convertView, parent).apply {
+        (this as TextView).setTextColor(textColor)
+        palette?.let { setBackgroundColor(it.background) }
+      }
+      override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = getView(position, convertView, parent)
+    }
 
   private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
@@ -216,6 +246,10 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   companion object {
     const val EXTRA_DROPDOWN = "tech.dongdongbh.mindwtr.androidwidget.dropdown"
+
+    /** Tasks for the current and legacy Tasks providers (and any unknown class); Compact and Quick capture by their class. */
+    internal fun kindFor(applicationPackage: String, providerClassName: String): WidgetKind =
+      WidgetProviderRegistry.identities(applicationPackage).firstOrNull { it.className == providerClassName }?.kind ?: WidgetKind.TASKS
 
     internal fun chooserGroups(payload: WidgetPayload): List<Pair<String?, List<Pair<String, String>>>> = listOf(
       null to fixedOptions(payload.listTitles),

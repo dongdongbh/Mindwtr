@@ -8,14 +8,46 @@
     android:orientation="vertical"
     android:padding="20dp">
 
-    <TextView
-        android:id="@+id/mindwtr_widget_configure_title"
+    <!-- The Background choice shares the title line so the list keeps its
+         height in a short window (landscape with the keyboard open). -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Mindwtr"
-        android:textColor="@color/mindwtr_widget_text"
-        android:textSize="18sp"
-        android:textStyle="bold" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/mindwtr_widget_configure_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:singleLine="true"
+            android:text="Mindwtr"
+            android:textColor="@color/mindwtr_widget_text"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:id="@+id/mindwtr_widget_configure_background_row"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/mindwtr_widget_configure_background_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:labelFor="@id/mindwtr_widget_configure_background"
+                android:textColor="@color/mindwtr_widget_text" />
+
+            <Spinner
+                android:id="@+id/mindwtr_widget_configure_background"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent" />
+        </LinearLayout>
+    </LinearLayout>
 
     <EditText
         android:id="@+id/mindwtr_widget_configure_search"

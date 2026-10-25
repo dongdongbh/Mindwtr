@@ -1934,6 +1934,8 @@ export const faOverrides: Record<string, string> = {
         'agenda.upcoming': 'پیش رو',
         'widget.upcomingStarts': 'شروع',
         'widget.upcomingReturns': 'بازگشت',
+        'widget.background': 'پس‌زمینه',
+        'widget.backgroundTransparent': 'شفاف',
         'agenda.laterToday': 'بعدتر در امروز',
         'agenda.allClear': 'همه‌چیز مرتب است!',
         'agenda.noTasks': 'فعلاً چیزی برای تمرکز نیست. یک کار را ستاره بزنید یا برایش تاریخ سررسید تعیین کنید تا اینجا نمایش داده شود.',

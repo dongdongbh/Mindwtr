@@ -63,6 +63,8 @@ const buildWidgetKinds = (props) => [
     // Picks the list on placement; `reconfigurable` adds the launcher's edit action (#1173).
     configure: CONFIGURE_ACTIVITY_NAME,
     widgetFeatures: 'reconfigurable|configuration_optional',
+    // Upcoming dates go stale, so the list refreshes every 30 min and on clock changes.
+    clockRefresh: true,
   },
   {
     kind: 'Compact',
@@ -81,6 +83,9 @@ const buildWidgetKinds = (props) => [
     targetCellHeight: 2,
     resizeMode: 'horizontal|vertical',
     previewImage: './assets/images/widget-compact-preview.png',
+    // Its settings hold only the background choice.
+    configure: CONFIGURE_ACTIVITY_NAME,
+    widgetFeatures: 'reconfigurable|configuration_optional',
   },
   {
     kind: 'QuickCapture',
@@ -126,7 +131,7 @@ const buildWidgetInfoXml = (kind) => `<?xml version="1.0" encoding="utf-8"?>
     android:minResizeHeight="${kind.minResizeHeight}"
     android:targetCellWidth="${kind.targetCellWidth}"
     android:targetCellHeight="${kind.targetCellHeight}"
-    android:updatePeriodMillis="${kind.configure ? 30 * 60 * 1000 : 0}"
+    android:updatePeriodMillis="${kind.clockRefresh ? 30 * 60 * 1000 : 0}"
     android:initialLayout="@layout/${kind.layout}"${kind.previewImage ? `
     android:previewImage="@drawable/${kind.layout}_preview"` : ''}
     android:previewLayout="@layout/${kind.layout}_preview"
@@ -190,7 +195,7 @@ const ensureWidgetReceiver = (application, kind) => {
     'android:label': kind.labelResource ? `@string/${kind.labelResource}` : kind.label,
     'android:exported': 'true',
   };
-  receiver['intent-filter'] = [{ action: [WIDGET_UPDATE_ACTION, ...(kind.configure ? WIDGET_DATE_ACTIONS : [])]
+  receiver['intent-filter'] = [{ action: [WIDGET_UPDATE_ACTION, ...(kind.clockRefresh ? WIDGET_DATE_ACTIONS : [])]
     .map((action) => ({ $: { 'android:name': action } })) }];
   receiver['meta-data'] = [{ $: { 'android:name': WIDGET_PROVIDER_META, 'android:resource': `@xml/${kind.infoResource}` } }];
 };

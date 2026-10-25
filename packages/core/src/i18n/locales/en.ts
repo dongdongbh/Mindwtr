@@ -1959,6 +1959,8 @@ export const en: Record<string, string> = {
         'agenda.upcoming': 'Upcoming',
         'widget.upcomingStarts': 'Starts',
         'widget.upcomingReturns': 'Returns',
+        'widget.background': 'Background',
+        'widget.backgroundTransparent': 'Transparent',
         'agenda.laterToday': 'Later today',
         'agenda.allClear': 'All Clear!',
         'agenda.noTasks': 'Nothing to focus on right now. Star a task or give it a due date and it will show up here.',

@@ -1269,6 +1269,8 @@ export const trOverrides: Record<string, string> = {
         'agenda.upcoming': 'Yaklaşan',
         'widget.upcomingStarts': 'Başlar',
         'widget.upcomingReturns': 'Geri döner',
+        'widget.background': 'Arka plan',
+        'widget.backgroundTransparent': 'Şeffaf',
         'agenda.allClear': 'Hepsi Açık!',
         'agenda.noTasks': 'Şu anda odaklanacak bir şey yok. Bir göreve yıldız ekleyin veya son tarih verin; burada görünecek.',
         'agenda.emptyStart': 'Henüz görev yok. Aklınızdakileri Gelen kutusuna ekleyin, sonra düzenlersiniz.',

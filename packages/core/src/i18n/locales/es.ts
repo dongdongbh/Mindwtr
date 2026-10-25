@@ -1905,6 +1905,8 @@ export const esOverrides: Record<string, string> = {
 'agenda.upcoming': "Próximas",
 'widget.upcomingStarts': 'Empieza',
 'widget.upcomingReturns': 'Vuelve',
+'widget.background': 'Fondo',
+'widget.backgroundTransparent': 'Transparente',
 'agenda.laterToday': "Más tarde hoy",
 'agenda.allClear': "¡Todo limpio!",
 'agenda.noTasks': "Nada en qué enfocarse ahora. Marca una tarea con una estrella o ponle una fecha de vencimiento y aparecerá aquí.",

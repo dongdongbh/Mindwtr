@@ -225,6 +225,7 @@ object WidgetRenderer {
     bindCompactChrome(context, views, appWidgetId, payload)
     views.setTextViewText(R.id.mindwtr_widget_capture_label, payload.quickCapture.title)
     val stats = bindCollection(context, views, appWidgetId, WidgetKind.COMPACT, payload)
+    hideSurfacesIfTransparent(context, views, appWidgetId, WidgetKind.COMPACT)
     palette?.let {
       views.setInt(R.id.mindwtr_widget_surface, "setColorFilter", it.background)
       views.setTextColor(R.id.mindwtr_widget_title, it.text)
@@ -251,6 +252,7 @@ object WidgetRenderer {
     bindTasksChrome(context, views, appWidgetId, payload, listId)
 
     val stats = bindCollection(context, views, appWidgetId, WidgetKind.TASKS, payload)
+    hideSurfacesIfTransparent(context, views, appWidgetId, WidgetKind.TASKS)
     // Match the body surface; the divider and capture plus carry the accent.
     palette?.let {
       val theme = tasksTheme(it)
@@ -264,6 +266,18 @@ object WidgetRenderer {
       views.setTextColor(R.id.mindwtr_widget_empty, it.mutedText)
     }
     return stats
+  }
+
+  /** The full-panel layers a Transparent background drops; rows, text, icons and the capture button stay. */
+  internal fun backgroundSurfaces(kind: WidgetKind): List<Int> = when (kind) {
+    WidgetKind.TASKS -> listOf(R.id.mindwtr_widget_surface, R.id.mindwtr_widget_band)
+    WidgetKind.COMPACT -> listOf(R.id.mindwtr_widget_surface)
+    WidgetKind.QUICK_CAPTURE -> emptyList()
+  }
+
+  private fun hideSurfacesIfTransparent(context: Context, views: RemoteViews, appWidgetId: Int, kind: WidgetKind) {
+    if (!WidgetListStore.isTransparent(context, appWidgetId)) return
+    for (id in backgroundSurfaces(kind)) views.setViewVisibility(id, View.GONE)
   }
 
   internal fun usesDirectCollections(sdkInt: Int): Boolean = sdkInt >= 31

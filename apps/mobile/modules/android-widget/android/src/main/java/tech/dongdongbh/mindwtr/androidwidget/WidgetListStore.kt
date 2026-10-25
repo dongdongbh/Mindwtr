@@ -6,9 +6,13 @@ import android.content.Context
 import android.net.Uri
 import java.net.URLDecoder
 
-/** Which list each placed Tasks widget shows (#1173): SharedPreferences `mindwtr_widget_lists`, key = widget id. */
+/**
+ * Which list each placed Tasks widget shows (#1173): SharedPreferences `mindwtr_widget_lists`, key = widget id.
+ * Also each Tasks or Compact widget's background choice, in `mindwtr_widget_backgrounds`; both stay on the device.
+ */
 object WidgetListStore {
   const val PREFS_NAME = "mindwtr_widget_lists"
+  const val BACKGROUNDS_PREFS_NAME = "mindwtr_widget_backgrounds"
   const val DEFAULT_LIST = "focus"
   /** Kept for installed widgets that still carry a project selection. */
   const val PROJECT_PREFIX = "project:"
@@ -72,10 +76,22 @@ object WidgetListStore {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(appWidgetId.toString(), listId).commit()
   }
 
+  /** False (the default background) until the widget's settings pick Transparent. */
+  fun isTransparent(context: Context, appWidgetId: Int): Boolean =
+    context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).getBoolean(appWidgetId.toString(), false)
+
+  fun writeTransparent(context: Context, appWidgetId: Int, transparent: Boolean) {
+    val editor = context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).edit()
+    if (transparent) editor.putBoolean(appWidgetId.toString(), true) else editor.remove(appWidgetId.toString())
+    editor.commit()
+  }
+
   fun remove(context: Context, appWidgetIds: IntArray) {
-    val editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-    for (id in appWidgetIds) editor.remove(id.toString())
-    editor.apply()
+    for (name in listOf(PREFS_NAME, BACKGROUNDS_PREFS_NAME)) {
+      val editor = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
+      for (id in appWidgetIds) editor.remove(id.toString())
+      editor.apply()
+    }
   }
 
   /** Distinct list ids bound to the Tasks widgets currently placed. */

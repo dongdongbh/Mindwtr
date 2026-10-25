@@ -87,4 +87,8 @@ open class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
 
 class QuickCaptureWidgetProvider : MindwtrWidgetProvider(WidgetKind.QUICK_CAPTURE)
 
-class CompactWidgetProvider : MindwtrWidgetProvider(WidgetKind.COMPACT)
+class CompactWidgetProvider : MindwtrWidgetProvider(WidgetKind.COMPACT) {
+  override fun onDeleted(context: android.content.Context, appWidgetIds: IntArray) {
+    WidgetListStore.remove(context, appWidgetIds)
+  }
+}

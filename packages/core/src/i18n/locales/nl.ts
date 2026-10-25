@@ -17,6 +17,8 @@ export const nlOverrides: Record<string, string> = {
     'settings.cleartextSyncDismiss': 'Verbergen voor deze synchronisatiebestemming',
     'widget.upcomingStarts': 'Begint',
     'widget.upcomingReturns': 'Keert terug',
+    'widget.background': 'Achtergrond',
+    'widget.backgroundTransparent': 'Transparant',
     "projects.convertBlocked.destination-section-sequence": "Kies een doelproject met Sequentieel → Binnen secties. De nieuwe sectie behoudt de taakvolgorde; andere secties kunnen onafhankelijk doorgaan.",
     'timeline.moveTaskDates': "Taakdatums verplaatsen",
     'timeline.moveProjectDates': "Projectdatums verplaatsen",

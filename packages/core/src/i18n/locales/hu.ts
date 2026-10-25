@@ -1905,6 +1905,8 @@ export const huOverrides: Record<string, string> = {
     'agenda.upcoming': 'Közelgő',
     'widget.upcomingStarts': 'Kezdés',
     'widget.upcomingReturns': 'Visszatérés',
+    'widget.background': 'Háttér',
+    'widget.backgroundTransparent': 'Átlátszó',
     'agenda.laterToday': 'Ma később',
     'agenda.allClear': 'Minden tiszta!',
     'agenda.noTasks': 'Jelenleg nincs mire fókuszálni. Csillagozzon meg egy feladatot, vagy adjon neki határidőt, és megjelenik itt.',

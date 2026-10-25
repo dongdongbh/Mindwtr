@@ -1830,6 +1830,8 @@ export const zhHant: Record<string, string> = {
         'agenda.upcoming': '即將到來',
         'widget.upcomingStarts': '開始於',
         'widget.upcomingReturns': '再次出現於',
+        'widget.background': '背景',
+        'widget.backgroundTransparent': '透明',
         'agenda.laterToday': '今天稍後',
         'agenda.allClear': '全部完成！',
         'agenda.noTasks': '目前沒有需要專注的任務。為任務加上星號或截止日期，就會顯示在這裡。',

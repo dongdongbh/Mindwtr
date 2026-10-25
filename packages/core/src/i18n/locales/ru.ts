@@ -1252,6 +1252,8 @@ export const ruOverrides: Record<string, string> = {
         'agenda.upcoming': 'Предстоящие',
         'widget.upcomingStarts': 'Начало',
         'widget.upcomingReturns': 'Возвращается',
+        'widget.background': 'Фон',
+        'widget.backgroundTransparent': 'Прозрачный',
         'agenda.allClear': 'Все ясно!',
         'agenda.noTasks': 'Сейчас не на чем сфокусироваться. Отметьте задачу звёздочкой или задайте срок — и она появится здесь.',
         'agenda.emptyStart': 'Задач пока нет. Добавьте всё, что держите в голове, во Входящие и разберите позже.',

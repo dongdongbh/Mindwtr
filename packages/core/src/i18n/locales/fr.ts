@@ -1584,6 +1584,8 @@ export const frOverrides: Record<string, string> = {
         'agenda.upcoming': 'À venir',
         'widget.upcomingStarts': 'Commence',
         'widget.upcomingReturns': 'Revient',
+        'widget.background': 'Arrière-plan',
+        'widget.backgroundTransparent': 'Sans fond',
         'agenda.laterToday': 'Plus tard aujourd’hui',
         'agenda.allClear': 'Tout est traité !',
         'agenda.noTasks': 'Rien à traiter pour l’instant. Ajoutez une étoile ou une date d’échéance à une tâche pour la voir ici.',

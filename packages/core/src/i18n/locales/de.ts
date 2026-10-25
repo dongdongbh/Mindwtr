@@ -1348,6 +1348,8 @@ export const deOverrides: Record<string, string> = {
         'agenda.upcoming': 'Anstehend',
         'widget.upcomingStarts': 'Beginnt',
         'widget.upcomingReturns': 'Kehrt zurück',
+        'widget.background': 'Hintergrund',
+        'widget.backgroundTransparent': 'Durchsichtig',
         'agenda.laterToday': 'Später heute',
         'agenda.allClear': 'Alles geklärt!',
         'agenda.noTasks': 'Gerade nichts im Fokus. Markiere eine Aufgabe mit einem Stern oder gib ihr ein Fälligkeitsdatum, dann erscheint sie hier.',
