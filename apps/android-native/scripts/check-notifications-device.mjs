@@ -340,9 +340,15 @@ const idleCard = async () => {
     if (withDescription(nodes, en['pomodoro.switchToFocus'])) {
         nodes = await tapExpecting(await control('pomodoro-switch'), (current) => Boolean(withDescription(current, en['pomodoro.switchToBreak'])), 'Switch to Focus');
     }
-    nodes = await tapExpecting(await control('pomodoro-preset-custom'), (current) => clock(current) === '01:00' || Boolean(tagged(current, 'pomodoro-reset')), 'the 1/1 preset');
+    // The preset's transition waits for the card to be idle, so its effect is read from the stored session, never from the screen.
+    const oneOne = () => { const durations = pomodoro().state?.session?.durations; return durations?.focusMinutes === 1 && durations?.breakMinutes === 1; };
+    if (!oneOne()) {
+        await tap(await control('pomodoro-preset-custom'));
+        await waitUntil('the 1/1 minutes stored', oneOne, 20_000);
+    }
+    nodes = await waitFor('the card idle at 1/1', (current) => tagged(current, 'pomodoro-primary')?.enabled === 'true' && Boolean(clock(current)), 30_000);
     if (clock(nodes) !== '01:00') nodes = await tapExpecting(await control('pomodoro-reset'), (current) => clock(current) === '01:00', 'Reset');
-    return nodes;
+    return waitFor('the card idle', (current) => tagged(current, 'pomodoro-primary')?.enabled === 'true', 30_000);
 };
 /** Start on the idle card: the session runs, and core's record names the focus alert (its time is the stored phase end). */
 const startFocus = async (nodes) => {

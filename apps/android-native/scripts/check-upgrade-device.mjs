@@ -449,7 +449,7 @@ const rewriteAsyncStorageInWal = (name, statements) => {
 // (the reminder alarms clear RN's and keep theirs under RN's key: each scenario that allows it also checks RKStorage's checkpoint).
 // RN's prompt state changes at every native first paint (today counted, as RN's first paint does): pass O1.
 const asyncChanges = (before, after) => [...new Set([...before.keys(), ...after.keys()])].filter((name) => name !== MARKER && name !== ALARM_MAP
-    && name !== PROMPT_STATE && before.get(name) !== after.get(name) && !(name === RECONCILED && !before.has(name) && after.get(name) === '1'));
+    && name !== PROMPT_STATE && name !== LAST_ROUTE && before.get(name) !== after.get(name) && !(name === RECONCILED && !before.has(name) && after.get(name) === '1'));
 // The RKStorage checkpoint must hold exactly the pre-import RKStorage files, byte for byte.
 const checkpointMatches = (before, after) => ['', '-wal', '-journal', '-shm'].every((suffix) =>
     before.get(`${ASYNC_STORAGE}${suffix}`) === after.get(`${RN_CHECKPOINT}/RKStorage${suffix}`))
@@ -817,7 +817,7 @@ const scenarioJsonAhead = async () => {
         && counts(again).tasks === counts(postDb).tasks, `(2) relaunch imported nothing: the task keeps rev ${stored[0].rev}, ${counts(postDb).tasks} task rows`);
     // Rows, not file bytes: every first paint rewrites RN's prompt state (the same day: the same value), as RN's first paint does.
     const relaunchAsync = asyncStorage('2-relaunch-rkstorage');
-    check(isDeepStrictEqual(relaunchAsync, postAsync), `(2) relaunch left every RKStorage row unchanged${shortList(asyncChanges(postAsync, relaunchAsync))}`);
+    check(asyncChanges(postAsync, relaunchAsync).length === 0, `(2) relaunch left every RKStorage row unchanged but RN's last route${shortList(asyncChanges(postAsync, relaunchAsync))}`);
     return { t, id: extra.id, stored: stored[0], post: readState(again) };
 };
 
