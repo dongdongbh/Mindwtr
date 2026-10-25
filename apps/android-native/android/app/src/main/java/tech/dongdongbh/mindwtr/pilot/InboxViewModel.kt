@@ -1091,7 +1091,19 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                            onAction: () -> Unit = {}) {
         toast = Toast(title, message, tone, action, onAction)
         val mine = ++toastShown
-        main.postDelayed({ if (mine == toastShown) toast = null }, durationMs ?: toastDurationMs(null, action))
+        val shown = durationMs ?: toastDurationMs(null, action)
+        main.postDelayed({ if (mine == toastShown) toast = null }, if (action != null) actionTimeout(shown) else shown)
+    }
+
+    /**
+     * Android's "Time to take action" (Accessibility settings): a toast with an action (Undo) stays as long as the user asked,
+     * never shorter than RN's time. Android 10+; earlier, RN's time.
+     */
+    private fun actionTimeout(shown: Long): Long {
+        if (android.os.Build.VERSION.SDK_INT < 29) return shown
+        val accessibility = getApplication<Application>().getSystemService(android.view.accessibility.AccessibilityManager::class.java) ?: return shown
+        return maxOf(shown, accessibility.getRecommendedTimeoutMillis(shown.toInt(),
+            android.view.accessibility.AccessibilityManager.FLAG_CONTENT_TEXT or android.view.accessibility.AccessibilityManager.FLAG_CONTENT_CONTROLS).toLong())
     }
 
     /** Core's toast or notice (`title`, `message`, `tone`, `durationMs`), shown for core's time (toastDurationMs). */

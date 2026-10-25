@@ -163,7 +163,10 @@ try {
     nodes = await tapExpecting(tagged(nodes, 'project-delete-button'), (current) => !sheetOpen(current) && Boolean(button(current, en['common.delete'])), 'the delete confirm');
     nodes = await tapExpecting(button(nodes, en['common.delete']), (current) => hasText(current, en['projects.deleted']), 'the deleted toast', 30_000);
     check(!projectTitled(nodes, COPY) && Boolean(button(nodes, en['common.undo'])), '(c) Delete closes the copy and core\'s toast offers Undo');
-    nodes = await tapExpecting(button(nodes, en['common.undo']), (current) => hasText(current, COPY), 'the copy back in Projects', 30_000);
+    // RN's toast stays 5.2 s and one UI dump here takes 1-2 s: Undo is tapped from the very dump that found the toast (a fresh
+    // dump first, as tapExpecting takes, let it expire in phone runs 4 and 5).
+    await tap(button(nodes, en['common.undo']) ?? fail('no Undo on the toast'));
+    nodes = await waitFor('the copy back in Projects', (current) => hasText(current, COPY), 30_000);
     check(true, '(c) Undo puts the copy back');
     nodes = await tapExpecting(byText(nodes, STARTER_TITLE) ?? fail('no Getting Started row'),
         (current) => projectTitled(current, STARTER_TITLE) && Boolean(tagged(current, 'getting-started-actions')), 'Getting Started again');
