@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { FILE_SYNC_ABSENT_FINGERPRINT, createMobileFileSync, type MobileFileSyncFullHost } from './mobile-file-sync';
 import { fileSyncErrorCode } from './mobile-file-sync-remote';
 import { defaultSyncCryptoPrimitives } from './sync-crypto';
-import { compareSyncTransitionEntryNames, runDisableSyncEncryptionOverRemote, runEnableSyncEncryptionOverRemote, type SyncEncryptionLocalState } from './sync-encryption';
+import { compareSyncTransitionEntryNames, runChangeSyncEncryptionPassphraseOverRemote, runDisableSyncEncryptionOverRemote, runEnableSyncEncryptionOverRemote, type SyncEncryptionLocalState } from './sync-encryption';
 import type { AppData } from './types';
 
 // File Sync's log contexts never carry the sync folder's path or a document URI: a provider's or the file system's error text
@@ -212,8 +212,9 @@ describe('File Sync encryption enable order', () => {
 /** A SAF tree in memory that counts the provider calls: a listing costs one call and one row per child. A taken name on
  *  create is decorated (" (1)", as the external storage provider does), kept twice (`duplicate`, as Google Drive allows),
  *  or answered with the existing document (`return-existing`); `lag` hides a new document from its first listing.
+ *  `pathIds` names a document by its path, as Android's external storage does: one recreated under a name gets its URI back.
  *  [onCall] sees each create, write and read by document name, for a peer that acts in between. */
-const safFolder = (options: { create?: 'decorate' | 'duplicate' | 'return-existing'; lag?: boolean } = {}) => {
+const safFolder = (options: { create?: 'decorate' | 'duplicate' | 'return-existing'; lag?: boolean; pathIds?: boolean } = {}) => {
     const root = `${SAF_TREE}/document/primary%3A${PRIVATE}`;
     const docs = new Map<string, { parent: string; name: string; bytes: Uint8Array | null; hidden: number }>();
     const calls = { list: 0, rows: 0, read: 0 };
@@ -221,7 +222,7 @@ const safFolder = (options: { create?: 'decorate' | 'duplicate' | 'return-existi
     let onCall: (op: 'create' | 'write' | 'read', name: string) => void = () => undefined;
     const add = (parent: string, name: string, bytes: Uint8Array | null, hidden = 0) => {
         sequence += 1;
-        const uri = `${parent}%2F${encodeURIComponent(name)}~${sequence}`;
+        const uri = `${parent}%2F${encodeURIComponent(name)}${options.pathIds ? '' : `~${sequence}`}`;
         docs.set(uri, { parent, name, bytes, hidden });
         return uri;
     };
@@ -283,10 +284,10 @@ const enableOver = async (folder: ReturnType<typeof safFolder>) => {
     for (let i = 0; i < 3; i += 1) folder.add(attachmentsDir, `file-${i}.txt`, encodeText(`attachment ${i}`));
     const { host, logged } = fakeHost({ saf: folder.port as never, crypto: defaultSyncCryptoPrimitives });
     const remote = (await createMobileFileSync(host).createFileSyncEncryptionRemotePort(safChild('data.json')))!;
-    const { keyCache, localState } = memoryKeys();
-    const outcome = await runEnableSyncEncryptionOverRemote('correct horse', remote, keyCache, localState, undefined,
+    const keys = memoryKeys();
+    const outcome = await runEnableSyncEncryptionOverRemote('correct horse', remote, keys.keyCache, keys.localState, undefined,
         defaultSyncCryptoPrimitives, CHEAP_KDF).then(() => 'ok', (error: Error) => error.name);
-    return { outcome, logged };
+    return { outcome, logged, keys, attachmentsDir };
 };
 
 describe('File Sync encryption transition guards kept while cutting its cost', () => {
@@ -330,21 +331,27 @@ describe('File Sync encryption transition guards kept while cutting its cost', (
             .toEqual([JSON.stringify(data)]);
     });
 
-    it('refuses to move aside an attachment a peer replaced with a new document, on a provider proved to rename a taken name', async () => {
-        const folder = safFolder();
-        let replaced = false;
-        folder.peer((op, name) => {
-            if (replaced || op !== 'write' || !name.startsWith('.mindwtr-et-s-')) return;
-            replaced = true;
-            const [uri, doc] = [...folder.docs].find(([, entry]) => entry.name === 'file-0.txt')!;
-            folder.docs.delete(uri);
-            folder.add(doc.parent, 'file-0.txt', encodeText('PEER-REPLACEMENT'));
+    for (const pathIds of [false, true]) {
+        it(`refuses to move aside an attachment a peer replaced with a new document, on a provider proved to rename a taken name${pathIds ? ' and naming documents by path' : ''}`, async () => {
+            const folder = safFolder({ pathIds });
+            let replaced = false;
+            folder.peer((op, name) => {
+                if (replaced || op !== 'write' || !name.startsWith('.mindwtr-et-s-')) return;
+                replaced = true;
+                const [uri, doc] = [...folder.docs].find(([, entry]) => entry.name === 'file-0.txt')!;
+                folder.docs.delete(uri);
+                folder.add(doc.parent, 'file-0.txt', encodeText('PEER-REPLACEMENT'));
+            });
+            const { outcome } = await enableOver(folder);
+            expect(outcome).toBe('SyncEncryptionRemoteConflictError');
+            // By path the stat finds the peer's document under the name, so the old copy's check is the read after the move
+            // aside: the peer's bytes go back under the name, and the moved-aside copy is kept.
+            expect([...folder.docs.values()].filter((doc) => doc.name === 'file-0.txt').map((doc) => decodeText(doc.bytes)))
+                .toEqual(['PEER-REPLACEMENT']);
+            expect([...folder.docs.values()].filter((doc) => doc.name.startsWith('.mindwtr-et-q-')).map((doc) => decodeText(doc.bytes)))
+                .toEqual(pathIds ? ['PEER-REPLACEMENT'] : []);
         });
-        const { outcome } = await enableOver(folder);
-        expect(outcome).toBe('SyncEncryptionRemoteConflictError');
-        expect([...folder.docs.values()].filter((doc) => doc.name === 'file-0.txt').map((doc) => decodeText(doc.bytes)))
-            .toEqual(['PEER-REPLACEMENT']);
-    });
+    }
 
     it('refuses an attachment install when a peer took its name after the old copy was moved aside, keeping both copies', async () => {
         const folder = safFolder();
@@ -361,6 +368,23 @@ describe('File Sync encryption transition guards kept while cutting its cost', (
             .toEqual(['PEER-COPY']);
         expect([...folder.docs.values()].filter((doc) => doc.name.startsWith('.mindwtr-et-q-')).map((doc) => decodeText(doc.bytes)))
             .toEqual(['attachment 0']);
+    });
+
+    it('passes over an empty name probe a cut-off transition left, and removes it at the next probe', async () => {
+        const folder = safFolder();
+        const { outcome, keys, attachmentsDir } = await enableOver(folder);
+        expect(outcome).toBe('ok');
+        // The app was killed between the probe's creates and its deletes (one copy under the name Android gives the second).
+        folder.add(attachmentsDir, '.mindwtr-et-p-mvn0-1-left', new Uint8Array(0));
+        folder.add(attachmentsDir, '.mindwtr-et-p-mvn0-1-left (1)', new Uint8Array(0));
+        const { host, logged } = fakeHost({ saf: folder.port as never, crypto: defaultSyncCryptoPrimitives });
+        const remote = (await createMobileFileSync(host).createFileSyncEncryptionRemotePort(safChild('data.json')))!;
+        await runChangeSyncEncryptionPassphraseOverRemote('correct horse', 'battery staple', remote, keys.keyCache, keys.localState,
+            undefined, defaultSyncCryptoPrimitives, CHEAP_KDF);
+        expect(folder.named(attachmentsDir).map((doc) => doc.name).sort()).toEqual(['file-0.txt', 'file-1.txt', 'file-2.txt']);
+        expect(logged.filter((entry) => entry.message === 'File Sync transition chose its name check')
+            .map((entry) => (entry.context as { extra: unknown }).extra))
+            .toEqual([{ releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed', cleaned: 'yes' }]);
     });
 
     it('logs the transition line from a transition only, not from a listing that wrote nothing', async () => {
@@ -433,8 +457,8 @@ describe('File Sync encryption transition cost', () => {
         for (const kind of ['enable', 'disable'] as const) {
             expect(large[kind].list - small[kind].list, `${kind} listings for 20 more attachments`).toBe(0);
         }
-        expect(large.modes).toEqual([{ releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed' },
-            { releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed' }]);
+        expect(large.modes).toEqual([{ releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed', cleaned: 'yes' },
+            { releaseCheck: 'v1.3.8/file-sync-name-probe', mode: 'unique-names', outcome: 'renamed', cleaned: 'yes' }]);
     });
 
     it('keeps both listings per attachment where the probe sees a taken name kept or handed back', async () => {

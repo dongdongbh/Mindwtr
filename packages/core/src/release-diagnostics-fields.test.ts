@@ -25,6 +25,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'globalCount', 'hiddenByAreaCount',
     // file-sync-transition-cost reuses releaseCheck and elapsedMs; entries and writes are counts, never names.
     'entries', 'writes',
+    // file-sync-name-probe reuses releaseCheck, mode and outcome; cleaned is yes/no for the probe's own empty documents.
+    'cleaned',
     // project-color reuses releaseCheck and mode; no identity or color values.
     // section-flow-mode reuses releaseCheck and mode; sectionDefaults is a count. No titles or identifiers.
     'sectionDefaults',

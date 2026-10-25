@@ -666,6 +666,8 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
     };
 
     const isTransitionScratchName = (name: string): boolean => name.includes(TRANSITION_SCRATCH_MARKER);
+    /** The name probe's empty documents, under the name asked for or the one the provider gave the second (`<name> (1)`). */
+    const isNameProbeName = (name: string): boolean => name.includes(`${TRANSITION_SCRATCH_MARKER}p-`);
     const isDesktopTransitionRecoveryDir = (name: string): boolean =>
         name.startsWith(DESKTOP_TRANSITION_STAGE_DIR_PREFIX)
         || name.startsWith(DESKTOP_TRANSITION_QUARANTINE_DIR_PREFIX);
@@ -707,10 +709,18 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
          * or hands back the first document, or any failure, keeps both full listings per attachment.
          */
         let attachmentNamesUnique: Promise<boolean> | null = null;
+        /** Probe documents a cut-off transition left in attachments/ (the inventory passes over them), by name. */
+        const leftoverNameProbes = new Map<string, string>();
         const probeAttachmentNames = async (): Promise<boolean> => {
             const dirUri = target.attachmentsDirUri;
             if (!dirUri || !isSaf(dirUri) || !host.saf) return false;
             const saf = host.saf;
+            for (const [leftover, uri] of leftoverNameProbes) {
+                // Only an empty one: a probe never holds bytes, so anything else is not ours to delete.
+                if ((await saf.stat(uri).catch(() => null))?.size !== 0) continue;
+                await deleteSyncArtifact(uri).catch(() => undefined);
+                attachments?.entries.delete(leftover);
+            }
             const name = transitionScratchName('probe');
             const created: string[] = [];
             let outcome: 'renamed' | 'kept-name' | 'handed-back' | 'failed' = 'failed';
@@ -730,11 +740,17 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
             } catch {
                 outcome = 'failed';
             }
-            for (const uri of created) await deleteSyncArtifact(uri).catch(() => undefined);
+            let cleaned = true;
+            for (const uri of created) await deleteSyncArtifact(uri).catch(() => { cleaned = false; });
             const unique = outcome === 'renamed';
             host.log.info('File Sync transition chose its name check', {
                 scope: 'sync',
-                extra: { releaseCheck: 'v1.3.8/file-sync-name-probe', mode: unique ? 'unique-names' : 'full-listing', outcome },
+                extra: {
+                    releaseCheck: 'v1.3.8/file-sync-name-probe',
+                    mode: unique ? 'unique-names' : 'full-listing',
+                    outcome,
+                    cleaned: cleaned ? 'yes' : 'no',
+                },
             });
             return unique;
         };
@@ -839,6 +855,12 @@ export const createMobileFileSyncRemote = (host: MobileFileSyncHost) => {
                     }
                     if (isDesktopTransitionRecoveryDir(name)) {
                         await collectDesktopRecoveryDirectory(uri);
+                        continue;
+                    }
+                    // An empty name probe holds nothing to seal, and its 0 bytes would fail a passphrase change's
+                    // MWENC1 check on every retry; the next probe deletes it.
+                    if (isNameProbeName(name)) {
+                        leftoverNameProbes.set(name, uri);
                         continue;
                     }
                     entries.push({ name: `${ATTACHMENT_PREFIX}${name}`, kind: 'attachment' });

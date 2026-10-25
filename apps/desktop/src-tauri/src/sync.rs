@@ -8652,6 +8652,19 @@ mod tests {
     }
 
     #[test]
+    fn mobile_transition_scratch_names_match_the_marker_anywhere() {
+        assert!(is_transition_scratch(".mindwtr-et-p-mvndgro7-1-7n0cin2o"));
+        assert!(is_transition_scratch(
+            ".mindwtr-et-p-mvndgro7-1-7n0cin2o (1)"
+        ));
+        assert!(is_transition_scratch(
+            " (1).mindwtr-et-p-mvndgro7-1-7n0cin2o"
+        ));
+        assert!(is_transition_scratch("data.json.enctransition"));
+        assert!(!is_transition_scratch("photo (1).png"));
+    }
+
+    #[test]
     fn desktop_transitions_recover_mobile_flat_generations_in_place() {
         let dir = tempfile::tempdir().expect("temp dir");
         seed_transition_folder(dir.path());
@@ -18235,9 +18248,11 @@ fn is_transition_recovery_dir(name: &str) -> bool {
 fn is_transition_scratch(name: &str) -> bool {
     // Only names Mindwtr itself reserves for encryption-transition recovery are scratch.
     // Attachment cloud keys preserve a user's original extension, so `.tmp`, `.previous`,
-    // `.lock`, and dot-prefixed names are all legitimate attachment generations.
+    // `.lock`, and dot-prefixed names are all legitimate attachment generations. The mobile marker
+    // may sit anywhere: an Android provider renames a second document under a taken name
+    // (`<name> (1)`), as mobile's name probe does on purpose.
     name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX)
-        || name.starts_with(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
+        || name.contains(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
 }
 
 fn transition_directory_entries(dir: &Path) -> Result<fs::ReadDir, String> {
@@ -18393,10 +18408,7 @@ where
                     path.display()
                 ));
             }
-            if inside_recovery
-                || name.ends_with(SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX)
-                || name.starts_with(SYNC_ENCRYPTION_MOBILE_SCRATCH_PREFIX)
-            {
+            if inside_recovery || is_transition_scratch(name) {
                 found.push(path);
             }
         }
