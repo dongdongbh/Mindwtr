@@ -9602,6 +9602,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         assert.match(source(file), /openExternalLink\(context, target\.getString\("href"\)/, `${file}'s external links offer Copy link`);
         assert.doesNotMatch(source(file), /runCatching \{ context\.startActivity\(Intent\(Intent\.ACTION_VIEW, (?:original|target\.getString\("href"\))/);
     }
+    // A stored Done or Archive view value falls back alone (RN's 57271148e, ListViewStateTest): Kotlin's option lists are core's.
+    const coreList = (file, name) => [.../=\s*\[([^\]]*)\]/.exec(readFileSync(resolve(app, '../../packages/core/src', file), 'utf8')
+        .split(`export const ${name}`)[1])[1].matchAll(/'([\w-]+)'/g)].map((m) => m[1]);
+    const kotlinSet = (name) => [...new RegExp(`val ${name} = setOf\\(([^)]*)\\)`).exec(source('ViewState.kt'))[1].matchAll(/"([\w-]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(kotlinSet('LIST_VIEW_GROUP_OPTIONS'), coreList('menu-views-model.ts', 'DONE_LIST_GROUP_OPTIONS'));
+    assert.deepEqual(kotlinSet('LIST_VIEW_GROUP_OPTIONS'), coreList('archive-view-model.ts', 'ARCHIVE_TASK_GROUP_OPTIONS'));
+    assert.deepEqual(kotlinSet('LIST_VIEW_SORT_OPTIONS'), [...coreList('task-list-sort-options.ts', 'TASK_LIST_SORT_OPTIONS').filter((option) => option !== 'priority'), 'completed']);
+    assert.match(readFileSync(resolve(app, '../../packages/core/src/task-list-sort-options.ts'), 'utf8'),
+        /DONE_TASK_LIST_SORT_OPTIONS: readonly TaskSortBy\[\] = \[\s+\.\.\.TASK_LIST_SORT_OPTIONS\.filter\(\(option\) => option !== 'priority'\),\s+'completed',\s+\];/);
     const calendar = source('CalendarSettings.kt');
     assert.match(calendar, /rememberLauncherForActivityResult\(ActivityResultContracts\.OpenDocument\(\)\) \{ uri -> uri\?\.let \{ screen\.addFile\(it, revision\) \} \}/,
         'the local .ics picker is OpenDocument, feeding addFile');

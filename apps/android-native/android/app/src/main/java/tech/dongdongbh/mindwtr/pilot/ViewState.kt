@@ -90,9 +90,16 @@ const val ARCHIVED_VIEW_KEY = "mindwtr:view:archived:v1"
 const val WEEKLY_REVIEW_KEY = "mindwtr:weeklyReview:currentStep"
 const val DAILY_REVIEW_KEY = "mindwtr:dailyReview:currentStep"
 
+/** Core's DONE_LIST_GROUP_OPTIONS and ARCHIVE_TASK_GROUP_OPTIONS (one list; check-boot-gates.mjs compares them). */
+val LIST_VIEW_GROUP_OPTIONS = setOf("none", "completedDate", "context", "area", "project", "tag")
+/** Core's DONE_TASK_LIST_SORT_OPTIONS: TASK_LIST_SORT_OPTIONS without priority, and completed (check-boot-gates.mjs compares). */
+val LIST_VIEW_SORT_OPTIONS = setOf("default", "due", "start", "review", "timeEstimate", "title", "created", "created-desc", "completed")
+
 /**
  * RN's Done and Archived list view state, `{ groupBy, sortBy? }`: the device's grouping and sort, kept as core's option
- * values (only this app writes them, from core's options). Absent means core's default.
+ * values. Absent means core's default. A stored value this build does not know (an older or newer app wrote it, or it is
+ * broken) reads as absent, as RN's readDoneListViewState and readArchivedListViewState read it (57271148e): core refuses the
+ * whole view for an unknown one.
  */
 data class ListViewState(val groupBy: String?, val sortBy: String?) {
     fun save(prefs: SharedPreferences, key: String) {
@@ -103,9 +110,12 @@ data class ListViewState(val groupBy: String?, val sortBy: String?) {
     fun into(params: JSONObject): JSONObject = params.apply { groupBy?.let { put("groupBy", it) }; sortBy?.let { put("sortBy", it) } }
 
     companion object {
-        fun read(prefs: SharedPreferences, key: String): ListViewState {
-            val raw = runCatching { JSONObject(prefs.getString(key, null) ?: "{}") }.getOrDefault(JSONObject())
-            return ListViewState(raw.opt("groupBy") as? String, raw.opt("sortBy") as? String)
+        fun read(prefs: SharedPreferences, key: String): ListViewState = parse(prefs.getString(key, null))
+
+        fun parse(text: String?): ListViewState {
+            val raw = runCatching { JSONObject(text ?: "{}") }.getOrDefault(JSONObject())
+            return ListViewState((raw.opt("groupBy") as? String)?.takeIf { it in LIST_VIEW_GROUP_OPTIONS },
+                (raw.opt("sortBy") as? String)?.takeIf { it in LIST_VIEW_SORT_OPTIONS })
         }
     }
 }
