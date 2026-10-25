@@ -116,6 +116,7 @@ import {
 } from './sync-attachment-cleanup';
 import {
     clearAttachmentSyncState,
+    isAttachmentDownloadBackedOff,
     type AttachmentBackendDeps,
     type CloudConfig,
     syncCloudAttachments,
@@ -862,7 +863,11 @@ const hasAttachmentSyncWork = async (data: AppData, presenceScope: string | null
             if (hasLocalUri && attachment.localStatus !== 'missing') return true;
             continue;
         }
-        if (!hasLocalUri || attachment.localStatus !== 'available') return true;
+        if (!hasLocalUri || attachment.localStatus !== 'available') {
+            // A file that answered "not found" stays a live row; it waits out its backoff.
+            if (isAttachmentDownloadBackedOff(attachment.id)) continue;
+            return true;
+        }
         if (attachment.pendingContentUpload === true) return true;
         if (
             !Number.isFinite(attachment.contentMtimeMs ?? NaN)

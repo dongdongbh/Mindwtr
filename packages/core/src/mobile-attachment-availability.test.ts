@@ -9,7 +9,6 @@ import { globalProgressTracker } from './attachment-progress';
 import { CLOUD_PROVIDER_KEY, CLOUD_URL_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, WEBDAV_PASSWORD_KEY, WEBDAV_URL_KEY, WEBDAV_USERNAME_KEY } from './sync-storage-keys';
 import { DropboxFileNotFoundError } from './dropbox';
 import { withRetry } from './retry-utils';
-import { rememberUnreachableAttachments, UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
 import { createMemoryFileSystem, createMemoryStorage, createRecordingLog, MANAGED } from './__fixtures__/mobile-attachment-fakes';
 
 const now = '2026-09-28T00:00:00.000Z';
@@ -250,7 +249,7 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     expect(installAttachmentFileGeneration).not.toHaveBeenCalled();
   });
 
-  it('keeps terminal404 policy without a source and leaves the original metadata/bytes intact', async () => {
+  it('answers a 404 without a source as unavailable and leaves the original metadata/bytes intact', async () => {
     const preparePlaintextDownload = vi.fn(async () => sourceReply());
     const { availability, memory, webdavGetFile } = setup({ storage: webdav, preparePlaintextDownload });
     const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
@@ -260,13 +259,11 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
 
     const outcome = await availability.prepareAttachmentAvailableDetailed!(requested);
 
-    expect(outcome).toMatchObject({ status: 'unrecoverable', attachment: { cloudKey: undefined, fileHash: undefined, deletedAt: expect.any(String) } });
+    expect(outcome).toEqual({ status: 'unavailable' });
     expect(requested).toEqual(before);
     expect(memory.read(`${MANAGED}unrelated.txt`)).toEqual(REMOTE);
     expect(mutations(memory.calls)).toEqual([]);
     expect(preparePlaintextDownload).not.toHaveBeenCalled();
-    if (outcome.status !== 'unrecoverable') throw new Error('Expected terminal outcome');
-    await expect(availability.prepareAttachmentAvailableDetailed!(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
     expect(webdavGetFile).toHaveBeenCalledTimes(1);
   });
 
@@ -481,57 +478,23 @@ describe('mobile attachment availability', () => {
     expect(deletesOutsideScratch(memory.calls)).toEqual([]);
   });
 
-  it('treats a WebDAV 404 as terminal, as the sync pass does: no second request, no Download, local bytes kept', async () => {
+  it('answers a WebDAV 404 as unavailable and leaves the row as it is, so a file uploaded later still arrives', async () => {
+    // Deleting the row would sync to every device, and a location still holding the file would then delete it.
     const { availability, memory, webdavGetFile, lines } = setup({ storage: webdav });
     webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
-    const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
+    const fileHash = await computeSha256Hex(REMOTE);
+    const requested = remoteAttachment({ fileHash });
+    const before = { ...requested };
 
-    const outcome = await availability.ensureAttachmentAvailableDetailed(requested);
+    await expect(availability.ensureAttachmentAvailableDetailed(requested)).resolves.toEqual({ status: 'unavailable' });
 
-    expect(outcome).toMatchObject({
-      status: 'unrecoverable',
-      attachment: { cloudKey: undefined, fileHash: undefined, localStatus: 'missing', deletedAt: expect.any(String) },
-    });
-    expect(requested.cloudKey).toBe('attachments/att-1.txt');
+    expect(requested).toEqual(before);
     expect(deletesOutsideScratch(memory.calls)).toEqual([]);
     expect(lines).toContainEqual(expect.objectContaining({
       level: 'warn', extra: expect.objectContaining({ releaseCheck: 'v1.3.4/webdav-download-not-found' }),
     }));
-    if (outcome.status !== 'unrecoverable') throw new Error('Expected a terminal outcome');
-    await expect(availability.ensureAttachmentAvailableDetailed(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
-    expect(webdavGetFile).toHaveBeenCalledTimes(1);
-  });
-
-  it('still asks for a row the user kept without its file, and takes its not-found as no news', async () => {
-    const { availability, webdavGetFile } = setup({
-      storage: { ...webdav, [UNREACHABLE_ATTACHMENTS_KEY]: JSON.stringify({ '["webdav","https://dav.example/Mindwtr","me"]': ['att-1'] }) },
-    });
-    webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
-    const fileHash = await computeSha256Hex(REMOTE);
-    const kept = remoteAttachment({ fileHash });
-
-    await expect(availability.ensureAttachmentAvailableDetailed(kept)).resolves.toEqual({ status: 'unavailable' });
-    expect(kept).toMatchObject({ cloudKey: 'attachments/att-1.txt', fileHash, localStatus: 'missing' });
-    expect(kept.deletedAt).toBeUndefined();
-    // Another device uploaded the file there: it arrives.
-    await expect(availability.ensureAttachmentAvailableDetailed(kept)).resolves.toMatchObject({ status: 'available' });
+    await expect(availability.ensureAttachmentAvailableDetailed(requested)).resolves.toMatchObject({ status: 'available' });
     expect(webdavGetFile).toHaveBeenCalledTimes(2);
-  });
-
-  it('takes not-found as no news for a kept row even while this process believes another location is active', async () => {
-    rememberUnreachableAttachments({}, '["webdav","https://other.example/dav","me"]');
-    try {
-      const { availability, webdavGetFile } = setup({
-        storage: { ...webdav, [UNREACHABLE_ATTACHMENTS_KEY]: JSON.stringify({ '["webdav","https://dav.example/Mindwtr","me"]': ['att-1'] }) },
-      });
-      webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
-      const kept = remoteAttachment();
-
-      await expect(availability.ensureAttachmentAvailableDetailed(kept)).resolves.toEqual({ status: 'unavailable' });
-      expect(kept.deletedAt).toBeUndefined();
-    } finally {
-      rememberUnreachableAttachments({}, null);
-    }
   });
 
   it.each([
@@ -539,22 +502,17 @@ describe('mobile attachment availability', () => {
       Object.assign(new Error('Cloud File GET failed (404)'), { status: 404 }), 'Cloud attachment att-1 is no longer available', 'v1.3.4/cloud-download-not-found'],
     ['Dropbox', { [SYNC_BACKEND_KEY]: 'cloud', [CLOUD_PROVIDER_KEY]: 'dropbox' }, 'downloadDropboxFile',
       new DropboxFileNotFoundError(), 'Dropbox attachment att-1 is no longer available', 'v1.3.4/dropbox-download-not-found'],
-  ] as const)('treats a %s not-found as terminal, as WebDAV: no second request, no Download, local bytes kept', async (_name, storage, fetcher, failure, line, releaseCheck) => {
+  ] as const)('answers a %s not-found as unavailable and leaves the row as it is, as WebDAV', async (_name, storage, fetcher, failure, line, releaseCheck) => {
     const ports = setup({ storage });
     ports[fetcher].mockRejectedValueOnce(failure);
     const requested = remoteAttachment({ fileHash: 'a'.repeat(64) });
+    const before = { ...requested };
 
-    const outcome = await ports.availability.ensureAttachmentAvailableDetailed(requested);
+    await expect(ports.availability.ensureAttachmentAvailableDetailed(requested)).resolves.toEqual({ status: 'unavailable' });
 
-    expect(outcome).toMatchObject({
-      status: 'unrecoverable',
-      attachment: { cloudKey: undefined, fileHash: undefined, localStatus: 'missing', deletedAt: expect.any(String) },
-    });
-    expect(requested.cloudKey).toBe('attachments/att-1.txt');
+    expect(requested).toEqual(before);
     expect(deletesOutsideScratch(ports.memory.calls)).toEqual([]);
     expect(ports.lines).toContainEqual(expect.objectContaining({ level: 'warn', message: line, extra: expect.objectContaining({ releaseCheck }) }));
-    if (outcome.status !== 'unrecoverable') throw new Error('Expected a terminal outcome');
-    await expect(ports.availability.ensureAttachmentAvailableDetailed(outcome.attachment)).resolves.toEqual({ status: 'unavailable' });
     expect(ports[fetcher]).toHaveBeenCalledTimes(1);
   });
 
@@ -635,17 +593,17 @@ describe('mobile attachment availability', () => {
     expect(memory.read(`${MANAGED}att-1.txt`)).toEqual(REMOTE);
   });
 
-  it('treats a CloudKit not-found as terminal', async () => {
+  it('answers a CloudKit not-found as unavailable and leaves the row as it is', async () => {
     const cloudKit = {
       fetchAttachmentAsset: vi.fn(async () => { throw new Error('asset gone'); }),
       isAttachmentNotFoundError: () => true,
     };
     const { availability } = setup({ storage: { [SYNC_BACKEND_KEY]: 'cloudkit' }, cloudKit });
+    const requested = remoteAttachment({ cloudKey: 'cloudkit:att-1' });
 
-    const outcome = await availability.ensureAttachmentAvailableDetailed(remoteAttachment({ cloudKey: 'cloudkit:att-1' }));
-
-    expect(outcome.status).toBe('unrecoverable');
-    expect(outcome.status === 'unrecoverable' && outcome.attachment.deletedAt).toBeTruthy();
+    await expect(availability.ensureAttachmentAvailableDetailed(requested)).resolves.toEqual({ status: 'unavailable' });
+    expect(requested.deletedAt).toBeUndefined();
+    expect(requested.cloudKey).toBe('cloudkit:att-1');
   });
 
   it('reports CloudKit attachments unavailable on a host without CloudKit', async () => {

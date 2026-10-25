@@ -6,13 +6,12 @@
 //
 // Data safety: a failed download never deletes local bytes, a target already on disk is used
 // only when its bytes prove they are the current remote generation, and a CloudKit not-found, a
-// WebDAV or self-hosted cloud 404, or a Dropbox path-not-found is terminal (the attachment is marked unrecoverable),
-// except for a row the user kept without its file (unreachable-attachments.ts), which stays as it is.
+// WebDAV or self-hosted cloud 404, or a Dropbox path-not-found leaves the row as it is (shown as a
+// missing file): deleting it would sync to every device and could cost the file where it still exists.
 import type { Attachment } from './types';
 import { computeSha256Hex, isSha256Hex } from './attachment-hash';
 import { extractExtension, getBaseSyncUrl, getCloudBaseUrl } from './attachment-paths';
 import { reportProgress, validateAttachmentHash } from './attachment-transfer';
-import { markAttachmentUnrecoverable } from './attachment-validation';
 import { cloudGetFile } from './cloud';
 import { parseCloudKitAttachmentKey } from './cloudkit-attachments';
 import { DropboxFileNotFoundError, downloadDropboxFile } from './dropbox';
@@ -21,7 +20,6 @@ import { getErrorStatus } from './sync-runtime-utils';
 import { isSandboxMode } from './sandbox';
 import { CLOUD_PROVIDER_DROPBOX, CLOUD_PROVIDER_KEY, SYNC_BACKEND_KEY, SYNC_PATH_KEY, type SyncKeyValueStoragePort } from './sync-storage-keys';
 import { webdavGetFile } from './webdav';
-import { isAttachmentKeptAnywhere, parseUnreachableAttachments, rememberUnreachableAttachments, UNREACHABLE_ATTACHMENTS_KEY } from './unreachable-attachments';
 import { getMobileCloudRequestOptions, getMobileWebDavRequestOptions } from './mobile-sync-utils';
 import { isHttpAttachmentUri, type MobileAttachmentFiles } from './mobile-attachment-files';
 import { assertAttachmentSyncNotAborted, type MobileAttachmentCommon, type PreparedAttachmentDownloadBytes } from './mobile-attachment-common';
@@ -145,9 +143,9 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
   const downloadLocks = new Map<string, Promise<AttachmentAvailabilityOutcome>>();
 
   /**
-   * A failed on-demand download: progress fails, and a remote that answers the file is gone ([notFound]) is terminal, as the
-   * sync pass treats it: the attachment is marked unrecoverable (on a copy; local bytes are never deleted), so a retry asks
-   * the server nothing. Any other failure stays retryable.
+   * A failed on-demand download: progress fails and the answer is "unavailable". A remote that answers the file is gone
+   * ([notFound]) leaves the row as it is, as the sync pass does: deleting it would sync to every device. Local bytes are
+   * never deleted.
    */
   const downloadFailed = (
     attachment: Attachment,
@@ -163,12 +161,9 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
       'failed',
       notFound ? 'Attachment is no longer available' : error instanceof Error ? error.message : String(error)
     );
-    // The user kept this row without its file: "not found" is no news, and a tombstone would win where the file lives.
-    if (notFound && isAttachmentKeptAnywhere(attachment)) return null;
     if (notFound) {
-      markAttachmentUnrecoverable(attachment);
       files.logAttachmentWarn(terminalLog.message, error, { releaseCheck: terminalLog.releaseCheck });
-      return { availabilityStatus: 'unrecoverable', attachment };
+      return null;
     }
     files.logAttachmentWarn(`Failed to download attachment ${attachment.id}`, error);
     return null;
@@ -371,11 +366,9 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
           ? 'Attachment is no longer available'
           : error instanceof Error ? error.message : String(error),
       );
-      if (terminalNotFound && isAttachmentKeptAnywhere(attachment)) return null;
       if (terminalNotFound) {
-        markAttachmentUnrecoverable(attachment);
         files.logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
-        return { availabilityStatus: 'unrecoverable', attachment };
+        return null;
       }
       files.logAttachmentWarn(`Failed to download CloudKit attachment ${attachment.id}`, error);
       return null;
@@ -424,12 +417,6 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     // A selected existing generation needs its stored hash, not a remote key.
     // A missing selection still cannot acquire bytes without remote identity.
     if (preparing && !localAttachment.cloudKey) return null;
-    // Fresh for the "not found" answer below: a row the user kept without its file stays as it is.
-    // A prepared (selected) download gets only its location's own config keys; it uses the copy
-    // the last sync or on-demand read left.
-    if (!preparing) {
-      rememberUnreachableAttachments(parseUnreachableAttachments(await host.storage.getItem(UNREACHABLE_ATTACHMENTS_KEY)));
-    }
     const backend = preparing ? preparedBackend : await host.storage.getItem(SYNC_BACKEND_KEY);
     if (backend === 'file') {
       const syncPath = await host.storage.getItem(SYNC_PATH_KEY);

@@ -6,7 +6,7 @@
 // run the same rules; each host binds them to its file IO, native installer and transports.
 //
 // Data safety: bytes are uploaded before `cloudKey` is recorded, and the metadata is published
-// only after that. A remote 404 is terminal (the attachment is marked unrecoverable), a failed
+// only after that. A remote 404 leaves the row live and backs off (an activation probe marks its trial copy unrecoverable), a failed
 // download never deletes local bytes, `pendingContentUpload` survives until the edited bytes
 // are on the remote, and a new WebDAV upload is sent with `If-None-Match: *`.
 import type { AppData, Attachment } from './types';
@@ -27,7 +27,7 @@ import {
   type AttachmentDownloadExpectation,
   type AttachmentTransferAdmission,
 } from './attachment-transfer';
-import { markAttachmentUnrecoverable, validateAttachmentForUpload } from './attachment-validation';
+import { handleRemoteAttachmentNotFound, markAttachmentUnrecoverable, validateAttachmentForUpload } from './attachment-validation';
 import { cloudAttachmentExists, cloudGetFile, cloudPutFile, isBlockedAttachmentContentRefusal } from './cloud';
 import {
   createDropboxAttachmentPresenceIndex,
@@ -807,11 +807,13 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           }
           const status = getErrorStatus(error);
           if (status === 404) {
-            // A row kept without its file stays live after this; the backoff frees its download slot.
+            // The row stays live; the backoff frees its download slot.
             if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, error);
-            const mutated = markAttachmentUnrecoverable(attachment);
-            files.logAttachmentInfo('Cleared missing WebDAV cloud key after 404', { id: attachment.id });
-            return mutated;
+            files.logAttachmentInfo('WebDAV attachment not found (404); row kept', {
+              id: attachment.id,
+              releaseCheck: 'v1.3.8/attachment-not-found-kept',
+            });
+            return handleRemoteAttachmentNotFound(attachment, options.activationProbe === true);
           }
           throw error;
         }
@@ -1677,7 +1679,7 @@ export const createMobileAttachmentBackends = (host: MobileAttachmentBackendsHos
           && attachment.cloudKey
         ) {
           if (!options.activationProbe) files.setWebdavDownloadBackoff(attachment.id, { status: 404 });
-          if (markAttachmentUnrecoverable(attachment)) {
+          if (handleRemoteAttachmentNotFound(attachment, options.activationProbe === true)) {
             recordPatch(attachment);
           }
         }

@@ -2,7 +2,7 @@ import type { AppData, Attachment, AttachmentSettings } from '@mindwtr/core';
 import {
     applyAttachmentPatches,
     buildCloudKitAttachmentKey,
-    markAttachmentUnrecoverable,
+    handleRemoteAttachmentNotFound,
     parseCloudKitAttachmentKey,
     validateAttachmentForUpload,
     withAttachmentSettingsPatch,
@@ -21,12 +21,14 @@ import {
     getLocalAttachmentPresence,
     getAttachmentByteSize,
     getAttachmentsDir,
+    getWebdavDownloadBackoff,
     isContentAttachmentUri,
     logAttachmentWarn,
     markAttachmentPresenceReconciled,
     readAttachmentBytesForUpload,
     readFileAsBytes,
     reportProgress,
+    setWebdavDownloadBackoff,
     statAttachmentFile,
     writeBytesSafely,
 } from '../attachment-sync-utils';
@@ -184,6 +186,8 @@ export const syncCloudKitAttachments = async (
         // A cloudKey written by a different backend before a provider switch isn't a valid
         // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
+        // Outside a probe, a record that answered "not found" waits out its backoff.
+        policy: { shouldDownload: (attachment) => options.activationProbe === true || !getWebdavDownloadBackoff(attachment.id) },
         onUpload: async (attachment, localPath, snapshot) => {
             const owned = ownerByAttachmentId.get(attachment.id);
             if (!owned) return false;
@@ -283,9 +287,10 @@ export const syncCloudKitAttachments = async (
                         'failed',
                         'Attachment is no longer available',
                     );
-                    const mutated = markAttachmentUnrecoverable(attachment);
                     logAttachmentWarn(`CloudKit attachment ${attachment.id} is no longer available`, error);
-                    return mutated;
+                    // The row stays live and keyed (core handleRemoteAttachmentNotFound).
+                    if (options.activationProbe !== true) setWebdavDownloadBackoff(attachment.id, { status: 404 });
+                    return handleRemoteAttachmentNotFound(attachment, options.activationProbe === true);
                 }
                 reportProgress(
                     attachment.id,

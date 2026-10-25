@@ -22,6 +22,7 @@ import {
     syncDropboxAttachments,
     syncFileAttachments,
     syncWebdavAttachments,
+    isAttachmentDownloadBackedOff,
     type AttachmentBackendDeps,
 } from './sync-attachment-backends';
 
@@ -521,9 +522,14 @@ describe('desktop sync attachment backends', () => {
         const gets = () => fetcher.mock.calls.filter((call) => String((call as unknown[])[0]).endsWith('attachments/attachment-1.txt')
             && ((call as unknown[])[1] as RequestInit | undefined)?.method !== 'HEAD').length;
 
-        await run();
+        const firstResult = await run();
         const first = gets();
         expect(first).toBeGreaterThan(0);
+        // The row stays live and keyed; the backoff also keeps it out of the pending work.
+        const row = (firstResult || appData).tasks[0].attachments?.[0];
+        expect(row).toMatchObject({ cloudKey: 'attachments/attachment-1.txt', localStatus: 'missing' });
+        expect(row?.deletedAt).toBeUndefined();
+        expect(isAttachmentDownloadBackedOff('attachment-1')).toBe(true);
         await run();
         expect(gets()).toBe(first);
     });
@@ -557,7 +563,7 @@ describe('desktop sync attachment backends', () => {
         expect(gets()).toBe(3);
     });
 
-    it('marks cloud attachments unrecoverable when the remote file is missing', async () => {
+    it('leaves a cloud attachment live and keyed when the remote file is missing; only a probe marks its trial copy', async () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
         const logSyncWarning = vi.fn();
         const appData: AppData = {
@@ -605,18 +611,26 @@ describe('desktop sync attachment backends', () => {
             deps,
         );
 
-        const attachment = expectFoldedData(result).tasks[0].attachments?.[0];
-        // The document handed in is never written to.
+        // A tombstone would sync to every device, and a location still holding the file would then delete it.
+        const attachment = (result || appData).tasks[0].attachments?.[0];
         expect(appData.tasks[0].attachments?.[0]?.cloudKey).toBe('attachments/attachment-1.jpg');
         expect(fetcher).toHaveBeenCalledTimes(1);
-        expect(attachment?.cloudKey).toBeUndefined();
-        expect(attachment?.fileHash).toBeUndefined();
-        expect(attachment?.localStatus).toBe('missing');
-        expect(attachment?.deletedAt).toBeDefined();
+        expect(attachment).toMatchObject({ cloudKey: 'attachments/attachment-1.jpg', fileHash: 'a'.repeat(64), localStatus: 'missing' });
+        expect(attachment?.deletedAt).toBeUndefined();
         expect(logSyncWarning).not.toHaveBeenCalledWith(
             expect.stringContaining('Failed to download attachment'),
             expect.anything(),
         );
+
+        const probed = expectFoldedData(await syncCloudAttachments(
+            appData,
+            { url: 'https://cloud.example/v1/data', token: 'token' },
+            'https://cloud.example/v1',
+            deps,
+            activationHelpers(),
+        )).tasks[0].attachments?.[0];
+        expect(probed?.cloudKey).toBeUndefined();
+        expect(probed?.deletedAt).toBeDefined();
     });
 
     it('uploads self-hosted cloud attachments selected from Windows paths', async () => {
@@ -1532,7 +1546,7 @@ describe('desktop sync attachment backends', () => {
     it.each([
         'attachment-record-not-found',
         'attachment-asset-missing',
-    ])('marks a CloudKit attachment unrecoverable after cleaning a terminal %s stage', async (reason) => {
+    ])('leaves a CloudKit attachment live and keyed after cleaning a terminal %s stage', async (reason) => {
         const appData = createDownloadData('cloudkit');
         appData.tasks[0].attachments![0].fileHash = DOWNLOAD_BYTES_HASH;
         const logSyncWarning = vi.fn();
@@ -1547,18 +1561,18 @@ describe('desktop sync attachment backends', () => {
             new cloudKitMocks.CloudKitAttachmentNotFoundError(reason),
         );
 
-        const result = expectFoldedData(await syncCloudKitAttachments(appData, deps));
+        const result = (await syncCloudKitAttachments(appData, deps)) || appData;
         const stagedPath = cloudKitMocks.fetchCloudKitAttachmentAsset.mock.calls[0]?.[1];
 
         expect(stagedPath).toMatch(/^\/app-data\/mindwtr\/attachments\/\.download-/);
         expect(fsMocks.remove).toHaveBeenCalledWith(stagedPath);
         expect(installerMocks.installAttachmentDownload).not.toHaveBeenCalled();
         expect(result.tasks[0].attachments?.[0]).toMatchObject({
+            cloudKey: 'cloudkit:attachment-1',
+            fileHash: DOWNLOAD_BYTES_HASH,
             localStatus: 'missing',
-            deletedAt: expect.any(String),
         });
-        expect(result.tasks[0].attachments?.[0].cloudKey).toBeUndefined();
-        expect(result.tasks[0].attachments?.[0].fileHash).toBeUndefined();
+        expect(result.tasks[0].attachments?.[0].deletedAt).toBeUndefined();
         expect(appData.tasks[0].attachments?.[0]).toMatchObject({
             cloudKey: 'cloudkit:attachment-1',
             fileHash: DOWNLOAD_BYTES_HASH,

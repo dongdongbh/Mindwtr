@@ -27,6 +27,7 @@ import {
     isWebdavRateLimitedError,
     normalizeStrongWebdavEtag,
     parseCloudKitAttachmentKey,
+    handleRemoteAttachmentNotFound,
     validateAttachmentForUpload,
     webdavFileExists,
     webdavGetFile,
@@ -66,7 +67,6 @@ import {
 import {
     clearAttachmentValidationFailure,
     handleAttachmentValidationFailure,
-    markAttachmentUnrecoverable,
     shouldAttemptAttachmentUpload,
 } from './sync-attachment-validation';
 import { openAttachmentBytes, sealAttachmentBytes } from './sync-encryption-service';
@@ -154,9 +154,8 @@ class FileSyncGenerationIntegrityError extends Error {
  * verified wrong. Another attempt can only repeat the same read and warning.
  *
  * The attachment record is left exactly as it is — cloudKey included. The local bytes are the
- * good copy here, and the remote-404 path's `markAttachmentUnrecoverable` is not the right
- * seam for that: there the local copy is already gone, while here a tombstone would delete a
- * recoverable attachment on every device over what may be a flaky mount. Skipping the upload
+ * good copy here, and a tombstone would delete a recoverable attachment on every device over
+ * what may be a flaky mount (a remote 404 no longer tombstones either: `remoteAttachmentNotFound`). Skipping the upload
  * for this process is all that is needed to honour P8's "no unbounded retries"; a restart
  * grants one more verification attempt.
  */
@@ -449,6 +448,20 @@ const setWebdavDownloadBackoff = (attachmentId: string, error: unknown): void =>
 const pruneWebdavDownloadBackoff = (): void => {
     webdavDownloadBackoff.prune();
 };
+
+/** Outside an activation probe, a file that answered "not found" waits out its backoff. */
+export const isAttachmentDownloadBackedOff = (attachmentId: string): boolean => getWebdavDownloadBackoff(attachmentId) !== null;
+
+/** A remote "not found": the row stays live and keyed and backs off (core `handleRemoteAttachmentNotFound`). */
+const remoteAttachmentNotFound = (attachment: Attachment, helpers?: SyncRunAttachmentHelpers): boolean => {
+    const activationProbe = helpers?.activationProbe === true;
+    if (!activationProbe) setWebdavDownloadBackoff(attachment.id, { status: 404 });
+    return handleRemoteAttachmentNotFound(attachment, activationProbe);
+};
+
+const downloadsOutsideBackoff = (helpers?: SyncRunAttachmentHelpers) => (attachment: Attachment): boolean => (
+    helpers?.activationProbe === true || !isAttachmentDownloadBackedOff(attachment.id)
+);
 
 /** Which task/project an attachment id belongs to — CloudKit's upload metadata needs the
  *  owner, which the shared lifecycle's per-attachment callbacks don't carry. Deliberately
@@ -920,11 +933,11 @@ export async function syncWebdavAttachments(
                     return false;
                 }
                 if (getErrorStatus(error) === 404) {
-                    // A row kept without its file stays live after this; the backoff frees its download slot.
-                    if (helpers?.activationProbe !== true) webdavDownloadBackoff.setFromError(attachment.id, error);
-                    const mutated = markAttachmentUnrecoverable(attachment);
-                    deps.logSyncInfo('Cleared missing WebDAV cloud key after 404', { id: attachment.id });
-                    return mutated;
+                    deps.logSyncInfo('WebDAV attachment not found (404); row kept', {
+                        id: attachment.id,
+                        releaseCheck: 'v1.3.8/attachment-not-found-kept',
+                    });
+                    return remoteAttachmentNotFound(attachment, helpers);
                 }
                 throw error;
             }
@@ -1075,6 +1088,7 @@ export async function syncCloudAttachments(
         computeLocalFileHash,
         createUploadSnapshot,
         contentChangePhase: helpers?.phase,
+        policy: { shouldDownload: downloadsOutsideBackoff(helpers) },
         isFatalError: isSyncRemoteMutationFenceError,
         onUpload: async (attachment, _localPath, snapshot) => {
             if (!shouldAttemptAttachmentUpload(attachment)) return false;
@@ -1201,7 +1215,7 @@ export async function syncCloudAttachments(
                 );
             } catch (error) {
                 if (getErrorStatus(error) === 404) {
-                    return markAttachmentUnrecoverable(attachment);
+                    return remoteAttachmentNotFound(attachment, helpers);
                 }
                 throw error;
             }
@@ -1354,6 +1368,7 @@ export async function syncDropboxAttachments(
         computeLocalFileHash,
         createUploadSnapshot,
         contentChangePhase: helpers?.phase,
+        policy: { shouldDownload: downloadsOutsideBackoff(helpers) },
         isFatalError: (error) => (
             isSyncRemoteMutationFenceError(error)
             || error instanceof DropboxConflictError
@@ -1442,7 +1457,7 @@ export async function syncDropboxAttachments(
                 );
             } catch (error) {
                 if (error instanceof DropboxFileNotFoundError) {
-                    return markAttachmentUnrecoverable(attachment);
+                    return remoteAttachmentNotFound(attachment, helpers);
                 }
                 throw error;
             }
@@ -1563,6 +1578,7 @@ export async function syncCloudKitAttachments(
         computeLocalFileHash,
         createUploadSnapshot,
         contentChangePhase: helpers?.phase,
+        policy: { shouldDownload: downloadsOutsideBackoff(helpers) },
         // A cloudKey written by a different backend before a provider switch isn't a valid
         // CloudKit record key, so CloudKit must still treat the attachment as needing upload.
         hasCloudCopy: (attachment) => Boolean(parseCloudKitAttachmentKey(attachment.cloudKey)),
@@ -1644,13 +1660,12 @@ export async function syncCloudKitAttachments(
                         'failed',
                         'Attachment is no longer available',
                     );
-                    const mutated = markAttachmentUnrecoverable(attachment);
                     logAttachmentWarning(
                         deps,
                         `CloudKit attachment ${attachment.id} is no longer available`,
                         error,
                     );
-                    return mutated;
+                    return remoteAttachmentNotFound(attachment, helpers);
                 }
                 throw error;
             }

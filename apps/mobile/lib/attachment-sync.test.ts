@@ -3856,7 +3856,7 @@ describe('attachment sync', () => {
     });
   });
 
-  it('marks a confirmed missing CloudKit asset unrecoverable without installing scratch', async () => {
+  it('leaves the row of a confirmed missing CloudKit asset live and keyed without installing scratch', async () => {
     const bytes = new Uint8Array([37, 38, 39]);
     const appData = singleAttachmentData({
       id: 'cloudkit-terminal-missing',
@@ -3875,14 +3875,13 @@ describe('attachment sync', () => {
       { phase: 'post-merge' },
     );
 
-    const { didMutate, data } = syncResult(result, appData);
-    expect(didMutate).toBe(true);
+    // The row stays live and keyed: a tombstone would sync to every device.
+    const { data } = syncResult(result, appData);
     expect(data.tasks[0].attachments?.[0]).toMatchObject({
-      cloudKey: undefined,
-      fileHash: undefined,
+      cloudKey: 'cloudkit:cloudkit-terminal-missing',
       localStatus: 'missing',
-      deletedAt: expect.any(String),
     });
+    expect(data.tasks[0].attachments?.[0]?.deletedAt).toBeUndefined();
     expect(fileSystemMock.deleteAsync).toHaveBeenCalledWith(
       expect.stringMatching(/\.mindwtr-download-.*\.staged$/),
       { idempotent: true },

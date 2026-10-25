@@ -1065,21 +1065,18 @@ describe('WebDAV attachment pass', () => {
     });
   });
 
-  it('marks the attachment unrecoverable when the remote answers 404', async () => {
+  it('leaves the row live and keyed when the remote answers 404; only a probe marks its trial copy unrecoverable', async () => {
+    // A tombstone would sync to every device, and a location still holding the file would then delete it.
     const { backends } = setup({
       core: { webdavGetFile: vi.fn(async () => { throw httpError(404); }) },
     });
+    const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' }));
 
-    const result = await backends.syncWebdavAttachments(
-      withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' })),
-      webdavConfig,
-      BASE_URL,
-    );
+    expect(await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL)).toBe(false);
 
-    const attachment = attachmentOf(result);
-    expect(attachment?.cloudKey).toBeUndefined();
-    expect(attachment?.localStatus).toBe('missing');
-    expect(attachment?.deletedAt).toBeTruthy();
+    const probed = attachmentOf(await backends.syncWebdavAttachments(data, webdavConfig, BASE_URL, undefined, { activationProbe: true, phase: 'post-merge' }));
+    expect(probed?.cloudKey).toBeUndefined();
+    expect(probed?.deletedAt).toBeTruthy();
   });
 
   it('backs off a download that answered 404, so the next pass does not ask again', async () => {
@@ -1574,15 +1571,17 @@ describe('Dropbox attachment pass', () => {
     )).rejects.toBeInstanceOf(DropboxConflictError);
   });
 
-  it('marks a missing remote file unrecoverable but only flags other download failures', async () => {
+  it('leaves a row whose remote file is not found live and keyed, and only flags other download failures', async () => {
     const downloadDropboxFile = vi.fn(async (): Promise<ArrayBuffer> => { throw new DropboxFileNotFoundError(); });
     const { backends } = setup({ core: { downloadDropboxFile } });
     const data = withAttachment(fileAttachment({ cloudKey: 'attachments/att-1.txt', localStatus: 'available' }));
     const fetcher = vi.fn() as unknown as typeof fetch;
 
     const missing = attachmentOf(await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken }));
-    expect(missing).toMatchObject({ cloudKey: undefined, localStatus: 'missing' });
-    expect(missing?.deletedAt).toBeTruthy();
+    expect(missing).toMatchObject({ cloudKey: 'attachments/att-1.txt', localStatus: 'missing' });
+    expect(missing?.deletedAt).toBeUndefined();
+    const probed = attachmentOf(await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken, activationProbe: true }));
+    expect(probed?.deletedAt).toBeTruthy();
 
     downloadDropboxFile.mockImplementation(async () => { throw httpError(500); });
     const failed = attachmentOf(await backends.syncDropboxAttachments(data, 'app-key', fetcher, { resolveAccessToken }));

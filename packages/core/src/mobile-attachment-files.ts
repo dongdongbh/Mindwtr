@@ -1014,6 +1014,8 @@ export const createMobileAttachmentFiles = (host: MobileAttachmentFilesHost) => 
         return true;
       }
       if (attachment.cloudKey && (!uri || attachment.localStatus === 'missing' || attachment.localStatus === 'downloading')) {
+        // A file that answered "not found" stays a live row; it waits out its backoff.
+        if (attachment.localStatus !== 'downloading' && getWebdavDownloadBackoff(attachment.id) !== null) continue;
         return true;
       }
       // #1057 (review B3): the steady state — cloudKey + a managed local file +

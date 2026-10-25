@@ -204,11 +204,10 @@ describe('selected Task Download private JS producer', () => {
         expect(f.sources).toEqual([]); expect(f.requests).toEqual([]); expect(f.memory.read(MANAGED + 'baseline362.txt')).toEqual(BYTES);
     });
 
-    it('serializes terminal404 lifecycle removals without an installed/source claim', async () => {
+    it('answers a 404 as unavailable without an installed/source claim, and never removes the attachment', async () => {
+        // A tombstone would sync to every device, and a location still holding the file would then delete it.
         const f = fixture(); f.status(404); const result = await f.run(attachment({ fileHash: digest(BYTES) }));
-        expect(result.status).toBe('unrecoverable'); const resolved = JSON.parse((result as { attachmentJSON: string }).attachmentJSON);
-        expect(Object.hasOwn(resolved, 'cloudKey')).toBe(false); expect(Object.hasOwn(resolved, 'fileHash')).toBe(false);
-        expect(resolved.localStatus).toBe('missing'); expect(resolved.deletedAt).toBe(resolved.updatedAt); expect(f.sources).toEqual([]);
+        expect(result.status).toBe('unavailable'); expect(f.sources).toEqual([]); expect(f.memory.files.size).toBe(0);
     });
 
     it('refuses wrong plaintext integrity before the callback', async () => {

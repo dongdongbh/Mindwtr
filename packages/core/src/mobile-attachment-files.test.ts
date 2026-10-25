@@ -461,6 +461,17 @@ describe('mobile attachment files: pending work and the presence stamp (#1119)',
     await expect(files.hasPendingAttachmentSyncWork(documentWith([attachment()]))).resolves.toBe(true);
   });
 
+  it('leaves a file that answered not-found out of the pending work while its backoff holds', async () => {
+    // The row stays live after a not-found; it must not make every sync run the attachment phase.
+    const { files } = setup();
+    const missing = documentWith([attachment({ uri: '', cloudKey: 'attachments/att-1.txt', localStatus: 'missing' })]);
+    await expect(files.hasPendingAttachmentSyncWork(missing)).resolves.toBe(true);
+
+    files.setWebdavDownloadBackoff('att-1', { status: 404 });
+
+    await expect(files.hasPendingAttachmentSyncWork(missing)).resolves.toBe(false);
+  });
+
   it('runs the presence proof once a day per sync location', async () => {
     const { files, values } = setup({ storage: webdavLocation });
     const data = documentWith([settled]);
