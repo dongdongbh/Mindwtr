@@ -667,7 +667,8 @@ describe('native Android File Sync: RN fix history through the native binding', 
             const { sync } = fileHost(withAttachments(fileAttachment('a1')));
             expect(await sync.settingsHost.performSync(undefined, manual)).toMatchObject({ success: false });
             expect(folder.names()).toEqual(['data.json.enc']);
-            expect(writes(folder.ops)).toEqual(writes(folder.ops).filter((op) => !op.includes('a1')));
+            // By the document's name (`a1.<hash>.txt`), not a substring: a transition scratch name's random part may hold "a1".
+            expect(writes(folder.ops).filter((op) => op.split(' ')[1]?.startsWith('a1.'))).toEqual([]);
             expect(folder.ops.some((op) => op.includes('attachments'))).toBe(false);
         });
 
