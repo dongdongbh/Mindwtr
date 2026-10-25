@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { button, check, connect, evidenced, fail, hasText, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { button, check, connect, evidenced, fail, hasText, isOn, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, seedApk, shotsArg] = process.argv.slice(2);
 if (!serial || !seedApk) {
@@ -188,10 +188,11 @@ try {
         return tapExpecting(byText(await screen(), label) ?? fail(`no ${label} choice`), (current) => !hasText(current, en['sort.label']), 'the sort chosen');
     };
     await pickSort(en['sort.title']);
-    nodes = await waitFor('the "..." washed', (current) => tagged(current, 'project-task-view-options-button')?.selected === 'true', 15_000);
+    // Compose reports a non-tab node's selected state as checked (isOn reads either), which TalkBack announces.
+    nodes = await waitFor('the "..." washed', (current) => isOn(tagged(current, 'project-task-view-options-button')), 15_000);
     check(true, '(c) a Title sort washes the view options "..."');
     await pickSort(en['sort.default']);
-    nodes = await waitFor('the "..." plain again', (current) => tagged(current, 'project-task-view-options-button')?.selected === 'false', 15_000);
+    nodes = await waitFor('the "..." plain again', (current) => { const options = tagged(current, 'project-task-view-options-button'); return Boolean(options) && !isOn(options); }, 15_000);
     check(true, '(c) Default again clears it');
     // The pinned "+" (RN's openProjectQuickAdd): the popup opens with Getting Started chosen, and the task saves as Next in it.
     nodes = await tapExpecting(tagged(nodes, 'project-add-task-button') ?? fail('no project "+"'),
