@@ -279,7 +279,8 @@ describe('native host contract: Process Inbox', () => {
         expect(await host.commitInboxProcessingStep(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
         saveData.mockResolvedValue(undefined);
         expect(await host.commitInboxProcessingStep(input)).toEqual({ ok: true, value: {
-            view: null, notice: null, toast: { message: 'Plan trip moved to Trash', undoLabel: 'Undo' },
+            view: null, notice: null, toast: { message: 'Plan trip moved to Trash', undoLabel: 'Undo',
+                undoReceipt: expect.objectContaining({ taskId: 'inbox-c', kind: 'discarded' }) },
         } });
         expect(recorder.log).toEqual([['deleteTask', 'inbox-c']]);
         expect(host.getInboxProcessingStep({ sessionId: input.sessionId, taskId: 'inbox-c', step: 'actionable' }))

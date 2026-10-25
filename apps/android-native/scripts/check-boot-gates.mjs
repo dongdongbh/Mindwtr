@@ -806,9 +806,10 @@ assert.match(model, /internal val UPDATE_REFUSALS = listOf\("STALE_REVISION", "I
 assert.match(model, /private val REFUSABLE = setOf\("update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker"\) \+ MENU_KINDS \+ CAPTURE_MODAL_KINDS \+ ATTACHMENT_KINDS/);
 assert.match(model, /val refused = message\.startsWith\("STALE_REVISION"\) \|\| \(action\?\.kind in REFUSABLE && UPDATE_REFUSALS\.any \{ message\.startsWith\(it\) \}\)/);
 // A command refused as stale wrote nothing: it is never owed (no retry loop on a revision that can never match), its lists are
-// read again, and nothing shows but the conflict line of the editor save, the status menu and an open draft's Save.
+// read again, and nothing shows but the conflict line of the editor save, the status menu, an open draft's Save, and a completion's
+// Undo refused because the task changed since (RN shows its failure too).
 assert.match(model, /stale = action != null && action\.kind !in STALE_SHOWN && message\.startsWith\("STALE_REVISION"\)/);
-assert.match(model, /private val STALE_SHOWN = setOf\("saveDraft", "update", "calendarCreate", "manageEditor"\)/);
+assert.match(model, /private val STALE_SHOWN = setOf\("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo"\)/);
 assert.match(model, /if \(stale\) acknowledged\(action!!\)\s+else ui \{/);
 assert.match(model, /\(action != null && !refused\) \|\| message\.startsWith\("SAVE_FAILED"\)/);
 // While a failed command's retry is owed, only that exact command runs: no read starts, and the retry
@@ -820,7 +821,7 @@ assert.match(model, /if \(failedAction == null\) error = null\s+\}/, 'a read\'s 
 assert.match(model, /val owed = failedAction\?\.takeIf \{ action == null && it\.kind != "storage" \}\s+if \(owed == null\) \{\s+error = message[\s\S]{0,120}?if \(failed != null\) failedAction = failed/);
 assert.match(owner, /if \(pending\.action\.kind == "storage" && failure\?\.action\?\.kind\.let \{ it != null && it != "storage" \}\) return/);
 // User actions go through perform: the three commands with their action, the reads the user asked for without one.
-assert.equal(code(model).match(/\bperform\(action\)/g).length, 15, 'complete, editor save, Reset checklist, task star, project star, status, project create, area filter, saved search, Process Inbox answer, the storage retry, the journal replay\'s retry, and the capture popup\'s capture, lines and picker create');
+assert.equal(code(model).match(/\bperform\(action\)/g).length, 17, 'complete, its Undo, a Process Inbox decision\'s Undo, editor save, Reset checklist, task star, project star, status, project create, area filter, saved search, Process Inbox answer, the storage retry, the journal replay\'s retry, and the capture popup\'s capture, lines and picker create');
 assert.equal(code(model).match(/\bperform\s*\{/g).length, 10, 'editor, reload, Try again, two More (Focus, a project), open project, open Process Inbox, open the capture popup, a Focus control\'s edit, Import .txt');
 // Background reads (resume, each minute, after a command) never take busy, so they disable no control and never
 // turn a user's tap away: only perform sets busy, and its guard knows nothing of reads in flight.
@@ -1298,7 +1299,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         assert.equal(kotlin.match(new RegExp(`"(${iosOnlyMethods.join('|')})"`, 'g')), null, 'Kotlin never calls the iOS-only writes');
     }
     // Core's write commands: every command of the crash-safe table (native-request-receipts.ts states the rule each follows).
-    const coreWrites = ['setTaskFocus', 'completeTask', 'setProjectFocus', 'createProject', 'saveSearch', 'updateTask', 'saveTaskDraft', 'resetTaskChecklist',
+    const coreWrites = ['setTaskFocus', 'completeTask', 'undoTaskCompletion', 'undoInboxDecision', 'setProjectFocus', 'createProject', 'saveSearch', 'updateTask', 'saveTaskDraft', 'resetTaskChecklist',
         'submitQuickCapture', 'submitQuickCaptureLines', 'submitQuickCapturePickerQuery', 'commitInboxProcessingStep', 'skipInboxProcessingTask', 'setAreaFilter',
         'activateProject', 'moveSomedayTasksToSection', 'undoSomedaySectionMove', 'addSomedaySectionTask', 'createSomedaySection', 'setTaskListSort',
         'runArchiveAction', 'runContextsAction', 'runTrashAction', 'runReviewAction', 'runCalendarAction', 'runBoardAction', 'runBulkAction', 'setFocusGroupBy',

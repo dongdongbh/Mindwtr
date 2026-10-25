@@ -85,7 +85,7 @@ internal val UPDATE_REFUSALS = listOf("STALE_REVISION", "INVALID_INPUT", "TASK_N
  * The commands whose STALE_REVISION keeps core's line on screen: the editor save's conflict (with Reload), the status menu's update, and
  * the saves of a draft that stays open (the Calendar composer, Manage's editor), so a Save that wrote nothing never looks done.
  */
-private val STALE_SHOWN = setOf("saveDraft", "update", "calendarCreate", "manageEditor")
+private val STALE_SHOWN = setOf("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo")
 /** Commands core can refuse before writing: an update, an editor save, a saved search, a Process Inbox answer, and the Menu tab's commands. */
 private val REFUSABLE = setOf("update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker") + MENU_KINDS + CAPTURE_MODAL_KINDS + ATTACHMENT_KINDS + PROJECT_DETAIL_KINDS
 
@@ -610,11 +610,37 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** Done's exact request: the task and the revision its row showed ([TaskRow.taskRevision]). */
     fun completeAction(id: String, taskRevision: String) = FailedAction("complete", id, patch = mapOf("taskRevision" to taskRevision))
 
-    /** From the Inbox, Focus, or a project: the same command, the same exact-retry lock. */
+    /**
+     * From the Inbox, Focus, Search, or a project: the same command, the same exact-retry lock. A completion this call made shows
+     * RN's toast, "{title} marked Done" with Undo for 5.2 s (RN cafdac02d, #834; efd0d8ac8, #1051).
+     */
     fun complete(id: String, taskRevision: String) {
         val action = completeAction(id, taskRevision)
         perform(action) { runtime ->
-            runtime.completeTask(id, taskRevision)
+            val reply = runtime.completeTask(id, taskRevision)
+            acknowledged(action)
+            val toast = reply.optJSONObject("toast")
+            val undo = reply.optJSONObject("undo")
+            if (toast != null && undo != null) ui {
+                showToast(null, toast.getString("message"), "info", toast.getString("undoLabel"), 5200) { undoCompletion(undo.put("id", id)) }
+            }
+        }
+    }
+
+    /** A Process Inbox decision's Undo: core's undoInboxDecision with its receipt; an item changed since stays, with core's words. */
+    fun undoInboxDecision(receipt: JSONObject) {
+        val action = FailedAction("inboxDecisionUndo", receipt.getString("taskId"), patch = mapOf("receipt" to receipt.toString()))
+        perform(action) { runtime ->
+            runtime.undoInboxDecision(receipt.toString())
+            acknowledged(action)
+        }
+    }
+
+    /** Done's Undo: core's undoTaskCompletion with the completion's answer; a task changed since stays done, with core's words. */
+    fun undoCompletion(undo: JSONObject) {
+        val action = FailedAction("completeUndo", undo.getString("id"), patch = mapOf("undo" to undo.toString()))
+        perform(action) { runtime ->
+            runtime.undoTaskCompletion(undo.toString())
             acknowledged(action)
         }
     }
@@ -1173,6 +1199,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             "capturePicker" -> sendPicker(action)
             "captureModal", "captureModalLines" -> captureModal.retry(action)
             "complete" -> complete(action.id, action.patch["taskRevision"].orEmpty())
+            "completeUndo" -> undoCompletion(JSONObject(action.patch["undo"].orEmpty()))
+            "inboxDecisionUndo" -> undoInboxDecision(JSONObject(action.patch["receipt"].orEmpty()))
             "update" -> sendUpdate(action)
             "saveDraft" -> sendDraft(action)
             "resetChecklist" -> sendReset(action)
@@ -1776,7 +1804,12 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** Core's result: the next step (or the end of the queue), a notice instead of moving on, and the filed item's toast. */
     private fun finishAnswer(reply: JSONObject) {
         reply.optJSONObject("notice")?.let { showToast(it) }
-        reply.optJSONObject("toast")?.let { showToast(it, tone = "info") }
+        // RN's toast, with Undo of this decision while the receipt is there (RN 23e2102b3, 3b1a3f4f4).
+        reply.optJSONObject("toast")?.let { toast ->
+            val receipt = toast.optJSONObject("undoReceipt")
+            if (receipt == null) showToast(toast, tone = "info")
+            else showToast(null, toast.getString("message"), "info", toast.getString("undoLabel"), 5200) { undoInboxDecision(receipt) }
+        }
         // A background re-send after process death has no screen to move on; its record is done.
         val current = processing ?: return
         if (current.hidden) { keepProcessing(null); return }

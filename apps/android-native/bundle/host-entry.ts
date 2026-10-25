@@ -810,8 +810,8 @@ type CalendarScreenCommand = 'calendarFeedAdd';
 type AttachmentCommand = 'attachmentAddFile' | 'attachmentLinks' | 'attachmentRemove';
 /** Project details' edit, sent by ProjectDetails.kt (journaled ahead): core's runProjectEdit. */
 type ProjectDetailCommand = 'projectEdit';
-type Command = 'create' | 'complete' | 'update' | 'saveTaskDraft' | 'resetChecklist' | 'taskFocus' | 'projectFocus' | 'createProject' | 'areaFilter'
-    | 'saveSearch' | 'inboxCommit' | 'inboxSkip' | 'quickCapture' | 'quickCaptureLines' | 'quickCapturePicker' | 'captureModal' | 'captureModalLines' | 'ingest' | 'reminderDone' | 'reminderSnooze' | MenuCommand;
+type Command = 'create' | 'complete' | 'completeUndo' | 'update' | 'saveTaskDraft' | 'resetChecklist' | 'taskFocus' | 'projectFocus' | 'createProject' | 'areaFilter'
+    | 'saveSearch' | 'inboxCommit' | 'inboxSkip' | 'inboxDecisionUndo' | 'quickCapture' | 'quickCaptureLines' | 'quickCapturePicker' | 'captureModal' | 'captureModalLines' | 'ingest' | 'reminderDone' | 'reminderSnooze' | MenuCommand;
 const taskResult = <T>(operation: Command, result: Parameters<typeof unwrap<T>>[0]): T => {
     const ios = globalThis.__mindwtrHostPlatform === 'ios';
     const meta = {
@@ -5052,6 +5052,10 @@ globalThis.MindwtrHost = {
     complete(id: string, taskRevision = ''): string {
         return submit(async () => taskResult('complete', await contract.completeTask({ id, taskRevision: taskRevision || undefined })));
     },
+    /** `json` is completeTask's `undo` with the task's `id`: RN's completion Undo (core's undoTaskCompletion). */
+    completeUndo(json: string): string {
+        return submit(async () => taskResult('completeUndo', await contract.undoTaskCompletion(JSON.parse(json))));
+    },
     /** A target state, so an exact retry re-sends the same target. A `{ blocked }` reply wrote nothing. */
     taskFocus(id: string, focused: boolean, taskRevision = ''): string {
         return submit(async () => taskResult('taskFocus', await contract.setTaskFocus({ id, focused, taskRevision: taskRevision || undefined })));
@@ -5108,6 +5112,10 @@ globalThis.MindwtrHost = {
     /** `json` is `{ sessionId, taskId, step, decision, requestId }`. Core answers a repeated request without writing again. */
     inboxCommit(json: string): string {
         return submit(async () => taskResult('inboxCommit', await contract.commitInboxProcessingStep(JSON.parse(json))));
+    },
+    /** `json` is a Process Inbox commit's `undoReceipt`: RN's Undo of that decision (core's undoInboxDecision). */
+    inboxDecisionUndo(json: string): string {
+        return submit(async () => taskResult('inboxDecisionUndo', await contract.undoInboxDecision(JSON.parse(json))));
     },
     /** `json` is `{ sessionId, taskId, requestId }`, the header's Skip. */
     inboxSkip(json: string): string {

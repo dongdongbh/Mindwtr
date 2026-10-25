@@ -37,10 +37,10 @@ class WriteJournal(
         val SHAPES = mapOf(
             "captureSubmit" to listOf("{captureId}"), "captureLines" to listOf("{captureIds[]}"), "capturePicker" to listOf("{requestId}"),
             "captureModalSubmit" to listOf("{captureId}"), "captureModalLines" to listOf("{captureIds[]}"),
-            "complete" to listOf("id", "id"), "update" to listOf("{id,requestId}"), "saveDraft" to listOf("{id,requestId}"),
+            "complete" to listOf("id", "id"), "completeUndo" to listOf("{id,taskRevision}"), "update" to listOf("{id,requestId}"), "saveDraft" to listOf("{id,requestId}"),
             "resetChecklist" to listOf("{id,requestId,taskRevision}"), "taskFocus" to listOf("id", "bool", "id"), "projectFocus" to listOf("id", "bool", "id"),
             "createProject" to listOf("id", "text", "id"), "setAreaFilter" to listOf("{included[],excluded[]}"), "saveSearch" to listOf("{requestId}"),
-            "inboxCommit" to listOf("{sessionId,taskId,requestId}"), "inboxSkip" to listOf("{sessionId,taskId,requestId}"), "menuCommand" to listOf("menu", "{menu}"),
+            "inboxCommit" to listOf("{sessionId,taskId,requestId}"), "inboxDecisionUndo" to listOf("{taskId,kind}"), "inboxSkip" to listOf("{sessionId,taskId,requestId}"), "menuCommand" to listOf("menu", "{menu}"),
             "ingest" to listOf("id"), "reminderDone" to listOf("id", "id"), "reminderSnooze" to listOf("{requestId}"),
             // Settings › Data's restore, merge and import: the operation's reference and its snapshot name. CoreHost sends the checked plan
             // (BackupOperations) between them, so the journal never holds library data.

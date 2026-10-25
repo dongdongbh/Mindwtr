@@ -94,6 +94,7 @@ import { isTaskCancelled, isTaskFinished } from './task-status';
 import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaInput } from './task-row-meta';
 import type { ProjectDeadlineBoost } from './task-utils';
 import { getEnglishI18nValue, getTranslator, tFallback } from './i18n';
+import { formatTaskMarkedDoneMessage, restoreTaskSnapshot, undoTaskCompletion } from './undo-task-completion';
 import { logInfo, logWarn } from './logger';
 import { isSupportedLanguage } from './i18n/i18n-constants';
 import { loadTranslations } from './i18n/i18n-loader';
@@ -117,6 +118,7 @@ import type { NativeRequestReceipts } from './native-request-receipts';
 import { isCustomTimeEstimate as isCustomInboxTimeEstimate, TIME_ESTIMATE_OPTIONS as INBOX_TIME_ESTIMATES } from './calendar-scheduling';
 import { resolveProcessInboxPlan } from './process-inbox-plan';
 import {
+    buildProcessInboxUndoRestoreUpdates,
     answerProcessInboxStep,
     applyProcessInboxDraftEdit,
     buildProcessInboxStepView,
@@ -3433,8 +3435,15 @@ export function createNativeHostContract(options: {
             }
         },
 
-        /** `taskRevision` is the row's: a task changed since is not completed (STALE_REVISION). */
-        async completeTask(input: { id: string; taskRevision?: string }): Promise<NativeHostResult<{ id: string }>> {
+        /**
+         * `taskRevision` is the row's: a task changed since is not completed (STALE_REVISION). A completion this call made
+         * answers RN's toast ("{title} marked Done" with Undo) and what undoTaskCompletion needs (RN cafdac02d, #834).
+         */
+        async completeTask(input: { id: string; taskRevision?: string }): Promise<NativeHostResult<{
+            id: string;
+            undo?: { previousStatus: TaskStatus; wasFocusedToday: boolean; taskRevision: string };
+            toast?: { message: string; undoLabel: string };
+        }>> {
             const ready = readiness();
             if (!ready.ok) return ready;
             if (!input || typeof input.id !== 'string' || !input.id.trim() || !isRevision(input.taskRevision)) {
@@ -3462,6 +3471,15 @@ export function createNativeHostContract(options: {
                         const failure = useTaskStore.getState().persistenceFailure;
                         return fail(failure ? 'SAVE_FAILED' : 'ACTION_FAILED', failure?.message ?? result.error ?? 'Task completion failed');
                     }
+                    const saved = await save();
+                    if (!saved.ok) return saved;
+                    const completed = useTaskStore.getState()._tasksById.get(input.id);
+                    if (!completed) return { ok: true, value: { id: input.id } };
+                    return { ok: true, value: {
+                        id: input.id,
+                        undo: { previousStatus: task.status, wasFocusedToday: task.isFocusedToday === true, taskRevision: taskRevisionOf(completed) },
+                        toast: { message: formatTaskMarkedDoneMessage(translate, task.title), undoLabel: tFallback(translate, 'common.undo', 'Undo') },
+                    } };
                 }
                 const saved = await save();
                 if (!saved.ok) return saved;
@@ -3469,6 +3487,35 @@ export function createNativeHostContract(options: {
             } catch (error) {
                 return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error));
             }
+        },
+        /**
+         * RN's completion Undo (undoTaskCompletion): the task goes back to `previousStatus`, its Today star with it while
+         * Focus has room. `undo` is completeTask's answer. A task no longer done was undone already (a replay); one that
+         * changed after its completion, here or on another device, is refused (STALE_REVISION) and stays done.
+         */
+        async undoTaskCompletion(input: { id: string; previousStatus: TaskStatus; wasFocusedToday: boolean; taskRevision: string }): Promise<NativeHostResult<{ id: string }>> {
+            const ready = readiness();
+            if (!ready.ok) return ready;
+            if (!input || typeof input.id !== 'string' || !input.id.trim() || !TASK_STATUSES.includes(input.previousStatus)
+                || input.previousStatus === 'done' || typeof input.wasFocusedToday !== 'boolean' || !isRevision(input.taskRevision)) {
+                return fail('INVALID_INPUT', 'Task ID, its status before completion, its star and the completion revision are required');
+            }
+            const task = useTaskStore.getState()._tasksById.get(input.id);
+            if (!task || task.deletedAt) return fail('TASK_NOT_FOUND', 'Task not found');
+            if (task.status === 'done') {
+                if (taskRevisionOf(task) !== input.taskRevision) {
+                    return fail('STALE_REVISION', 'The task changed after it was marked done; it was not undone');
+                }
+                try {
+                    await undoTaskCompletion(input.id, input.previousStatus, input.wasFocusedToday);
+                } catch (error) {
+                    const failure = useTaskStore.getState().persistenceFailure;
+                    return fail(failure ? 'SAVE_FAILED' : 'ACTION_FAILED', failure?.message ?? (error instanceof Error ? error.message : String(error)));
+                }
+            }
+            const saved = await save();
+            if (!saved.ok) return saved;
+            return { ok: true, value: { id: input.id } };
         },
     };
     self = contract as unknown as Record<string, unknown>;
@@ -3499,8 +3546,23 @@ export type NativeInboxProcessingResult = {
     view: NativeInboxProcessingView | null;
     /** A message the step shows instead of moving on, like "Choose a start date". */
     notice: ProcessInboxNotice | null;
-    /** The confirmation shown after a decision lands, with its Undo label. */
-    toast: { message: string; undoLabel: string; undo?: NativeInboxUndoOffer } | null;
+    /**
+     * The confirmation shown after a decision lands, with its Undo label. `undo` is the prepared path's offer (iOS);
+     * `undoReceipt` the plain commit's (Android), which undoInboxDecision takes.
+     */
+    toast: { message: string; undoLabel: string; undo?: NativeInboxUndoOffer; undoReceipt?: NativeInboxDecisionUndo } | null;
+};
+
+/**
+ * RN's Process Inbox Undo receipt (23e2102b3, 3b1a3f4f4): the item as it was before the decision, kept with the toast so a
+ * later decision never redirects an older Undo.
+ */
+export type NativeInboxDecisionUndo = {
+    taskId: string;
+    kind: 'discarded' | 'completed' | 'filed';
+    previousStatus: TaskStatus;
+    wasFocusedToday: boolean;
+    restoreUpdates: Partial<Task>;
 };
 
 type InboxProcessingDeps = {
@@ -3762,6 +3824,16 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
         const { state, plan, queue, parseTitle } = context();
         const t = deps.t();
         const title = entry.draft.title.trim() || task.title;
+        // RN's Undo receipt, taken before the decision writes (createDecisionUndoReceipt).
+        const undoReceipt: NativeInboxDecisionUndo | undefined = committed ? {
+            taskId: task.id,
+            kind: committed === 'trash' ? 'discarded' : committed === 'done' ? 'completed' : 'filed',
+            previousStatus: task.status,
+            wasFocusedToday: task.isFocusedToday === true,
+            // null for an absent field: the receipt crosses the host bridge as JSON, which drops an undefined one, so Undo would keep
+            // a start date or project the decision set.
+            restoreUpdates: Object.fromEntries(Object.entries(buildProcessInboxUndoRestoreUpdates(task)).map(([field, value]) => [field, value ?? null])),
+        } : undefined;
         const ownId = requestRowId(requestId, 'project');
         const projects = requestProjects(() => ownId);
         // Create project finds its project by name: the one this request made is matched first under
@@ -3831,7 +3903,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             value: {
                 notice: null,
                 toast: committed
-                    ? { message: formatProcessInboxCommitMessage(t, committed, title), undoLabel: tFallback(t, 'common.undo', 'Undo') }
+                    ? { message: formatProcessInboxCommitMessage(t, committed, title), undoLabel: tFallback(t, 'common.undo', 'Undo'), undoReceipt }
                     : null,
                 wrote: true,
             },
@@ -3840,6 +3912,48 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
 
     return {
         ...createInboxUndoMethods({ readiness: deps.readiness, receipts: deps.receipts }),
+        /**
+         * RN's Process Inbox Undo (undoDecision) with a commit's `undoReceipt`: a discarded item is restored, a completed one
+         * goes back with undoTaskCompletion, a filed one gets its fields back. An item another device changed since is
+         * refused (STALE_REVISION), as RN refuses it (376c562b5).
+         */
+        async undoInboxDecision(input: NativeInboxDecisionUndo): Promise<NativeHostResult<{ taskId: string }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || typeof input.taskId !== 'string' || !input.taskId
+                || !['discarded', 'completed', 'filed'].includes(input.kind) || !TASK_STATUSES.includes(input.previousStatus)
+                || typeof input.wasFocusedToday !== 'boolean' || !isObjectRecord(input.restoreUpdates)) {
+                return fail('INVALID_INPUT', 'An Undo receipt from a Process Inbox commit is required');
+            }
+            const store = useTaskStore.getState();
+            const task = store._allTasks.find((item) => item.id === input.taskId);
+            if (!task) return fail('TASK_NOT_FOUND', 'Task not found');
+            const restoreUpdates = Object.fromEntries(Object.entries(input.restoreUpdates).map(([field, value]) => [field, value ?? undefined])) as Partial<Task>;
+            // A journal replay after a kill sends an Undo that already applied: the item is back as the receipt has it, so nothing is written.
+            // Both sides go through the receipt's own builder, so a default the store fills in (reminderPolicy, a false flag) compares equal.
+            const now = buildProcessInboxUndoRestoreUpdates(task) as Record<string, unknown>;
+            const plain = (value: unknown) => JSON.stringify(value === false ? null : value ?? null);
+            const applied = input.kind === 'discarded' ? !task.deletedAt : !task.deletedAt && Object.entries(input.restoreUpdates)
+                .every(([field, value]) => plain(now[field]) === plain(value));
+            if (applied) return { ok: true, value: { taskId: input.taskId } };
+            try {
+                const result = input.kind === 'completed'
+                    ? (await undoTaskCompletion(input.taskId, input.previousStatus, input.wasFocusedToday, { restoreUpdates }), { success: true })
+                    : input.kind === 'discarded'
+                        ? await store.restoreTask(input.taskId)
+                        : await restoreTaskSnapshot(input.taskId, restoreUpdates);
+                if (!result.success) {
+                    const message = ('error' in result && result.error) || 'Process Inbox Undo failed';
+                    return message.startsWith('STALE_REVISION') ? fail('STALE_REVISION', message.replace(/^STALE_REVISION:\s*/, '')) : writeFailure(message);
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                return message.startsWith('STALE_REVISION') ? fail('STALE_REVISION', message.replace(/^STALE_REVISION:\s*/, '')) : writeFailure(message);
+            }
+            const saved = await deps.save();
+            if (!saved.ok) return saved;
+            return { ok: true, value: { taskId: input.taskId } };
+        },
         /** Open the queue: Inbox items and returning Someday items, in store order. */
         startInboxProcessing(input: { mode?: ProcessInboxMode; mergeSyncedChanges?: boolean } = {}): NativeHostResult<{
             sessionId: string | null;

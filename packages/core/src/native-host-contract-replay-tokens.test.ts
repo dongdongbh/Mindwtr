@@ -48,7 +48,7 @@ describe('native host replay tokens', () => {
 
     it('optional (the default): a completion without its revision completes, as before journaling', async () => {
         const host = await open();
-        expect(await host.completeTask({ id: 'a' } as never)).toEqual({ ok: true, value: { id: 'a' } });
+        expect(await host.completeTask({ id: 'a' } as never)).toMatchObject({ ok: true, value: { id: 'a' } });
         expect(stored()).toMatchObject({ status: 'done', rev: 8 });
         // A revision it sends is still checked.
         const b = taskRevisionOf(stored('b'));

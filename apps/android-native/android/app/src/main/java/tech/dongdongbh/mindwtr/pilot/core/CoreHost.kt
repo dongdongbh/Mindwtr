@@ -615,6 +615,12 @@ class CoreHost(
     /** Core's completeTask; [taskRevision] is the row's: a task changed since is refused (STALE_REVISION). */
     fun completeTask(id: String, taskRevision: String): JSONObject = callAsync("complete", id, taskRevision)
 
+    /** Core's undoTaskCompletion with completeTask's `undo` and the task's `id` ([json]): RN's completion Undo. */
+    fun undoTaskCompletion(json: String): JSONObject = callAsync("completeUndo", json)
+
+    /** Core's undoInboxDecision with a Process Inbox commit's `undoReceipt` ([json]): RN's Undo of that decision. */
+    fun undoInboxDecision(json: String): JSONObject = callAsync("inboxDecisionUndo", json)
+
     /** Core's setTaskFocus to the target [focused], at the row's [taskRevision]. A reply with `blocked` wrote nothing. */
     fun setTaskFocus(id: String, focused: Boolean, taskRevision: String): JSONObject = callAsync("taskFocus", id, focused, taskRevision)
 

@@ -960,7 +960,7 @@ describe('native host contract', () => {
         await vi.waitFor(() => expect(saveData).toHaveBeenCalledTimes(2));
         expect(completedSettled).toBe(false);
         releaseSave();
-        expect(await completing).toEqual({ ok: true, value: { id: created.value.id } });
+        expect(await completing).toMatchObject({ ok: true, value: { id: created.value.id } });
         expect(host.getTask({ id: created.value.id })).toMatchObject({
             ok: true, value: { status: 'done', completedAt: expect.any(String) },
         });
@@ -1124,7 +1124,7 @@ describe('native host contract', () => {
         saveData.mockClear();
         useTaskStore.setState({ _allTasks: [task('replay', '2026-09-01T00:00:00.000Z')] });
         const input = { id: 'replay', taskRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get('replay')!) };
-        expect(await host.completeTask(input)).toEqual({ ok: true, value: { id: 'replay' } });
+        expect(await host.completeTask(input)).toMatchObject({ ok: true, value: { id: 'replay' } });
         const completedAt = useTaskStore.getState()._tasksById.get('replay')?.completedAt;
         expect(saveData).toHaveBeenCalledTimes(1);
 
@@ -3339,7 +3339,7 @@ describe('native host contract: replays after a restart', () => {
     it('completeTask: a replay never completes a task reopened since', async () => {
         const host = await open();
         const input = { id: 'a', taskRevision: taskRevisionOf(stored('a')) };
-        expect(unwrap(await host.completeTask(input))).toEqual({ id: 'a' });
+        expect(unwrap(await host.completeTask(input))).toMatchObject({ id: 'a' });
         expect(await replayAfterRestart((restarted) => restarted.completeTask(input))).toEqual({ result: { ok: true, value: { id: 'a' } }, wrote: false });
         expect((await store().updateTask('a', { status: 'next' })).success).toBe(true);
         const { result, wrote } = await replayAfterRestart((restarted) => restarted.completeTask(input));
