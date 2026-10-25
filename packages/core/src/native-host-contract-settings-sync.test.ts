@@ -2778,17 +2778,23 @@ describe('native host contract: Settings › Sync activation without some attach
         cancelLabel: en['common.cancel'],
     };
     /** The activation probe answers "these files are missing" until they are accepted; [again] is found on the accepted rerun. */
-    const refusing = (dev: Awaited<ReturnType<typeof start>>['dev'], again: typeof files = []) => {
+    const refusing = (dev: Awaited<ReturnType<typeof start>>['dev'], again: typeof files = [], probeMs = 0) => {
         const probes: (readonly string[] | null)[] = [];
         dev.host.performSync = async (_path, options) => {
             if (!options?.activationProbe) return { success: true };
             probes.push(options.acceptMissingAttachmentIds ?? null);
+            if (probeMs) await new Promise((resolve) => setTimeout(resolve, probeMs));
             const missing = options.acceptMissingAttachmentIds ? again : files;
             return missing.length
                 ? { success: false, error: 'Candidate attachment proof failed', activationMissingAttachments: missing }
                 : { success: true };
         };
         return probes;
+    };
+    /** The Android host answers the question (it registers answerSyncMissingFiles and draws `missingFiles`). */
+    const answering = <T extends { dev: Awaited<ReturnType<typeof start>>['dev'] }>(started: T): T => {
+        started.dev.host.answersMissingFilesQuestion = true;
+        return started;
     };
     /** The view's question once the running command's activation asks it. */
     const asked = async (contract: Awaited<ReturnType<typeof start>>['contract']) => {
@@ -2801,7 +2807,7 @@ describe('native host contract: Settings › Sync activation without some attach
     };
 
     it('asks React Native\'s question while a save waits, and Continue lets the same activation go on with those files', async () => {
-        const { dev, contract } = await start({});
+        const { dev, contract } = answering(await start({}));
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
         const probes = refusing(dev);
         const saving = contract.saveSyncBackend({
@@ -2821,7 +2827,7 @@ describe('native host contract: Settings › Sync activation without some attach
     });
 
     it('stores nothing on Cancel, and refuses an answer to a question that is not open', async () => {
-        const { dev, contract } = await start({});
+        const { dev, contract } = answering(await start({}));
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
         const probes = refusing(dev);
         expect(contract.answerSyncMissingFiles({ questionId: 'none', continue: true })).toMatchObject({ ok: false, error: { code: 'ACTION_FAILED' } });
@@ -2840,7 +2846,7 @@ describe('native host contract: Settings › Sync activation without some attach
 
     it('activates the picked folder on Continue, without asking the picker again', async () => {
         const uri = 'content://tree/primary%3ASync/document/primary%3ASync%2Fdata.json';
-        const { dev, contract } = await start({ queues: { pick: [{ value: { uri } }] } });
+        const { dev, contract } = answering(await start({ queues: { pick: [{ value: { uri } }] } }));
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'file' }));
         const probes = refusing(dev);
         const picking = contract.pickSyncFolder({ requestId: generateUUID() });
@@ -2854,7 +2860,7 @@ describe('native host contract: Settings › Sync activation without some attach
     });
 
     it('activates the connected Dropbox account on Continue, without signing in again', async () => {
-        const { dev, contract } = await start({ dropboxAppKey: 'app-key' });
+        const { dev, contract } = answering(await start({ dropboxAppKey: 'app-key' }));
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'dropbox' }));
         const probes = refusing(dev);
         const connecting = contract.connectDropbox({ requestId: generateUUID() });
@@ -2868,7 +2874,7 @@ describe('native host contract: Settings › Sync activation without some attach
     });
 
     it('refuses the location when the accepted activation finds another missing file, and stores nothing', async () => {
-        const { dev, contract } = await start({});
+        const { dev, contract } = answering(await start({}));
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
         const probes = refusing(dev, [{ ...files[0]!, id: 'att-2', title: 'other.pdf' }]);
         const saving = contract.saveSyncBackend({
@@ -2884,7 +2890,7 @@ describe('native host contract: Settings › Sync activation without some attach
     });
 
     it('answers an open question with Cancel when the screen closes', async () => {
-        const { dev, contract } = await start({});
+        const { dev, contract } = answering(await start({}));
         value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
         const probes = refusing(dev);
         const saving = contract.saveSyncBackend({
@@ -2897,5 +2903,46 @@ describe('native host contract: Settings › Sync activation without some attach
 
         expect(probes).toEqual([null]);
         expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+    });
+
+    it('answers at once with React Native\'s error toast on a host that cannot answer the question (iOS today)', async () => {
+        const { dev, contract } = await start({ os: 'ios' });
+        value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
+        const probes = refusing(dev);
+
+        const result = value(await contract.saveSyncBackend({
+            requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision, webdav: { ...webdavFields, password: 'pw' },
+        }));
+
+        expect(probes).toEqual([null]);
+        expect(result.toasts.some((toast) => toast.tone === 'error')).toBe(true);
+        expect(value(contract.getSyncSettings()).missingFiles).toBeNull();
+        expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+    });
+
+    it('answers Cancel itself before the host stops waiting on the command, so no dead question is left', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+        try {
+            const { dev, contract } = answering(await start({}));
+            value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'webdav' }));
+            // A slow first probe: 10 minutes before the question.
+            const probes = refusing(dev, [], 10 * 60 * 1000);
+            const saving = contract.saveSyncBackend({
+                requestId: generateUUID(), revision: value(contract.getSyncSettings()).configRevision, webdav: { ...webdavFields, password: 'pw' },
+            });
+            await vi.advanceTimersByTimeAsync(10 * 60 * 1000);
+            for (let turn = 0; turn < 200 && !value(contract.getSyncSettings()).missingFiles; turn += 1) await vi.advanceTimersByTimeAsync(0);
+            expect(value(contract.getSyncSettings()).missingFiles).not.toBeNull();
+
+            // CoreHost waits 30 minutes on the whole command; the question ends first.
+            await vi.advanceTimersByTimeAsync(19 * 60 * 1000);
+            value(await saving);
+
+            expect(value(contract.getSyncSettings()).missingFiles).toBeNull();
+            expect(probes).toEqual([null]);
+            expect(dev.state.storage.get(WEBDAV_URL_KEY)).toBeUndefined();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

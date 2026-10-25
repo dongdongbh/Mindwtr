@@ -771,6 +771,9 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             delete: (key) => secureConfig.deleteSecureConfigValue(key),
         },
         performSync,
+        // SyncSettings.kt shows the view's missing-files question and sends answerSyncMissingFiles; iOS does not yet
+        // (followups/ios-native-continue-without-files.md), so its activations keep RN's error toast.
+        answersMissingFilesQuestion: platform === 'android',
         // File Sync's Select folder (S5): Kotlin's picker already ran and left the folder it granted in the host's pick slot
         // (HostDocuments.kt PendingSyncFolderPick); taking it empties it, and an empty slot is a cancel. The folder step is RN's
         // pickAndParseSyncFolder after expo's directory permission, with its error log.

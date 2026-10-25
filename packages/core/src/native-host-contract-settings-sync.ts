@@ -156,6 +156,11 @@ export type NativeSyncSettingsHost = {
     secrets: SyncSettingsTransportHost['secrets'];
     /** The mobile sync service's performMobileSync (core's createMobileSyncService). */
     performSync: SyncSettingsTransportHost['performSync'];
+    /**
+     * The host shows the view's `missingFiles` question and sends `answerSyncMissingFiles`. Without it, a location missing
+     * attachment files is refused at once with RN's error toast (a question nobody can answer would hold the command).
+     */
+    answersMissingFilesQuestion?: boolean;
     clearSyncConfigCache(): void;
     /** Brings the background sync job in line with the stored backend. */
     reconcileBackgroundSync(): Promise<unknown>;
@@ -386,8 +391,8 @@ type Screen = {
     question: { id: string; files: ActivationMissingAttachment[]; answer: (accepted: boolean) => void } | null;
 };
 
-/** A question nobody answers is a Cancel before the host's 30-minute wait on the command ends (CoreHost SYNC_WAIT_MS). */
-const MISSING_FILES_QUESTION_TIMEOUT_MS = 25 * 60 * 1000;
+/** A question nobody answers is a Cancel within 28 minutes of its command's start: CoreHost waits 30 (SYNC_WAIT_MS). */
+const MISSING_FILES_COMMAND_BUDGET_MS = 28 * 60 * 1000;
 
 const MONTH_FIRST_LOCALE = /^en(?:[-_]US)?$/i;
 /** Date.prototype.toLocaleString's options (ECMA-402 ToDateTimeOptions "any", "all"). */
@@ -508,7 +513,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             t,
             // React Native's Alert: the activation waits here while the screen shows the question (its `missingFiles`), then
             // goes on as RN's does: Continue reruns only the activation with these files accepted, Cancel changes nothing.
-            confirmActivationWithoutFiles: (files) => new Promise<boolean>((resolve) => {
+            ...(host.answersMissingFilesQuestion ? { confirmActivationWithoutFiles: (files: ActivationMissingAttachment[]) => new Promise<boolean>((resolve) => {
                 const current = screen;
                 if (!current || current.host !== host) {
                     resolve(false);
@@ -516,7 +521,9 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 }
                 current.question?.answer(false);
                 const id = generateUUID();
-                const timer = setTimeout(() => current.question?.id === id && current.question.answer(false), MISSING_FILES_QUESTION_TIMEOUT_MS);
+                const startedAt = Math.min(Date.now(), ...[...running.values()].map((action) => action.startedAt));
+                const timer = setTimeout(() => current.question?.id === id && current.question.answer(false),
+                    Math.max(0, startedAt + MISSING_FILES_COMMAND_BUDGET_MS - Date.now()));
                 current.question = {
                     id,
                     files,
@@ -528,7 +535,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                     },
                 };
                 current.generation += 1;
-            }),
+            }) } : {}),
         };
     };
 
@@ -1221,7 +1228,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     // refused. Neither survives a restart; each command is target-state or
     // compare-and-set instead.
     // ponytail: remembers the last 50 finished request UUIDs; an older retry runs as a replay.
-    const running = new Map<string, { identity: string; result: Promise<NativeHostResult<NativeSyncCommandResult>> }>();
+    const running = new Map<string, { identity: string; startedAt: number; result: Promise<NativeHostResult<NativeSyncCommandResult>> }>();
     const finished = new Map<string, { identity: string; value: NativeSyncCommandResult }>();
 
     const screenActionReceipt = (
@@ -1275,7 +1282,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             if (finished.size > 50) finished.delete(finished.keys().next().value as string);
             return { ok: true, value };
         })().finally(() => running.delete(requestId));
-        running.set(requestId, { identity: print, result });
+        running.set(requestId, { identity: print, startedAt: Date.now(), result });
         return result;
     };
 

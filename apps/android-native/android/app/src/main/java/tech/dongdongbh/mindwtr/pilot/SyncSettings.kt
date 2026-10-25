@@ -72,6 +72,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.core.net.toUri
 import kotlinx.coroutines.delay
 import org.json.JSONObject
@@ -395,10 +398,16 @@ class SyncSettingsModel(private val menu: MenuModel) {
 internal fun SyncSettings(model: InboxViewModel, view: JSONObject) {
     val sync = model.menu.settings.sync
     val c = LocalTheme.current.colors
-    LaunchedEffect(sync.running > 0) {
-        while (sync.running > 0) {
-            delay(500)
-            model.menu.settings.refresh()
+    // Paused while the missing-files question shows (nothing changes until it is answered) and while the app is in the background.
+    val owner = LocalLifecycleOwner.current
+    val polling = sync.running > 0 && view.optJSONObject("missingFiles") == null
+    LaunchedEffect(polling, owner) {
+        if (!polling) return@LaunchedEffect
+        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (sync.running > 0) {
+                delay(500)
+                model.menu.settings.refresh()
+            }
         }
     }
     val backend = view.getJSONObject("backend")
