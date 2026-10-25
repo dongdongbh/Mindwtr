@@ -6,6 +6,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useLanguage } from '../../contexts/language-context';
+import { MobileAreaSwitcher } from '@/components/mobile-area-switcher';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { WidgetLaunchContext } from '@/hooks/use-widget-launch';
 import { getWidgetLaunchState } from '@/modules/android-widget';
@@ -18,6 +19,7 @@ function DrawerHeader({
   backgroundColor,
   borderColor,
   backAccessibilityLabel,
+  showAreaSwitcher,
   rightAction,
 }: {
   title: string;
@@ -27,6 +29,7 @@ function DrawerHeader({
   backgroundColor: string;
   borderColor: string;
   backAccessibilityLabel: string;
+  showAreaSwitcher: boolean;
   rightAction?: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
@@ -55,10 +58,21 @@ function DrawerHeader({
       <Text numberOfLines={1} style={[styles.headerTitle, { color: tintColor }]}>
         {title}
       </Text>
-      <View style={styles.headerRightAction}>{rightAction}</View>
+      <View style={styles.headerRight}>
+        {showAreaSwitcher ? <MobileAreaSwitcher /> : null}
+        {rightAction || !showAreaSwitcher ? <View style={styles.headerRightAction}>{rightAction}</View> : null}
+      </View>
     </View>
   );
 }
+
+// Screens whose lists follow the area filter show it, as the tab headers do,
+// so a task hidden by it has a visible reason (#1448). Widget lists use the widget's
+// own scope, and Settings has no header.
+const AREA_FILTERED_ROUTES = new Set([
+  'board', 'calendar', 'review', 'contexts', 'waiting', 'someday', 'reference', 'done',
+  'history', 'projects-screen', 'archived', 'trash', 'saved-search/[id]',
+]);
 
 // Cold starts and deep links that land directly on a stack screen (session
 // restore to Archive, widget/notification links) must still have the tabs
@@ -93,6 +107,7 @@ export default function AppLayout() {
             tintColor={tc.text}
             title={getHeaderTitle(options, route.name)}
             backAccessibilityLabel={backAccessibilityLabel}
+            showAreaSwitcher={AREA_FILTERED_ROUTES.has(route.name)}
             rightAction={options.headerRight?.({ tintColor: tc.text, canGoBack: !!back })}
           />
         ),
@@ -138,6 +153,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  headerRight: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
   headerRightAction: {
     alignItems: 'center',
     height: 44,
@@ -148,6 +168,9 @@ const styles = StyleSheet.create({
     opacity: 0,
   },
   headerTitle: {
+    flex: 1,
+    marginHorizontal: 4,
+    textAlign: 'center',
     fontSize: 17,
     fontWeight: '700',
   },
