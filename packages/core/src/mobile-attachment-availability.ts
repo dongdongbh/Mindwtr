@@ -425,7 +425,11 @@ export const createMobileAttachmentAvailability = (host: MobileAttachmentAvailab
     // A missing selection still cannot acquire bytes without remote identity.
     if (preparing && !localAttachment.cloudKey) return null;
     // Fresh for the "not found" answer below: a row the user kept without its file stays as it is.
-    rememberUnreachableAttachments(parseUnreachableAttachments(await host.storage.getItem(UNREACHABLE_ATTACHMENTS_KEY)));
+    // A prepared (selected) download gets only its location's own config keys; it uses the copy
+    // the last sync or on-demand read left.
+    if (!preparing) {
+      rememberUnreachableAttachments(parseUnreachableAttachments(await host.storage.getItem(UNREACHABLE_ATTACHMENTS_KEY)));
+    }
     const backend = preparing ? preparedBackend : await host.storage.getItem(SYNC_BACKEND_KEY);
     if (backend === 'file') {
       const syncPath = await host.storage.getItem(SYNC_PATH_KEY);
