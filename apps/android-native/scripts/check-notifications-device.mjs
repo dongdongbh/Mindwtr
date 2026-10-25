@@ -617,10 +617,18 @@ try {
     await setPomodoroSwitch(POMODORO.autoBreaks, true);
     nodes = await idleCard();
     const open = await startFocus(nodes);
-    const breakOf = (alert) => ({ sessionID: alert.sessionID, phase: 'break', fireAtMs: alert.fireAtMs + 60_000 });
-    const openBreak = { ...breakOf(open), id: pomodoroId(breakOf(open)) };
+    // The auto-started break of [focus]'s session once stored: it starts when core settles the focus phase (its end is read, not assumed).
+    const breakOf = async (focus, timeoutMs) => {
+        const state = await waitUntil('the auto-started break stored', () => {
+            const { state: s } = pomodoro();
+            return s?.sessionID === focus.sessionID && s.session?.timerState?.phase === 'break' && s.session.timerState.isRunning && s;
+        }, timeoutMs, 2000);
+        const alert = { sessionID: state.sessionID, phase: 'break', fireAtMs: Date.parse(state.session.phaseEndsAt) };
+        return { ...alert, id: pomodoroId(alert) };
+    };
     // The app stays open on Focus: the card settles the phase at 0, and the break's alarm is armed.
-    await waitUntil('the break\'s alarm', () => armedAt(openBreak) === 1, Math.max(0, open.fireAtMs - Date.now()) + 30_000, 2000);
+    const openBreak = await breakOf(open, Math.max(0, open.fireAtMs - Date.now()) + 30_000);
+    await waitUntil('the break\'s alarm', () => armedAt(openBreak) === 1, 30_000, 2000);
     await waitUntil('the focus alert', () => shownOnce(open).length === 1, 30_000);
     await sleep(3000);
     check(shownOnce(open).length === 1 && shownOnce(open)[0].text === en['pomodoro.focusComplete'], '(5) the break starts and the focus alert shows, once');
@@ -641,12 +649,12 @@ try {
     const darkLate = Date.now() - dark.fireAtMs;
     check(shownOnce(dark)[0].when === dark.fireAtMs && darkLate > -2000 && darkLate < 30_000,
         `(6) with the screen off the focus alert arrives at the phase end (${darkLate} ms after it), stamped with it`);
-    const darkBreak = { ...breakOf(dark), id: pomodoroId(breakOf(dark)) };
     await sleep(15_000);
-    check(pomodoroAlarms().length === 0 && !book().armed.some((entry) => entry.id === darkBreak.id),
+    check(pomodoroAlarms().length === 0 && !book().armed.some((entry) => entry.sessionID === dark.sessionID && entry.phase === 'break'),
         '(6) the auto-started break gets no alarm while the screen is off and the app does not run (RN\'s background rule)');
     sh('input keyevent KEYCODE_WAKEUP');
     sh('wm dismiss-keyguard');
+    const darkBreak = await breakOf(dark, 30_000);
     await waitUntil('the break\'s alarm once the app runs', () => armedAt(darkBreak) === 1, 30_000);
     check(Date.now() < darkBreak.fireAtMs, '(6) the screen on again resumes the app, which arms the break\'s alert at its end');
     await waitUntil('the break\'s alert', () => shownOnce(darkBreak).length === 1, Math.max(0, darkBreak.fireAtMs - Date.now()) + 60_000);
