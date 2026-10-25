@@ -86,8 +86,16 @@ internal val UPDATE_REFUSALS = listOf("STALE_REVISION", "INVALID_INPUT", "TASK_N
  * the saves of a draft that stays open (the Calendar composer, Manage's editor), so a Save that wrote nothing never looks done.
  */
 private val STALE_SHOWN = setOf("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo")
-/** Commands core can refuse before writing: an update, an editor save, a saved search, a Process Inbox answer, and the Menu tab's commands. */
-private val REFUSABLE = setOf("update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker") + MENU_KINDS + CAPTURE_MODAL_KINDS + ATTACHMENT_KINDS + PROJECT_DETAIL_KINDS
+/** Commands core can refuse before writing: Done and its Undos, an update, an editor save, a saved search, a Process Inbox answer, and the Menu tab's commands. */
+private val REFUSABLE = setOf("complete", "completeUndo", "inboxDecisionUndo", "update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker") + MENU_KINDS + CAPTURE_MODAL_KINDS + ATTACHMENT_KINDS + PROJECT_DETAIL_KINDS
+
+/**
+ * Core refused [kind] before writing ([message]: its error): no retry is owed. STALE_REVISION for any command, core's refusals for
+ * REFUSABLE, and an Undo core could no longer run (ACTION_FAILED), which a retry would only repeat.
+ */
+internal fun refusedUnwritten(kind: String?, message: String) =
+    message.startsWith("STALE_REVISION") || (kind in REFUSABLE && UPDATE_REFUSALS.any { message.startsWith(it) })
+        || (kind in setOf("completeUndo", "inboxDecisionUndo") && message.startsWith("ACTION_FAILED"))
 
 private fun JSONObject.metaPart(): MetaPart = MetaPart(
     getString("kind"), getString("text"), getBoolean("detail"), text("dotColor"), text("tone"),
@@ -2133,7 +2141,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             }
             catch (failure: Throwable) {
                 val message = failure.message ?: failure.javaClass.simpleName
-                val refused = message.startsWith("STALE_REVISION") || (action?.kind in REFUSABLE && UPDATE_REFUSALS.any { message.startsWith(it) })
+                val refused = refusedUnwritten(action?.kind, message)
                 stale = action != null && action.kind !in STALE_SHOWN && message.startsWith("STALE_REVISION")
                 val failed = if ((action != null && !refused) || message.startsWith("SAVE_FAILED")) {
                     action ?: FailedAction("storage", "")

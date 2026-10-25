@@ -801,10 +801,11 @@ assert.match(rowUi, /onDragStopped = \{ settle\(if \(offset\.value > open \/ 2\)
 assert.match(rowUi, /val left = if \(onDelete != null\) -open else 0f/);
 assert.match(rowUi, /val onDelete = actions\?\.delete\?\.takeIf \{ canEdit && !selecting \}/);
 assert.doesNotMatch(code(rowUi), /SwipeToDismissBox|combinedClickable\([^)]*\)[^\n]*openEditor/, 'no one-gesture swipe; the row\'s own long-press stays free');
-// Every failed command holds its exact retry, except an update or editor save core refused before writing.
+// Every failed command holds its exact retry, except one core refused before writing (Done and its Undos too: 13a review P2).
 assert.match(model, /internal val UPDATE_REFUSALS = listOf\("STALE_REVISION", "INVALID_INPUT", "TASK_NOT_FOUND"\)/);
-assert.match(model, /private val REFUSABLE = setOf\("update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker"\) \+ MENU_KINDS \+ CAPTURE_MODAL_KINDS \+ ATTACHMENT_KINDS/);
-assert.match(model, /val refused = message\.startsWith\("STALE_REVISION"\) \|\| \(action\?\.kind in REFUSABLE && UPDATE_REFUSALS\.any \{ message\.startsWith\(it\) \}\)/);
+assert.match(model, /private val REFUSABLE = setOf\("complete", "completeUndo", "inboxDecisionUndo", "update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker"\) \+ MENU_KINDS \+ CAPTURE_MODAL_KINDS \+ ATTACHMENT_KINDS/);
+assert.match(model, /message\.startsWith\("STALE_REVISION"\) \|\| \(kind in REFUSABLE && UPDATE_REFUSALS\.any \{ message\.startsWith\(it\) \}\)\s+\|\| \(kind in setOf\("completeUndo", "inboxDecisionUndo"\) && message\.startsWith\("ACTION_FAILED"\)\)/);
+assert.match(model, /val refused = refusedUnwritten\(action\?\.kind, message\)/);
 // A command refused as stale wrote nothing: it is never owed (no retry loop on a revision that can never match), its lists are
 // read again, and nothing shows but the conflict line of the editor save, the status menu, an open draft's Save, and a completion's
 // Undo refused because the task changed since (RN shows its failure too).
