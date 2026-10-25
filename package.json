@@ -111,6 +111,7 @@
     "lint:desktop": "bun run --filter mindwtr lint",
     "lint:mobile": "bun run --filter mobile lint",
     "lint:mcp": "bun run --filter mindwtr-mcp lint",
+    "lint:rust:changed": "node scripts/ci/lint-rust-changed.mjs",
     "lint:all": "bun run lint:node && bun run lint:desktop && bun run lint:mobile && bun run lint:mcp",
     "typecheck": "bun run typecheck:core && bun run typecheck:native-host && bun run typecheck:cloud && bun run typecheck:desktop && bun run typecheck:mobile && bun run typecheck:mcp",
     "typecheck:core": "bun run --filter @mindwtr/core typecheck",
