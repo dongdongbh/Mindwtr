@@ -28,4 +28,15 @@ class CalendarVisitTest {
         assertTrue(visits.opened(second))
         assertTrue(visits.isCurrent(second))
     }
+
+    // RN's 5bfa6bf6b: a picked local .ics stays readable after a reboot only through a persisted read grant. The pick is an
+    // ACTION_OPEN_DOCUMENT (OpenDocument), whose result allows one; addFile takes it for reading only, and a refusal is logged
+    // while the feed is still added.
+    @Test fun aPickedCalendarFileKeepsAPersistedReadGrant() {
+        val taken = mutableListOf<Int>()
+        assertEquals(null, keepPickedFileReadable { flags -> taken += flags })
+        assertEquals(listOf(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION), taken)
+        val refused = SecurityException("No persistable permission grants found")
+        assertEquals(refused, keepPickedFileReadable { throw refused })
+    }
 }

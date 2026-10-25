@@ -172,8 +172,8 @@ class CalendarSettingsModel(private val menu: MenuModel) {
      */
     fun addFile(uri: Uri, revision: String) {
         val resolver = shell.getApplication<android.app.Application>().contentResolver
-        runCatching { resolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            .onFailure { Log.w(CoreHost.TAG, "Calendar file grant not kept ${failureForLog(it)}") }
+        keepPickedFileReadable { flags -> resolver.takePersistableUriPermission(uri, flags) }
+            ?.let { Log.w(CoreHost.TAG, "Calendar file grant not kept ${failureForLog(it)}") }
         val fileName = runCatching {
             resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
         }.getOrNull()
@@ -551,3 +551,10 @@ private fun FeedInput(value: String, field: JSONObject, tag: String, keyboard: K
             }
         })
 }
+
+/**
+ * RN's 5bfa6bf6b: a picked document stays readable after a reboot only through a persisted read grant, which an
+ * ACTION_OPEN_DOCUMENT result (OpenDocument) allows. [take] persists it for reading only; its failure is answered, not thrown.
+ */
+internal fun keepPickedFileReadable(take: (flags: Int) -> Unit): Throwable? =
+    runCatching { take(Intent.FLAG_GRANT_READ_URI_PERMISSION) }.exceptionOrNull()
