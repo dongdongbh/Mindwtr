@@ -63,6 +63,23 @@ describe('native host contract: the capture popup', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
+    it('keeps the preset on a retry after a failed save: the task saves once, Next in its project, never in the Inbox', async () => {
+        let failing = false;
+        const { host } = await openHost('base', async () => { if (failing) throw new Error('disk unavailable'); });
+        const preset = { projectId: 'p-home', status: 'next' } as const;
+        const opened = value(host.openQuickCapture());
+        const chosen = value(host.editQuickCapture({ text: '', options: opened.options, edit: { type: 'selectProject', projectId: 'p-home' }, preset } as never));
+        // The exact request the popup saved with the draft (Try again sends it again).
+        const request = { text: 'Oil the hinge', options: chosen.view.options, captureId: generateUUID(), preset } as never;
+        failing = true;
+        expect(await host.submitQuickCapture(request)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        expect(await host.submitQuickCapture(request)).toMatchObject({ ok: true, value: { kind: 'saved', projectId: 'p-home' } });
+        const saved = useTaskStore.getState()._allTasks.filter((task) => task.title === 'Oil the hinge');
+        expect(saved).toHaveLength(1);
+        expect(saved[0]).toMatchObject({ projectId: 'p-home', status: 'next' });
+    });
+
     it('offers saved unused contexts and invalidates retained context choices when only settings changes', async () => {
         const { host } = await openHost();
         const opened = value(host.openQuickCapture());

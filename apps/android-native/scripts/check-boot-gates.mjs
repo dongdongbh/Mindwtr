@@ -2213,8 +2213,9 @@ for (const [kind, fn] of [['capture', 'sendCapture'], ['captureLines', 'sendLine
     assert.match(model, new RegExp(`current\\.pending\\?\\.takeIf \\{ it\\.kind == "${kind}" \\}`), `${kind}: a retry reuses the pending request`);
     assert.match(model, new RegExp(`keepCapture\\(current\\.copy\\(pending = action[^)]*\\)\\)\\s+${fn}\\(action\\)`), `${kind}: the request is persisted before the call`);
 }
-assert.match(model, /FailedAction\("capture", current\.captureId, current\.text, patch = mapOf\("options" to current\.options\.toString\(\), "openAfterSave" to "\$openAfterSave"\)\)/);
-assert.match(model, /FailedAction\("captureLines", current\.lineIds\.first\(\), current\.linesText \?: current\.text,\s*patch = mapOf\("options" to current\.options\.toString\(\), "captureIds" to current\.lineIds\.joinToString\(","\)\)\)/);
+// The opener's preset (a project's "+", O2f-parity b3) rides the same saved request, so a retry keeps its project and status.
+assert.match(model, /FailedAction\("capture", current\.captureId, current\.text, patch = mapOf\("options" to current\.options\.toString\(\), "openAfterSave" to "\$openAfterSave"\) \+ presetPatch\(current\)\)/);
+assert.match(model, /FailedAction\("captureLines", current\.lineIds\.first\(\), current\.linesText \?: current\.text,\s*patch = mapOf\("options" to current\.options\.toString\(\), "captureIds" to current\.lineIds\.joinToString\(","\)\) \+ presetPatch\(current\)\)/);
 assert.match(model, /failedAction = action\s+when \(action\.kind\) \{ "capture" -> sendCapture\(action\); "captureLines" -> sendLines\(action\); else -> sendPicker\(action\) \}/,
     'after process death an uncertain capture is sent again with the same IDs');
 assert.match(model, /if \(action\.kind in CAPTURE_KINDS\) storedCapture\?\.let \{ keepCapture\(it\.copy\(pending = action\)\) \}/, 'a new screen reopens the popup on an owed capture, never re-sends it');
@@ -2310,7 +2311,7 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     // at any step leaves the edit for the boot's replay (review PD 1, 2; WriteJournalTest, ProjectDetailsTest).
     {
         const details = code(source('ProjectDetails.kt'));
-        assert.match(details, /private fun edit\(projectId: String\?, kind: String, fields: JSONObject\.\(\) -> Unit\) \{[\s\S]*?journalAhead\("projectEdit", json\)[\s\S]*?writes\.add\(FailedAction\("projectEdit", requestId, json\)\)/, 'an edit is journaled before it is queued');
+        assert.match(details, /private fun edit\(projectId: String\?, kind: String, [^{]*fields: JSONObject\.\(\) -> Unit = \{\}\): String\? \{[\s\S]*?journalAhead\("projectEdit", json\)[\s\S]*?writes\.add\(FailedAction\("projectEdit", requestId, json\)\)/, 'an edit is journaled before it is queued');
         assert.doesNotMatch(details, /menuRead\("[^"]*Prepare"|commitPrepared/, 'Kotlin never prepares or commits an edit itself');
         assert.match(coreHost, /fun journalAhead\(name: String, json: String\) \{\s*require\(name == "projectEdit"\)[\s\S]{0,160}?\.append\("menuCommand", listOf\(name, json\)\)/);
         const journalKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt'), 'utf8');
@@ -2321,8 +2322,9 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     // (review PD 3; ProjectDetailsTest's ReplyGuard).
     {
         const details = code(source('ProjectDetails.kt'));
-        assert.equal((details.match(/replies\.ticket\("/g) ?? []).length, 5, 'every Details read takes a ticket');
-        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 5, 'every Details reply checks its ticket');
+        // Six reads: the five Details reads and Convert to section's (readConvert, its kind passed in).
+        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 6, 'every Details read takes a ticket');
+        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 6, 'every Details reply checks its ticket');
         assert.match(details, /shell\.fresh\(mine, InboxViewModel\.Part\.ProjectDetails\)/);
         assert.match(details, /fun closeOverlays\(\) \{\s*replies\.close\(\)/);
     }
@@ -9623,7 +9625,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const header = source('ProjectsScreen.kt'), details = source('ProjectDetails.kt');
     assert.match(header, /ProjectTitleField\([^\n]*\n[\s\S]{0,800}\{ projectDetails\.openActions\(\) \}[\s\S]{0,200}testTag\("project-actions-menu-button"\)/);
     assert.match(details, /"project-duplicate-button"[\s\S]{0,500}"project-convert-to-section-button"[\s\S]{0,300}"project-reactivate-button"[\s\S]{0,300}"project-archive-button"[\s\S]{0,300}"project-cancel-button"[\s\S]{0,300}"project-delete-button"/);
-    assert.match(details, /deleteId = edit\(id, "delete", answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo"\) \{ put\("deleteRequestId", deleteId\) \}/);
+    assert.match(details, /deleteId = edit\(id, "delete", refused = [^\n]*answer = \{[\s\S]{0,400}shell\.closeProject\(\)[\s\S]{0,300}edit\(id, "deleteUndo", refused = [^\n]*\) \{ put\("deleteRequestId", deleteId\) \}/);
     assert.match(details, /answers\.remove\(action\.id\)\?\.let \{ answer -> shell\.ui \{ answer\(reply\) \} \}/);
     // Review of b1+b2: the sheet stores a typed title and notes before any action (RN's onBeforeConvertToSection), and a refused
     // action shows RN's failure line (core's STALE_REVISION is otherwise silent); Convert sends the preview Next confirmed.
