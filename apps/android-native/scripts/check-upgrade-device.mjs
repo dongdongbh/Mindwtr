@@ -1576,10 +1576,15 @@ const scenarioPomodoroRnFix = async () => {
     await until('RN 155\'s Pomodoro alarm again', () => packageAlarms().some(rnAt), 60_000);
     check(packageAlarms().filter(rnAt).length === 1 && Date.now() < fireAtMs,
         '(9c) RN 155 arms its Pomodoro alarm again before the phase end, once (its record matched, its library held none)');
+    // Exact only while Android allows it (a throwaway package has no exact-alarm grant): the window says how late it may come.
+    const rnBlock = sh('dumpsys alarm').split(/\n(?=\s*(?:RTC_WAKEUP|RTC|ELAPSED_WAKEUP|ELAPSED) #\d+: Alarm\{)/)
+        .find((block) => block.includes(PKG) && block.includes(RN_RECEIVER)) ?? '';
+    console.log(`info - RN 155's alarm: ${/window[= ]\S+/.exec(rnBlock)?.[0] ?? 'no window line'} ${/exactAllowReason[= ]\S+/.exec(rnBlock)?.[0] ?? ''}`);
     await killWithoutStop();
-    await until('RN\'s focus alert', () => pomodoroShown(en['pomodoro.focusComplete']).length === 1, Math.max(0, fireAtMs - Date.now()) + 60_000);
+    await until('RN\'s focus alert', () => pomodoroShown(en['pomodoro.focusComplete']).length === 1, Math.max(0, fireAtMs - Date.now()) + 10 * 60_000);
+    const late = Date.now() - fireAtMs;
     await sleep(10_000);
-    check(pomodoroShown(en['pomodoro.focusComplete']).length === 1, '(9c) RN\'s focus alert arrives at the phase end, once');
+    check(pomodoroShown(en['pomodoro.focusComplete']).length === 1, `(9c) RN's focus alert arrives at the phase end, once (${late} ms after it)`);
     await killWithoutStop();
 };
 
