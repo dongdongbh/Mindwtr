@@ -5,6 +5,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { configureDateFormatting, useTaskStore, type Task } from '@mindwtr/core';
 import { createTaskDraft, type TaskDraft } from '@mindwtr/core/task-draft';
 
+import { CalendarDays } from 'lucide-react-native';
+
+import { FieldHeading } from './FieldHeading';
 import { TaskEditScheduleField } from './TaskEditScheduleField';
 
 vi.mock('@react-native-community/datetimepicker', () => ({
@@ -23,9 +26,6 @@ const styles = {
     flex1: {},
     clearDateBtn: {},
     clearDateText: {},
-    compactFieldRow: {},
-    compactFieldLabel: {},
-    compactFieldValue: {},
     pickerToolbar: {},
     pickerSpacer: {},
     pickerDone: {},
@@ -95,7 +95,7 @@ afterEach(() => {
 });
 
 describe('TaskEditScheduleField', () => {
-    it('renders an unset due date as a compact action row', () => {
+    it('renders an unset due date as a field heading above a Not set box, like Start date (#1451)', () => {
         const setShowDatePicker = vi.fn();
 
         let tree!: renderer.ReactTestRenderer;
@@ -107,7 +107,7 @@ describe('TaskEditScheduleField', () => {
                     draft: makeDraft({}),
                     fieldId: 'dueDate',
                     formatDate: (value?: string) => value ?? '',
-                    formatDueDate: (value?: string) => value ?? 'Not set',
+                    formatDueDate: (value?: string) => value || 'Not set',
                     getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'),
                     monthlyPattern: 'date',
                     onDateChange: vi.fn(),
@@ -132,11 +132,15 @@ describe('TaskEditScheduleField', () => {
             );
         });
 
-        const compactButton = tree.root.findByProps({ accessibilityLabel: 'Due Date: Not set' });
-        expect(compactButton.props.accessibilityRole).toBe('button');
+        const heading = tree.root.findByType(FieldHeading);
+        expect(heading.props.label).toBe('Due Date');
+        expect(heading.props.icon).toBe(CalendarDays);
+        const valueBox = tree.root.findByProps({ accessibilityLabel: 'Due Date: Not set' });
+        expect(valueBox.props.accessibilityRole).toBe('button');
+        expect(valueBox.findByType(Text).props.children).toBe('Not set');
 
         act(() => {
-            compactButton.props.onPress();
+            valueBox.props.onPress();
         });
 
         expect(setShowDatePicker).toHaveBeenCalledWith('due');

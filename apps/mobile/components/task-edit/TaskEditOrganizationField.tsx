@@ -28,7 +28,6 @@ import {
 import { TASK_STATUS_ICONS } from '@/lib/task-status-icons';
 
 import { PriorityFlag } from '@/components/priority-flag';
-import { CompactText } from '@/components/compact-text';
 import { FieldHeading } from './FieldHeading';
 import type { TaskEditFieldRendererProps } from './TaskEditFieldRenderer.types';
 
@@ -142,48 +141,6 @@ export function TaskEditOrganizationField({
         const key = `status.${status}` as const;
         return translateWithFallback(t, key, status);
     };
-    const renderCompactPicker = (label: string, value: string, onPress: () => void, icon?: LucideIcon) => {
-        const RowIcon = icon;
-        return (
-            <View style={styles.formGroup}>
-                <TouchableOpacity
-                    style={[styles.compactFieldRow, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                    onPress={onPress}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${label}: ${value}`}
-                >
-                    {RowIcon ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
-                            <RowIcon
-                                size={14}
-                                color={tc.secondaryText}
-                                aria-hidden
-                                accessible={false}
-                                pointerEvents="none"
-                            />
-                            <CompactText
-                                style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
-                            >
-                                {label}
-                            </CompactText>
-                        </View>
-                    ) : (
-                        <CompactText
-                            style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
-                        >
-                            {label}
-                        </CompactText>
-                    )}
-                    <CompactText
-                        style={[styles.compactFieldValue, { color: tc.tint }]}
-                        numberOfLines={2}
-                    >
-                        {value}
-                    </CompactText>
-                </TouchableOpacity>
-            </View>
-        );
-    };
     const assignedToDraft = draft.assignedTo.trim();
     const assignedToCreateLabel = translateWithFallback(t, 'people.new', 'New Person');
     const canCreateAssignedToPerson = assignedToDraft.length > 0
@@ -257,11 +214,23 @@ export function TaskEditOrganizationField({
                 : areaId
                     ? areas.find((area) => area.id === areaId)?.name || t('taskEdit.noAreaOption')
                     : t('common.none');
-            return renderCompactPicker(
-                t('task.destination'),
-                destination,
-                () => setShowProjectPicker(true),
-                Folder,
+            return (
+                <View style={styles.formGroup}>
+                    <FieldHeading
+                        icon={Folder}
+                        label={t('task.destination')}
+                        iconColor={tc.secondaryText}
+                        labelStyle={[styles.label, { color: tc.secondaryText }]}
+                    />
+                    <TouchableOpacity
+                        style={[styles.dateBtn, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
+                        onPress={() => setShowProjectPicker(true)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t('task.destination')}: ${destination}`}
+                    >
+                        <Text style={{ color: tc.text }}>{destination}</Text>
+                    </TouchableOpacity>
+                </View>
             );
         }
         case 'section': {

@@ -30,7 +30,6 @@ import {
 } from 'lucide-react-native';
 
 import { QuickDateChips } from '../QuickDateChips';
-import { CompactText } from '@/components/compact-text';
 import { FieldHeading } from './FieldHeading';
 import { RecurrenceIntervalInput } from './RecurrenceIntervalInput';
 import type {
@@ -673,45 +672,6 @@ export function TaskEditScheduleField({
             const parsed = draft.dueDate ? safeParseDate(draft.dueDate) : null;
             const hasTime = hasTimeComponent(draft.dueDate);
             const timeOnly = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
-            if (!draft.dueDate) {
-                const notSetLabel = t('common.notSet');
-                return (
-                    <View style={styles.formGroup}>
-                        <TouchableOpacity
-                            style={[styles.compactFieldRow, { backgroundColor: tc.filterBg, borderColor: tc.border }]}
-                            onPress={() => openDatePicker('due')}
-                            accessibilityRole="button"
-                            accessibilityLabel={`${t('taskEdit.dueDateLabel')}: ${notSetLabel}`}
-                        >
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
-                                <CalendarDays
-                                    size={14}
-                                    color={tc.secondaryText}
-                                    aria-hidden
-                                    accessible={false}
-                                    pointerEvents="none"
-                                />
-                                <CompactText
-                                    style={[styles.compactFieldLabel, { color: tc.secondaryText }]}
-                                >
-                                    {t('taskEdit.dueDateLabel')}
-                                </CompactText>
-                            </View>
-                            <CompactText
-                                style={[styles.compactFieldValue, { color: tc.tint }]}
-                                numberOfLines={2}
-                            >
-                                {notSetLabel}
-                            </CompactText>
-                        </TouchableOpacity>
-                        {renderQuickDateChips('due', parsed)}
-                        {renderInlineIOSDatePicker(['due'])}
-                        {renderReminderHandoffControl()}
-                        {renderAdvanceReminderControl()}
-                        {renderRepeatReminderControl()}
-                    </View>
-                );
-            }
             return (
                 <View style={styles.formGroup}>
                     <FieldHeading
@@ -725,6 +685,8 @@ export function TaskEditScheduleField({
                             <TouchableOpacity
                                 style={[styles.dateBtn, styles.flex1, { backgroundColor: tc.inputBg, borderColor: tc.border }]}
                                 onPress={() => openDatePicker('due')}
+                                accessibilityRole="button"
+                                accessibilityLabel={`${t('taskEdit.dueDateLabel')}: ${formatDueDate(draft.dueDate)}`}
                             >
                                 <Text style={{ color: tc.text }}>{formatDueDate(draft.dueDate)}</Text>
                             </TouchableOpacity>

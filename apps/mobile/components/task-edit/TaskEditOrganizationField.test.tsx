@@ -3,6 +3,9 @@ import { Text, TextInput, TouchableOpacity } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
+import { Folder } from 'lucide-react-native';
+
+import { FieldHeading } from './FieldHeading';
 import { TaskEditOrganizationField } from './TaskEditOrganizationField';
 
 const styles = {
@@ -13,9 +16,6 @@ const styles = {
     flex1: {},
     clearDateBtn: {},
     clearDateText: {},
-    compactFieldRow: {},
-    compactFieldLabel: {},
-    compactFieldValue: {},
     statusContainer: {},
     statusContainerCompact: {},
     statusChip: {},
@@ -136,7 +136,7 @@ describe('TaskEditOrganizationField', () => {
         expect(requestStatusChange).not.toHaveBeenCalled();
     });
 
-    it('renders an unset project as a compact picker row', () => {
+    it('renders Destination as a field heading above a value box (#1449)', () => {
         const setShowProjectPicker = vi.fn();
 
         let tree!: renderer.ReactTestRenderer;
@@ -150,11 +150,15 @@ describe('TaskEditOrganizationField', () => {
             );
         });
 
-        const compactButton = tree.root.findByProps({ accessibilityLabel: 'Destination: None' });
-        expect(compactButton.props.accessibilityRole).toBe('button');
+        const heading = tree.root.findByType(FieldHeading);
+        expect(heading.props.label).toBe('Destination');
+        expect(heading.props.icon).toBe(Folder);
+        const valueBox = tree.root.findByProps({ accessibilityLabel: 'Destination: None' });
+        expect(valueBox.props.accessibilityRole).toBe('button');
+        expect(valueBox.findByType(Text).props.children).toBe('None');
 
         act(() => {
-            compactButton.props.onPress();
+            valueBox.props.onPress();
         });
 
         expect(setShowProjectPicker).toHaveBeenCalledWith(true);
