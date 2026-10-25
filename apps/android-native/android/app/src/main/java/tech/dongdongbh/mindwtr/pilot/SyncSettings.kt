@@ -25,9 +25,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -438,15 +440,16 @@ private fun MissingFilesDialog(sync: SyncSettingsModel, question: JSONObject) {
     AlertDialog(
         onDismissRequest = { sync.answerMissingFiles(false) },
         title = { Text(question.getString("title")) },
-        text = { Text(question.getString("message")) },
+        // RN's Alert.alert on Android: the message scrolls, and the buttons draw in capitals with Cancel at the left.
+        text = { Text(question.getString("message"), modifier = Modifier.verticalScroll(rememberScrollState())) },
         confirmButton = {
             TextButton(onClick = { sync.answerMissingFiles(true) }, Modifier.testTag("sync-missing-files-continue")) {
-                Text(question.getString("continueLabel"))
+                Text(question.getString("continueLabel").uppercase())
             }
         },
         dismissButton = {
             TextButton(onClick = { sync.answerMissingFiles(false) }, Modifier.testTag("sync-missing-files-cancel")) {
-                Text(question.getString("cancelLabel"))
+                Text(question.getString("cancelLabel").uppercase())
             }
         },
     )
