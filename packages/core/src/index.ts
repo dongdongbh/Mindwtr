@@ -221,6 +221,7 @@ export * from './digest-utils';
 export * from './search';
 export * from './search-highlight';
 export * from './saved-filters';
+export * from './sqlite-copy-repair';
 export * from './saved-filter-labels';
 export * from './hierarchy-utils';
 export * from './markdown';

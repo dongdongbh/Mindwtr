@@ -63,6 +63,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     // linux-task-link-launcher reuses releaseCheck and outcome below; no executable paths.
     // sync-write-gate reuses backend below; step is the sync step name; gateWaitMs lists each save's wait for the gate.
     'step', 'gateWaitMs',
+    // rn-copy-repair reuses releaseCheck/step; counts per repair class, never titles or identifiers.
+    'nullEntries', 'untitledTasks', 'untitledProjects', 'untitledSections', 'unnamedAreas', 'missingCreatedAt', 'orphanSections',
     // native-sync-slices reuses backend and gateWaitMs: each save's time in the gate, its publish (prepared or in-gate),
     // the slices that gave the engine back and the longest, the store's subscribers, and the requeue reason.
     'commitPublishMs', 'storePublish', 'slices', 'longestSliceMs', 'storeListeners', 'requeue',
