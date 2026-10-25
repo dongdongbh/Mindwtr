@@ -310,6 +310,10 @@ describe('buildPendingCaptureTaskProps', () => {
         );
         expect(props.dueDate).toBe('2026-08-14');
         expect(props.startTime).toBe('2026-08-01');
+        // #1452: a start date files the default Inbox into Next; a chosen or contextual status wins.
+        expect(props.status).toBe('next');
+        expect(buildPendingCaptureTaskProps({ id: 'a', title: 'T', tags: [], startDate: '2026-08-01', status: 'inbox' }, []).status).toBe('inbox');
+        expect(buildPendingCaptureTaskProps({ id: 'a', title: 'T', tags: [], startDate: '2026-08-01', defaultStatus: 'someday' }, []).status).toBe('someday');
     });
 });
 

@@ -4,6 +4,7 @@ import type { StoreActionResult } from './store-types';
 import { getQuickAddProjectInitialProps } from './quick-add';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from './color-constants';
+import { resolveCaptureStatusForStart } from './store-helpers';
 
 /**
  * Capture assembly as one module: turning parsed quick-add input plus surface
@@ -324,6 +325,16 @@ export function planCaptureTask(
     let props = options.transformProps
         ? options.transformProps({ ...assembly.props })
         : assembly.props;
+
+    // A start date files an Inbox capture into Next (#1452), as editing does.
+    // A surface's prefilled Inbox is a default, not a choice; a parsed /status
+    // token or a surface override (extraProps) is. Runs after transformProps so
+    // a start date from a picker counts.
+    const statusChosen = Boolean(input.parsed.props.status || input.extraProps?.status);
+    if (!statusChosen && props.status === 'inbox') {
+        const { status: _defaultStatus, ...unchosen } = props;
+        props = { ...props, status: resolveCaptureStatusForStart(unchosen, 'inbox') };
+    }
 
     // A surface picker is more explicit than a parsed +Project token. Avoid
     // creating an orphan parsed project when enrichment supplied a project id.

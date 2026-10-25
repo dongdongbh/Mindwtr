@@ -22,6 +22,7 @@ import { normalizeShortcutTags } from './capture-deeplink';
 import { safeParseDate } from './date';
 import { getChecklistEditStatus } from './task-checklist-model';
 import { runStoreCommand } from './store-write-gate';
+import { resolveCaptureStatusForStart } from './store-helpers';
 import { isSelectableProjectForTaskAssignment } from './project-utils';
 import { buildQuickAddParseOptions, parseQuickAdd } from './quick-add';
 import type { AppData, Area, Person, Project, Task } from './types';
@@ -269,7 +270,10 @@ function resolveStructuredProjectId(capture: PendingCapture, projects: readonly 
 }
 
 export function buildPendingCaptureTaskProps(capture: PendingCapture, projects: Project[]): Partial<Task> {
-    const props: Partial<Task> = { status: capture.status ?? capture.defaultStatus ?? 'inbox' };
+    // Same rule as planCaptureTask (#1452): a start date files the default Inbox into Next.
+    const props: Partial<Task> = {
+        status: capture.status ?? resolveCaptureStatusForStart({ startTime: capture.startDate }, capture.defaultStatus ?? 'inbox'),
+    };
     if (capture.note) props.description = capture.note;
 
     const tags = normalizeShortcutTags(capture.tags);
