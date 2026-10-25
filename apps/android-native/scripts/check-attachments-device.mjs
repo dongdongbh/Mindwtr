@@ -16,8 +16,9 @@
 //   (7) a kill during an install: the second device adds a file to the project; the phone's sync dies once the installer's
 //       journal is on disk (debug property install_stop=journal); the next boot's recovery rolls it back (no installer file,
 //       no half file), and the next sync installs the whole file;
-//   (8) a remote 404: a project file whose remote copy is gone is marked unrecoverable (cloudKey cleared, soft-deleted) and no
-//       bytes are written; the PDF's remote copy removed, a sync keeps its local bytes;
+//   (8) a remote 404: a project file whose remote copy is gone stays a live, keyed attachment shown as missing (never deleted,
+//       so the delete cannot spread to other devices) and no bytes are written; the PDF's remote copy removed, a sync keeps its
+//       local bytes;
 //   (9) sync Off again.
 // It installs with `install -r` (development data stays), touches only the development package, never launches over another
 // app, clears its debug property, removes the port mapping and the pushed files, and puts the keyboard back. Leave the phone on
@@ -501,7 +502,7 @@ try {
     await until('(7) the whole file (SHA-256) in its stored record', installedWhole, 120_000, 3_000);
     check(true, '(7) the next sync installed the whole file (SHA-256)');
 
-    // (8) A remote 404 is terminal and writes no bytes; a removed remote copy never deletes local bytes.
+    // (8) A remote 404 keeps the row (live, keyed, missing) and writes no bytes; a removed remote copy never deletes local bytes.
     const goneId = await addProjectFile('gone');
     const gone = (await second.call('menuRead', 'attachmentList', JSON.stringify({ owner: { kind: 'project', projectId } }))).rows.find((row) => row.id === goneId);
     const goneKey = [...dav.state.files.keys()].find((path) => path.includes(goneId));
@@ -509,11 +510,12 @@ try {
     dav.state.files.delete(goneKey);
     const pdfKey = `${FOLDER}/${stored('tasks', names.task).find((a) => a.id === pdf.id).cloudKey}`;
     dav.state.files.delete(pdfKey);
+    const goneCloudKey = goneKey.slice(FOLDER.length + 1);
     await syncNow('Sync now (the 404)');
-    await until('the 404 to settle', () => stored('projects', names.project).find((a) => a.id === goneId)?.deletedAt, 120_000, 3_000);
-    const unrecoverable = stored('projects', names.project).find((a) => a.id === goneId);
-    check(!unrecoverable.cloudKey && unrecoverable.localStatus === 'missing' && !attachmentFiles().some((name) => name.startsWith(goneId)),
-        '(8) the 404 marked the file unrecoverable (cloudKey cleared, missing, soft-deleted) and wrote no bytes');
+    const kept = stored('projects', names.project).find((a) => a.id === goneId);
+    check(Boolean(kept) && !kept.deletedAt && kept.cloudKey === goneCloudKey && kept.localStatus !== 'available'
+        && !attachmentFiles().some((name) => name.startsWith(goneId)),
+        '(8) the 404 kept the attachment (live, its key, not available) and wrote no bytes');
     check(phoneSha(pdf.uri) === sha256(pdfBytes), '(8) the PDF\'s remote copy gone, the sync kept its local bytes');
 
     // (9) Sync Off again.
