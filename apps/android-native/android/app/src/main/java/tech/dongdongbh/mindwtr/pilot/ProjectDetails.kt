@@ -66,6 +66,11 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
@@ -1027,14 +1032,18 @@ private fun GettingStartedActions(model: InboxViewModel, view: JSONObject) {
             }
         }
         val guide = view.getJSONObject("guide")
-        Row(Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) {
-            runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, guide.getString("url").toUri())) }
-        }, horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(guide.getString("label"), style = rnText(14, 500).copy(textDecoration = TextDecoration.Underline), color = c.tint)
+        val openGuide = { runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, guide.getString("url").toUri())) }; Unit }
+        Row(Modifier.heightIn(min = 44.dp).clickable(onClick = openGuide), horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(guideLink(guide.getString("label"), c.tint, openGuide), style = rnText(14, 500).copy(textDecoration = TextDecoration.Underline), color = c.tint)
             Icon(GuideExternalLink, null, tint = c.tint, modifier = Modifier.size(14.dp))
         }
     }
 }
+
+/** A guide link's label as a link span, so TalkBack names it a link as RN's accessibilityRole="link" does (Compose has no link Role). */
+internal fun guideLink(label: String, tint: Color, open: () -> Unit) =
+    buildAnnotatedString { withLink(LinkAnnotation.Clickable("guide", TextLinkStyles(SpanStyle(color = tint))) { open() }) { append(label) } }
 
 /** RN's GettingStartedActions draws Plus and ExternalLink at lucide's default stroke 2 (Lucide's are the capture button's and the windows'). */
 private val GettingStartedPlus = lucide("Plus", "M5 12h14", "M12 5v14")

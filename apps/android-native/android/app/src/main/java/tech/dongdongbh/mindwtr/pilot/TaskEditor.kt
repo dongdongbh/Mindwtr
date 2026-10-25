@@ -63,6 +63,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -1087,7 +1088,9 @@ private fun ContextualHelp(editorId: String, sectionId: String, help: JSONObject
     Column(Modifier.padding(vertical = 4.dp).testTag("contextual-help-$sectionId")) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top) {
             Row((if (expanded) Modifier.weight(1f) else Modifier).heightIn(min = 44.dp).widthIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
-                .clickable(role = Role.Button) { expanded = !expanded }.semantics { contentDescription = label }
+                .clickable(role = Role.Button) { expanded = !expanded }
+                // RN's accessibilityState={{ expanded }}, worded as the app's other folding rows (Details, the review groups).
+                .semantics { contentDescription = label; stateDescription = t(if (expanded) "markdown.collapse" else "markdown.expand") }
                 .padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp, if (expanded) Alignment.Start else Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically) {
                 Icon(Lucide.CircleHelp, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
@@ -1100,10 +1103,10 @@ private fun ContextualHelp(editorId: String, sectionId: String, help: JSONObject
         }
         if (expanded) Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 4.dp)) {
             Text(help.getString("body"), style = rnText(14, 400, 21), color = c.secondaryText)
-            Row(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) {
-                failed = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, help.getString("guideUrl").toUri())) }.isFailure
-            }.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(help.getString("readGuide"), style = rnText(14, 400), color = c.tint)
+            val openGuide = { failed = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, help.getString("guideUrl").toUri())) }.isFailure }
+            Row(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = openGuide).padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(guideLink(help.getString("readGuide"), c.tint, openGuide), style = rnText(14, 400), color = c.tint)
                 Icon(HelpExternalLink, null, tint = c.tint, modifier = Modifier.size(14.dp))
             }
             if (failed) Text(help.getString("guideError"), style = rnText(14, 400), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })

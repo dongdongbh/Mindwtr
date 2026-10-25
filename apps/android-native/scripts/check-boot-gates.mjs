@@ -9558,5 +9558,10 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.equal(gradle.match(/buildConfigField\("boolean", "DONATION_PROMPT", rnDonationPrompt\.toString\(\)\)/g)?.length, 1, 'read only in release');
     // Prompt activity has one writer: the startup prompts' first ask (review O2e P3-A).
     assert.doesNotMatch([source('ProcessCoreHost.kt'), hostEntry].join('\n'), /recordAboutPromptActivity/);
+    // RN's guide links are accessibilityRole="link" and its help toggle carries accessibilityState={{ expanded }} (review O2f P3-5).
+    const editor = source('TaskEditor.kt'), details = source('ProjectDetails.kt');
+    assert.match(editor, /Text\(guideLink\(help\.getString\("readGuide"\)/);
+    assert.match(details, /Text\(guideLink\(guide\.getString\("label"\)/);
+    assert.match(editor, /\{ expanded = !expanded \}\s+\/\/[^\n]*\s+\.semantics \{ contentDescription = label; stateDescription = /);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
