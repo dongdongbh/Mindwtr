@@ -12,6 +12,7 @@ import {
 import { loadTranslations } from './i18n/i18n-loader';
 import {
     addProcessInboxToken,
+    answerProcessInboxStep,
     applyProcessInboxDraftEdit,
     createProcessInboxDraft,
     getProcessInboxNotePreview,
@@ -119,6 +120,24 @@ describe('Process Inbox steps', () => {
         expect(resolveProcessInboxStep(answers({ actionability: 'actionable', twoMinute: 'no', execution: 'defer' }), 'guided', base)).toBe('oneAction');
         expect(resolveProcessInboxStep(answers({ actionability: 'actionable', twoMinute: 'no', execution: 'delegate' }), 'quick', base)).toBe('waiting');
         expect(resolveProcessInboxStep(answers({ actionability: 'incubate' }), 'quick', base)).toBe('incubate');
+    });
+
+    it('opens the file step for quick "I\'ll do it" instead of filing to Next at once (#1445)', () => {
+        const base = plan({});
+        const task = { id: 't1', title: 'Call bank', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        const outcome = answerProcessInboxStep({ choice: 'next', answers: INITIAL_PROCESS_INBOX_ANSWERS,
+            draft: createProcessInboxDraft(task), mode: 'quick', plan: base, task,
+            parseTitle: (title) => ({ title }) as never });
+        expect(outcome.type).toBe('flow');
+        if (outcome.type !== 'flow') return;
+        expect(resolveProcessInboxStep(outcome.answers, 'quick', base)).toBe('file');
+    });
+
+    it('starts a capture with no project or area in the default area (#1445)', () => {
+        const task = { id: 't1', title: 'Call bank', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        expect(createProcessInboxDraft(task, 'a-work').areaId).toBe('a-work');
+        expect(createProcessInboxDraft({ ...task, areaId: 'a-home' }, 'a-work').areaId).toBe('a-home');
+        expect(createProcessInboxDraft({ ...task, projectId: 'p1' }, 'a-work').areaId).toBeNull();
     });
 
     it('steps back one question and drops a project split only from the file step', () => {

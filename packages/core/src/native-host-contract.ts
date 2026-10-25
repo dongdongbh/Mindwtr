@@ -3,6 +3,7 @@ import { getPomodoroTaskChoices } from './pomodoro';
 import { createReferenceProjectNextActionMethods } from './native-host-contract-project-next-action';
 import { MAX_FOCUSED_PROJECTS } from './store-projects/project-actions';
 import { AREA_FILTER_ALL, AREA_FILTER_NONE, areaFilterSelectionToFilters, areaFilterSelectionToValue, cycleAreaFilterSelection, isAreaFilterSelectionActive, isTaskVisibleInArea, isTaskVisibleInInbox, resolveAreaFilterSelection, taskMatchesAreaFilterSelection, type AreaFilterSelection } from './area-filter';
+import { resolveDefaultNewTaskAreaId } from './area-utils';
 import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { flushPendingSave, getPersistenceStatus, getStorageAdapter, useTaskStore } from './store';
 import { gateStoreCommands } from './store-write-gate';
@@ -3572,12 +3573,17 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
         };
     };
 
+    const processInboxDefaultAreaId = (): string | null => {
+        const { settings, areas } = useTaskStore.getState();
+        return resolveDefaultNewTaskAreaId(settings, areas) ?? null;
+    };
+
     /** Put the session's current task on screen with fresh answers and draft. False when the queue is done. */
     const openCurrent = (entry: InboxProcessingEntry, queue: Task[]): boolean => {
         const task = getProcessInboxCurrentCandidate(entry.session, queue);
         if (!task) return false;
         entry.answers = { ...INITIAL_PROCESS_INBOX_ANSWERS };
-        entry.draft = createProcessInboxDraft(task);
+        entry.draft = createProcessInboxDraft(task, processInboxDefaultAreaId());
         entry.taskRevision = inboxTaskRevision(task);
         return true;
     };
@@ -3778,7 +3784,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 mode: input.mode ?? 'guided',
                 session: startProcessInboxSession(queue),
                 answers: { ...INITIAL_PROCESS_INBOX_ANSWERS },
-                draft: createProcessInboxDraft(queue[0]),
+                draft: createProcessInboxDraft(queue[0], processInboxDefaultAreaId()),
                 taskRevision: inboxTaskRevision(queue[0]),
                 progress: { total: 0, processed: 0 },
                 ended: false,

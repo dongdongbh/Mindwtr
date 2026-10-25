@@ -306,7 +306,7 @@ export const scenarios: Scenario[] = [
       ['press', 'incubate'], ['press', 'back'],
       ['press', 'project'], ['press', 'oneActionNo'], ['press', 'back'],
       ['press', 'project'], ['press', 'oneActionYes'], ['press', 'back'],
-      ['press', 'illDoIt'],
+      ['press', 'illDoIt'], ['press', 'fileIt'],
       ['press', 'done'],
       ['press', 'mode'],
       ['press', 'yes'],

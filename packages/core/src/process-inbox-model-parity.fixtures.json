@@ -944,6 +944,10 @@
     ],
     [
      "press",
+     "fileIt"
+    ],
+    [
+     "press",
      "done"
     ],
     [
@@ -11465,6 +11469,81 @@
      "followUp": null,
      "convertToProject": true,
      "nextAction": "Call Alice about the launch",
+     "extraActions": [],
+     "somedaySectionId": null,
+     "showAdvancedOptions": true
+    },
+    "suggestions": {
+     "tokens": [],
+     "contextCopilot": [
+      "@office"
+     ],
+     "tagCopilot": [
+      "#house",
+      "#work"
+     ],
+     "assignedTo": [],
+     "delegateWho": [],
+     "projects": [
+      "p-launch",
+      "p-home"
+     ],
+     "exactProject": false,
+     "similar": [
+      "next-e"
+     ],
+     "similarProjects": {
+      "p-launch": "Launch"
+     },
+     "timeEstimates": [
+      "5min",
+      "10min",
+      "15min",
+      "30min",
+      "1hr",
+      "2hr",
+      "3hr",
+      "4hr",
+      "4hr+"
+     ]
+    },
+    "writes": [],
+    "toasts": []
+   },
+   {
+    "closed": 0,
+    "taskId": "inbox-a",
+    "step": "file",
+    "back": true,
+    "fileIt": true,
+    "progress": "0/3 tasks",
+    "returning": false,
+    "counts": [
+     3,
+     0
+    ],
+    "draft": {
+     "title": "Call Alice about the launch",
+     "description": "",
+     "projectId": null,
+     "areaId": null,
+     "projectSearch": "",
+     "contexts": [
+      "@phone"
+     ],
+     "tags": [],
+     "tokenInput": "",
+     "priority": null,
+     "energyLevel": null,
+     "assignedTo": "",
+     "timeEstimate": null,
+     "startTime": null,
+     "dueDate": null,
+     "reviewAt": null,
+     "delegateWho": "",
+     "followUp": null,
+     "convertToProject": false,
+     "nextAction": "",
      "extraActions": [],
      "somedaySectionId": null,
      "showAdvancedOptions": true

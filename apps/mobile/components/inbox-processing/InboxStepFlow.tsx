@@ -129,6 +129,23 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
   const taskId = currentTask?.id;
 
   const dateOnlyLabel = t('taskEdit.dateOnly');
+  // The time picker opens on the row's day at its picked time, else the default schedule time.
+  const { timePickerField } = controller;
+  const timePickerValue = (() => {
+    if (!timePickerField) return null;
+    const day = {
+      startTime: pendingStartDate,
+      dueDate: controller.pendingDueDate,
+      reviewAt: controller.pendingReviewDate,
+      followUp: controller.delegateFollowUpDate,
+    }[timePickerField];
+    if (!day) return null;
+    const [hours, minutes] = (controller.pendingTimes[timePickerField] || controller.defaultScheduleTime || '09:00')
+      .split(':').map(Number);
+    const value = new Date(day);
+    value.setHours(hours, minutes, 0, 0);
+    return value;
+  })();
   const aiWorkingLabel = t('ai.working');
   const aiWorkingText = aiWorkingLabel === 'ai.working' ? 'Working...' : aiWorkingLabel;
   const primaryForeground = filledButton.textColor ?? tc.onTint;
@@ -237,6 +254,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
             pendingReviewDateOnly={controller.pendingReviewDateOnly}
             setPendingReviewDateOnly={controller.setPendingReviewDateOnly}
             setShowReviewDatePicker={controller.setShowReviewDatePicker}
+            pendingTimes={controller.pendingTimes}
+            openTimePicker={controller.setTimePickerField}
             tc={tc}
             defaultScheduleTime={controller.defaultScheduleTime}
             dateOnlyLabel={dateOnlyLabel}
@@ -412,6 +431,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               dateOnly={pendingStartDateOnly}
               onDateOnly={() => setPendingStartDateOnly(true)}
               onUseDefaultTime={controller.useDefaultStartTime}
+              time={controller.pendingTimes.startTime}
+              onOpenTime={() => controller.setTimePickerField('startTime')}
               defaultScheduleTime={controller.defaultScheduleTime}
               dateOnlyLabel={dateOnlyLabel}
               notSetLabel={t('common.notSet')}
@@ -445,6 +466,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               dateOnly={controller.pendingReviewDateOnly}
               onDateOnly={() => controller.setPendingReviewDateOnly(true)}
               onUseDefaultTime={() => controller.setPendingReviewDateOnly(false)}
+              time={controller.pendingTimes.reviewAt}
+              onOpenTime={() => controller.setTimePickerField('reviewAt')}
               defaultScheduleTime={controller.defaultScheduleTime}
               dateOnlyLabel={dateOnlyLabel}
               notSetLabel={t('common.notSet')}
@@ -471,6 +494,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               delegateFollowUpDateOnly={controller.delegateFollowUpDateOnly}
               setDelegateFollowUpDateOnly={controller.setDelegateFollowUpDateOnly}
               setShowDelegateDatePicker={controller.setShowDelegateDatePicker}
+              delegateFollowUpTime={controller.pendingTimes.followUp}
+              openTimePicker={controller.setTimePickerField}
               handleSendDelegateRequest={controller.handleSendDelegateRequest}
               defaultScheduleTime={controller.defaultScheduleTime}
               dateOnlyLabel={dateOnlyLabel}
@@ -599,6 +624,15 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               onSelect: (date) => {
                 controller.setDelegateFollowUpDate(date);
                 controller.setDelegateFollowUpDateOnly(false);
+              },
+            },
+            {
+              mode: 'time',
+              show: timePickerField !== null,
+              value: timePickerValue,
+              onClose: () => controller.setTimePickerField(null),
+              onSelect: (date) => {
+                if (timePickerField) controller.setPendingTime(timePickerField, date);
               },
             },
           ]}

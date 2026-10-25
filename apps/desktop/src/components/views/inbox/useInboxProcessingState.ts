@@ -8,6 +8,7 @@ import {
     getProjectChoiceState,
     normalizeClockTimeInput,
     openProcessInboxTask,
+    resolveDefaultNewTaskAreaId,
     resolveProcessInboxPlan,
     selectProcessInboxCandidates,
     setTaskDraftField,
@@ -233,6 +234,9 @@ export function useInboxProcessingState({
 
     // The task the draft was hydrated from: a step's write merges against it.
     const processingBaseRef = useRef<Task | null>(null);
+    // Read at hydrate time only, so a settings change never re-hydrates an open draft.
+    const defaultAreaIdRef = useRef<string | undefined>(undefined);
+    defaultAreaIdRef.current = resolveDefaultNewTaskAreaId(settings, areas);
     const hydrateProcessingTask = useCallback((
         task: Task,
         session?: ProcessInboxSession<ProcessingStep>,
@@ -243,9 +247,13 @@ export function useInboxProcessingState({
         setQuickTwoMinuteChoice('no');
         setQuickExecutionChoice('defer');
         // Keep an area assigned while the task sat in the inbox; a project home
-        // outranks the direct area (container exclusivity).
+        // outranks the direct area (container exclusivity). A capture with neither
+        // starts in the default area (#1445).
         const taskDraft = createTaskDraft(task);
-        setDraft(task.projectId ? setTaskDraftField(taskDraft, 'areaId', '') : taskDraft);
+        const defaultAreaId = defaultAreaIdRef.current;
+        setDraft(task.projectId
+            ? setTaskDraftField(taskDraft, 'areaId', '')
+            : !task.areaId && defaultAreaId ? setTaskDraftField(taskDraft, 'areaId', defaultAreaId) : taskDraft);
         setCustomContext('');
         setCustomTag('');
         setProjectSearch('');

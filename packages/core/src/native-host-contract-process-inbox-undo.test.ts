@@ -42,7 +42,7 @@ const prepareDecision = (sqlite: Sqlite, kind: Decision = 'next'): NativeInboxDe
         if (answer.kind === 'flow') { view = answer.result.view!; return null; }
         return { request, prepared: answer.prepared };
     };
-    if (['next', 'reference', 'done', 'trash'].includes(kind)) return choose(kind)!;
+    if (['reference', 'done', 'trash'].includes(kind)) return choose(kind)!;
     expect(choose(kind === 'waiting' ? 'delegate' : kind)).toBeNull();
     if (kind === 'waiting') edit('delegateWho', 'Team');
     if (kind === 'later' || kind === 'incubate') {

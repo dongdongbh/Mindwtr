@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { isProcessInboxReturningTask, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
+import { isProcessInboxReturningTask, useTaskStore, type AppData, type Area, type Project, type Task } from '@mindwtr/core';
 import { useUiStore } from '../../../store/ui-store';
 import { useInboxProcessingController } from './useInboxProcessingController';
 import { holdSyncSave } from '../../../test/hold-sync-save';
@@ -547,14 +547,17 @@ describe('useInboxProcessingController draft writes', () => {
         { id: 'p2', title: 'Work Project', status: 'active', areaId: 'area-1' } as Project,
     ];
 
-    const renderController = () => renderHook(() => {
+    const renderController = (
+        areas: Area[] = [],
+        settings: AppData['settings'] = {},
+    ) => renderHook(() => {
         const [isProcessing, setIsProcessing] = useState(true);
         return useInboxProcessingController({
             t: (key) => key,
             tasks,
             projects,
-            areas: [],
-            settings: {},
+            areas,
+            settings,
             addProject: async () => null,
             addTask: async () => ({ success: true }),
             updateTask: async () => ({ success: true }),
@@ -588,6 +591,15 @@ describe('useInboxProcessingController draft writes', () => {
             result.current.wizardProps.setField('title', 'Clarified');
         });
         expect(result.current.wizardProps.draft).toBe(draft);
+    });
+
+    it('starts a capture with no project or area in the default area (#1445)', async () => {
+        const { result } = renderController(
+            [{ id: 'area-1', name: 'Work' } as Area],
+            { gtd: { defaultAreaMode: 'fixed', defaultAreaId: 'area-1' } } as AppData['settings'],
+        );
+        await openFirstTask(result);
+        expect(result.current.wizardProps.draft.areaId).toBe('area-1');
     });
 
     it('drops a project that lives outside a newly picked area, and keeps one inside it', async () => {

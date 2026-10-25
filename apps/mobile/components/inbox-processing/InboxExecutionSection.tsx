@@ -5,6 +5,7 @@ import { UserRound } from 'lucide-react-native';
 import { styles } from '../inbox-processing-modal.styles';
 import { InboxDateSelectorRow } from './InboxDateSelectorRow';
 import { InboxSuggestionList } from './InboxSuggestionList';
+import type { ProcessInboxDateField } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
 /** The delegate detail step: who, follow-up date, and the hand-off message. */
@@ -20,6 +21,8 @@ type Props = {
   delegateFollowUpDateOnly: boolean;
   setDelegateFollowUpDateOnly: (v: boolean) => void;
   setShowDelegateDatePicker: (v: boolean) => void;
+  delegateFollowUpTime?: string;
+  openTimePicker: (field: ProcessInboxDateField) => void;
   handleSendDelegateRequest: () => void;
   defaultScheduleTime?: string | null;
   dateOnlyLabel: string;
@@ -37,6 +40,8 @@ export function InboxExecutionSection({
   delegateFollowUpDateOnly,
   setDelegateFollowUpDateOnly,
   setShowDelegateDatePicker,
+  delegateFollowUpTime,
+  openTimePicker,
   handleSendDelegateRequest,
   defaultScheduleTime,
   dateOnlyLabel,
@@ -72,6 +77,8 @@ export function InboxExecutionSection({
           dateOnly={delegateFollowUpDateOnly}
           onDateOnly={() => setDelegateFollowUpDateOnly(true)}
           onUseDefaultTime={() => setDelegateFollowUpDateOnly(false)}
+          time={delegateFollowUpTime}
+          onOpenTime={() => openTimePicker('followUp')}
           defaultScheduleTime={defaultScheduleTime}
           dateOnlyLabel={dateOnlyLabel}
           notSetLabel={t('common.notSet')}

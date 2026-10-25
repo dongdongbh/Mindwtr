@@ -5,6 +5,8 @@ import { normalizeProcessInboxPickedDate } from '@mindwtr/core';
 
 export type DatePickerConfig = {
   show: boolean;
+  /** 'time' picks a clock time; the date picker keeps only the day. */
+  mode?: 'date' | 'time';
   value: Date | null;
   onClose: () => void;
   onSelect: (date: Date) => void;
@@ -22,7 +24,7 @@ export function InboxDatePickers({ configs }: Props) {
           <DateTimePicker
             key={i}
             value={cfg.value ?? new Date()}
-            mode="date"
+            mode={cfg.mode ?? 'date'}
             display="default"
             onChange={(event, date) => {
               if (event.type === 'dismissed') {
@@ -31,7 +33,7 @@ export function InboxDatePickers({ configs }: Props) {
               }
               if (Platform.OS !== 'ios') cfg.onClose();
               if (!date) return;
-              cfg.onSelect(normalizeProcessInboxPickedDate(date));
+              cfg.onSelect(cfg.mode === 'time' ? date : normalizeProcessInboxPickedDate(date));
             }}
           />
         ) : null,

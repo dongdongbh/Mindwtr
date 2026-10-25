@@ -323,10 +323,11 @@ describe('native prepared Process Inbox writer', () => {
         const state = { ...baseline, _allTasks: tasks, _tasksById: new Map(tasks.map((task) => [task.id, task])) };
         const parseTitle = createProcessInboxTitleParser({ settings: state.settings,
             tasks, people: [], projects: state._allProjects, areas: state._allAreas });
-        const request = { sessionId: 'bounded-archived-session', taskId: source.id, step: 'decisions',
-            decision: { choice: 'next' }, requestId: generateUUID() };
+        const request = { sessionId: 'bounded-archived-session', taskId: source.id, step: 'file',
+            decision: { choice: 'fileIt' }, requestId: generateUUID() };
         const prepared = prepareNativeInboxWrite({ request, source, mode: 'quick',
-            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'actionable' },
+            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'actionable', twoMinute: 'no',
+                execution: 'defer', oneActionAnswered: true },
             draft: createProcessInboxDraft(source), plan: resolveProcessInboxPlan(state.settings),
             committed: 'next', decisionKind: 'next', state, parseTitle });
         expect(prepared.kind).toBe('prepared');

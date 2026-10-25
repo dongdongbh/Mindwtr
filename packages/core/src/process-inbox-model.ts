@@ -275,7 +275,8 @@ export type ProcessInboxTaskDefaults = {
     dates: Record<ProcessInboxScheduleField, { value: string | null; dateOnly: boolean }>;
 };
 
-export function getProcessInboxTaskDefaults(task: Task | null | undefined): ProcessInboxTaskDefaults {
+/** `defaultAreaId` (resolveDefaultNewTaskAreaId) fills the area of a capture that has neither a project nor an area (#1445). */
+export function getProcessInboxTaskDefaults(task: Task | null | undefined, defaultAreaId?: string | null): ProcessInboxTaskDefaults {
     const dateDefault = (value: string | undefined) => ({
         value: value || null,
         dateOnly: Boolean(value) && !hasTimeComponent(value),
@@ -286,7 +287,7 @@ export function getProcessInboxTaskDefaults(task: Task | null | undefined): Proc
         projectId: task?.projectId ?? null,
         // Keep an area assigned while the task sat in the Inbox; a project home
         // outranks the direct area (container exclusivity).
-        areaId: task?.projectId ? null : (task?.areaId ?? null),
+        areaId: task?.projectId ? null : (task?.areaId ?? defaultAreaId ?? null),
         contexts: task?.contexts ?? [],
         tags: task?.tags ?? [],
         priority: task?.priority,
@@ -320,31 +321,34 @@ export function getProcessInboxDefaultScheduleTime(settings: AppSettings | undef
 }
 
 /**
- * A picked date as the store value. Only the calendar day survives: the
- * default schedule time, unless the date is date-only, replaces any clock time.
+ * A picked date as the store value. Only the calendar day survives: a time the
+ * user picked ("HH:mm"), else the default schedule time, unless the date is
+ * date-only, replaces any clock time.
  */
 export function formatProcessInboxScheduleValue(
     value: Date | string,
     dateOnly: boolean,
     defaultScheduleTime: string,
+    time?: string,
 ): string {
     const dateOnlyValue = createDateFormatter({ calendarSystem: 'gregorian' })(value, 'yyyy-MM-dd');
-    return defaultScheduleTime && !dateOnly ? `${dateOnlyValue}T${defaultScheduleTime}` : dateOnlyValue;
+    const clock = time || defaultScheduleTime;
+    return clock && !dateOnly ? `${dateOnlyValue}T${clock}` : dateOnlyValue;
 }
 
 const formatProcessInboxStart = (date: ProcessInboxPendingDate, defaultTime: string, stored?: string): string | undefined => {
     if (!date.value) return undefined;
-    if (!stored || date.dateOnly || date.useDefaultTime || !hasTimeComponent(stored)) {
-        return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime);
+    if (!stored || date.dateOnly || date.useDefaultTime || date.time || !hasTimeComponent(stored)) {
+        return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime, date.time);
     }
     const parsed = safeParseDate(stored);
-    if (!parsed) return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime);
+    if (!parsed) return formatProcessInboxScheduleValue(date.value, date.dateOnly, defaultTime, date.time);
     const formatDate = createDateFormatter({ calendarSystem: 'gregorian' });
     const day = formatDate(date.value, 'yyyy-MM-dd');
     return day === formatDate(parsed, 'yyyy-MM-dd') ? stored : `${day}T${formatDate(parsed, 'HH:mm')}`;
 };
 
-export type ProcessInboxPendingDate = { value: Date | string | null; dateOnly: boolean; useDefaultTime?: boolean };
+export type ProcessInboxPendingDate = { value: Date | string | null; dateOnly: boolean; useDefaultTime?: boolean; time?: string };
 
 export function buildProcessInboxScheduleUpdates(
     plan: Pick<ProcessInboxPlan, 'visibleFields'>,
@@ -356,12 +360,12 @@ export function buildProcessInboxScheduleUpdates(
     const updates: Partial<Task> = {};
     for (const field of ['startTime', 'dueDate', 'reviewAt'] as const) {
         if (!plan.visibleFields[field]) continue;
-        const { value, dateOnly } = dates[field];
+        const { value, dateOnly, time } = dates[field];
         updates[field] = field === 'startTime' && task?.startTime
             ? formatProcessInboxStart(dates.startTime, defaultScheduleTime, task.startTime)
             : !dirtyFields.has(field) && task?.[field]
                 ? task[field]
-                : value ? formatProcessInboxScheduleValue(value, dateOnly, defaultScheduleTime) : undefined;
+                : value ? formatProcessInboxScheduleValue(value, dateOnly, defaultScheduleTime, time) : undefined;
     }
     return updates;
 }
@@ -503,7 +507,7 @@ export function buildProcessInboxDecisionRequest(
     },
 ): { ok: true; decision: ProcessInboxDecision; options: ProcessInboxCommitOptions } | { ok: false; reason: 'incubate-date-required' } {
     const format = (date: ProcessInboxPendingDate) => (
-        date.value ? formatProcessInboxScheduleValue(date.value, date.dateOnly, input.defaultScheduleTime) : undefined
+        date.value ? formatProcessInboxScheduleValue(date.value, date.dateOnly, input.defaultScheduleTime, date.time) : undefined
     );
     const staleReviewDate = isDueForReview(input.task.reviewAt, input.now ?? new Date());
     const somedayFields = (): ProcessInboxWorkflowFields => ({
@@ -1008,8 +1012,8 @@ export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
 // ---------------------------------------------------------------------------
 // The draft as plain JSON, and the one commit path both clients run
 
-/** A calendar day, `yyyy-MM-dd` in local time. */
-export type ProcessInboxDateValue = { date: string; dateOnly: boolean; useDefaultTime?: boolean } | null;
+/** A calendar day, `yyyy-MM-dd` in local time; `time` is a clock time ("HH:mm") the user picked (#1445). */
+export type ProcessInboxDateValue = { date: string; dateOnly: boolean; useDefaultTime?: boolean; time?: string } | null;
 export type ProcessInboxDateField = ProcessInboxScheduleField | 'followUp';
 
 export type ProcessInboxDraft = {
@@ -1044,8 +1048,8 @@ const toDateValue = (value: string | null, dateOnly: boolean): ProcessInboxDateV
     return parsed ? { date: safeFormatDate(parsed, 'yyyy-MM-dd'), dateOnly } : null;
 };
 
-export function createProcessInboxDraft(task: Task): ProcessInboxDraft {
-    const defaults = getProcessInboxTaskDefaults(task);
+export function createProcessInboxDraft(task: Task, defaultAreaId?: string | null): ProcessInboxDraft {
+    const defaults = getProcessInboxTaskDefaults(task, defaultAreaId);
     return {
         title: defaults.title,
         description: defaults.description,
@@ -1075,7 +1079,8 @@ export function createProcessInboxDraft(task: Task): ProcessInboxDraft {
 
 const pendingDate = (value: ProcessInboxDateValue): ProcessInboxPendingDate => (
     value ? { value: value.date, dateOnly: value.dateOnly,
-        ...(value.useDefaultTime ? { useDefaultTime: true } : {}) } : { value: null, dateOnly: false }
+        ...(value.useDefaultTime ? { useDefaultTime: true } : {}),
+        ...(value.time ? { time: value.time } : {}) } : { value: null, dateOnly: false }
 );
 
 /** The collapsed capture card's plain-text, 200 UTF-16-code-unit preview. */
@@ -1951,8 +1956,13 @@ export function answerProcessInboxStep(input: {
             if (choice === 'trash') return commit('trash', 'trash');
             return { type: 'invalid' };
         case 'decisions':
-            if (choice === 'next') return commit('next', 'next');
             if (choice === 'done' && plan.twoMinuteEnabled) return commit('complete', 'done');
+            // "I'll do it" opens the file step, as guided mode and desktop do, so the capture can be organized first (#1445).
+            // It is a single action, so it drops a project split that Back kept.
+            if (choice === 'next') {
+                return flow(chooseQuickProcessInboxDestination(answers, choice, plan),
+                    { ...draft, convertToProject: false, nextAction: '', extraActions: [] });
+            }
             if ((choice === 'project' && plan.visibleFields.project) || choice === 'later' || choice === 'delegate') {
                 return flow(chooseQuickProcessInboxDestination(answers, choice, plan));
             }

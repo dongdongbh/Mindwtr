@@ -31,6 +31,7 @@ import {
   getProcessInboxSimilarTasks,
   getProcessInboxSuggestionTerms,
   getProcessInboxTaskDefaults,
+  resolveDefaultNewTaskAreaId,
   getProcessInboxTokenPools,
   getProcessInboxTokenSuggestions,
   INITIAL_PROCESS_INBOX_ANSWERS,
@@ -61,6 +62,7 @@ import {
   type ProcessInboxAnswers,
   type ProcessInboxChoiceOutcome,
   type ProcessInboxCommitKind,
+  type ProcessInboxDateField,
   type ProcessInboxDraft,
   type ProcessInboxMode,
   type ProcessInboxSession,
@@ -116,6 +118,10 @@ type InboxProcessingControllerParams = {
   visible: boolean;
   onClose: () => void;
 };
+
+const withoutPendingTime = (field: ProcessInboxDateField) => (
+  (prev: Partial<Record<ProcessInboxDateField, string>>) => (prev[field] ? { ...prev, [field]: undefined } : prev)
+);
 
 export function useInboxProcessingController({
   visible,
@@ -174,6 +180,9 @@ export function useInboxProcessingController({
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [showReviewDatePicker, setShowReviewDatePicker] = useState(false);
+  // A clock time ("HH:mm") the user picked per date row; it wins over the default schedule time (#1445).
+  const [pendingTimes, setPendingTimes] = useState<Partial<Record<ProcessInboxDateField, string>>>({});
+  const [timePickerField, setTimePickerField] = useState<ProcessInboxDateField | null>(null);
   const [isAIWorking, setIsAIWorking] = useState(false);
   const [appleClarificationBackend, setAppleClarificationBackend] = useState<'configured' | 'on-device'>('configured');
   const [aiModal, setAiModal] = useState<{ title: string; message?: string; actions: AIResponseAction[] } | null>(null);
@@ -190,6 +199,9 @@ export function useInboxProcessingController({
   const processingScrollRef = useRef<any>(null);
   const hasInitialized = useRef(false);
   const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
+  // Read at prime time only: a settings change must not re-prime (and reset) the open draft.
+  const defaultAreaIdRef = useRef<string | null>(null);
+  defaultAreaIdRef.current = resolveDefaultNewTaskAreaId(settings, areas) ?? null;
   const { projectFirst, referenceEnabled } = processInboxPlan;
   const {
     project: showProjectField,
@@ -416,7 +428,7 @@ export function useInboxProcessingController({
     // The task the draft is filled from: the base its save merges against. currentTask follows the live store, so a
     // sync that lands before the decision would read as the draft's own change.
     processingBaseRef.current = task ?? null;
-    const defaults = getProcessInboxTaskDefaults(task);
+    const defaults = getProcessInboxTaskDefaults(task, defaultAreaIdRef.current);
     const { startTime, dueDate, reviewAt } = defaults.dates;
     dirtyScheduleFieldsRef.current.clear();
     useDefaultStartTimeRef.current = false;
@@ -431,6 +443,8 @@ export function useInboxProcessingController({
     setShowStartDatePicker(false);
     setShowDueDatePicker(false);
     setShowReviewDatePicker(false);
+    setPendingTimes({});
+    setTimePickerField(null);
     setDelegateWho('');
     setDelegateFollowUpDate(null);
     setDelegateFollowUpDateOnly(false);
@@ -454,36 +468,62 @@ export function useInboxProcessingController({
     setProcessingDescription(defaults.description);
   }, [resetTitleFocus]);
 
+  // Clearing a row or making it date-only drops its picked time, so the default time comes back.
   const setPendingStartDateFromControl = useCallback((value: Date | null) => {
     dirtyScheduleFieldsRef.current.add('startTime');
     useDefaultStartTimeRef.current = false;
     setPendingStartDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('startTime'));
   }, []);
   const setPendingStartDateOnlyFromControl = useCallback((value: boolean) => {
     dirtyScheduleFieldsRef.current.add('startTime');
     useDefaultStartTimeRef.current = false;
     setPendingStartDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('startTime'));
   }, []);
   const useDefaultStartTimeFromControl = useCallback(() => {
     dirtyScheduleFieldsRef.current.add('startTime');
     useDefaultStartTimeRef.current = true;
     setPendingStartDateOnly(false);
+    setPendingTimes(withoutPendingTime('startTime'));
   }, []);
   const setPendingDueDateFromControl = useCallback((value: Date | null) => {
     dirtyScheduleFieldsRef.current.add('dueDate');
     setPendingDueDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('dueDate'));
   }, []);
   const setPendingDueDateOnlyFromControl = useCallback((value: boolean) => {
     dirtyScheduleFieldsRef.current.add('dueDate');
     setPendingDueDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('dueDate'));
   }, []);
   const setPendingReviewDateFromControl = useCallback((value: Date | null) => {
     dirtyScheduleFieldsRef.current.add('reviewAt');
     setPendingReviewDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('reviewAt'));
   }, []);
   const setPendingReviewDateOnlyFromControl = useCallback((value: boolean) => {
     dirtyScheduleFieldsRef.current.add('reviewAt');
     setPendingReviewDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('reviewAt'));
+  }, []);
+  const setDelegateFollowUpDateFromControl = useCallback((value: Date | null) => {
+    setDelegateFollowUpDate(value);
+    if (!value) setPendingTimes(withoutPendingTime('followUp'));
+  }, []);
+  const setDelegateFollowUpDateOnlyFromControl = useCallback((value: boolean) => {
+    setDelegateFollowUpDateOnly(value);
+    if (value) setPendingTimes(withoutPendingTime('followUp'));
+  }, []);
+  // A time from the time picker: the row stops being date-only and counts as user input, like a picked date.
+  const setPendingTimeFromControl = useCallback((field: ProcessInboxDateField, picked: Date) => {
+    if (field !== 'followUp') dirtyScheduleFieldsRef.current.add(field);
+    if (field === 'startTime') useDefaultStartTimeRef.current = false;
+    if (field === 'startTime') setPendingStartDateOnly(false);
+    if (field === 'dueDate') setPendingDueDateOnly(false);
+    if (field === 'reviewAt') setPendingReviewDateOnly(false);
+    if (field === 'followUp') setDelegateFollowUpDateOnly(false);
+    setPendingTimes((prev) => ({ ...prev, [field]: safeFormatDate(picked, 'HH:mm') }));
   }, []);
 
   const activateProcessingSession = useCallback((
@@ -596,9 +636,10 @@ export function useInboxProcessingController({
 
   /** The draft as plain values, the shape core commits. */
   const buildDraft = useCallback((): ProcessInboxDraft => {
-    const dateValue = (date: Date | null, dateOnly: boolean, useDefaultTime = false) => (
+    const dateValue = (date: Date | null, dateOnly: boolean, useDefaultTime = false, time?: string) => (
       date ? { date: safeFormatDate(date, 'yyyy-MM-dd'), dateOnly,
-        ...(useDefaultTime ? { useDefaultTime: true } : {}) } : null
+        ...(useDefaultTime ? { useDefaultTime: true } : {}),
+        ...(time && !dateOnly ? { time } : {}) } : null
     );
     return {
       title: processingTitle,
@@ -613,11 +654,11 @@ export function useInboxProcessingController({
       energyLevel: selectedEnergyLevel ?? null,
       assignedTo: selectedAssignedTo,
       timeEstimate: selectedTimeEstimate ?? null,
-      startTime: dateValue(pendingStartDate, pendingStartDateOnly, useDefaultStartTimeRef.current),
-      dueDate: dateValue(pendingDueDate, pendingDueDateOnly),
-      reviewAt: dateValue(pendingReviewDate, pendingReviewDateOnly),
+      startTime: dateValue(pendingStartDate, pendingStartDateOnly, useDefaultStartTimeRef.current, pendingTimes.startTime),
+      dueDate: dateValue(pendingDueDate, pendingDueDateOnly, false, pendingTimes.dueDate),
+      reviewAt: dateValue(pendingReviewDate, pendingReviewDateOnly, false, pendingTimes.reviewAt),
       delegateWho,
-      followUp: dateValue(delegateFollowUpDate, delegateFollowUpDateOnly),
+      followUp: dateValue(delegateFollowUpDate, delegateFollowUpDateOnly, false, pendingTimes.followUp),
       convertToProject,
       nextAction: nextActionDraft,
       extraActions: extraActionDrafts,
@@ -639,6 +680,7 @@ export function useInboxProcessingController({
     pendingReviewDateOnly,
     pendingStartDate,
     pendingStartDateOnly,
+    pendingTimes,
     processingDescription,
     processingTitle,
     projectSearch,
@@ -1237,6 +1279,10 @@ export function useInboxProcessingController({
     pendingReviewDateOnly,
     pendingStartDate,
     pendingStartDateOnly,
+    pendingTimes,
+    setPendingTime: setPendingTimeFromControl,
+    timePickerField,
+    setTimePickerField,
     processInboxPlan,
     processingDescription,
     processingScrollRef,
@@ -1257,8 +1303,8 @@ export function useInboxProcessingController({
     selectedTimeEstimate,
     setSelectedAreaId,
     setSelectedAssignedTo,
-    setDelegateFollowUpDate,
-    setDelegateFollowUpDateOnly,
+    setDelegateFollowUpDate: setDelegateFollowUpDateFromControl,
+    setDelegateFollowUpDateOnly: setDelegateFollowUpDateOnlyFromControl,
     setDelegateWho,
     setNewContext,
     setPendingDueDate: setPendingDueDateFromControl,

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
-import { safeFormatDate, type QuickDatePreset } from '@mindwtr/core';
+import { Clock } from 'lucide-react-native';
+import { safeFormatDate, tFallback, type QuickDatePreset } from '@mindwtr/core';
 
 import { QuickDateChips } from '../QuickDateChips';
 import { styles } from '../inbox-processing-modal.styles';
@@ -19,6 +20,10 @@ type Props = {
   dateOnly?: boolean;
   onDateOnly?: () => void;
   onUseDefaultTime?: () => void;
+  /** A clock time ("HH:mm") the user picked for this row; shown after the date. */
+  time?: string;
+  /** Opens the time picker, as the task editor's clock button does. */
+  onOpenTime?: () => void;
   defaultScheduleTime?: string | null;
   dateOnlyLabel: string;
   notSetLabel: string;
@@ -39,13 +44,17 @@ export function InboxDateSelectorRow({
   dateOnly,
   onDateOnly,
   onUseDefaultTime,
+  time,
+  onOpenTime,
   defaultScheduleTime,
   dateOnlyLabel,
   notSetLabel,
   clearLabel,
   tc,
 }: Props) {
-  const displayValue = value ? safeFormatDate(value.toISOString(), 'P') : notSetLabel;
+  const displayValue = value
+    ? `${safeFormatDate(value.toISOString(), 'P')}${time ? ` ${time}` : ''}`
+    : notSetLabel;
   const describeAction = (action: string) => `${label}: ${action}`;
   const dateModeAction = dateOnly
     ? `${t('settings.gtdMobile.defaultScheduleTime')}: ${defaultScheduleTime}`
@@ -76,7 +85,17 @@ export function InboxDateSelectorRow({
             <Text style={[styles.startDateClearText, { color: tc.secondaryText }]}>{clearLabel}</Text>
           </TouchableOpacity>
         )}
-        {value && defaultScheduleTime && onDateOnly && onUseDefaultTime && (
+        {value && onOpenTime && (
+          <TouchableOpacity
+            accessibilityLabel={describeAction(time || tFallback(t, 'calendar.changeTime', 'Add time'))}
+            accessibilityRole="button"
+            style={[styles.startDateClear, { borderColor: tc.border }]}
+            onPress={onOpenTime}
+          >
+            <Clock size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
+          </TouchableOpacity>
+        )}
+        {value && (defaultScheduleTime || time) && onDateOnly && onUseDefaultTime && (
           <TouchableOpacity
             accessibilityLabel={describeAction(dateModeAction)}
             accessibilityRole="button"

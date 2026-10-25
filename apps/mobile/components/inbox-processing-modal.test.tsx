@@ -264,6 +264,9 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
     resolveAutoTextDirection: vi.fn(() => 'ltr'),
     safeFormatDate: vi.fn((value: Date | string, formatStr: string) => {
       if (formatStr === 'yyyy-MM-dd') return formatDateOnly(value);
+      if (formatStr === 'HH:mm' && value instanceof Date) {
+        return `${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`;
+      }
       return 'Jan 1, 2025';
     }),
     safeParseDate: vi.fn((value?: string) => (value ? new Date(value) : null)),
@@ -758,6 +761,13 @@ describe('InboxProcessingModal', () => {
 
     await act(async () => {
       findPressableWithText(root, 'inbox.illDoIt').props.onPress();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // Quick "I'll do it" opens the file step first (#1445).
+    expect(updateTask).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      findPressableWithText(root, 'File it').props.onPress();
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -1963,6 +1973,115 @@ describe('InboxProcessingModal', () => {
     );
   });
 
+  // #1445: each date row gets the task editor's clock button; a picked time is what gets stored.
+  describe('picked times', () => {
+    const pickerWithMode = (root: ReturnType<typeof create>['root'], mode: 'date' | 'time') => {
+      const pickers = root.findAllByType('DateTimePicker' as any).filter((node) => (node.props.mode ?? 'date') === mode);
+      expect(pickers).toHaveLength(1);
+      return pickers[0];
+    };
+
+    const pickLaterStartDate = (root: ReturnType<typeof create>['root']) => {
+      act(() => {
+        findPressableWithText(root, 'Start later').props.onPress();
+      });
+      act(() => {
+        root.findByProps({ children: 'common.notSet' }).parent!.props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'date').props.onChange({ type: 'set' }, new Date(2026, 2, 23, 12, 0, 0));
+      });
+    };
+
+    it('stores the start time picked after the date', async () => {
+      setPlatform('android');
+      mockSettings.gtd.defaultScheduleTime = '09:00';
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      const root = tree!.root;
+      pickLaterStartDate(root);
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.startDateLabel: Add time' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'time').props.onChange({ type: 'set' }, new Date(2026, 2, 23, 14, 30, 0));
+      });
+      expect(root.findAllByType('DateTimePicker' as any)).toHaveLength(0);
+      expect(root.findAllByProps({ accessibilityLabel: 'taskEdit.startDateLabel: 14:30' }).length).toBeGreaterThan(0);
+
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        startTime: '2026-03-23T14:30',
+      }));
+    });
+
+    it('keeps the default time when the time dialog is cancelled', async () => {
+      setPlatform('android');
+      mockSettings.gtd.defaultScheduleTime = '09:00';
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      const root = tree!.root;
+      pickLaterStartDate(root);
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.startDateLabel: Add time' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'time').props.onChange({ type: 'dismissed' }, undefined);
+      });
+      expect(root.findAllByType('DateTimePicker' as any)).toHaveLength(0);
+
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        startTime: '2026-03-23T09:00',
+      }));
+    });
+
+    it('stores a picked due time without a default schedule time', async () => {
+      setPlatform('android');
+      mockSettings.gtd.inboxProcessing = { scheduleEnabled: true };
+      mockSettings.gtd.taskEditor = { hidden: [] };
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(<InboxProcessingModal visible onClose={vi.fn()} />);
+      });
+      const root = tree!.root;
+      walkToFileStep(root);
+      expandMoreOptions(root);
+
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.dueDateLabel', accessibilityRole: 'button' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'date').props.onChange({ type: 'set' }, new Date(2026, 8, 18, 12, 0, 0));
+      });
+      act(() => {
+        root.findByProps({ accessibilityLabel: 'taskEdit.dueDateLabel: Add time' }).props.onPress();
+      });
+      act(() => {
+        pickerWithMode(root, 'time').props.onChange({ type: 'set' }, new Date(2026, 8, 18, 17, 45, 0));
+      });
+
+      pressStep(root, 'File it');
+      await flushAsyncActions();
+
+      expect(updateTask).toHaveBeenCalledWith('inbox-1', expect.objectContaining({
+        status: 'next',
+        dueDate: '2026-09-18T17:45',
+      }));
+    });
+  });
+
   it('requires a start date before filing a Later item', async () => {
     const onClose = vi.fn();
     let tree: ReturnType<typeof create>;
@@ -2971,6 +3090,8 @@ describe('InboxProcessingModal', () => {
 
       const quick = await openFlow();
       await pressAsync(quick, 'inbox.illDoIt');
+      expect(updateTask).not.toHaveBeenCalled();
+      await pressAsync(quick, 'File it');
 
       expect(updateTask).toHaveBeenCalledTimes(1);
       expect(updateTask.mock.calls[0]).toEqual(guidedCall);

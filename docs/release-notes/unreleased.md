@@ -22,3 +22,7 @@ Changes collected since the latest stable release.
 - Mobile: after an import, the message now shows why tasks were skipped (for example, tasks imported earlier and then deleted) right below the counts. Before, the reason sat below the snapshot name and was cut off, so "Imported 0 task(s)" had no explanation (#1447).
 - Android and iOS: if moving your data into the app's database fails at start, Mindwtr shows your tasks from the older copy and blocks saving until the move succeeds. Before, it showed an empty library and could later save that empty library over the older copy.
 - Android and iOS: when Mindwtr moves your data into its database for the first time, it now keeps the settings that belong to this device, such as notification choices. Before, those went back to their defaults.
+||||||| parent of 3b2f0052c (fix: quick I'll do it opens the filing step, processing dates take a time and start in the default area (#1445))
+- Mobile: in quick Process Inbox, "I'll do it" now opens the filing step (project, area, contexts, dates) before moving the task to Next, as guided mode and desktop do (#1445).
+- Mobile: Process Inbox date rows have a clock button, so you can set a time for start, due, review and follow-up dates (#1445).
+- Mobile and desktop: Process Inbox starts a capture with no project or area in your default area (#1445).
