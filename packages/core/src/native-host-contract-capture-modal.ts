@@ -73,7 +73,6 @@ import {
     type CaptureModalView,
 } from './capture-modal-model';
 import { isAIKeyRequired } from './ai-config';
-import { resolveDefaultNewTaskAreaId } from './area-utils';
 import type { DateFormatter } from './date';
 import type { TranslateFn } from './i18n';
 import { NATIVE_HOST_CONTRACT_VERSION, type NativeHostResult } from './native-host-contract';
@@ -81,7 +80,7 @@ import { fail, isObjectRecord, isText, isTimeEstimate } from './native-host-cont
 import { captureProjectId, captureProjects, isTaskOfPlan } from './native-host-contract-quick-capture';
 import { createNativeRequestReceipts, withRequestProject } from './native-request-receipts';
 import { buildQuickAddParseOptions, parseQuickAdd, splitQuickAddBulkLines, type QuickAddParseOptions } from './quick-add';
-import { getQuickCaptureInvalidDateNotice, type QuickCaptureNotice } from './quick-capture-model';
+import { getQuickCaptureInvalidDateNotice, resolveQuickCaptureDefaultAreaId, type QuickCaptureNotice } from './quick-capture-model';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { useTaskStore } from './store';
 import type { Project, Task } from './types';
@@ -249,7 +248,8 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             projects,
             initialProps: presetOf(params),
             projectParam: readCaptureModalProjectParam(params),
-            defaultAreaId: resolveDefaultNewTaskAreaId(state.settings, state.areas),
+            // The active area filter too, as the in-app + does (#1460).
+            defaultAreaId: resolveQuickCaptureDefaultAreaId(state.settings, state.areas) ?? undefined,
             description: draft.description,
             copilot: draft.applied,
             timeEstimatesEnabled: resolveFeatureFlags(state.settings).timeEstimates,

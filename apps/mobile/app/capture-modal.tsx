@@ -24,7 +24,7 @@ import {
   getUsedTaskTokens,
   getSavedTaxonomyTokens,
   parseQuickAdd,
-  resolveDefaultNewTaskAreaId,
+  resolveQuickCaptureDefaultAreaId,
   formatQuickAddHelp,
   resolveFeatureFlags,
   shallow,
@@ -103,7 +103,8 @@ export default function CaptureScreen() {
     () => readCaptureModalInitialProps(params.initialProps, projects, areas),
     [areas, params.initialProps, projects]
   );
-  const defaultNewTaskAreaId = resolveDefaultNewTaskAreaId(settings, areas);
+  // Widget, shade-tile and shortcut captures land here: they take the active area filter too, as the in-app + does (#1460).
+  const defaultNewTaskAreaId = resolveQuickCaptureDefaultAreaId(settings, areas) ?? undefined;
   const returnTo = React.useMemo(
     () => sanitizeCaptureReturnToParam(params.returnTo),
     [params.returnTo]

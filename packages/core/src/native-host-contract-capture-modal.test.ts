@@ -480,6 +480,19 @@ describe('native host contract: the capture confirmation screen', () => {
         expect(value(await host.submitCaptureModalLines({ ...lines, draft: { ...draft, text: 'Plan beds\nPay rent' } }))).toMatchObject({ kind: 'saved', taskIds: ids });
     });
 
+    it.each([
+        [{ areaId: 'a-work' }, 'a-work'],
+        [{}, '<undefined>'],
+    ])('files a capture in the active area filter %j when new tasks follow it (#1460)', async (filters, areaId) => {
+        const log: unknown[][] = [];
+        const settings = { ...fixture.settings.ai, gtd: { ...fixture.settings.ai.gtd, defaultAreaMode: 'active' as const }, filters };
+        const host = await openScreenHost({ data: { ...data, settings }, record: { addTask: 2 }, log });
+        const params = { initialValue: 'Call plumber' };
+        const opened = value(host.openCaptureModal({ params }));
+        value(await host.submitCaptureModal({ params, draft: opened.draft, captureId: requestId() }));
+        expect(log).toEqual([['addTask', 'Call plumber', { status: 'inbox', areaId }]]);
+    });
+
     it('leaves shared files out, and checks what the host sends', async () => {
         const log: unknown[][] = [];
         const host = await openScreenHost({ data, record: { addTask: 2 }, log });
