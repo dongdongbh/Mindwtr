@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -78,6 +79,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -472,8 +475,10 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     // The open date picker (a date field, or "until" for the recurrence end) and the open time picker (a date field).
     var pickDate by rememberSaveable { mutableStateOf<String?>(null) }
     var pickTime by rememberSaveable { mutableStateOf<String?>(null) }
+    // RN's ExpandedMarkdownEditor over the form, for the description (its Expand button).
+    var descriptionExpanded by rememberSaveable(editor.id) { mutableStateOf(false) }
     // An open picker keeps the editor from a widget tap or link (editorClean), as RN's showDatePicker and list pickers do.
-    val pickerOpen = picker != null || pickDate != null || pickTime != null
+    val pickerOpen = picker != null || pickDate != null || pickTime != null || descriptionExpanded
     DisposableEffect(pickerOpen) { editorPickerOpen = pickerOpen; onDispose { editorPickerOpen = false } }
     // As in the mobile editor: with nothing to save it closes; unsaved edits (typed text core has not resolved included) ask first.
     val leave = { if (editor.readOnly || (!editor.dirty && !editsPending)) closeEditor() else confirmLeave = true }
@@ -574,7 +579,8 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
                 EditorAIRows(model, locked)
                 // The Destination row stands for both Project and Area, at the first of them in core's order (RN's destinationFields).
                 val destination = editor.view.sections.flatMap { it.fields }.firstOrNull { it == "project" || it == "area" }
-                val field = @Composable { id: String -> EditorField(model, editor, id, locked, id == destination, { picker = it }, { pickDate = it }, { pickTime = it }) }
+                val field = @Composable { id: String -> EditorField(model, editor, id, locked, id == destination, { picker = it }, { pickDate = it }, { pickTime = it },
+                    { descriptionExpanded = true }, follow) }
                 for (section in editor.view.sections) {
                     if (section.titleKey == null) {
                         section.fields.forEach { field(it) }
@@ -610,6 +616,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
         }
     }
 
+    if (descriptionExpanded && !editor.readOnly) DescriptionFullscreen(model, editor, locked, follow) { descriptionExpanded = false }
     pickDate?.let { target ->
         // The picker starts where core says: the field's date (else today), or the recurrence end.
         val start = if (target == "until") editor.view.fields.recurrence.getString("until") else editor.view.fields.dates.getValue(target).pickerDate
@@ -715,7 +722,8 @@ private fun InboxViewModel.setDate(field: String, value: String) =
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, locked: Boolean, destination: Boolean,
-                        openPicker: (String) -> Unit, pickDate: (String) -> Unit, pickTime: (String) -> Unit) = with(model) {
+                        openPicker: (String) -> Unit, pickDate: (String) -> Unit, pickTime: (String) -> Unit,
+                        expandDescription: () -> Unit, follow: (JSONObject) -> Unit) = with(model) {
     val c = LocalTheme.current.colors
     when (id) {
         "status" -> FormGroup {
@@ -829,8 +837,27 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
             EditorInput(editor.text("location"), { editText("location", it) }, t("taskEdit.locationPlaceholder"), !locked, description = t("taskEdit.locationLabel"))
         }
         "description" -> FormGroup {
-            FieldHeading(Lucide.AlignLeft, t("taskEdit.descriptionLabel"))
-            EditorInput(editor.text("description"), { editText("description", it) }, t("taskEdit.descriptionPlaceholder"), !locked,
+            // RN's inlineHeader: the heading, then the preview switch and Expand (RN's inlineActions: the bare 18 and 20 icons, right-
+            // aligned 8 apart, each with a 10 hitSlop). One 66-wide box, 10 past the edge as RN's slop reaches, centers each touch box
+            // on its icon.
+            var previewing by rememberSaveable(editor.id) { mutableStateOf(false) }
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                FieldHeading(Lucide.AlignLeft, t("taskEdit.descriptionLabel"), Modifier.weight(1f), bottom = 0)
+                Box(Modifier.offset(x = 10.dp).size(66.dp, 38.dp)) {
+                    val previewLabel = t(if (previewing) "markdown.edit" else "markdown.preview")
+                    Box(Modifier.align(Alignment.CenterStart).size(38.dp).clickable(role = Role.Button) { previewing = !previewing }
+                        .semantics { contentDescription = previewLabel }, contentAlignment = Alignment.Center) {
+                        Icon(if (previewing) Lucide.Pencil else Lucide.Eye, null, tint = c.tint, modifier = Modifier.size(18.dp))
+                    }
+                    val expandLabel = t("markdown.expand")
+                    Box(Modifier.align(Alignment.CenterEnd).size(40.dp).clickable(enabled = !editor.readOnly, role = Role.Button, onClick = expandDescription)
+                        .semantics { contentDescription = expandLabel }, contentAlignment = Alignment.Center) {
+                        Icon(Ionicons.ExpandOutline, null, tint = c.tint, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+            if (previewing) DescriptionPreview(model, editor, follow, Modifier.fillMaxWidth())
+            else EditorInput(editor.text("description"), { editText("description", it) }, t("taskEdit.descriptionPlaceholder"), !locked,
                 singleLine = false, minHeight = 100, description = t("taskEdit.descriptionLabel"))
         }
         "dueDate", "startTime", "reviewAt" -> FormGroup {
@@ -1200,6 +1227,56 @@ private val LocalFormViewport = compositionLocalOf { 0 }
  * the [viewport] clear above the keyboard.
  */
 internal fun focusRevealBottom(fieldHeight: Int, viewport: Int): Float = minOf(fieldHeight.toFloat(), viewport * 0.4f) + viewport * 0.18f
+
+/**
+ * RN's markdownPreview of the draft description: core's rendered Markdown, read as the View tab reads the draft (getTaskView), in
+ * RN's 12-padded, bordered filter-background box.
+ */
+@Composable
+private fun DescriptionPreview(model: InboxViewModel, editor: TaskEditor, follow: (JSONObject) -> Unit, modifier: Modifier) = with(model) {
+    val c = LocalTheme.current.colors
+    val draftKey = draftJson(editor.fullDraft()) + editor.checklistNow + editor.attachments.orEmpty()
+    LaunchedEffect(editor.id, draftKey, busy, failedAction) { if (!busy && failedAction == null) readTaskView() }
+    val view = taskView?.takeIf { it.getString("id") == editor.id }
+    val shape = RoundedCornerShape(10.dp)
+    Box(modifier.heightIn(min = 44.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape).padding(12.dp).testTag("task-description-preview")) {
+        val blocks = view?.menuObjects("rows")?.firstOrNull { it.getString("type") == "description" }?.menuObjects("blocks").orEmpty()
+        view?.let { MarkdownBlocks(blocks, it.getJSONObject("markdownLabels"), follow) }
+    }
+}
+
+/**
+ * RN's ExpandedMarkdownEditor for the description: Collapse at the left, the task's title (or Description) in the middle, the
+ * edit and preview switch at the right, then the field or core's preview. Closing keeps the typed text in the draft, as RN's does.
+ */
+@Composable
+private fun DescriptionFullscreen(model: InboxViewModel, editor: TaskEditor, locked: Boolean, follow: (JSONObject) -> Unit, close: () -> Unit) = with(model) {
+    val c = LocalTheme.current.colors
+    var editing by rememberSaveable(editor.id) { mutableStateOf(true) }
+    val title = editor.text("title").trim().ifEmpty { t("taskEdit.descriptionLabel") }
+    Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().imePadding().semantics { testTagsAsResourceId = true }.testTag("task-description-fullscreen")) {
+            Box(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                val collapse = t("markdown.collapse")
+                Box(Modifier.align(Alignment.CenterStart).size(44.dp).clickable(role = Role.Button, onClick = close).semantics { contentDescription = collapse },
+                    contentAlignment = Alignment.Center) { Icon(Ionicons.Close, null, tint = c.text, modifier = Modifier.size(24.dp)) }
+                Text(title, style = rnText(15, 600), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 60.dp).semantics { heading() })
+                val modeLabel = t(if (editing) "markdown.preview" else "markdown.edit")
+                val shape = RoundedCornerShape(8.dp)
+                Box(Modifier.align(Alignment.CenterEnd).size(40.dp, 34.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
+                    .clickable(role = Role.Button) { editing = !editing }.semantics { contentDescription = modeLabel },
+                    contentAlignment = Alignment.Center) { Icon(if (editing) Lucide.Eye else Lucide.Pencil, null, tint = c.tint, modifier = Modifier.size(18.dp)) }
+            }
+            if (editing) Box(Modifier.weight(1f).padding(16.dp)) {
+                EditorInput(editor.text("description"), { editText("description", it) }, t("taskEdit.descriptionPlaceholder"), !locked,
+                    singleLine = false, minHeight = 240, description = t("taskEdit.descriptionLabel"))
+            } else Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
+                DescriptionPreview(model, editor, follow, Modifier.fillMaxWidth().heightIn(min = 120.dp))
+            }
+        }
+    }
+}
 
 /**
  * RN's text input: 12 padding, radius 10, 16 text, the input background and border. [description] names it for TalkBack. With

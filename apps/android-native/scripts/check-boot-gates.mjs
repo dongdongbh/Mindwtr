@@ -3424,7 +3424,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // pickers) keep it, as unsaved edits do. EditorNavigationTest drives closesOnNavigation.
     assert.match(model, /val editorClean get\(\) = editor\?\.closesOnNavigation\(editsPending, covered = editorPickerOpen \|\| attachments\.link != null \|\| attachments\.view != null\s+\|\| ai\.working == "editor" \|\| ai\.answer != null\) \?: true/);
     assert.match(editorUi, /fun closesOnNavigation\(editsPending: Boolean, covered: Boolean\) = readOnly \|\| \(!dirty && !editsPending && waitingFor == null && !covered\)/);
-    assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null\s+DisposableEffect\(pickerOpen\) \{ editorPickerOpen = pickerOpen; onDispose \{ editorPickerOpen = false \} \}/);
+    assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null \|\| descriptionExpanded\s+DisposableEffect\(pickerOpen\) \{ editorPickerOpen = pickerOpen; onDispose \{ editorPickerOpen = false \} \}/);
     assert.match(entryKt, /if \(reply\.menuText\("route"\) != null \|\| reply\.has\("capture"\) && !reply\.isNull\("capture"\) \|\| reply\.has\("captureModal"\) && !reply\.isNull\("captureModal"\)\) \{/);
     // The tester's line for #1410, as RN's v1.3.7/mobile-editor-navigation closed-clean.
     assert.match(entryKt, /if \(editor != null\) anyTime\(\{ it\.logLine\("Native Android task editor dismissed on navigation releaseCheck=v1\.3\.8\/native-editor-navigation", JSONObject\(\)\.put\("releaseCheck", "v1\.3\.8\/native-editor-navigation"\)\.put\("outcome", "closed-clean"\)\) \}, \{\}\)\s+closeEditor\(\)/);
@@ -9881,5 +9881,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(editorUi, /"dueDate", "startTime", "reviewAt" -> FormGroup \{[\s\S]{0,600}FieldHeading\(icon, label\)\s+\/\/[^\n]*\n\s+Row\(verticalAlignment = Alignment\.CenterVertically\) \{\s+DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
     // (2) RN's header: 12 above and below its 44 controls, and its 1 bottom border, which takes room as RN's borderBottomWidth does.
     assert.match(editorUi, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 60\.dp\)\.background\(c\.cardBg\)\.hairline\(c\.border, top = false\)\.padding\(start = 16\.dp, end = 16\.dp, top = 12\.dp, bottom = 13\.dp\)/);
+    // (3) RN's Description: the preview switch (Eye, then Pencil while previewing) and Expand beside its heading; the preview is
+    // core's rendered draft (the View tab's read), and Expand opens RN's ExpandedMarkdownEditor, an overlay as RN's descriptionExpanded.
+    assert.match(editorUi, /val previewLabel = t\(if \(previewing\) "markdown\.edit" else "markdown\.preview"\)/);
+    assert.match(editorUi, /Icon\(if \(previewing\) Lucide\.Pencil else Lucide\.Eye, null, tint = c\.tint, modifier = Modifier\.size\(18\.dp\)\)/);
+    assert.match(editorUi, /val expandLabel = t\("markdown\.expand"\)[\s\S]{0,300}Icon\(Ionicons\.ExpandOutline, null, tint = c\.tint, modifier = Modifier\.size\(20\.dp\)\)/);
+    assert.match(editorUi, /testTag\("task-description-fullscreen"\)/);
+    // RN lays out the bare 18 and 20 icons, right-aligned 8 apart, with a 10 hitSlop: one 66-wide box shifted 10 to the right
+    // centers each touch box on its icon (the phone pair had them 90 px left of RN's).
+    assert.match(editorUi, /Box\(Modifier\.offset\(x = 10\.dp\)\.size\(66\.dp, 38\.dp\)\) \{/);
+    assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null \|\| descriptionExpanded/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
