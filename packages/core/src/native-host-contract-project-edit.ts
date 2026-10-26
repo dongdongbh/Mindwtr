@@ -11,6 +11,7 @@ import { PROJECT_TASK_SORT_OPTIONS } from './task-list-sort-options';
 import { deterministicHash128 } from './uuid';
 import { ensureDeviceId } from './store-helpers';
 import { getProjectAccentColor } from './task-accent-color';
+import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 
 /**
  * One Project details edit as the user made it: the field and its new value (a target state), under the request UUID the
@@ -92,7 +93,8 @@ const valid = (input: unknown): input is NativeProjectEdit => {
                 && (after === null || (typeof after === 'object' && !Array.isArray(after) && Object.keys(after).length === 2
                     && (after.type === 'task' || after.type === 'section') && id(after.id)))
                 && typeof edit.showCompleted === 'boolean' && !!edit.filters && typeof edit.filters === 'object' && !Array.isArray(edit.filters)
-                && text(edit.expectedOrder, 100_000) && edit.expectedOrder.length > 0;
+                // The view offers reorder up to the host's 2 MB message cap, so the token it hands out passes the same byte check.
+                && typeof edit.expectedOrder === 'string' && edit.expectedOrder.length > 0 && isNativeJsonWithinBytes(edit.expectedOrder);
         }
         case 'sort': return keys(edit, ['sortBy']) && (PROJECT_TASK_SORT_OPTIONS as readonly string[]).includes(edit.sortBy as string);
         case 'toSectionUndo': return keys(edit, ['convertRequestId']) && typeof edit.convertRequestId === 'string'

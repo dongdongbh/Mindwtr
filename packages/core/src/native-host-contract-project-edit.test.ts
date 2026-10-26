@@ -321,4 +321,17 @@ describe('runProjectEdit task order', () => {
         expect(await host.runProjectEdit(stale)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(order()).toEqual(['t3', 't1', 't2']);
     });
+
+    it('moves a task in a project whose order token passes 100,000 characters, as the view offers reorder up to its byte cap', async () => {
+        const archived = Array.from({ length: 1_600 }, (_, i) => ({ ...task(`archived-${i}`, 10 + i), status: 'archived' }));
+        const { host, data } = await open({ tasks: [task('t1', 0), task('t2', 1), task('t3', 2), ...archived] as never });
+        const view = host.getProjectTaskOrderView({ projectId: 'p', offset: 0, limit: 50, showCompleted: false, filters: {} });
+        expect(view).toMatchObject({ ok: true, value: { canReorder: true } });
+        const expectedOrder = (view as { value: { orderToken: string } }).value.orderToken;
+        expect(expectedOrder.length).toBeGreaterThan(100_000);
+        const move = { requestId: uuid(72), projectId: 'p', kind: 'taskOrder', taskId: 't3', after: null, showCompleted: false, filters: {}, expectedOrder } as never;
+        expect(await host.runProjectEdit(move)).toMatchObject({ ok: true, value: { kind: 'taskOrder', outcome: 'saved' } });
+        const live = data().tasks.filter((row) => row.projectId === 'p' && row.status === 'next').sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        expect(live.map((row) => row.id)).toEqual(['t3', 't1', 't2']);
+    });
 });
