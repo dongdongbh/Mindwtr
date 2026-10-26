@@ -685,6 +685,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                 t={t}
                                 fields={scheduleFields}
                                 visibleFieldKeys={['start']}
+                                requiredFieldKeys={['start']}
                                 variant="guided"
                             />
                             <button

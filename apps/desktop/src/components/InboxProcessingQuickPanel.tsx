@@ -604,6 +604,7 @@ export function InboxProcessingQuickPanel({
                             t={t}
                             fields={scheduleFields}
                             visibleFieldKeys={['start']}
+                            requiredFieldKeys={['start']}
                             variant="quick"
                         />
                         {organizationContainerFields}

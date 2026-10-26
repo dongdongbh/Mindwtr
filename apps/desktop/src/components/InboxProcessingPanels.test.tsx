@@ -492,8 +492,16 @@ describe('Incubate requires a review date (#1338)', () => {
         expect(view.getByRole('dialog')).toBeInTheDocument();
         expect(view.queryByRole('button', { name: 'No date' })).toBeNull();
     });
+    it.each(['guided', 'quick'] as const)('offers only dates for Start later in %s mode (#768)', (mode) => {
+        const view = mode === 'quick'
+            ? render(<QuickPanelHarness actionabilityChoice="later" />)
+            : render(<WizardHarness processingStep="actionable" />);
+        if (mode === 'guided') fireEvent.click(view.getByRole('button', { name: 'Start later' }));
+        expect(view.getByRole('button', { name: 'Tomorrow' })).toBeInTheDocument();
+        expect(view.queryByRole('button', { name: 'No date' })).toBeNull();
+    });
     it('retains No date for optional scheduling fields', () => {
-        const view = render(<QuickPanelHarness actionabilityChoice="later" />);
+        const view = render(<QuickPanelHarness visibility={{ ...visibility, showScheduleFields: true }} visibleScheduleFieldKeys={['start']} />);
         expect(view.getByRole('button', { name: 'No date' })).toBeInTheDocument();
     });
 });
