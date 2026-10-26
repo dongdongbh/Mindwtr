@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Widgets: the Inbox list and the Inbox count now show every Inbox task, as the app's Inbox does. Before, an area filter hid Inbox tasks outside that area (including tasks with no area), so the Inbox widget could look empty (#1458).
 - Mobile: when Default area is set to use the active area filter, a task captured from a widget, the Android quick settings tile or a shortcut now goes into that area, as the in-app + button already did (#1460).
 - Desktop: in a task's right-click menu, resting the mouse on Start Date, Due Date or Review Date under Dates opens that date's calendar beside the Dates list, so you can pick a date without another click. Clicking a menu row that the mouse already opened now keeps it open instead of closing it (#1390).
 - A project with no area and no color of its own shows a grey dot again in project group headers (Focus, Next actions, and the desktop Timeline), so its name lines up with the other groups. On mobile, a task row's project or area chip with no color is now grey too, as on desktop. In v1.3.7 desktop showed no dot in headers (the accent color on the Timeline) and mobile showed the accent color (#1422).

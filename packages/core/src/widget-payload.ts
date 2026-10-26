@@ -8,7 +8,7 @@ import {
     safeParseDate,
     safeParseDueDate,
 } from './date';
-import { resolveAreaFilterSelection, isTaskVisibleInArea } from './area-filter';
+import { resolveAreaFilterSelection, isTaskVisibleInArea, isTaskVisibleInInbox } from './area-filter';
 import { TASK_PRIORITY_COLORS } from './color-constants';
 import { buildFocusTaskGroups } from './focus-grouping';
 import { buildFocusPools, buildFocusTaskSections, deriveFocusTaskLists } from './focus-sections';
@@ -539,6 +539,11 @@ export function createWidgetPayloadProjection(
         if (!isTaskInActiveProject(task, projectById)) return false;
         return isTaskVisibleInArea(task, areaVisibility);
     });
+    // The Inbox ignores the area filter, as the app's Inbox screen does: a
+    // capture with no area must not vanish from the widget (#1458).
+    const inboxTasks = undeletedActionableTasks.filter((task) => (
+        task.status === 'inbox' && isTaskVisibleInInbox(task, areaVisibility)
+    ));
 
     const widgetSort = resolveWidgetSort(data);
 
@@ -632,9 +637,9 @@ export function createWidgetPayloadProjection(
     const curatedTasks = [...lists.focusedTasks, ...lists.schedule];
     const curatedSections = buildFocusTaskSections(lists, (key) => tr[key])
         .filter((section) => section.key === 'focus' || section.key === 'schedule');
-    const inboxCount = activeTasks.filter((task) => task.status === 'inbox').length;
+    const inboxCount = inboxTasks.length;
     const dateLabel = formatDateLabel(now, language, 'long');
-    const listContext = { data, activeTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
+    const listContext = { data, activeTasks, inboxTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
         tokenTaskIndex: options?.listIds?.some((id) => {
             const base = parseWidgetListSelection(id)?.listId ?? '';
             return base.startsWith('context:') || base.startsWith('tag:');

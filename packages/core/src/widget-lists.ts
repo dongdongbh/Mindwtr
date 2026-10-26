@@ -126,6 +126,8 @@ export interface WidgetListContext {
     data: AppData;
     /** Undeleted, actionable, in an active project: the widget's base pool. */
     activeTasks: Task[];
+    /** The Inbox's own pool: like the app's Inbox, it ignores the area filter (#1458). */
+    inboxTasks: Task[];
     focusLists: FocusTaskLists;
     sortBy: TaskSortBy;
     prioritiesEnabled: boolean;
@@ -180,11 +182,11 @@ function buildSavedFilterList(filter: SavedFilter, context: WidgetListContext): 
 
 /** Null when the id names no list (an unknown or deleted saved filter). */
 export function buildWidgetTaskList(listId: string, context: WidgetListContext): WidgetTaskList | null {
-    const { data, activeTasks, focusLists, sortBy, tr } = context;
+    const { data, activeTasks, inboxTasks, focusLists, sortBy, tr } = context;
     const titles = widgetListTitles(tr);
     switch (listId) {
         case 'inbox':
-            return { title: titles.inbox, tasks: sortTasksBy(activeTasks.filter((task) => task.status === 'inbox'), sortBy) };
+            return { title: titles.inbox, tasks: sortTasksBy(inboxTasks, sortBy) };
         case 'next':
             // The app's Next Actions list is the Focus screen's Next section
             // (sequential-project rules included).

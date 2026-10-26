@@ -183,3 +183,19 @@ describe('Focus widget area selection', () => {
         expect(filtered.focusedCount).toBe(3);
     });
 });
+
+describe('Inbox widget area selection', () => {
+    it('lists every Inbox task like the app Inbox, while other lists keep the area filter (#1458)', () => {
+        const stamp = '2026-10-01T12:00:00.000Z';
+        const task = (id: string, extra: Partial<Task> = {}): Task => ({ id, title: id, status: 'inbox',
+            tags: [], contexts: [], createdAt: stamp, updatedAt: stamp, ...extra });
+        const data: AppData = { tasks: [task('loose'), task('home', { areaId: 'home' }), task('work-next', { status: 'next', areaId: 'work' }),
+            task('home-next', { status: 'next', areaId: 'home' })], projects: [], sections: [],
+            areas: ['work', 'home'].map((id, order) => ({ id, name: id, order, createdAt: stamp, updatedAt: stamp })),
+            settings: { filters: { areaIds: ['work'] } } };
+        const payload = createWidgetPayloadProjection(data, 'en', { listIds: ['inbox', 'next'] }).build(10);
+        expect(payload.lists.inbox?.items.map((row) => row.id).sort()).toEqual(['home', 'loose']);
+        expect(payload.inboxCount).toBe(2);
+        expect(payload.lists.next?.items.map((row) => row.id)).toEqual(['work-next']);
+    });
+});
