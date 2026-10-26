@@ -104,12 +104,14 @@ const hideKeyboard = async () => {
  * and waits for [expected] (tapped once more only if the first tap provably did nothing; device.mjs tapExpecting).
  */
 const tapDescribed = async (description, expected, what = description) => {
+    // Compose lists a control scrolled out of view with empty bounds: scroll until it is on screen too.
+    const shown = (nodes) => [withDescription(nodes, description)].find((node) => node && node.bounds !== '[0,0][0,0]');
     let nodes = await screen();
-    for (let step = 0; step < 4 && !withDescription(nodes, description); step += 1) nodes = await device.swipe(nodes, 'down');
-    return tapExpecting(withDescription(nodes, description) ?? fail(`no control announced "${description}"`), expected, what);
+    for (let step = 0; step < 4 && !shown(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
+    return tapExpecting(shown(nodes) ?? fail(`no control announced "${description}" on screen`), expected, what);
 };
-/** The Material date picker is up: it marks today. */
-const datePicker = (nodes) => Boolean(button(nodes, 'OK')) && nodes.some((node) => /\bToday\b/.test(`${node.text} ${node['content-desc']}`));
+/** RN's date dialog is up: Android's own date picker (datetimepicker, display "default") with its OK. */
+const datePicker = (nodes) => Boolean(button(nodes, 'OK')) && nodes.some((node) => node['resource-id'] === 'android:id/datePicker');
 
 const openEditor = async (title) => {
     await inbox();

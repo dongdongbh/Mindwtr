@@ -511,10 +511,11 @@ private fun DateRow(row: JSONObject, locked: Boolean, send: (JSONObject) -> Unit
             val display = row.getString("display")
             SmallOutlined(display, "$label: $display", !locked, filled = true) { pickDate(row.getString("field")) }
             val context = LocalContext.current
+            val dark = LocalTheme.current.isDark
             row.child("clear")?.let { SmallOutlined(it.getString("label"), "$label: ${it.getString("label")}", !locked, filled = false) { send(it.getJSONObject("edit")) } }
             row.child("time")?.let { time ->
                 SmallOutlined("", "$label: ${time.getString("label")}", !locked, filled = false, icon = Lucide.Clock) {
-                    pickTime(context, time) { picked -> send(JSONObject(time.getJSONObject("edit").toString()).put("value", picked)) }
+                    pickTime(context, time, dark) { picked -> send(JSONObject(time.getJSONObject("edit").toString()).put("value", picked)) }
                 }
             }
             row.child("timeMode")?.let { SmallOutlined(it.getString("label"), "$label: ${it.getString("label")}", !locked, filled = false) { send(it.getJSONObject("edit")) } }

@@ -32,18 +32,14 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -83,15 +79,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
+import android.content.Context
 import android.content.Intent
+import android.view.ContextThemeWrapper
+import android.text.format.DateFormat
 import org.json.JSONArray
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import org.json.JSONTokener
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
 import java.util.UUID
 
 /** One draft value as JSON text: a draft compares, saves, and survives process death exactly as core sent it. */
@@ -424,9 +421,9 @@ data class TaskEditor(
     }
 }
 
-/** Names the day the picker chose; it returns that day's UTC midnight. Only picker output comes here, never a stored value. */
-private fun pickedDay(pickerMillis: Long): String =
-    SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(Date(pickerMillis))
+/** Names the day the system date dialog chose (its 0-based month). Only picker output comes here, never a stored value. */
+internal fun pickedDay(year: Int, month: Int, day: Int): String =
+    "$year-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}"
 
 /** The picker's hour and minute as core's pickTime takes them, `HH:mm`. */
 internal fun pickedTime(hour: Int, minute: Int) = "${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}"
@@ -435,9 +432,11 @@ internal fun pickedTime(hour: Int, minute: Int) = "${hour.toString().padStart(2,
 internal val PROJECT_DATE_FIELDS = listOf(Triple("startDate", "taskEdit.startDateLabel", "Start"), Triple("dueDate", "taskEdit.dueDateLabel", "Due"),
     Triple("reviewAt", "projects.reviewAt", "Review"))
 
-/** Where core says the date picker starts (`yyyy-MM-dd`), as the picker's UTC midnight: the reverse of [pickedDay]. */
-private fun pickerStart(coreDate: String): Long? =
-    runCatching { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(coreDate)?.time }.getOrNull()
+private val PICKER_DAY = Regex("""(\d{4})-(\d{2})-(\d{2})""")
+
+/** Where core says the date dialog starts (`yyyy-MM-dd`), as its year, 0-based month and day: the reverse of [pickedDay]; null opens on today. */
+internal fun pickerStart(coreDate: String?): Triple<Int, Int, Int>? =
+    coreDate?.let { PICKER_DAY.matchEntire(it) }?.destructured?.let { (year, month, day) -> Triple(year.toInt(), month.toInt() - 1, day.toInt()) }
 
 /** Where core says the time picker starts (`HH:mm`), as the picker's hour and minute. */
 internal fun pickerClock(coreTime: String): Pair<Int, Int> =
@@ -622,18 +621,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     pickTime?.let { target ->
         // The time picker starts on core's time for the field: its time, else now.
         val (hour, minute) = pickerClock(editor.view.fields.dates.getValue(target).pickerTime)
-        val state = rememberTimePickerState(initialHour = hour, initialMinute = minute)
-        AlertDialog(
-            onDismissRequest = { pickTime = null },
-            confirmButton = {
-                TextButton(onClick = {
-                    editDraft(JSONObject().put("type", "pickTime").put("field", target).put("time", pickedTime(state.hour, state.minute)))
-                    pickTime = null
-                }) { Text(t("common.ok")) }
-            },
-            dismissButton = { TextButton(onClick = { pickTime = null }) { Text(t("common.cancel")) } },
-            text = { TimePicker(state) },
-        )
+        ClockPickerDialog(hour, minute, { pickTime = null }) { time -> editDraft(JSONObject().put("type", "pickTime").put("field", target).put("time", time)) }
     }
 
     if (editor.waitingFor != null) WaitingPrompt(model, editor.waitingFor, locked)
@@ -668,39 +656,51 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
 }
 
 /**
- * The system date picker, starting on core's `yyyy-MM-dd` [start] (null: this month, nothing chosen). OK hands
- * [pick] the chosen day as `yyyy-MM-dd`, read from the picker's own fields; the editor and Process Inbox share it.
+ * RN's datetimepicker dialogs take the platform's own date and time dialog themes from RN's light or dark Activity theme: the
+ * same Material base, light or dark with the app's theme, resolves them here (an explicit dialog theme drew a wider dialog).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+internal fun systemDialogContext(context: Context, dark: Boolean): Context =
+    ContextThemeWrapper(context, if (dark) android.R.style.Theme_Material_NoActionBar else android.R.style.Theme_Material_Light_NoActionBar)
+
+/**
+ * RN's Android date dialog (datetimepicker, display "default"): the system DatePickerDialog, on core's `yyyy-MM-dd` [start] (null:
+ * today, as RN's `value ?? new Date()`). OK hands [pick] the chosen day as `yyyy-MM-dd`, then [dismiss] runs; Cancel, Back or a
+ * tap outside runs only [dismiss]. Every date row shares it: the editor, Process Inbox, the capture popup, project details,
+ * Bulk and Done.
+ */
 @Composable
 fun DayPickerDialog(start: String?, dismiss: () -> Unit, pick: (String) -> Unit) {
-    val state = rememberDatePickerState(initialSelectedDateMillis = start?.let { pickerStart(it) })
-    DatePickerDialog(
-        onDismissRequest = dismiss,
-        confirmButton = {
-            TextButton(onClick = {
-                state.selectedDateMillis?.let { pickerMillis -> pick(pickedDay(pickerMillis)) }
-                dismiss()
-            }, enabled = state.selectedDateMillis != null) { Text(t("common.ok")) }
-        },
-        dismissButton = { TextButton(onClick = dismiss) { Text(t("common.cancel")) } },
-    ) { DatePicker(state) }
+    val context = LocalContext.current
+    val dark = LocalTheme.current.isDark
+    val picked by rememberUpdatedState(pick)
+    val dismissed by rememberUpdatedState(dismiss)
+    DisposableEffect(start, dark) {
+        val dialog = DatePickerDialog(systemDialogContext(context, dark))
+        pickerStart(start)?.let { (year, month, day) -> dialog.updateDate(year, month, day) }
+        dialog.setOnDateSetListener { _, year, month, day -> picked(pickedDay(year, month, day)) }
+        dialog.setOnDismissListener { dismissed() }
+        dialog.show()
+        // Leaving (a closed screen, a new start) takes the dialog away without answering for it.
+        onDispose { dialog.setOnDismissListener(null); dialog.dismiss() }
+    }
 }
 
 /**
- * The system time picker starting at [hour]:[minute]; OK hands [pick] the time as core's `HH:mm`, read from the
- * picker's own fields. The capture popup's due time uses it.
+ * RN's Android time dialog: the system TimePickerDialog at [hour]:[minute], in the device's 12/24-hour format. OK hands [pick] the
+ * time as core's `HH:mm`, then [dismiss] runs. The editor's dates, the capture popup's due time and Done's time use it.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ClockPickerDialog(hour: Int, minute: Int, dismiss: () -> Unit, pick: (String) -> Unit) {
-    val state = rememberTimePickerState(initialHour = hour, initialMinute = minute)
-    AlertDialog(
-        onDismissRequest = dismiss,
-        confirmButton = { TextButton(onClick = { pick(pickedTime(state.hour, state.minute)); dismiss() }) { Text(t("common.ok")) } },
-        dismissButton = { TextButton(onClick = dismiss) { Text(t("common.cancel")) } },
-        text = { TimePicker(state) },
-    )
+    val context = LocalContext.current
+    val dark = LocalTheme.current.isDark
+    val picked by rememberUpdatedState(pick)
+    val dismissed by rememberUpdatedState(dismiss)
+    DisposableEffect(hour, minute, dark) {
+        val dialog = TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(pickedTime(hour, minute)) }, hour, minute, DateFormat.is24HourFormat(context))
+        dialog.setOnDismissListener { dismissed() }
+        dialog.show()
+        onDispose { dialog.setOnDismissListener(null); dialog.dismiss() }
+    }
 }
 
 /** A recurrence control's edit for core's editTaskDraft. */

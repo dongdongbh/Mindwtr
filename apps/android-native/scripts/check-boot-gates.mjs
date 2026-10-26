@@ -1745,18 +1745,34 @@ assert.match(editorUi, /if \(\(current\[field\] \?: "null"\) != \(sent\[field\] 
 // Dates: core's label, core's picker starts, core's date edits; Kotlin never writes a date value of its own.
 assert.match(editorUi, /DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
 assert.match(editorUi, /JSONObject\(\)\.put\("type", "pickDate"\)\.put\("field", target\)\.put\("date", day\)/);
-assert.match(editorUi, /JSONObject\(\)\.put\("type", "pickTime"\)\.put\("field", target\)\.put\("time", pickedTime\(state\.hour, state\.minute\)\)/);
+assert.match(editorUi, /ClockPickerDialog\(hour, minute, \{ pickTime = null \}\) \{ time -> editDraft\(JSONObject\(\)\.put\("type", "pickTime"\)\.put\("field", target\)\.put\("time", time\)\) \}/);
 assert.doesNotMatch(code(editorUi), /relativeStartOffset" to null\)(?!\))/, 'the relative start cascade is core\'s');
 assert.equal(code(editorUi).match(/"relativeStartOffset"/g).length, 1, 'only the Absolute chip names the relative start');
 assert.match(editorUi, /section\.fields\.forEach \{ field\(it\) \}/);
 assert.doesNotMatch(code(editorUi), /\.(sort\w*|sorted\w*|groupBy|reversed|shuffled|distinct\w*)\b/);
 // No Kotlin date parsing or formatting of stored values: dates show core's labels. Two helpers convert only between the
-// picker and core's picker strings: pickedDay (picker output) and pickerStart (core's picker start, yyyy-MM-dd, back into
+// system date dialog's year, month and day and core's picker strings: pickedDay (picker output) and pickerStart (core's picker
+// start, yyyy-MM-dd, into the dialog); pickerClock splits core's HH:mm picker start into the time dialog's hour and minute.
+const PICKER_START = /internal fun pickerStart\(coreDate: String\?\): Triple<Int, Int, Int>\? =\s*coreDate\?\.let \{ PICKER_DAY\.matchEntire\(it\) \}\?\.destructured\?\.let \{ \(year, month, day\) -> Triple\(year\.toInt\(\), month\.toInt\(\) - 1, day\.toInt\(\)\) \}/;
 // the picker); pickerClock splits core's HH:mm picker start into the time picker's hour and minute.
-const PICKER_START = /private fun pickerStart\(coreDate: String\): Long\? =\s*runCatching \{ SimpleDateFormat\("yyyy-MM-dd", Locale\.US\)\.apply \{ timeZone = TimeZone\.getTimeZone\("UTC"\) \}\.parse\(coreDate\)\?\.time \}\.getOrNull\(\)/;
 assert.match(editorUi, PICKER_START);
-assert.equal(editorUi.match(/pickerStart\(/g).length, 2, 'defined once, used once: the date picker\'s start');
-assert.match(editorUi, /val state = rememberDatePickerState\(initialSelectedDateMillis = start\?\.let \{ pickerStart\(it\) \}\)/);
+assert.equal(editorUi.match(/pickerStart\(/g).length, 2, 'defined once, used once: the date dialog\'s start');
+// RN's Android date and time dialogs (datetimepicker, display "default"): the system's, on the field's day or today, dark with a
+// dark theme; never Material 3's (it opened with no day chosen and OK greyed out). PickerDialogTest drives the day helpers.
+assert.match(editorUi, /val dialog = DatePickerDialog\(systemDialogContext\(context, dark\)\)\s+pickerStart\(start\)\?\.let \{ \(year, month, day\) -> dialog\.updateDate\(year, month, day\) \}\s+dialog\.setOnDateSetListener \{ _, year, month, day -> picked\(pickedDay\(year, month, day\)\) \}/);
+assert.match(editorUi, /TimePickerDialog\(systemDialogContext\(context, dark\), \{ _, hour, minute -> picked\(pickedTime\(hour, minute\)\) \}, hour, minute, DateFormat\.is24HourFormat\(context\)\)/);
+assert.match(editorUi, /^import android\.app\.DatePickerDialog$/m);
+{
+    const { readdirSync } = await import('node:fs');
+    const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
+    for (const name of readdirSync(dir).filter((file) => file.endsWith('.kt'))) {
+        assert.doesNotMatch(readFileSync(resolve(dir, name), 'utf8'), /material3\.(DatePicker|TimePicker|rememberDatePickerState|rememberTimePickerState)\b/, `${name} uses a Material 3 picker; RN shows the system dialog`);
+    }
+}
+// The platform's own date and time dialog themes (datePickerDialogTheme, timePickerDialogTheme) on a light or dark Material context,
+// as RN's Activity theme resolves them: an explicit dialog theme drew a wider dialog with rounded corners (phone pair).
+assert.match(editorUi, /internal fun systemDialogContext\(context: Context, dark: Boolean\): Context =\s+ContextThemeWrapper\(context, if \(dark\) android\.R\.style\.Theme_Material_NoActionBar else android\.R\.style\.Theme_Material_Light_NoActionBar\)/);
+assert.match(source('NotificationsSettings.kt'), /TimePickerDialog\(systemDialogContext\(context, dark\), \{ _, hour, minute -> picked\(coreTime\(hour, minute\)\) \}/);
 assert.match(editorUi, /val \(hour, minute\) = pickerClock\(editor\.view\.fields\.dates\.getValue\(target\)\.pickerTime\)/);
 assert.doesNotMatch([editorUi.replace(PICKER_START, ''), model, activity, focusUi, projectsUi, rowUi, areaUi, viewStateKt, menuModel, ...Object.values(menuScreens)].join('\n'),
     /java\.time|LocalDate|Instant|DateTimeFormatter|java\.util\.Calendar|GregorianCalendar|Calendar\.getInstance|(?<!InboxPage|FocusView|ProjectsView|ProjectDetail|AreaFilter|EditorSuggestions|SearchView)\.parse\(|DateFormat\.get|SimpleDateFormat\(\)/);
@@ -1785,11 +1801,11 @@ assert.doesNotMatch(code(captureUi), /material3\.Switch|SwitchDefaults/);
             `${name} formats, parses, or colors a date; only core's meta text is shown`);
     }
 }
-assert.equal(editorUi.match(/SimpleDateFormat|\.format\(/g).length, 4); // import, pickedDay's constructor and format call, pickerStart's constructor
-assert.match(editorUi, /private fun pickedDay\(pickerMillis: Long\): String =\s*SimpleDateFormat\("yyyy-MM-dd", Locale\.US\)\.apply \{ timeZone = TimeZone\.getTimeZone\("UTC"\) \}\.format\(Date\(pickerMillis\)\)/);
+assert.equal(editorUi.match(/SimpleDateFormat|\.format\(/g), null);
+assert.match(editorUi, /internal fun pickedDay\(year: Int, month: Int, day: Int\): String =\s*"\$year-\$\{\(month \+ 1\)\.toString\(\)\.padStart\(2, '0'\)\}-\$\{day\.toString\(\)\.padStart\(2, '0'\)\}"/);
 assert.equal(editorUi.match(/pickedDay\(/g).length, 2);
 assert.match(editorUi, /internal fun pickedTime\(hour: Int, minute: Int\) = "\$\{hour\.toString\(\)\.padStart\(2, '0'\)\}:\$\{minute\.toString\(\)\.padStart\(2, '0'\)\}"/);
-assert.equal(editorUi.match(/pickedTime\(/g).length, 3, 'defined once; the editor\'s time picker and the shared ClockPickerDialog (the capture popup\'s due time)');
+assert.equal(editorUi.match(/pickedTime\(/g).length, 2, 'defined once; the shared ClockPickerDialog (the editor\'s, the capture popup\'s and Done\'s times)');
 // A draft date is never read apart: no substring, split, or pattern over a date field's value.
 assert.doesNotMatch(code(editorUi), /text\("(dueDate|startTime|reviewAt)"\)\.(substring|split|take|drop|contains|startsWith|endsWith|matches|replace)/);
 assert.doesNotMatch(code(editorUi), /\b(due|value)\.(substring|split|take|drop|contains|startsWith|endsWith|matches)\(/);

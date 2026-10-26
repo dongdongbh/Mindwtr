@@ -344,7 +344,8 @@ try {
     const day = Number(sh('date +%d'));
     await tapDescribed('Due Date: Not set', (current) => Boolean(button(current, 'OK')), 'the date picker');
     const label = (node) => `${node.text ?? ''} ${node['content-desc'] ?? ''}`;
-    const todayCell = (current) => current.find((node) => node.clickable === 'true' && /\bToday\b/.test(label(node)));
+    // RN's system date dialog opens on today, chosen (a field with no date starts there).
+    const todayCell = (current) => current.find((node) => node.clickable === 'true' && node.selected === 'true' && /\d/.test(label(node)));
     nodes = await waitFor('the date picker', (current) => button(current, 'OK') && todayCell(current));
     check(new RegExp(`(^|\\D)${day}(\\D|$)`).test(label(todayCell(nodes))), `(b) the picker marks today, day ${day} ("${label(todayCell(nodes)).trim()}")`);
     await tapExpecting(todayCell(nodes), (current) => button(current, 'OK')?.enabled === 'true', 'OK enabled', 10_000);

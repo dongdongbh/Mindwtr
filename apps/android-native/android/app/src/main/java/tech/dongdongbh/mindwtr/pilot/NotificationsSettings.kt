@@ -83,7 +83,7 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
             contentDescription = "$label: $value"; role = Role.Button; if (on) onClick { open(); true } else disabled()
         }.clickable(enabled = on, onClick = open), dimmed = row.getBoolean("disabled"))
     }
-    val time = { row: JSONObject -> { pickTime(context, row) { picked -> notifications(JSONObject().put("type", row.getString("type")).put("value", picked)) } } }
+    val time = { row: JSONObject -> { pickTime(context, row, theme.isDark) { picked -> notifications(JSONObject().put("type", row.getString("type")).put("value", picked)) } } }
 
     Card {
         Toggle(reminders.getJSONObject("enable"), false)
@@ -125,9 +125,9 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
 /** RN's manageEditorButtonPrimary. */
 private val ALLOW_BLUE = Color(0xFF2563EB)
 
-/** RN's Android time picker for [row] (core's hour and minute), in the device's 12/24-hour format; [picked] gets 'HH:MM'. */
-internal fun pickTime(context: Context, row: JSONObject, picked: (String) -> Unit) {
-    TimePickerDialog(context, { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
+/** RN's Android time picker for [row] (core's hour and minute), in the device's 12/24-hour format and the app's light or dark; [picked] gets 'HH:MM'. */
+internal fun pickTime(context: Context, row: JSONObject, dark: Boolean, picked: (String) -> Unit) {
+    TimePickerDialog(systemDialogContext(context, dark), { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
         DateFormat.is24HourFormat(context)).show()
 }
 
