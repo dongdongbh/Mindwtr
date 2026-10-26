@@ -29,7 +29,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -280,7 +279,7 @@ private fun AppLockScreen(model: InboxViewModel) {
     val activity = LocalActivity.current
     val resumed by LocalLifecycleOwner.current.lifecycle.currentStateAsState()
     // The system bars follow the theme here too (the screens that set them are gone).
-    SideEffect { activity?.window?.applySystemBars(c.bg.toArgb(), theme.isDark) }
+    LaunchedEffect(c.bg, theme.isDark) { activity?.window?.applySystemBars(c.bg.toArgb(), theme.isDark) }
     // RN asks by itself once per lock, 250 ms after the app is active.
     LaunchedEffect(lock.locks, lock.authenticating, resumed) {
         if (lock.shouldPrompt(resumed.isAtLeast(Lifecycle.State.RESUMED))) { delay(PROMPT_DELAY_MS); lock.promptOnce() }

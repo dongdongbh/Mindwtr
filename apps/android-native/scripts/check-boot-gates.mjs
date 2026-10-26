@@ -725,6 +725,9 @@ const processUi = source('ProcessInbox.kt');
 // Only a new question (animated) or item (at once) scrolls; the question last shown survives a recreation (ProcessInboxScrollTest).
 assert.match(processUi, /val scroll = rememberScrollState\(\)[\s\S]{0,300}LaunchedEffect\(flow\.taskId, flow\.step\) \{\s+when \(stepScroll\(shownTask, shownStep, flow\.taskId, flow\.step\)\) \{\s+StepScroll\.Animate -> scroll\.animateScrollTo\(0\)\s+StepScroll\.Jump -> scroll\.scrollTo\(0\)/);
 assert.match(processUi, /var shownTask by rememberSaveable \{ mutableStateOf<String\?>\(null\) \}/);
+// RN's system bars (SystemBarsTest): set by the screens and the lock screen, only when the background or darkness changes.
+assert.match(activity, /LaunchedEffect\(c\.bg, theme\.isDark\) \{ window\.applySystemBars\(c\.bg\.toArgb\(\), theme\.isDark\) \}/);
+assert.match(source('AppLock.kt'), /LaunchedEffect\(c\.bg, theme\.isDark\) \{ activity\?\.window\?\.applySystemBars\(c\.bg\.toArgb\(\), theme\.isDark\) \}/);
 assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
 const captureModalUi = source('CaptureModal.kt');

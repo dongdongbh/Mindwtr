@@ -53,7 +53,6 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -156,7 +155,7 @@ class MainActivity : FragmentActivity() {
             MindwtrTheme(if (model.loading) null else ThemeChoice.current) { AppLockGate(model) { with(model) {
                 val theme = LocalTheme.current
                 val c = theme.colors
-                SideEffect { window.applySystemBars(c.bg.toArgb(), theme.isDark) }
+                LaunchedEffect(c.bg, theme.isDark) { window.applySystemBars(c.bg.toArgb(), theme.isDark) }
                 // A waiting entry opens once the app is free (EntryRouter.pump); a system capture that ended puts the app behind the previous one.
                 LaunchedEffect(entries.head, entries.blocked) { entries.pump() }
                 // RN asks for the notification permission at start while a reminder feature is on (core's answer, once per process).
