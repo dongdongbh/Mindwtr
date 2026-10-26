@@ -28,6 +28,8 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DatePicker
@@ -61,6 +63,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -73,6 +76,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -224,6 +228,14 @@ const val CHECKLIST_ADD = "checklistAdd"
 
 /** The token and person fields: their text is typed freely, and core's getTaskEditorSuggestions turns it into the draft value. */
 val TYPED_FIELDS = listOf("contexts", "tags", "assignedTo")
+
+/**
+ * RN's commitContextDraft / commitTagDraft (Done, or leaving the field): the field shows core's tidy token list for the typed
+ * [typed] text ([shown]'s draftValue, core's parseTaskEditorTokenList joined as RN joins it). Null keeps the text: already tidy,
+ * or core has not answered for this text yet.
+ */
+internal fun committedTokens(typed: String, shown: EditorSuggestions?): String? =
+    shown?.takeIf { it.text == typed }?.draftValue?.takeIf { it != typed }
 
 /** Core's suggestions for [text]: the draft value it stands for, RN's matches, and the quick chips (value, selected, text after a tap). */
 data class EditorSuggestions(val text: String, val draftValue: String, val matches: List<Pair<String, String>>, val quick: List<Triple<String, Boolean, String>>) {
@@ -791,7 +803,8 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
             val label = t(if (contexts) "taskEdit.contextsLabel" else "taskEdit.tagsLabel")
             FieldHeading(if (contexts) Lucide.AtSign else Lucide.Tag, label)
             EditorInput(editor.input(id), { editInput(id, it) }, t(if (contexts) "taskEdit.contextsPlaceholder" else "taskEdit.tagsPlaceholder"),
-                !locked, description = label, tag = "editor-$id")
+                !locked, singleLine = true, description = label, tag = "editor-$id",
+                commit = { committedTokens(editor.input(id), suggestions[id])?.let { editInput(id, it) } })
             val shown = suggestions[id]?.takeIf { it.text == editor.input(id) }
             if (shown != null && shown.matches.isNotEmpty()) SuggestionMenu(shown.matches, !locked) { editInput(id, it) }
             if (shown != null && shown.quick.isNotEmpty()) FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1191,11 +1204,16 @@ private val LocalFormViewport = compositionLocalOf { 0 }
  */
 internal fun focusRevealBottom(fieldHeight: Int, viewport: Int): Float = minOf(fieldHeight.toFloat(), viewport * 0.4f) + viewport * 0.18f
 
-/** RN's text input: 12 padding, radius 10, 16 text, the input background and border. [description] names it for TalkBack. */
+/**
+ * RN's text input: 12 padding, radius 10, 16 text, the input background and border. [description] names it for TalkBack. With
+ * [commit] it is RN's `returnKeyType="done"` with `blurOnSubmit`: the keyboard shows Done, Done leaves the field, and leaving it
+ * runs [commit] (RN's onBlur).
+ */
 @Composable
 private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: String?, enabled: Boolean, singleLine: Boolean = false,
-                        minHeight: Int = 0, description: String? = null, tag: String? = null) {
+                        minHeight: Int = 0, description: String? = null, tag: String? = null, commit: (() -> Unit)? = null) {
     val c = LocalTheme.current.colors
+    val focusManager = LocalFocusManager.current
     val shape = RoundedCornerShape(10.dp)
     // Focused, the whole field (its border too, not only Compose's cursor line) and RN's clearance sit above the
     // keyboard; it runs again as the form shrinks with the keyboard, so the last pass sees the settled form.
@@ -1213,7 +1231,9 @@ private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: 
     if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled, singleLine = singleLine, textStyle = rnText(16, 400).copy(color = if (enabled) c.text else c.secondaryText),
         cursorBrush = SolidColor(c.tint),
-        modifier = Modifier.bringIntoViewRequester(reveal).onSizeChanged { size = it }.onFocusChanged { focused = it.isFocused }.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
+        keyboardOptions = if (commit != null) KeyboardOptions(imeAction = ImeAction.Done) else KeyboardOptions.Default,
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+        modifier = Modifier.bringIntoViewRequester(reveal).onSizeChanged { size = it }.onFocusChanged { if (focused && !it.isFocused) commit?.invoke(); focused = it.isFocused }.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         decorationBox = { inner ->

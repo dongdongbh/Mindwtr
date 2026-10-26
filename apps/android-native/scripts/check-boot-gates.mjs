@@ -896,8 +896,13 @@ assert.match(editorUi, /if \(field\.text != value\) field = TextFieldValue\(valu
 // A focused editor field scrolls wholly into view with RN's clearance above the keyboard (RN's scrollHandleIntoView),
 // again as the form shrinks with the keyboard; Compose alone brings only the cursor line in.
 assert.match(editorUi, /LaunchedEffect\(focused, viewport\) \{\s+if \(focused && viewport > 0\) reveal\.bringIntoView\(Rect\(0f, 0f, size\.width\.toFloat\(\), focusRevealBottom\(size\.height, viewport\)\)\)/);
-assert.match(editorUi, /modifier = Modifier\.bringIntoViewRequester\(reveal\)\.onSizeChanged \{ size = it \}\.onFocusChanged \{ focused = it\.isFocused \}/);
+assert.match(editorUi, /modifier = Modifier\.bringIntoViewRequester\(reveal\)\.onSizeChanged \{ size = it \}\.onFocusChanged \{ if \(focused && !it\.isFocused\) commit\?\.invoke\(\); focused = it\.isFocused \}/);
 assert.match(editorUi, /\.imePadding\(\)\.onSizeChanged \{ formViewport = it\.height \}\.verticalScroll\(rememberScrollState\(\)\)/);
+// RN's Contexts and Tags inputs (TaskEditTokenField): one line with the keyboard's Done; Done leaves the field, and leaving it
+// shows core's tidy token list (draftValue), as RN's commitContextDraft / commitTagDraft on submit and on blur (TokenCommitTest).
+assert.match(editorUi, /keyboardOptions = if \(commit != null\) KeyboardOptions\(imeAction = ImeAction\.Done\) else KeyboardOptions\.Default,\s+keyboardActions = KeyboardActions\(onDone = \{ focusManager\.clearFocus\(\) \}\)/);
+assert.match(editorUi, /\.onFocusChanged \{ if \(focused && !it\.isFocused\) commit\?\.invoke\(\); focused = it\.isFocused \}/);
+assert.match(editorUi, /!locked, singleLine = true, description = label, tag = "editor-\$id",\s+commit = \{ committedTokens\(editor\.input\(id\), suggestions\[id\]\)\?\.let \{ editInput\(id, it\) \} \}\)/);
 // A chip's click, label, and state are one accessibility node: one-of-many choices are selectable (TalkBack says
 // "selected" as RN does; uiautomator reports selected), and only on/off chips (quick tokens, after completion) toggle.
 assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.then\(if \(toggle\) Modifier\.toggleable\(value = active, enabled = enabled, role = Role\.Button, onValueChange = \{ onClick\(\) \}\)\s+else Modifier\.selectable\(selected = active, enabled = enabled, role = Role\.Tab, onClick = onClick\)\)/);
