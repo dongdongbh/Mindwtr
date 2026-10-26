@@ -118,6 +118,32 @@ final class NativeFileSyncReadOwnerTests: XCTestCase {
     for name in ["unknown", "data.json", "data.json.bak", "data.json.previous"] { XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(name)), sentinel) }
   }
 
+  func testCanonicalProjectionRevalidatesTheHandleAndActualRootIdentity() async throws {
+    let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
+    let root = try folder(parent), retained = parent.appendingPathComponent("retained-root"), bytes = Data([1, 2, 3])
+    try bytes.write(to: root.appendingPathComponent("data.json"))
+    let counts = Counts(), writer = owner(root, counts), handle = try await writer.open()
+    let projected = try await writer.canonicalDirectory(handle)
+    XCTAssertEqual(projected.absoluteString, root.absoluteString)
+    try FileManager.default.moveItem(at: root, to: retained)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+    let sentinel = Data([9, 8, 7]); try sentinel.write(to: root.appendingPathComponent("foreign"))
+    await refuses { _ = try await writer.canonicalDirectory(handle) }
+    for _ in 0..<2 {
+      do { try await writer.finishClosing(); XCTFail("The changed-root cleanup error must remain retained") }
+      catch {
+        guard let failure = error as? SyncFileLockEngineError, case .unavailable(let message) = failure else {
+          XCTFail("Unexpected cleanup error: \(error)"); continue
+        }
+        XCTAssertEqual(message, "sync root identity changed")
+      }
+    }
+    XCTAssertEqual(counts.count("scope-start"), 1); XCTAssertEqual(counts.count("scope-stop"), 1)
+    XCTAssertEqual(try Data(contentsOf: retained.appendingPathComponent("data.json")), bytes)
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("foreign")), sentinel)
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["foreign"], "The stale handle must not retarget the replacement root")
+  }
+
   func testExistingNodesAndUnownedNamesNeverGrantWriteAuthority() async throws {
     let parent = try fixture(); defer { try? FileManager.default.removeItem(at: parent) }
     for kind in ["file", "directory", "symlink", "missing"] {

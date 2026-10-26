@@ -88,7 +88,7 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
       name.withCString { Darwin.unlinkat(directory, $0, 0) }
     }
     // A false scope start is only accepted for a proven app-local directory, not an arbitrary external path.
-    var applicationContainer = FileManager.default.homeDirectoryForCurrentUser
+    var applicationContainer = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
   }
 
   private struct Node: Equatable {
@@ -368,6 +368,14 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   }
 
   func cancel(_ handle: Handle) async throws { try await close(handle) }
+
+  func canonicalDirectory(_ handle: Handle) async throws -> URL {
+    try await submit(handle) {
+      try self.validateRoot()
+      guard let root = self.root else { throw Failure.closed }
+      return root
+    }
+  }
 
   func revalidate(_ handle: Handle) async throws {
     try await submit(handle) { try self.validateRoot() }

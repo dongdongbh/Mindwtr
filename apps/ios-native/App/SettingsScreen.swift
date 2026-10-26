@@ -136,7 +136,7 @@ struct SettingsScreen: View {
         .background(palette.bg)
     }
 
-    var body: some View {
+    private var settingsPresentation: some View {
         settingsBody
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             model.retireAISettingsPage()
@@ -277,6 +277,10 @@ struct SettingsScreen: View {
             get: { notificationPicker != nil && model.settingsNotificationsPresented && !model.appLock.concealed },
             set: { if !$0 { notificationPicker = nil } }
         )) { notificationPickerSheet }
+    }
+
+    var body: some View {
+        settingsPresentation
         .sheet(item: Binding(
             get: {
                 guard model.settingsCalendarPresented, !model.appLock.concealed,
@@ -291,6 +295,21 @@ struct SettingsScreen: View {
                 }
                 .id(claim.id)
                 .interactiveDismissDisabled()
+            }
+        .sheet(item: Binding(
+            get: {
+                guard model.settingsSyncPresented, !model.appLock.concealed,
+                      let pickerID = model.settingsSyncDirectoryPickerID else { return nil }
+                return NativeDocumentPickerClaim(id: pickerID)
+            },
+            set: { (claim: NativeDocumentPickerClaim?) in
+                if claim == nil, let pickerID = model.settingsSyncDirectoryPickerID {
+                    model.completeSettingsSyncDirectory(.failure(CocoaError(.userCancelled)), pickerID: pickerID)
+                }
+            })) { claim in
+                NativeSyncDirectoryPicker(pickerID: claim.id) { result, capturedID in
+                    model.completeSettingsSyncDirectory(result, pickerID: capturedID)
+                }.id(claim.id).interactiveDismissDisabled()
             }
         .onChange(of: model.settingsNotificationsPresented) { presented in
             if !presented { notificationPicker = nil }
@@ -374,8 +393,9 @@ struct SettingsScreen: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
                     }
+                    if model.settingsSync.object("panel").text("kind") == "file" { syncDirectoryContent }
                     if ["webdav", "selfhosted"].contains(model.settingsSync.object("panel").text("kind")) { syncRemoteContent }
-                    if model.settingsSync.object("panel").text("kind") != "selfhosted",
+                    if !["selfhosted", "file"].contains(model.settingsSync.object("panel").text("kind")),
                        !model.settingsSync.object("encryption").isEmpty { syncEncryptionContent }
                     Button { syncField = nil; Task { await model.openAppleRemindersSettings() } } label: {
                         HStack {
@@ -642,6 +662,37 @@ struct SettingsScreen: View {
                     Text(failure).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true)
                 }
             }
+        }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var syncDirectoryContent: some View {
+        let panel = model.settingsSync.object("panel")
+        let help = panel.object("help"), folder = panel.object("folder"), action = panel.object("syncNow")
+        return VStack(alignment: .leading, spacing: 12) {
+            Text(help.text("title")).rnFont(16, .semibold)
+            Text(help.text("text")).rnFont(14).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(help.text("tip")).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(panel.text("title")).rnFont(16, .semibold)
+            Text(folder.text("label")).rnFont(14, .semibold)
+            Text(folder.text("value")).rnFont(13).foregroundStyle(palette.secondary).fixedSize(horizontal: false, vertical: true)
+            Button(folder.object("select").text("label")) { model.pickSettingsSyncDirectory() }
+                .buttonStyle(.bordered).frame(minHeight: 44)
+                .disabled(!model.settingsSyncCanEdit || !folder.object("select").flag("enabled"))
+                .accessibilityIdentifier("sync-select-folder")
+            Group {
+                Button { Task { await model.performSettingsSync("syncNow") } } label: {
+                    VStack(spacing: 4) {
+                        Text(action.text("label")).rnFont(15, .semibold)
+                        if let description = action["description"] as? String { Text(description).rnFont(12).fixedSize(horizontal: false, vertical: true) }
+                    }.frame(maxWidth: .infinity, minHeight: 44)
+                }.buttonStyle(.bordered).disabled(!model.settingsSyncActionEnabled("syncNow"))
+                    .accessibilityIdentifier("sync-now")
+            }
+            let lastSync = panel.object("lastSync")
+            Text(lastSync.text("title")).rnFont(15, .semibold)
+            Text(lastSync.text("status")).rnFont(14).foregroundStyle(palette.secondary)
+            ForEach(lastSync["lines"] as? [String] ?? [], id: \.self) { Text($0).rnFont(13).foregroundStyle(palette.secondary) }
+            if let failure = lastSync["error"] as? String { Text(failure).rnFont(13).foregroundStyle(palette.danger).fixedSize(horizontal: false, vertical: true) }
         }.padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
     }
 

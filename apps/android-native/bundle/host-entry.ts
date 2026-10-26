@@ -166,7 +166,7 @@ import { createPreparedProjectAvailabilityMethods, createProjectAvailabilityMeth
 import { SYNC_ENCRYPTION_STATE_KEY } from '../../../packages/core/src/sync-storage-keys';
 import { createNativeReminders } from './host-reminders';
 import { createIosReminderMethods, createIosReminderSnoozeMethods } from './host-ios-reminders';
-import { createIosFileSync, createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
+import { createIosDirectoryFileSync, createIosFileSync, createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
 type NativeBridge = {
@@ -567,6 +567,31 @@ const nativeSync: NativeSync | null = globalThis.__mindwtrHostPlatform !== 'ios'
     : null;
 let iosManualSync: NativeSync | null = null;
 let iosCleanupCallback: ((requestJSON: string) => unknown) | null = null;
+let iosDirectorySync: ReturnType<typeof createIosDirectoryFileSync> | null = null;
+const ensureIosManualSync = (): NativeSync => iosManualSync ??= createNativeSync({ ...nativeSyncBindings,
+                    performFileSync: (path, options) => {
+                        if (!iosDirectorySync) throw new Error('Directory File Sync requires an explicit manual action');
+                        return iosDirectorySync.performFileSync(path, options);
+                    },
+                    pickSyncFolder: () => {
+                        if (!iosDirectorySync) throw new Error('Directory selection requires an explicit manual action');
+                        return iosDirectorySync.pickSyncFolder();
+                    }, emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
+                    retireLocalAttachment: async (attachmentID, targetURI, keep) => {
+                        if (keep()) return false;
+                        const requestID = generateUUID();
+                        try {
+                            if (!iosCleanupCallback) throw new NativeAttachmentCleanupUnconfirmedError();
+                            const reply = iosCleanupCallback(JSON.stringify({ version: 1, requestID, attachmentID, targetURI }));
+                            if (typeof reply !== 'string' || new TextEncoder().encode(reply).byteLength > 1024) throw new Error();
+                            const result = JSON.parse(reply) as Record<string, unknown>;
+                            if (!result || typeof result !== 'object' || Array.isArray(result)
+                                || Object.keys(result).length !== 3 || result.version !== 1 || result.requestID !== requestID
+                                || !['removed', 'absent', 'retained'].includes(result.outcome as string)) throw new Error();
+                            return result.outcome !== 'retained';
+                        } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
+                    },
+                });
 let iosProjectAttachmentDownload = false;
 let iosRelocatedProjectAvailability = false;
 let iosCachedProjectAvailability = false;
@@ -6428,6 +6453,16 @@ globalThis.MindwtrHost = {
             return null;
         });
     },
+    iosDirectoryFileSyncDiagnostic(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: Directory File Sync diagnostic is unavailable');
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS manual directory File Sync completed',
+                context: { releaseCheck: 'v1.3.8/ios-file-sync-directory-manual', operation: 'foreground', outcome: 'completed' },
+            }, { force: true }); } catch { /* A diagnostic cannot change a settled result. */ }
+            return null;
+        });
+    },
     /** Only the retained CoreHost FileSyncTurn supplies this transient selection. */
     iosForegroundFileSync(turn: string, rootURI: string, canonicalPath: string): string {
         return submit(async () => {
@@ -6452,6 +6487,40 @@ globalThis.MindwtrHost = {
             await unchanged();
             if (!result.success || result.skipped || result.fileSyncLockDeferred) throw new Error('NOT_READY: File Sync cycle did not complete');
             return result;
+        });
+    },
+    /** Metadata and explicit directory actions share core's existing Settings transaction. */
+    iosDirectorySyncSettings(name: string, json: string, control: unknown): string {
+        return submit(async () => {
+            const channel = (globalThis as typeof globalThis & { __mindwtrFileSyncCall?: import('./host-file-sync').NativeFileSyncCall }).__mindwtrFileSyncCall;
+            const unavailable = () => new Error('NOT_READY: Directory File Sync is unavailable');
+            if (iosForegroundFailure || globalThis.__mindwtrHostPlatform !== 'ios' || nativeSync || !bootAdapter || !localAttachments
+                || iosDirectorySync || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation
+                || isSandboxMode() || isWorkspaceTransitionActive() || typeof control !== 'function' || typeof channel !== 'function'
+                || typeof json !== 'string' || new TextEncoder().encode(json).byteLength > 128 * 1024) throw unavailable();
+            const input = JSON.parse(json) as Record<string, unknown>;
+            if (!input || typeof input !== 'object' || Array.isArray(input)
+                || !['openSyncSettings', 'syncSettings', 'closeSyncSettings', 'selectSyncBackend', 'pickSyncFolder', 'syncNow'].includes(name)) throw unavailable();
+            if (name === 'selectSyncBackend' && !['off', 'file'].includes(input.option as string)) throw unavailable();
+            if (['pickSyncFolder', 'syncNow'].includes(name)
+                && (typeof input.revision !== 'string' || !input.revision || input.revision.length > 100
+                    || Object.keys(input).some((field) => !['requestId', 'revision'].includes(field)))) throw unavailable();
+            requireSaved();
+            const persistence = getPersistenceStatus();
+            if (persistence.failed || persistence.queued || persistence.inFlight || persistence.immediate || persistence.retrying) throw unavailable();
+            ensureIosManualSync().settingsHost.encryption.mode = 'saved-webdav-or-local';
+            const directory = createIosDirectoryFileSync(nativeSyncBindings, channel, control as (request: string) => unknown);
+            iosDirectorySync = directory;
+            try {
+                const result = name === 'syncSettings' ? contract.getSyncSettings(input)
+                    : name === 'pickSyncFolder' ? await contract.pickSyncFolder(input as { requestId: string; revision: string })
+                    : await MENU_COMMANDS[name as SyncScreenCommand](input as never);
+                if (result.ok && (name === 'syncSettings' || name === 'openSyncSettings')) {
+                    const model = result.value as import('../../../packages/core/src/native-host-contract-settings-sync').NativeSyncSettings;
+                    model.backend.options = model.backend.options.filter(({ option }) => ['off', 'file', 'webdav', 'selfhosted'].includes(option));
+                }
+                return result;
+            } finally { try { directory.close(); } finally { iosDirectorySync = null; } }
         });
     },
     /** Only CoreHost.foregroundSync supplies this invocation-scoped physical cleanup callback. */
@@ -6543,22 +6612,7 @@ globalThis.MindwtrHost = {
                         };
                     }
                 }
-                if (!downloadResult) iosManualSync ??= createNativeSync({ ...nativeSyncBindings, emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
-                    retireLocalAttachment: async (attachmentID, targetURI, keep) => {
-                        if (keep()) return false;
-                        const requestID = generateUUID();
-                        try {
-                            if (!iosCleanupCallback) throw new NativeAttachmentCleanupUnconfirmedError();
-                            const reply = iosCleanupCallback(JSON.stringify({ version: 1, requestID, attachmentID, targetURI }));
-                            if (typeof reply !== 'string' || new TextEncoder().encode(reply).byteLength > 1024) throw new Error();
-                            const result = JSON.parse(reply) as Record<string, unknown>;
-                            if (!result || typeof result !== 'object' || Array.isArray(result)
-                                || Object.keys(result).length !== 3 || result.version !== 1 || result.requestID !== requestID
-                                || !['removed', 'absent', 'retained'].includes(result.outcome as string)) throw new Error();
-                            return result.outcome !== 'retained';
-                        } catch { throw new NativeAttachmentCleanupUnconfirmedError(); }
-                    },
-                });
+                if (!downloadResult) ensureIosManualSync();
                 if (iosManualSync) iosManualSync.settingsHost.encryption.mode = 'saved-webdav-or-local';
                 if (name === 'selectSyncBackend' && input.option === 'selfhosted'
                     || ['saveSyncBackend', 'syncNow', 'testSyncConnection'].includes(name) && input.selfHosted !== undefined
@@ -6616,7 +6670,7 @@ globalThis.MindwtrHost = {
                     // The command union includes non-view replies; only the two view commands reach this branch.
                     if (name === 'syncSettings' || name === 'openSyncSettings') {
                         const model = result.value as import('../../../packages/core/src/native-host-contract-settings-sync').NativeSyncSettings;
-                        model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'webdav' || option === 'selfhosted');
+                        model.backend.options = model.backend.options.filter(({ option }) => option === 'off' || option === 'file' || option === 'webdav' || option === 'selfhosted');
                     }
                 }
                 if (currentTargetURI === undefined && (name !== 'projectAttachmentDownload' || result.ok && result.value && typeof result.value === 'object'

@@ -1,3 +1,4 @@
+import MindwtrNativeCore
 import SwiftUI
 import UIKit
 import LinkPresentation
@@ -1563,6 +1564,38 @@ struct NativeDocumentPicker: UIViewControllerRepresentable {
             completion(.success(urls), pickerID)
         }
 
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            completion(.failure(CocoaError(.userCancelled)), pickerID)
+        }
+    }
+}
+
+/// A separate directory picker leaves existing copied data/backup imports unchanged.
+struct NativeSyncDirectoryPicker: UIViewControllerRepresentable {
+    let pickerID: UUID
+    let completion: (Result<Data, Error>, UUID) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(pickerID: pickerID, completion: completion) }
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+    func updateUIViewController(_ picker: UIDocumentPickerViewController, context: Context) {}
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let pickerID: UUID
+        let completion: (Result<Data, Error>, UUID) -> Void
+        init(pickerID: UUID, completion: @escaping (Result<Data, Error>, UUID) -> Void) {
+            self.pickerID = pickerID; self.completion = completion
+        }
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            // Capture synchronously, before any Task suspension loses UIKit's temporary URL scope.
+            let result = Result<Data, Error> {
+                guard urls.count == 1, let url = urls.first else { throw CocoaError(.fileReadInvalidFileName) }
+                return try CoreHost.captureSyncDirectoryBookmark(url)
+            }
+            completion(result, pickerID)
+        }
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
             completion(.failure(CocoaError(.userCancelled)), pickerID)
         }

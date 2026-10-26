@@ -1409,7 +1409,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 : kind === 'selfhosted' ? Boolean(selfHosted) && input.webdav === undefined
                     : input?.webdav === undefined && input?.selfHosted === undefined;
             if (!isObjectRecord(input) || !isRequestId(input.requestId) || !fieldsOk
-                || (withFields ? !isText(input.revision, 100) : input.revision !== undefined)) {
+                || (withFields ? !isText(input.revision, 100) : kind === 'file' ? input.revision !== undefined && (!isText(input.revision, 100) || !input.revision) : input.revision !== undefined)) {
                 return fail('INVALID_INPUT', 'A request UUID, and the WebDAV or self-hosted form\'s fields with its configRevision when that form shows, are required');
             }
             const draft = webdav ? { url: webdav.url } : selfHosted ? { url: selfHosted.url, token: selfHosted.token } : {};
@@ -1417,7 +1417,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             const identity = ['syncNow', kind, input.revision ?? null, fieldsPrint(webdav ?? selfHosted)];
             return runScreenAction(input.requestId, identity, current, async () => {
                 // A form's Sync now stores the form's settings, as its Save does.
-                if (withFields) {
+                if (withFields || kind === 'file' && input.revision !== undefined) {
                     const stale = await refuseStaleConfiguration(current, input.revision!);
                     if (stale) return stale;
                 }
@@ -1459,14 +1459,20 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         },
 
         /** File Sync's Select folder: the system picker, then the picked folder activates through its first sync. */
-        async pickSyncFolder(input: { requestId: string }): Promise<NativeHostResult<NativeSyncCommandResult>> {
+        async pickSyncFolder(input: { requestId: string; revision?: string }): Promise<NativeHostResult<NativeSyncCommandResult>> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
             const current = opened.value;
-            if (!isObjectRecord(input) || !isRequestId(input.requestId)) return fail('INVALID_INPUT', 'A request UUID is required');
+            if (!isObjectRecord(input) || !isRequestId(input.requestId) || input.revision !== undefined && (!isText(input.revision, 100) || !input.revision)) return fail('INVALID_INPUT', 'A request UUID and optional revision are required');
             if (!current.host.pickSyncFolder) return fail('ACTION_FAILED', 'The folder picker is not available on this host yet');
             if (buildPanel(current, {})?.kind !== 'file') return fail('ACTION_FAILED', 'Select folder is not available now; read the screen again');
-            return runScreenAction(input.requestId, ['pickSyncFolder'], current, () => current.transport.handleSetSyncPath());
+            return runScreenAction(input.requestId, ['pickSyncFolder', input.revision ?? null], current, async () => {
+                if (input.revision !== undefined) {
+                    const stale = await refuseStaleConfiguration(current, input.revision);
+                    if (stale) return stale;
+                }
+                return current.transport.handleSetSyncPath();
+            });
         },
 
         /** Dropbox's Connect: sign-in, then the account activates through its first sync. Nothing when already connected. */

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import * as core from '@mindwtr/core';
 import {
@@ -17,7 +18,7 @@ import {
     setLogger,
     type AppData,
 } from '@mindwtr/core';
-import { createDeadlineFetch, createNativeSync } from './host-sync';
+import { createDeadlineFetch, createIosDirectoryFileSync, createNativeSync } from './host-sync';
 import type { NativeAttachmentBindings } from './host-attachments';
 import { createMemoryFileSystem, CACHE, DOCUMENTS, MANAGED } from '../../../packages/core/src/__fixtures__/mobile-attachment-fakes';
 
@@ -261,11 +262,12 @@ const iosFiles = () => {
         fileDirectories: () => JSON.stringify({ document: DOCUMENTS, cache: CACHE }),
         fileDeleteNow: () => { calls.push('deleteNow'); throw new Error('Unexpected raw delete'); },
     };
-    globals.__mindwtrFileCall = async (request: Record<string, unknown>) => {
+    globals.__mindwtrFileCall = async (request: Record<string, unknown>, bytes?: Uint8Array) => {
         const op = String(request.op);
         const uri = String(request.uri ?? '');
         calls.push(op);
         switch (op) {
+            case 'sha256': if (!bytes) throw new Error('Missing hash body'); return createHash('sha256').update(bytes).digest('hex');
             case 'getInfo': return memory.fs.getInfo(uri);
             case 'makeDirectory': return memory.fs.makeDirectory(uri);
             case 'readDirectory': return memory.fs.readDirectory(uri);
@@ -1113,4 +1115,91 @@ it('requires an exact injected File path while default and saved File admission 
     const result = await explicit.settingsHost.performSync(undefined, { manual: true, configOverride: { backend: 'file', syncPath: path } });
     expect(result.success).toBe(false); expect(admitted).toBe(1);
     expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('file'); expect(fixture.kv.has('@mindwtr_sync_path')).toBe(false);
+});
+
+
+it('runs picked activation through two fresh real shared File cycles, then one saved manual cycle', async () => {
+    resetForTests(); iosFiles();
+    const data: AppData = { tasks: [], projects: [], sections: [], areas: [], settings: {} };
+    core.setStorageAdapter({ getData: async () => structuredClone(data), saveData: async () => undefined });
+    const fixture = host({ [SYNC_BACKEND_KEY]: 'off' }, false, async () => structuredClone(data), async () => false);
+    const root = 'file:///app/selected/', path = root + 'data.json', bookmark = 'b3JpZ2luYWw=';
+    core.useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {}, error: null, persistenceFailure: null, isLoading: false, editLockCount: 0, lastDataChangeAt: 0 } as never);
+    await core.useTaskStore.getState().fetchData({ throwOnError: true });
+    await core.flushPendingSave();
+    const files = new Map<string, Uint8Array>(), phases: string[] = [], requests: string[] = [];
+    let turn = 0, active: string | null = null, opens = 0;
+    const control = (text: string) => {
+        const request = JSON.parse(text);
+        if (request.phase === 'begin') {
+            expect(active).toBeNull(); active = 'directory-' + (++turn);
+            phases.push('begin:' + turn + ':' + fixture.kv.get(SYNC_BACKEND_KEY));
+            return JSON.stringify({ turn: active, bookmark, expectedPath: request.picked ? null : fixture.kv.get('@mindwtr_sync_path') });
+        }
+        expect(request.turn).toBe(active);
+        phases.push('finish:' + turn + ':' + fixture.kv.get(SYNC_BACKEND_KEY) + ':' + request.admit);
+        active = null;
+        return JSON.stringify({ closed: true });
+    };
+    const call: import('./host-file-sync').NativeFileSyncCall = async (request) => {
+        expect(request.turn).toBe(active); requests.push(String(request.op));
+        const uri = String(request.uri), bytes = files.get(uri);
+        const reply = (value: unknown) => ({ id: 'reply', value });
+        switch (request.op) {
+        case 'prepare': return reply({ rootURI: root, canonicalPath: path });
+        case 'open': opens += 1; return reply(null);
+        case 'revalidate': case 'close': return reply(null);
+        case 'list': return reply([...files.keys()].map((name) => name.slice(root.length)));
+        case 'info': return reply(uri === root ? { exists: true, size: 0 } : bytes ? { exists: true, size: bytes.length } : { exists: false });
+        case 'read': return bytes ? { id: 'reply', value: 'bytes', body: true, base64: core.bytesToBase64(bytes) } : reply('absent');
+        case 'create': if (files.has(uri)) return reply('exists'); files.set(uri, new Uint8Array()); return reply('created');
+        case 'writeCreated': files.set(uri, core.base64ToBytes(String(request.base64))); return reply(null);
+        case 'renameObserved': {
+            expect(bytes).toEqual(core.base64ToBytes(String(request.base64)));
+            const target = root + encodeURIComponent(String(request.name)); expect(files.has(target)).toBe(false);
+            files.set(target, bytes!); files.delete(uri); return reply(target);
+        }
+        case 'deleteOwned': expect(bytes).toEqual(core.base64ToBytes(String(request.base64))); files.delete(uri); return reply(null);
+        default: throw new Error('Unexpected native operation');
+        }
+    };
+    const directory = createIosDirectoryFileSync(fixture.bindings, call, control);
+    const sync = createNativeSync({ ...fixture.bindings, ...directory });
+    const contract = core.createNativeHostContract({ syncSettings: sync.settingsHost });
+    const activation = await contract.activate({ writeSafetyReady: true });
+    expect(activation).toEqual({ ok: true, value: null });
+    expect((await contract.openSyncSettings({})).ok).toBe(true);
+    expect((await contract.selectSyncBackend({ requestId: crypto.randomUUID(), option: 'file' })).ok).toBe(true);
+    expect(turn).toBe(0); expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('off');
+    const read = contract.getSyncSettings(); if (!read.ok) throw new Error('No Settings view');
+    const picked = await contract.pickSyncFolder({ requestId: crypto.randomUUID(), revision: read.value.configRevision });
+    expect(picked).toMatchObject({ ok: true, value: { toasts: expect.not.arrayContaining([expect.objectContaining({ tone: 'error' })]) } });
+    expect(phases).toEqual(['begin:1:off', 'finish:1:off:true', 'begin:2:file', 'finish:2:file:true']);
+    expect(turn).toBe(2); expect(opens).toBe(2);
+    expect(fixture.kv.get('@mindwtr_sync_path')).toBe(path);
+    expect(fixture.kv.get('@mindwtr_sync_path_bookmark')).toBe(bookmark);
+    const first = core.bytesToBase64(files.get(path)!);
+    const fresh = contract.getSyncSettings(); if (!fresh.ok) throw new Error('No Settings view');
+    expect((await contract.syncNow({ requestId: crypto.randomUUID(), revision: fresh.value.configRevision })).ok).toBe(true);
+    expect(turn).toBe(3); expect(opens).toBe(3); expect(core.bytesToBase64(files.get(path)!)).toBe(first);
+    expect(requests.filter((op) => op === 'prepare')).toHaveLength(3);
+    expect((await contract.selectSyncBackend({ requestId: crypto.randomUUID(), option: 'off' })).ok).toBe(true);
+    expect(turn).toBe(3); expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('off');
+    directory.close(); resetForTests();
+});
+
+it('native directory projection failure closes before core can activate a picked target', async () => {
+    resetForTests(); iosFiles();
+    const fixture = host({ [SYNC_BACKEND_KEY]: 'off' }, false, undefined, async () => false);
+    const phases: string[] = [];
+    const directory = createIosDirectoryFileSync(fixture.bindings,
+        async () => ({ id: 'reply', value: { rootURI: 'file:///app/folder/', canonicalPath: 'file:///app/other/data.json' } }),
+        (text) => {
+            const request = JSON.parse(text); phases.push(request.phase);
+            return JSON.stringify(request.phase === 'begin' ? { turn: 'one', bookmark: 'b3JpZ2luYWw=', expectedPath: null } : { closed: true });
+        });
+    await expect(directory.pickSyncFolder()).rejects.toThrow();
+    expect(phases).toEqual(['begin', 'finish']);
+    expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('off');
+    directory.close(); resetForTests();
 });

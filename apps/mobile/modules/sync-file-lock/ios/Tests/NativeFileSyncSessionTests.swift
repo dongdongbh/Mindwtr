@@ -24,6 +24,41 @@ final class NativeFileSyncSessionTests: XCTestCase {
   private func refuses(_ work: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
     do { try await work(); XCTFail("Expected refusal", file: file, line: line) } catch { }
   }
+  func testBookmarkProjectionResolvesOnceAndKeepsTheSameLeaseUntilClose() async throws {
+    let root = try root(), resolves = Counter(), starts = Counter(), stops = Counter()
+    var io = access(root)
+    io.resolve = { _ in resolves.bump(); return (root, false) }
+    io.startScope = { _ in starts.bump(); return true }
+    io.stopScope = { _ in stops.bump() }
+    let session = NativeFileSyncSession(owner: NativeFileSyncReadOwner(selection: .bookmark(Data([1])), access: io, diagnostic: { _ in }))
+    let directory = try await session.openDirectory()
+    XCTAssertEqual(directory.absoluteString, root.absoluteString)
+    XCTAssertEqual(resolves.count, 1); XCTAssertEqual(starts.count, 1); XCTAssertEqual(stops.count, 0)
+    try await session.revalidate()
+    await refuses { _ = try await session.openDirectory() }
+    XCTAssertEqual(resolves.count, 1)
+    let competitor = SyncFileLockEngine(); defer { competitor.drain() }
+    XCTAssertThrowsError(try competitor.acquireDirectory(root))
+    try await session.close()
+    XCTAssertEqual(stops.count, 1)
+    let lease = try competitor.acquireDirectory(root); try competitor.release(lease)
+  }
+  func testStaleOrFileBookmarkCannotProjectADirectoryOrRetainScope() async throws {
+    let root = try root(), file = root.appendingPathComponent("picked-file")
+    try Data([7]).write(to: file)
+    for mode in ["stale", "file"] {
+      let starts = Counter(), stops = Counter()
+      var io = access(root)
+      io.resolve = { _ in (mode == "file" ? file : root, mode == "stale") }
+      io.startScope = { _ in starts.bump(); return true }
+      io.stopScope = { _ in stops.bump() }
+      let session = NativeFileSyncSession(owner: NativeFileSyncReadOwner(selection: .bookmark(Data([1])), access: io, diagnostic: { _ in }))
+      await refuses { _ = try await session.openDirectory() }
+      try await session.close()
+      XCTAssertEqual(stops.count, starts.count)
+      XCTAssertEqual(try Data(contentsOf: file), Data([7]))
+    }
+  }
   func testOversizeCapturedNodeRefusesBeforeAnyAccessRead() async throws {
     let root = try root(), count = Counter()
     try Data(repeating: 7, count: 9).write(to: root.appendingPathComponent("data.json"))

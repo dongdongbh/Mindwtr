@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'bun:test';
 import { base64ToBytes, bytesToBase64, FILE_SYNC_ABSENT_FINGERPRINT, FileSyncPathOwnerTerminatedError, type AppData, type MobileFileSyncFullHost } from '@mindwtr/core';
-import { assertNativeFileSyncData, createNativeFileSync, type NativeFileSyncCall } from './host-file-sync';
+import { assertNativeFileSyncData, createNativeFileSync, prepareNativeFileSync, type NativeFileSyncCall } from './host-file-sync';
 const selection = { turn: 'one-turn', rootURI: 'file:///app/Sync%20%E8%B3%87%E6%96%99/', canonicalPath: 'file:///app/Sync%20%E8%B3%87%E6%96%99/data.json' };
 const host: Pick<MobileFileSyncFullHost, 'encryption' | 'crypto' | 'log'> = {
     encryption: { localState: { read: () => null, write: () => {} }, flush: async () => {}, logEvent: () => {} },
@@ -142,4 +142,28 @@ it('encodes the actual observed write call without browser base64 globals', asyn
     expect(encoded).toBe(bytesToBase64(expected));
     expect(base64ToBytes(String(encoded))).toEqual(expected);
     expect(calls.slice(calls.indexOf('close')).every((op) => op === 'close')).toBe(true);
+});
+
+it('prepares the owner projection then adopts that same turn without resolving a bookmark in JS', async () => {
+    const calls: Record<string, unknown>[] = [];
+    const call: NativeFileSyncCall = async (request) => {
+        calls.push(request);
+        return { id: 'reply', value: request.op === 'prepare' ? { rootURI: selection.rootURI, canonicalPath: selection.canonicalPath } : null };
+    };
+    const resolved = await prepareNativeFileSync(selection.turn, call, host.log);
+    const port = createNativeFileSync(resolved, call, host);
+    const lease = await port.acquireLease(selection.canonicalPath);
+    await port.releaseLease(lease);
+    expect(calls).toEqual(['prepare', 'open', 'close'].map((op) => ({ turn: selection.turn, op })));
+});
+it.each([
+    { rootURI: selection.rootURI, canonicalPath: selection.canonicalPath, bookmark: 'untrusted' },
+    { rootURI: selection.rootURI, canonicalPath: selection.rootURI + 'peer.json' },
+    { rootURI: 'https://private.invalid/', canonicalPath: 'https://private.invalid/data.json' },
+])('refuses an invalid owner projection before acquiring IO: %j', async (value) => {
+    const calls: string[] = [];
+    await expect(prepareNativeFileSync(selection.turn, async (request) => {
+        calls.push(String(request.op)); return { id: 'reply', value };
+    }, host.log)).rejects.toBeInstanceOf(FileSyncPathOwnerTerminatedError);
+    expect(calls).toEqual(['prepare']);
 });

@@ -2768,3 +2768,37 @@ describe('native Settings › Sync recovery snapshot rows (pass D1a)', () => {
         expect(card).toMatchObject({ restoreLabel: t('settings.recoverySnapshotsRestore'), loading: t('settings.recoverySnapshotsLoading'), enabled: true });
     });
 });
+
+
+describe('selected directory revision admission', () => {
+    it('a cancelled picker writes nothing and its revision is part of the request receipt', async () => {
+        const { dev, contract } = await start({ os: 'ios' });
+        value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'file' }));
+        const revision = value(contract.getSyncSettings()).configRevision;
+        const requestId = generateUUID(), at = mark(dev);
+        value(await contract.pickSyncFolder({ requestId, revision }));
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [['pickSyncFolder']] });
+        expect(await contract.pickSyncFolder({ requestId, revision: revision + '-other' })).toMatchObject({ ok: false });
+        expect(since(dev, at).calls).toEqual([['pickSyncFolder']]);
+    });
+    it('stale File picker and manual sync refuse before picker/service and invalid revisions refuse validation', async () => {
+        const { dev, contract } = await start({ os: 'ios', storage: { [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: 'file:///original/data.json' } });
+        const revision = value(contract.getSyncSettings()).configRevision;
+        dev.state.storage.set(SYNC_PATH_KEY, 'file:///changed/data.json');
+        const at = mark(dev);
+        for (const action of ['pickSyncFolder', 'syncNow'] as const) {
+            expect(await contract[action]({ requestId: generateUUID(), revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+            expect(await contract[action]({ requestId: generateUUID(), revision: '' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(since(dev, at)).toEqual({ device: [], writes: [], calls: [] });
+    });
+    it('saved File metadata and Off do not call the picker or sync service', async () => {
+        const { dev, contract } = await start({ os: 'ios', storage: { [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: 'file:///saved/data.json' } });
+        const at = mark(dev);
+        expect(value(contract.getSyncSettings()).panel?.kind).toBe('file');
+        value(await contract.selectSyncBackend({ requestId: generateUUID(), option: 'off' }));
+        expect(dev.state.storage.get(SYNC_BACKEND_KEY)).toBe('off');
+        value(await contract.closeSyncSettings());
+        expect(since(dev, at).calls.filter(([name]) => name === 'pickSyncFolder' || name === 'performMobileSync')).toEqual([]);
+    });
+});

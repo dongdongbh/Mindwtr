@@ -21,7 +21,7 @@
  * iOS construction is explicit and foreground-only; the entry admits Off, WebDAV and self-hosted settings. Both admission
  * and actual self-hosted cycles refuse unfinished encryption transitions. This factory does not alter stored provider choices.
  */
-import { assertNativeFileSyncData, createNativeFileSync, type NativeFileSyncCall, type NativeFileSyncSelection, type NativeFileSyncLease } from './host-file-sync';
+import { assertNativeFileSyncData, createNativeFileSync, prepareNativeFileSync, type NativeFileSyncCall, type NativeFileSyncSelection, type NativeFileSyncLease } from './host-file-sync';
 import { DOMParser } from '@xmldom/xmldom';
 import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
 import {
@@ -90,6 +90,9 @@ export type NativeSyncBindings = {
     keyValue: HostKeyValue;
     /** Explicit, single-turn injection; never a saved provider capability. */
     fileSync?: { canonicalPath: string; port: MobileSyncFileSyncPort<NativeFileSyncLease> };
+    /** Present only on the explicit native directory Settings lane; each call opens a fresh owner. */
+    performFileSync?: NativeSyncSettingsHost['performSync'];
+    pickSyncFolder?: NativeSyncSettingsHost['pickSyncFolder'];
     /** host-polyfills.js's secret calls (SecretStore.kt, expo-secure-store's format). */
     secrets: { getSecret(key: string): Promise<string | null>; setSecret(key: string, value: string, accessibility?: SyncSecretAccessibility): Promise<void>; deleteSecret(key: string): Promise<void> };
     /** The boot's validated SQLite adapter: the local snapshot a cycle reads and saves, on its read tokens (D9b W3). */
@@ -474,6 +477,10 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
     /** Every cycle, automatic or from the Sync screen, goes through here, so Kotlin reads its lists again once one ends. */
     const performSync: NativeSyncSettingsHost['performSync'] = async (syncPathOverride, options) => {
         if (fatalCleanupError) throw fatalCleanupError;
+        if (platform === 'ios' && bindings.performFileSync
+            && (options.configOverride?.backend ?? await keyValue.get(SYNC_BACKEND_KEY)) === 'file') {
+            return bindings.performFileSync(syncPathOverride, options);
+        }
         if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
         try {
             const before = platform === 'ios' && options.manual && !options.activationProbe
@@ -630,6 +637,7 @@ export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionSta
             delete: (key) => secureConfig.deleteSecureConfigValue(key),
         },
         performSync,
+        ...(bindings.pickSyncFolder ? { pickSyncFolder: bindings.pickSyncFolder } : {}),
         ...(bindings.listRecoverySnapshots ? { listRecoverySnapshots: bindings.listRecoverySnapshots } : {}),
         clearSyncConfigCache: () => service.clearMobileSyncConfigCache(),
         reconcileBackgroundSync,
@@ -823,4 +831,65 @@ export const createIosFileSync = (bindings: NativeSyncBindings, selection: Nativ
             logEvent: (event, extra) => state.logSyncEncryptionEvent(event, extra) },
     });
     return createNativeSync({ ...bindings, fileSync: { canonicalPath: selection.canonicalPath, port } }, state);
+};
+
+/** The Settings transaction owns config writes; this adapter owns only one fresh physical cycle at a time. */
+export const createIosDirectoryFileSync = (bindings: NativeSyncBindings, call: NativeFileSyncCall,
+    control: (requestJSON: string) => unknown) => {
+    type Prepared = { selection: NativeFileSyncSelection; bookmark: string; expectedPath: string | null };
+    let prepared: Prepared | null = null;
+    let active: string | null = null;
+    const command = (request: Record<string, unknown>): Record<string, unknown> => {
+        const raw = control(JSON.stringify(request));
+        if (typeof raw !== 'string' || new TextEncoder().encode(raw).byteLength > 2 * 1024 * 1024) throw new Error('Directory File Sync authority is unavailable');
+        const value = JSON.parse(raw) as Record<string, unknown>;
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Directory File Sync authority is unavailable');
+        return value;
+    };
+    const finish = (admit: boolean) => {
+        if (!active) return;
+        const turn = active;
+        // A failed close remains terminal; no new owner may hide its failure.
+        const result = command({ phase: 'finish', turn, admit });
+        if (Object.keys(result).length !== 1 || result.closed !== true) throw new Error('Directory File Sync close was not confirmed');
+        active = null;
+    };
+    const prepare = async (picked: boolean, probe: boolean, candidate?: { path?: string | null; bookmark?: string | null }): Promise<Prepared> => {
+        if (active) throw new Error('Directory File Sync owner is already active');
+        const result = command({ phase: 'begin', picked, probe, path: candidate?.path ?? null, bookmark: candidate?.bookmark ?? null });
+        if (Object.keys(result).length !== 3 || typeof result.turn !== 'string' || !result.turn
+            || typeof result.bookmark !== 'string' || !result.bookmark || result.expectedPath !== null && typeof result.expectedPath !== 'string') throw new Error('Directory File Sync authority is unavailable');
+        active = result.turn;
+        try {
+            const selection = await prepareNativeFileSync(result.turn, call, {
+                info: (message, context) => { void bindings.appendLog(buildDiagnosticsLogEntry('info', message, context)).catch(() => null); },
+                warn: () => {}, error: () => {},
+            });
+            if (result.expectedPath !== null && result.expectedPath !== selection.canonicalPath) throw new Error('Saved directory changed');
+            return { selection, bookmark: result.bookmark, expectedPath: result.expectedPath };
+        } catch (error) { finish(false); throw error; }
+    };
+    const performFileSync: NativeSyncSettingsHost['performSync'] = async (_override, options) => {
+        const probe = options.activationProbe === true;
+        const candidate = options.configOverride;
+        const selected = prepared ?? await prepare(false, probe, { path: candidate?.syncPath, bookmark: candidate?.syncPathBookmark });
+        prepared = null;
+        try {
+            if (candidate && (candidate.syncPath !== selected.selection.canonicalPath || candidate.syncPathBookmark !== selected.bookmark)) throw new Error('Directory selection changed');
+            const fresh = createIosFileSync({ ...bindings, performFileSync: undefined, pickSyncFolder: undefined,
+                emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
+                retireLocalAttachment: async () => { throw new NativeAttachmentCleanupUnconfirmedError(); },
+            }, selected.selection, call);
+            const result = await fresh.settingsHost.performSync(undefined, { ...options,
+                configOverride: { backend: 'file', syncPath: selected.selection.canonicalPath, syncPathBookmark: null },
+            });
+            if (!result.success || result.skipped || result.fileSyncLockDeferred || result.remoteFenceDeferred) throw new Error('Directory File Sync cycle did not complete');
+            finish(true);
+            return result;
+        } catch (error) { finish(false); throw error; }
+    };
+    return { performFileSync, pickSyncFolder: async () => {
+        prepared = await prepare(true, true);
+        return { uri: prepared.selection.canonicalPath, bookmark: prepared.bookmark };
+    }, close: () => { prepared = null; finish(false); } };
 };

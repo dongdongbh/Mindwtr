@@ -18,6 +18,43 @@ const decode = (text: unknown): Uint8Array => {
     return bytes;
 };
 
+const logNativeFileSyncEvents = (events: unknown, log: MobileFileSyncFullHost['log']): void => {
+    if (events !== undefined) {
+        if (!Array.isArray(events)) return refused();
+        for (const event of events) {
+            if (!record(event) || typeof event.message !== 'string' || !record(event.context)
+                || !['Native iOS File Sync read owner admitted', 'Native iOS File Sync created-file write completed', 'Native iOS File Sync quarantine rename completed', 'Native iOS File Sync owned artifact deletion completed'].includes(event.message)
+                || Object.values(event.context).some((v) => typeof v !== 'string')) return refused();
+            const expected: Record<string, [string, string, string]> = {
+                'Native iOS File Sync read owner admitted': ['v1.3.8/ios-file-sync-read-owner', 'admission', 'confirmed'],
+                'Native iOS File Sync created-file write completed': ['v1.3.8/ios-file-sync-created-write', 'createdWrite', 'completed'],
+                'Native iOS File Sync quarantine rename completed': ['v1.3.8/ios-file-sync-publication-primitives', 'quarantine', 'completed'],
+                'Native iOS File Sync owned artifact deletion completed': ['v1.3.8/ios-file-sync-publication-primitives', 'ownedDelete', 'completed'],
+            };
+            const fields = expected[event.message];
+            if (!fields || Object.keys(event.context).length !== 3 || event.context.releaseCheck !== fields[0]
+                || event.context.operation !== fields[1] || event.context.outcome !== fields[2]) return refused();
+            log.info(event.message, { scope: 'sync', extra: event.context });
+        }
+    }
+};
+
+
+/** Resolve once under the owner's live scope. The subsequent port adopts that same session. */
+export const prepareNativeFileSync = async (turn: string, call: NativeFileSyncCall,
+    log: MobileFileSyncFullHost['log']): Promise<NativeFileSyncSelection> => {
+    const reply = await call({ turn, op: 'prepare' });
+    if (!record(reply)) return refused();
+    logNativeFileSyncEvents(reply.events, log);
+    if (typeof reply.id !== 'string' || Object.keys(reply).some((name) => !['id', 'value', 'events'].includes(name))
+        || !record(reply.value) || Object.keys(reply.value).length !== 2
+        || typeof reply.value.rootURI !== 'string' || !reply.value.rootURI.startsWith('file:///')
+        || !reply.value.rootURI.endsWith('/') || typeof reply.value.canonicalPath !== 'string'
+        || reply.value.canonicalPath !== reply.value.rootURI + 'data.json'
+        || new TextEncoder().encode(reply.value.canonicalPath).byteLength > 16 * 1024) return refused();
+    return { turn, rootURI: reply.value.rootURI, canonicalPath: reply.value.canonicalPath };
+};
+
 /** The first native app binding admits metadata documents only, before either side can merge. */
 export const assertNativeFileSyncData = (data: AppData): void => {
     if (data.tasks.some((task) => (task.attachments?.length ?? 0) !== 0)
@@ -35,24 +72,7 @@ export const createNativeFileSync = (selection: NativeFileSyncSelection, call: N
         try {
             const reply = await call({ turn: selection.turn, op, ...fields });
             if (!record(reply)) return refused();
-            if (reply.events !== undefined) {
-                if (!Array.isArray(reply.events)) return refused();
-                for (const event of reply.events) {
-                    if (!record(event) || typeof event.message !== 'string' || !record(event.context)
-                        || !['Native iOS File Sync read owner admitted', 'Native iOS File Sync created-file write completed', 'Native iOS File Sync quarantine rename completed', 'Native iOS File Sync owned artifact deletion completed'].includes(event.message)
-                        || Object.values(event.context).some((v) => typeof v !== 'string')) return refused();
-                    const expected: Record<string, [string, string, string]> = {
-                        'Native iOS File Sync read owner admitted': ['v1.3.8/ios-file-sync-read-owner', 'admission', 'confirmed'],
-                        'Native iOS File Sync created-file write completed': ['v1.3.8/ios-file-sync-created-write', 'createdWrite', 'completed'],
-                        'Native iOS File Sync quarantine rename completed': ['v1.3.8/ios-file-sync-publication-primitives', 'quarantine', 'completed'],
-                        'Native iOS File Sync owned artifact deletion completed': ['v1.3.8/ios-file-sync-publication-primitives', 'ownedDelete', 'completed'],
-                    };
-                    const fields = expected[event.message];
-                    if (!fields || Object.keys(event.context).length !== 3 || event.context.releaseCheck !== fields[0]
-                        || event.context.operation !== fields[1] || event.context.outcome !== fields[2]) return refused();
-                    host.log.info(event.message, { scope: 'sync', extra: event.context });
-                }
-            }
+            logNativeFileSyncEvents(reply.events, host.log);
             if (reply.error !== undefined) return refused();
             const allowed = new Set(['id', 'value', 'events', 'body', 'base64']);
             if (Object.keys(reply).some((name) => !allowed.has(name)) || typeof reply.id !== 'string') return refused();

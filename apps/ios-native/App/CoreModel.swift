@@ -612,6 +612,16 @@ final class CoreModel: ObservableObject {
     }
     private var settingsSyncEncryptionOwner: SettingsSyncEncryptionOwner?
     private var settingsSyncEncryptionTask: Task<Void, Never>?
+    private struct SettingsSyncDirectoryOwner {
+        let id: UUID
+        let host: CoreHost
+        let session: UUID
+        let generation: Int
+        let revision: String
+    }
+    private var settingsSyncDirectoryOwner: SettingsSyncDirectoryOwner?
+    private var settingsSyncDirectoryTask: Task<Void, Never>?
+    @Published private(set) var settingsSyncDirectoryPickerID: UUID?
     private var settingsSyncOpeningRevision = ""
     private var settingsSyncValidatedURL = ""
     private var settingsSyncValidatedTokenDraft: String?
@@ -637,7 +647,7 @@ final class CoreModel: ObservableObject {
             || settingsSyncAllowInsecure != settingsSyncOpeningAllowInsecure || !settingsSyncPassword.isEmpty
             || settingsSyncTokenEdited
     }
-    private enum SettingsSyncFormKind: String { case webdav, selfhosted }
+    private enum SettingsSyncFormKind: String { case webdav, selfhosted, file }
     private var settingsSyncFormKind: SettingsSyncFormKind? {
         SettingsSyncFormKind(rawValue: settingsSync.object("panel").text("kind"))
     }
@@ -672,12 +682,12 @@ final class CoreModel: ObservableObject {
     var settingsSyncCanEdit: Bool {
         ready && settingsSyncPresented && !settingsRemindersPresented && !busy && !retryNeeded && !settingsSyncNeedsReload
             && !settingsSyncRestartRequired && !appLock.concealed && settingsSyncAvailable && !settingsSync.isEmpty
-            && settingsSyncEncryptionOwner == nil
+            && settingsSyncEncryptionOwner == nil && settingsSyncDirectoryOwner == nil
     }
-    var settingsSyncCanClose: Bool { !settingsRemindersPresented && !busy && !settingsSyncChecking && !settingsSyncRestartRequired && settingsSyncEncryptionOwner == nil }
+    var settingsSyncCanClose: Bool { !settingsRemindersPresented && !busy && !settingsSyncChecking && !settingsSyncRestartRequired && settingsSyncEncryptionOwner == nil && settingsSyncDirectoryOwner == nil }
     func settingsSyncActionEnabled(_ action: String) -> Bool {
         settingsSyncCanEdit && !settingsSyncChecking && settingsSyncURL == settingsSyncValidatedURL
-            && (settingsSyncFormKind == .webdav || (settingsSyncFormKind == .selfhosted
+            && (settingsSyncFormKind == .file && action == "syncNow" || settingsSyncFormKind == .webdav || (settingsSyncFormKind == .selfhosted
                 && settingsSyncTokenDraft == settingsSyncValidatedTokenDraft))
             && settingsSync.object("panel").object(action).flag("enabled")
     }
@@ -8490,7 +8500,11 @@ final class CoreModel: ObservableObject {
             }
             #endif
             let encoded = try json(input)
-            let result = try decode(try await capturedHost.foregroundSync(command: command, requestJSON: encoded))
+            let metadata = ["openSyncSettings", "syncSettings", "closeSyncSettings"].contains(command)
+            let raw = metadata || command == "selectSyncBackend" && input.text("option") == "off"
+                ? try await capturedHost.foregroundDirectorySyncSettings(command: command, requestJSON: encoded)
+                : try await capturedHost.foregroundSync(command: command, requestJSON: encoded)
+            let result = try decode(raw)
             guard result["ok"] is Bool,
                   result.flag("ok") ? result["value"] != nil
                     : (result.object("error")["message"] is String && result.object("error")["code"] is String) else {
@@ -8522,6 +8536,14 @@ final class CoreModel: ObservableObject {
         if value is NSNull { return true }
         guard let panel = value as? CoreObject, let kind = SettingsSyncFormKind(rawValue: panel.text("kind")) else { return false }
         if kind == .webdav { return true }
+        if kind == .file {
+            let folder = panel.object("folder"), help = panel.object("help")
+            return Set(panel.keys) == Set(["kind", "help", "title", "folder", "syncNow", "lastSync"])
+                && Set(help.keys) == Set(["title", "text", "tip"]) && help.values.allSatisfy { $0 is String }
+                && panel["title"] is String && Set(folder.keys) == Set(["label", "value", "select"])
+                && folder["label"] is String && folder["value"] is String
+                && folder["select"] is CoreObject && panel["syncNow"] is CoreObject && panel["lastSync"] is CoreObject
+        }
         let url = panel.object("url"), token = panel.object("token")
         return Set(panel.keys) == Set(["kind", "url", "allowInsecureHttp", "token", "save", "syncNow", "test", "lastSync"])
             && Set(url.keys) == Set(["label", "placeholder", "value", "hints", "invalid"])
@@ -8536,7 +8558,7 @@ final class CoreModel: ObservableObject {
     private func adoptSettingsSync(_ view: CoreObject, resetDraft: Bool, host capturedHost: CoreHost) -> Bool {
         guard !view.text("title").isEmpty, !view.text("configRevision").isEmpty,
               view.object("backend")["options"] is [CoreObject],
-              view.object("backend").objects("options").allSatisfy({ ["off", "webdav", "selfhosted"].contains($0.text("option")) }),
+              view.object("backend").objects("options").allSatisfy({ ["off", "file", "webdav", "selfhosted"].contains($0.text("option")) }),
               validSettingsSyncPanel(view["panel"]),
               view.object("panel").text("kind") != "selfhosted" || view["encryption"] is NSNull,
               validSettingsSyncEncryption(view["encryption"]) else {
@@ -8868,6 +8890,13 @@ final class CoreModel: ObservableObject {
         // Revoke delivery and local text synchronously; the captured owner keeps
         // busy until its accepted bridge call and any required host close settle.
         settingsSyncEncryptionTask?.cancel()
+        settingsSyncDirectoryTask?.cancel()
+        if settingsSyncDirectoryPickerID != nil {
+            settingsSyncDirectoryPickerID = nil
+            // No bridge invocation has started; a cancelled picker has no settlement to retain.
+            settingsSyncDirectoryOwner = nil
+            if busy { finishOperation() }
+        }
         settingsSyncPassphrases = [:]
         settingsSyncReadTask?.cancel()
         settingsSyncReadTask = nil
@@ -9174,6 +9203,10 @@ final class CoreModel: ObservableObject {
         guard settingsSyncCanEdit, !settingsSyncChecking,
               settingsSync.object("backend").objects("options").contains(where: { $0.text("option") == option && !$0.flag("selected") }),
               let capturedHost = host else { return }
+        if option == "file" || option == "off" {
+            await performSettingsSyncDirectory("selectSyncBackend", extra: ["option": option])
+            return
+        }
         let session = settingsSyncSession
         settingsSyncReadTask?.cancel(); settingsSyncReadTask = nil
         settingsSyncGeneration += 1
@@ -9187,13 +9220,103 @@ final class CoreModel: ObservableObject {
         await readSettingsSyncModel(resetDraft: succeeded)
     }
 
+    private func newSettingsSyncDirectoryOwner() -> SettingsSyncDirectoryOwner? {
+        guard settingsSyncCanEdit, !settingsSyncChecking, let capturedHost = host, !settingsSyncOpeningRevision.isEmpty else { return nil }
+        settingsSyncReadTask?.cancel(); settingsSyncReadTask = nil
+        settingsSyncGeneration += 1
+        let owner = SettingsSyncDirectoryOwner(id: UUID(), host: capturedHost, session: settingsSyncSession,
+            generation: settingsSyncGeneration, revision: settingsSyncOpeningRevision)
+        settingsSyncDirectoryOwner = owner
+        settingsSyncError = nil; settingsSyncStatus = nil
+        busy = true
+        return owner
+    }
+
+    private func settingsSyncDirectoryCurrent(_ owner: SettingsSyncDirectoryOwner) -> Bool {
+        settingsSyncDirectoryOwner?.id == owner.id && settingsSyncCurrent(owner.host, owner.session)
+            && settingsSyncGeneration == owner.generation && !Task.isCancelled
+    }
+
+    func pickSettingsSyncDirectory() {
+        guard settingsSyncFormKind == .file, settingsSync.object("panel").object("folder").object("select").flag("enabled"),
+              let owner = newSettingsSyncDirectoryOwner() else { return }
+        settingsSyncDirectoryPickerID = owner.id
+    }
+
+    func completeSettingsSyncDirectory(_ result: Result<Data, Error>, pickerID: UUID) {
+        guard let owner = settingsSyncDirectoryOwner, owner.id == pickerID,
+              settingsSyncDirectoryPickerID == pickerID else { return }
+        settingsSyncDirectoryPickerID = nil
+        guard settingsSyncDirectoryCurrent(owner) else { finishSettingsSyncDirectory(owner); return }
+        switch result {
+        case .success(let bookmark):
+            let task = Task { await runSettingsSyncDirectory(owner, command: "pickSyncFolder", extra: [:], bookmark: bookmark) }
+            settingsSyncDirectoryTask = task
+        case .failure(let error):
+            if (error as NSError).code != CocoaError.userCancelled.rawValue { settingsSyncError = label("settings.feedback.actionFailed") }
+            finishSettingsSyncDirectory(owner)
+        }
+    }
+
+    private func performSettingsSyncDirectory(_ command: String, extra: CoreObject = [:]) async {
+        guard let owner = newSettingsSyncDirectoryOwner() else { return }
+        await dispatchSettingsSyncDirectory(owner, command: command, extra: extra, bookmark: nil)
+    }
+
+    private func dispatchSettingsSyncDirectory(_ owner: SettingsSyncDirectoryOwner, command: String, extra: CoreObject, bookmark: Data?) async {
+        let task = Task { await runSettingsSyncDirectory(owner, command: command, extra: extra, bookmark: bookmark) }
+        settingsSyncDirectoryTask = task
+        await task.value
+    }
+
+    private func runSettingsSyncDirectory(_ owner: SettingsSyncDirectoryOwner, command: String, extra: CoreObject, bookmark: Data?) async {
+        var accepted = false
+        do {
+            guard settingsSyncDirectoryCurrent(owner), settingsSyncOpeningRevision == owner.revision else { throw CancellationError() }
+            var input = extra
+            input["requestId"] = owner.id.uuidString.lowercased()
+            if command == "pickSyncFolder" || command == "syncNow" { input["revision"] = owner.revision }
+            accepted = true
+            let raw = try await owner.host.foregroundDirectorySyncSettings(command: command, requestJSON: try json(input), pickedBookmark: bookmark)
+            // Privacy revokes UI delivery, never the accepted transaction's rollback access.
+            guard settingsSyncDirectoryCurrent(owner) else { throw CancellationError() }
+            let result = try decode(raw)
+            guard result["ok"] is Bool else { throw CocoaError(.coderReadCorrupt) }
+            if let value = settingsSyncValue(result) {
+                let succeeded = adoptSettingsSyncToasts(value)
+                await readSettingsSyncModel(resetDraft: succeeded)
+            }
+            guard settingsSyncDirectoryCurrent(owner) else { throw CancellationError() }
+        } catch {
+            if accepted {
+                requireSettingsSyncRestart(owner.host)
+                // The accepted call has terminated and drained before registry/runtime closure.
+                await owner.host.close()
+            }
+        }
+        finishSettingsSyncDirectory(owner)
+    }
+
+    private func finishSettingsSyncDirectory(_ owner: SettingsSyncDirectoryOwner) {
+        guard settingsSyncDirectoryOwner?.id == owner.id else { return }
+        settingsSyncDirectoryOwner = nil
+        settingsSyncDirectoryTask = nil
+        settingsSyncDirectoryPickerID = nil
+        if host === owner.host { finishOperation() }
+    }
+
     func performSettingsSync(_ action: String) async {
         guard ["save", "syncNow", "test"].contains(action), settingsSyncActionEnabled(action),
               let capturedHost = host, let form = settingsSyncFormKind, !settingsSyncOpeningRevision.isEmpty else { return }
+        if form == .file {
+            await performSettingsSyncDirectory("syncNow")
+            return
+        }
         let session = settingsSyncSession
         let command = action == "save" ? "saveSyncBackend" : action == "test" ? "testSyncConnection" : "syncNow"
         var input: CoreObject
         switch form {
+        case .file: return
         case .webdav:
             input = ["webdav": ["url": settingsSyncURL, "username": settingsSyncUsername,
                 "password": settingsSyncPassword.isEmpty ? NSNull() : settingsSyncPassword as Any,

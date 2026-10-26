@@ -143,6 +143,309 @@ final class NativeFileSyncBindingTests: XCTestCase {
         XCTAssertEqual(cold["total"] as? Int, 2)
         await reopened.close()
     }
+    private func directorySettings(_ host: CoreHost, _ command: String, _ input: [String: Any] = [:], bookmark: Data? = nil) async throws -> [String: Any] {
+        try object(await host.foregroundDirectorySyncSettings(command: command, requestJSON: json(input), pickedBookmark: bookmark))
+    }
+    private func directoryRevision(_ host: CoreHost) async throws -> String {
+        let read = try await directorySettings(host, "syncSettings")
+        XCTAssertEqual(read["ok"] as? Bool, true)
+        return try XCTUnwrap((read["value"] as? [String: Any])?["configRevision"] as? String)
+    }
+    func testPickedDirectoryActivationClosesProbeBeforeCommitAndUsesFreshSavedOwners() async throws {
+        try Data(json(["@mindwtr_sync_backend": "off", "@mindwtr_sync_path": "", "@mindwtr_sync_path_bookmark": ""]).utf8).write(to: manifest)
+        let observation = FileBindingDrainObservation(), host = host(configure: { faults in
+            faults.configureFileSyncJobs = { jobs in
+                observation.record("constructed")
+                jobs.afterClose = { success in observation.record(success ? "closed" : "failed"); observation.nativeClosed.signal() }
+            }
+        })
+        _ = try await host.start()
+        _ = try await capture(host)
+        let bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let opened = try await directorySettings(host, "openSyncSettings")
+        XCTAssertEqual(opened["ok"] as? Bool, true)
+        let choice = try await directorySettings(host, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "file"])
+        XCTAssertEqual(choice["ok"] as? Bool, true); XCTAssertEqual(observation.count("constructed"), 0)
+        let revision = try await directoryRevision(host)
+        let result = try await directorySettings(host, "pickSyncFolder", ["requestId": UUID().uuidString.lowercased(), "revision": revision], bookmark: bookmark)
+        XCTAssertEqual(result["ok"] as? Bool, true)
+        XCTAssertEqual(observation.count("constructed"), 2, "Probe and post-commit callbacks must construct distinct owners")
+        for _ in 0..<2 { XCTAssertEqual(observation.nativeClosed.wait(timeout: .now() + 5), .success) }
+        XCTAssertEqual(observation.count("closed"), 2); XCTAssertEqual(observation.count("failed"), 0)
+        let config = try readConfiguration()
+        XCTAssertEqual(config["@mindwtr_sync_backend"], "file")
+        XCTAssertEqual(config["@mindwtr_sync_path"], selected.appendingPathComponent("data.json").absoluteString)
+        XCTAssertEqual(config["@mindwtr_sync_path_bookmark"], bookmark.base64EncodedString(), "Preserve the original picker bookmark")
+        let file = selected.appendingPathComponent("data.json"), first = try Data(contentsOf: file)
+        let after = try await export(host, "directory-after.json")
+        XCTAssertEqual((after["tasks"] as? [[String: Any]])?.count, 1)
+        await host.close()
+        let cold = self.host(configure: { faults in faults.configureFileSyncJobs = { _ in observation.record("cold-owner") } })
+        _ = try await cold.start()
+        _ = try await directorySettings(cold, "openSyncSettings")
+        XCTAssertEqual(observation.count("cold-owner"), 0)
+        let next = try await directoryRevision(cold)
+        let manual = try await directorySettings(cold, "syncNow", ["requestId": UUID().uuidString.lowercased(), "revision": next])
+        XCTAssertEqual(manual["ok"] as? Bool, true); XCTAssertEqual(observation.count("cold-owner"), 1)
+        XCTAssertEqual(try Data(contentsOf: file), first); XCTAssertEqual(try readConfiguration(), config)
+        let off = try await directorySettings(cold, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "off"])
+        XCTAssertEqual(off["ok"] as? Bool, true); XCTAssertEqual(observation.count("cold-owner"), 1)
+        XCTAssertEqual(try readConfiguration()["@mindwtr_sync_backend"], "off")
+        _ = try await directorySettings(cold, "closeSyncSettings")
+        XCTAssertEqual(try Data(contentsOf: selected.appendingPathComponent("unknown.bin")), Data([0, 255, 7]))
+        let lines = try String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)
+        let markers = try lines.split(separator: "\n").map { try object(String($0)) }.filter { $0["message"] as? String == "Native iOS manual directory File Sync completed" }
+        XCTAssertEqual(markers.count, 2)
+        for marker in markers { XCTAssertEqual(marker["context"] as? [String: String], ["releaseCheck": "v1.3.8/ios-file-sync-directory-manual", "operation": "foreground", "outcome": "completed"]) }
+        try Data(json(["picked": result, "manual": manual, "off": off]).utf8).write(to: root.appendingPathComponent("directory-result.json"))
+        await cold.close()
+    }
+    func testSavedFileMetadataAndOffNeverConstructAFileOwnerEvenWithRevokedBookmark() async throws {
+        var config = configuration; config["@mindwtr_sync_backend"] = "file"
+        try Data(json(config).utf8).write(to: manifest)
+        let observation = FileBindingDrainObservation(), host = host(configure: { faults in
+            faults.configureFileSyncJobs = { _ in observation.record("constructed") }
+        })
+        _ = try await host.start()
+        let opened = try await directorySettings(host, "openSyncSettings")
+        XCTAssertEqual(opened["ok"] as? Bool, true)
+        XCTAssertEqual(((opened["value"] as? [String: Any])?["panel"] as? [String: Any])?["kind"] as? String, "file")
+        _ = try await directoryRevision(host)
+        let off = try await directorySettings(host, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "off"])
+        XCTAssertEqual(off["ok"] as? Bool, true)
+        _ = try await directorySettings(host, "closeSyncSettings")
+        XCTAssertEqual(observation.count("constructed"), 0)
+        XCTAssertEqual(try readConfiguration()["@mindwtr_sync_backend"], "off")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: selected.appendingPathComponent(".mindwtr.lock").path))
+        await host.close()
+    }
+    func testSavedBookmarkRootMismatchAndMissingShownRevisionRefuseBeforePublication() async throws {
+        let bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let config = ["@mindwtr_sync_backend": "file", "@mindwtr_sync_path": "file:///other/data.json", "@mindwtr_sync_path_bookmark": bookmark.base64EncodedString()]
+        try Data(json(config).utf8).write(to: manifest)
+        let host = host(); _ = try await host.start()
+        _ = try await directorySettings(host, "openSyncSettings")
+        await refuses { _ = try await directorySettings(host, "syncNow", ["requestId": UUID().uuidString.lowercased()]) }
+        let revision = try await directoryRevision(host)
+        let result = try await directorySettings(host, "syncNow", ["requestId": UUID().uuidString.lowercased(), "revision": revision])
+        XCTAssertEqual(result["ok"] as? Bool, true)
+        XCTAssertEqual(try readConfiguration(), config)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: selected.appendingPathComponent("data.json").path))
+        let competitor = try NativeFileSyncJobs(directoryURL: selected)
+        let opened = try await reply(competitor, ["turn": competitor.token, "op": "open"])
+        XCTAssertNil(opened["error"]); try competitor.closeAndDrain()
+        await host.close()
+    }
+    private func seedPriorDirectory(_ name: String) throws -> (configuration: [String: String], file: URL, bytes: Data) {
+        let directory = container.appendingPathComponent(name, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let file = directory.appendingPathComponent("data.json")
+        let document: [String: Any] = ["tasks": [], "projects": [], "sections": [], "areas": [], "settings": [:]]
+        let bytes = Data(try json(document).utf8)
+        try bytes.write(to: file)
+        let bookmark = try CoreHost.captureSyncDirectoryBookmark(directory)
+        let configuration = ["@mindwtr_sync_backend": "file", "@mindwtr_sync_path": file.absoluteString,
+            "@mindwtr_sync_path_bookmark": bookmark.base64EncodedString()]
+        try Data(json(configuration).utf8).write(to: manifest)
+        return (configuration, file, bytes)
+    }
+    func testCancellationDuringAcceptedConfigurationWriteRetainsTransactionAndRealRollbackReads() async throws {
+        for failReadback in [false, true] {
+            let prior = try seedPriorDirectory(failReadback ? "Prior rollback" : "Prior commit")
+            let original = prior.configuration
+            let observation = FileBindingDrainObservation(), selectedPath = selected.appendingPathComponent("data.json").absoluteString, manifest = self.manifest
+            defer { observation.release.signal() }
+            let host = self.host(configure: { faults in
+                faults.configureFileSyncJobs = { _ in observation.record("constructed") }
+                faults.secretStatus = { operation, _ in
+                    if observation.count("gate") > 0 {
+                        observation.record("secret-after-gate")
+                        if failReadback && operation == "get" && observation.record("verification-read") == 1 {
+                            // KV has completed its own paired write; fail only shared configuration verification.
+                            observation.record("verification-failed")
+                            return errSecNotAvailable
+                        }
+                    }
+                    return errSecItemNotFound
+                }
+                faults.configureDeviceStorage = { storage in
+                    storage.faults.beforeReadback = {
+                        guard let bytes = try? Data(contentsOf: manifest),
+                              let values = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                              values["@mindwtr_sync_backend"] as? String == "off",
+                              values["@mindwtr_sync_path"] as? String == selectedPath,
+                              observation.record("candidate-readback") == 1 else { return }
+                        observation.record("gate"); observation.entered.signal(); observation.release.wait()
+                        // Return normally so NativeDeviceKV acknowledges/clears its exact pending batch.
+                        // The recoverable failure above is in the subsequent real secret readback.
+                    }
+                }
+            })
+            _ = try await host.start()
+            _ = try await directorySettings(host, "openSyncSettings")
+            let revision = try await directoryRevision(host), bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+            let request = try json(["requestId": UUID().uuidString.lowercased(), "revision": revision])
+            let call = Task.detached {
+                do { _ = try await host.foregroundDirectorySyncSettings(command: "pickSyncFolder", requestJSON: request, pickedBookmark: bookmark); observation.record("returned-success") }
+                catch { observation.record("returned-refusal") }
+                observation.returned.signal()
+            }
+            guard observation.entered.wait(timeout: .now() + 15) == .success else {
+                call.cancel(); observation.release.signal(); XCTFail("The real off-pair candidate readback was never entered"); await call.value; return
+            }
+            // This is after the probe's independent physical close acknowledgment.
+            XCTAssertEqual(observation.count("constructed"), 1)
+            call.cancel()
+            XCTAssertEqual(observation.returned.wait(timeout: .now() + 0.02), .timedOut)
+            observation.release.signal()
+            XCTAssertEqual(observation.returned.wait(timeout: .now() + 15), .success)
+            await call.value
+            XCTAssertEqual(observation.count("returned-refusal"), 1)
+            XCTAssertEqual(observation.count("constructed"), 1, "Cancellation denies a new post-commit cycle")
+            XCTAssertGreaterThan(observation.count("secret-after-gate"), 0, "The existing transaction/rollback must retain synchronous secret reads")
+            let settled = try readConfiguration()
+            if failReadback {
+                XCTAssertEqual(observation.count("verification-failed"), 1)
+                XCTAssertGreaterThan(observation.count("secret-after-gate"), 3, "Rollback must make additional real secret reads after the injected failure")
+                XCTAssertEqual(settled, original, "A recoverable post-ack verification failure must complete contained rollback despite cancellation")
+            }
+            else {
+                XCTAssertEqual(settled["@mindwtr_sync_backend"], "file")
+                XCTAssertEqual(settled["@mindwtr_sync_path"], selectedPath)
+                XCTAssertEqual(settled["@mindwtr_sync_path_bookmark"], bookmark.base64EncodedString())
+            }
+            XCTAssertEqual(try Data(contentsOf: prior.file), prior.bytes, "The previous valid target must stay untouched")
+            let log = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
+            XCTAssertFalse(log.contains("Native iOS manual directory File Sync completed"))
+            // UI's retained-owner pattern closes only now, after the accepted native action returned.
+            await host.close()
+            try Data(json(["failedReadback": failReadback, "configuration": settled,
+                "owners": observation.count("constructed"), "secretReads": observation.count("secret-after-gate"),
+                "verificationFailures": observation.count("verification-failed")]).utf8)
+                .write(to: root.appendingPathComponent(failReadback ? "directory-rollback-cancel.json" : "directory-commit-cancel.json"))
+        }
+    }
+    func testUncertainNativeBatchUnderCancellationStaysDisabledWithoutLaterIOOrReactivation() async throws {
+        let prior = try seedPriorDirectory("Prior uncertain")
+        let observation = FileBindingDrainObservation(), selectedPath = selected.appendingPathComponent("data.json").absoluteString, manifest = self.manifest
+        defer { observation.release.signal() }
+        let host = self.host(configure: { faults in
+            faults.configureFileSyncJobs = { jobs in
+                observation.record("constructed")
+                jobs.afterRead = { observation.record("owner-read") }
+            }
+            faults.configureDeviceStorage = { storage in
+                storage.faults.beforeReadback = {
+                    guard let bytes = try? Data(contentsOf: manifest),
+                          let values = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                          values["@mindwtr_sync_backend"] as? String == "off",
+                          values["@mindwtr_sync_path"] as? String == selectedPath,
+                          observation.record("candidate-readback") == 1 else { return }
+                    observation.entered.signal(); observation.release.wait()
+                    // This stronger cut deliberately retains NativeDeviceKV's exact pending operation.
+                    throw HostFailure("Injected unresolved native paired-write readback")
+                }
+            }
+        })
+        _ = try await host.start()
+        _ = try await directorySettings(host, "openSyncSettings")
+        let revision = try await directoryRevision(host), bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let request = try json(["requestId": UUID().uuidString.lowercased(), "revision": revision])
+        let call = Task.detached {
+            do { _ = try await host.foregroundDirectorySyncSettings(command: "pickSyncFolder", requestJSON: request, pickedBookmark: bookmark); observation.record("success") }
+            catch { observation.record("refused") }
+            observation.returned.signal()
+        }
+        guard observation.entered.wait(timeout: .now() + 15) == .success else {
+            call.cancel(); observation.release.signal(); XCTFail("The real native pending batch cut was not entered"); await call.value; return
+        }
+        call.cancel()
+        XCTAssertEqual(observation.returned.wait(timeout: .now() + 0.02), .timedOut)
+        observation.release.signal()
+        XCTAssertEqual(observation.returned.wait(timeout: .now() + 15), .success); await call.value
+        XCTAssertEqual(observation.count("refused"), 1); XCTAssertEqual(observation.count("constructed"), 1)
+        let expected = ["@mindwtr_sync_backend": "off", "@mindwtr_sync_path": selectedPath,
+            "@mindwtr_sync_path_bookmark": bookmark.base64EncodedString()]
+        XCTAssertEqual(try readConfiguration(), expected, "An unresolved native batch cannot be bypassed to restore/reactivate another target")
+        let reads = observation.count("owner-read")
+        do {
+            let retried = try await directorySettings(host, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "file"])
+            if retried["ok"] as? Bool == true {
+                let value = retried["value"] as? [String: Any], toasts = value?["toasts"] as? [[String: Any]] ?? []
+                XCTAssertTrue(toasts.contains { $0["tone"] as? String == "error" }, "A blocked retry must not report activation success")
+            } else { XCTAssertEqual(retried["ok"] as? Bool, false) }
+        } catch { /* Refusing the unusable store is also terminal without new owner IO. */ }
+        XCTAssertEqual(observation.count("constructed"), 1); XCTAssertEqual(observation.count("owner-read"), reads)
+        XCTAssertEqual(try readConfiguration(), expected)
+        let log = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
+        XCTAssertFalse(log.contains("Native iOS manual directory File Sync completed"))
+        XCTAssertEqual(try Data(contentsOf: prior.file), prior.bytes)
+        await host.close()
+        // Closing discards no command and never replays the uncertain batch. Cold metadata can read its stable Off result.
+        let beforeCold = try readConfiguration(), cold = self.host(configure: { faults in
+            faults.configureFileSyncJobs = { _ in observation.record("cold-owner") }
+        })
+        _ = try await cold.start()
+        let opened = try await directorySettings(cold, "openSyncSettings")
+        let view = opened["value"] as? [String: Any], backend = view?["backend"] as? [String: Any]
+        let options = backend?["options"] as? [[String: Any]] ?? []
+        XCTAssertTrue(options.contains { $0["option"] as? String == "off" && $0["selected"] as? Bool == true })
+        XCTAssertEqual(observation.count("cold-owner"), 0); XCTAssertEqual(try readConfiguration(), beforeCold)
+        await cold.close()
+        try Data(json(["configuration": expected, "owners": observation.count("constructed"),
+            "laterOwnerReads": observation.count("owner-read") - reads, "coldOwners": observation.count("cold-owner")]).utf8)
+            .write(to: root.appendingPathComponent("directory-uncertain-native-cancel.json"))
+    }
+    func testDirectoryCancellationBeforeProbeAcknowledgmentCannotActivate() async throws {
+        let original = ["@mindwtr_sync_backend": "off", "@mindwtr_sync_path": "", "@mindwtr_sync_path_bookmark": ""]
+        try Data(json(original).utf8).write(to: manifest)
+        let observation = FileBindingDrainObservation()
+        defer { observation.release.signal() }
+        let host = host(configure: { faults in faults.configureFileSyncJobs = { jobs in
+            observation.record("constructed")
+            jobs.afterRead = {
+                if observation.record("read") == 1 { observation.entered.signal(); observation.release.wait() }
+            }
+        } })
+        _ = try await host.start()
+        var remote = try await export(host, "directory-cancel-before.json")
+        remote["tasks"] = [["id": UUID().uuidString.lowercased(), "title": "Synthetic picked remote", "status": "inbox", "tags": [], "contexts": [],
+            "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-01-01T00:00:00.000Z", "rev": 1]]
+        let file = selected.appendingPathComponent("data.json"), before = Data(try json(remote).utf8)
+        try before.write(to: file)
+        _ = try await directorySettings(host, "openSyncSettings")
+        _ = try await directorySettings(host, "selectSyncBackend", ["requestId": UUID().uuidString.lowercased(), "option": "file"])
+        let revision = try await directoryRevision(host), bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let request = try json(["requestId": UUID().uuidString.lowercased(), "revision": revision])
+        let call = Task.detached {
+            do { _ = try await host.foregroundDirectorySyncSettings(command: "pickSyncFolder", requestJSON: request, pickedBookmark: bookmark); observation.record("success") }
+            catch { observation.record("refused") }
+            observation.returned.signal()
+        }
+        guard observation.entered.wait(timeout: .now() + 15) == .success else {
+            call.cancel(); observation.release.signal(); XCTFail("The actual directory owner never read the remote"); await call.value; return
+        }
+        call.cancel(); observation.release.signal()
+        XCTAssertEqual(observation.returned.wait(timeout: .now() + 15), .success); await call.value
+        XCTAssertEqual(observation.count("refused"), 1); XCTAssertEqual(observation.count("constructed"), 1)
+        XCTAssertEqual(try readConfiguration(), original); XCTAssertEqual(try Data(contentsOf: file), before)
+        await host.close()
+    }
+
+    func testPreparedMailboxAdoptsOneBookmarkLeaseAndRejectsDuplicateAcquire() async throws {
+        let bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let jobs = try NativeFileSyncJobs(bookmark: bookmark)
+        XCTAssertEqual(jobs.rootURI, "")
+        let prepared = try await reply(jobs, ["turn": jobs.token, "op": "prepare"])
+        XCTAssertNil(prepared["error"])
+        XCTAssertEqual((prepared["value"] as? [String: String])?["canonicalPath"], selected.appendingPathComponent("data.json").absoluteString)
+        let opened = try await reply(jobs, ["turn": jobs.token, "op": "open"]); XCTAssertNil(opened["error"])
+        let duplicate = try await reply(jobs, ["turn": jobs.token, "op": "open"]); XCTAssertNotNil(duplicate["error"])
+        try jobs.closeAndDrain()
+        let late = try await reply(jobs, ["turn": jobs.token, "op": "revalidate"]); XCTAssertNotNil(late["error"])
+        try jobs.closeAndDrain()
+    }
+
     func testUnsupportedStoredFileAndPublicSelectionRemainUnavailable() async throws {
         var config = configuration; config["@mindwtr_sync_backend"] = "file"
         try Data(json(config).utf8).write(to: manifest)

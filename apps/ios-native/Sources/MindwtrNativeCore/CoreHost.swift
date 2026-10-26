@@ -880,6 +880,40 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    /// Capture while UIKit still owns the selected directory URL. No directory authority survives this temporary scope.
+    public nonisolated static func captureSyncDirectoryBookmark(_ url: URL) throws -> Data {
+        guard url.isFileURL, url.host == nil || url.host == "", url.query == nil, url.fragment == nil else {
+            throw HostFailure("Selected Sync folder is unavailable")
+        }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
+            throw HostFailure("Selected Sync folder is unavailable")
+        }
+        #if os(macOS)
+        let options: URL.BookmarkCreationOptions = [.withSecurityScope]
+        #else
+        let options: URL.BookmarkCreationOptions = []
+        #endif
+        let bookmark = try url.bookmarkData(options: options, includingResourceValuesForKeys: nil, relativeTo: nil)
+        guard !bookmark.isEmpty, bookmark.base64EncodedString().utf8.count <= 1024 * 1024 else {
+            throw HostFailure("Selected Sync folder is unavailable")
+        }
+        return bookmark
+    }
+
+    /// Metadata opens no directory. Explicit File actions retain this host until the existing Settings transaction settles.
+    public func foregroundDirectorySyncSettings(command: String, requestJSON: String, pickedBookmark: Data? = nil) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.foregroundDirectorySyncSettings(command: command, requestJSON: requestJSON,
+                pickedBookmark: pickedBookmark, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
     /// An explicit app-local foreground cycle; no saved provider capability is granted.
     public func foregroundFileSync(directoryURL: URL) async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
@@ -24800,6 +24834,104 @@ private final class Engine: @unchecked Sendable {
             return result
         } catch {
             do { try jobs.closeAndDrain() } catch { fileSyncCloseFailed = true }
+            throw Self.foregroundSyncFailure
+        }
+    }
+
+    func foregroundDirectorySyncSettings(command: String, requestJSON: String, pickedBookmark: Data?, cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
+        guard ["openSyncSettings", "syncSettings", "closeSyncSettings", "selectSyncBackend", "pickSyncFolder", "syncNow"].contains(command),
+              requestJSON.utf8.count <= 128 * 1024, try NativeJSON.hasUniqueObjectKeys(requestJSON),
+              let input = try NativeJSON.jsonObject(with: Data(requestJSON.utf8)) as? [String: Any],
+              started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
+              !fileSyncCloseFailed, fileSyncTurn == nil, foregroundCleanupCancellation == nil, !foregroundCleanupActive,
+              pending == nil, projectFileAddTurn == nil, projectDownloadTurn == nil, retainedOrdinaryTurn == nil,
+              providerCopy == nil, ordinaryMutationDepth == 0,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+              try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil,
+              try mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+              let runtime = context else { throw Self.foregroundSyncFailure }
+        try cancellation.check()
+        let storage = try requireDeviceStorageAdmission(), generation = attachmentGeneration
+        let names = ["@mindwtr_sync_backend", "@mindwtr_sync_path", "@mindwtr_sync_path_bookmark"]
+        var live = true, pickedConsumed = false, completedCycles = 0, hadProbe = false
+        var baseline: [Data?]?
+        let originalDatabase = databaseURL
+        func current() throws {
+            guard live, self.invoking, self.context === runtime, self.attachmentGeneration == generation,
+                  self.deviceStorage === storage, self.started, !self.closed, self.lockFD >= 0,
+                  Data(self.databaseURL.absoluteString.utf8) == Data(originalDatabase.absoluteString.utf8) else { throw Self.foregroundSyncFailure }
+        }
+        func snapshot() throws -> [Data?] { try storage.multiGet(names).map { $0.1.map { Data($0.utf8) } } }
+        func closeCycle() throws {
+            guard let turn = self.fileSyncTurn else { return }
+            do { try turn.jobs.closeAndDrain() }
+            catch { self.fileSyncCloseFailed = true; cancellation.cancel(); throw Self.foregroundSyncFailure }
+            cancellation.setCancellationHandler(nil)
+            self.fileSyncTurn = nil
+        }
+        defer { live = false; cancellation.setCancellationHandler(nil) }
+        let control: @convention(block) (JSValue) -> String = { [weak self, weak runtime] value in
+            guard let self, let runtime, value.context === runtime, value.isString, let text = value.toString(),
+                  text.utf8.count <= 2 * 1024 * 1024 else { return "!MindwtrNativeError:Directory File Sync is unavailable" }
+            do {
+                try current()
+                guard try NativeJSON.hasUniqueObjectKeys(text), let request = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any] else { throw Self.foregroundSyncFailure }
+                if request["phase"] as? String == "begin" {
+                    try cancellation.check()
+                    guard command == "pickSyncFolder" || command == "syncNow" || command == "selectSyncBackend" && input["option"] as? String == "file" else { throw Self.foregroundSyncFailure }
+                    guard Set(request.keys) == Set(["phase", "picked", "probe", "path", "bookmark"]),
+                          Self.isBoolean(request["picked"]), let picked = request["picked"] as? Bool,
+                          Self.isBoolean(request["probe"]), let probe = request["probe"] as? Bool,
+                          self.fileSyncTurn == nil, !self.fileSyncCloseFailed else { throw Self.foregroundSyncFailure }
+                    let saved = try storage.multiGet(names).map(\.1)
+                    let bytes: Data, expected: String?
+                    if picked {
+                        guard command == "pickSyncFolder", probe, !pickedConsumed, request["path"] is NSNull,
+                              request["bookmark"] is NSNull, let pickedBookmark else { throw Self.foregroundSyncFailure }
+                        bytes = pickedBookmark; expected = nil; pickedConsumed = true
+                    } else {
+                        guard probe || saved[0] == "file", let path = saved[1], !path.isEmpty,
+                              let encoded = saved[2], !encoded.isEmpty, encoded.utf8.count <= 1024 * 1024,
+                              let decoded = Data(base64Encoded: encoded), !decoded.isEmpty,
+                              Data(decoded.base64EncodedString().utf8) == Data(encoded.utf8) else { throw Self.foregroundSyncFailure }
+                        if !(request["path"] is NSNull) {
+                            guard let pathInput = request["path"] as? String, Data(pathInput.utf8) == Data(path.utf8),
+                                  let bookmarkInput = request["bookmark"] as? String, Data(bookmarkInput.utf8) == Data(encoded.utf8) else { throw Self.foregroundSyncFailure }
+                        } else { guard request["bookmark"] is NSNull else { throw Self.foregroundSyncFailure } }
+                        bytes = decoded; expected = path
+                    }
+                    let jobs = try NativeFileSyncJobs(bookmark: bytes)
+                    #if DEBUG
+                    self.faults?.configureFileSyncJobs?(jobs)
+                    #endif
+                    baseline = try snapshot()
+                    self.fileSyncTurn = FileSyncTurn(runtime: runtime, generation: generation, databaseURL: originalDatabase, cancellation: cancellation, jobs: jobs)
+                    cancellation.setCancellationHandler { jobs.abort() }
+                    hadProbe = hadProbe || probe
+                    return try Self.ownedJSON(["turn": jobs.token, "bookmark": bytes.base64EncodedString(), "expectedPath": expected.map { $0 as Any } ?? NSNull()])
+                }
+                guard request["phase"] as? String == "finish", Set(request.keys) == Set(["phase", "turn", "admit"]),
+                      Self.isBoolean(request["admit"]), let admit = request["admit"] as? Bool,
+                      let turn = self.fileSyncTurn, request["turn"] as? String == turn.jobs.token else { throw Self.foregroundSyncFailure }
+                try closeCycle()
+                guard let baseline, try snapshot() == baseline else { throw Self.foregroundSyncFailure }
+                if admit { try cancellation.check(); completedCycles += 1 }
+                return try Self.ownedJSON(["closed": true])
+            } catch { return "!MindwtrNativeError:Directory File Sync is unavailable" }
+        }
+        guard let callback = JSValue(object: control, in: runtime) else { throw Self.foregroundSyncFailure }
+        do {
+            let result = try invoke("iosDirectorySyncSettings", arguments: [command, requestJSON, callback], localCancellation: cancellation)
+            try closeCycle()
+            try cancellation.check()
+            guard context === runtime, attachmentGeneration == generation, started, !closed else { throw Self.foregroundSyncFailure }
+            try denyCleanupOwner()
+            if completedCycles >= (hadProbe ? 2 : 1) { _ = try invoke("iosDirectoryFileSyncDiagnostic", arguments: []) }
+            return result
+        } catch {
+            do { try closeCycle() } catch { fileSyncCloseFailed = true }
             throw Self.foregroundSyncFailure
         }
     }

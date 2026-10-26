@@ -5,9 +5,13 @@ import SyncFileLockEngine
 final class NativeFileSyncJobs: @unchecked Sendable {
     static let maximumEnvelope = 12 * 1024 * 1024
     let token = UUID().uuidString.lowercased()
-    let root: URL
-    let canonicalPath: String
-    var rootURI: String { root.absoluteString }
+    private var selectedRoot: URL?
+    private let bookmarked: Bool
+    private var prepared = false
+    private var acquired = false
+    var rootURI: String { withLock { selectedRoot?.absoluteString ?? "" } }
+    var canonicalPath: String { withLock { selectedRoot?.appendingPathComponent("data.json", isDirectory: false).absoluteString ?? "" } }
+    private func root() throws -> URL { try withLock { guard let selectedRoot else { throw Failure.unavailable }; return selectedRoot } }
     private let condition = NSCondition()
     private var session: NativeFileSyncSession!
     private var tail: Task<Void, Never>?
@@ -35,9 +39,16 @@ final class NativeFileSyncJobs: @unchecked Sendable {
               directoryURL.query == nil, directoryURL.fragment == nil,
               Data(canonical.absoluteString.utf8) == Data(directoryURL.absoluteString.utf8),
               canonical.absoluteString.utf8.count <= 16 * 1024 else { throw Failure.unavailable }
-        root = canonical
-        canonicalPath = canonical.appendingPathComponent("data.json", isDirectory: false).absoluteString
+        selectedRoot = canonical
+        bookmarked = false
         session = NativeFileSyncSession(selection: .pickedDirectory(canonical)) { [weak self] message, context in
+            self?.withLock { self?.events.append(["message": message, "context": context]) }
+        }
+    }
+    init(bookmark: Data) throws {
+        guard !bookmark.isEmpty, bookmark.base64EncodedString().utf8.count <= 1024 * 1024 else { throw Failure.unavailable }
+        bookmarked = true
+        session = NativeFileSyncSession(selection: .bookmark(bookmark)) { [weak self] message, context in
             self?.withLock { self?.events.append(["message": message, "context": context]) }
         }
     }
@@ -50,7 +61,7 @@ final class NativeFileSyncJobs: @unchecked Sendable {
               url.isFileURL, url.host == nil || url.host == "", url.query == nil, url.fragment == nil else { throw Failure.unavailable }
         let name = url.lastPathComponent
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.contains("\0"),
-              same(root.appendingPathComponent(name, isDirectory: false).absoluteString, uri) else { throw Failure.unavailable }
+              same(try root().appendingPathComponent(name, isDirectory: false).absoluteString, uri) else { throw Failure.unavailable }
         return name
     }
     private func bytes(_ input: Any?) throws -> Data {
@@ -105,7 +116,7 @@ final class NativeFileSyncJobs: @unchecked Sendable {
         guard let op = request["op"] as? String else { throw Failure.unavailable }
         let fields: Set<String>
         switch op {
-        case "open", "revalidate", "close": fields = ["turn", "op"]
+        case "prepare", "open", "revalidate", "close": fields = ["turn", "op"]
         case "read", "info", "list", "create": fields = ["turn", "op", "uri"]
         case "writeCreated", "deleteOwned": fields = ["turn", "op", "uri", "base64"]
         case "renameObserved": fields = ["turn", "op", "uri", "name", "base64"]
@@ -115,8 +126,26 @@ final class NativeFileSyncJobs: @unchecked Sendable {
         if request["base64"] == nil, try JSONSerialization.data(withJSONObject: request).count > 64 * 1024 { throw Failure.unavailable }
         if op == "close" { try await startClosing().value; return (NSNull(), nil) }
         guard withLock({ accepting }) else { throw Failure.unavailable }
+        if op == "prepare" {
+            guard bookmarked, !prepared, !acquired else { throw Failure.unavailable }
+            let directory = try await session.openDirectory()
+            guard directory.absoluteString.utf8.count <= 16 * 1024,
+                  directory.appendingPathComponent("data.json", isDirectory: false).absoluteString.utf8.count <= 16 * 1024 else { throw Failure.unavailable }
+            withLock { selectedRoot = directory; prepared = true }
+            return (["rootURI": rootURI, "canonicalPath": canonicalPath], nil)
+        }
+        if op != "open" { guard acquired else { throw Failure.unavailable } }
         switch op {
-        case "open": try await session.open()
+        case "open":
+            guard !acquired else { throw Failure.unavailable }
+            if bookmarked {
+                guard prepared else { throw Failure.unavailable }
+                try await session.revalidate()
+            } else {
+                let directory = try await session.openDirectory()
+                guard same(directory.absoluteString, rootURI) else { throw Failure.unavailable }
+            }
+            acquired = true
         case "revalidate": try await session.revalidate()
         case "read":
             switch try await session.read(child(request["uri"])) {
@@ -143,7 +172,7 @@ final class NativeFileSyncJobs: @unchecked Sendable {
         case "renameObserved":
             let name = try child(request["uri"])
             guard let destination = request["name"] as? String else { throw Failure.unavailable }
-            let uri = root.appendingPathComponent(destination, isDirectory: false).absoluteString
+            let uri = try root().appendingPathComponent(destination, isDirectory: false).absoluteString
             guard try same(child(uri), destination) else { throw Failure.unavailable }
             try await session.renameObserved(name, to: destination, expectedBytes: bytes(request["base64"]))
             return (uri, nil)

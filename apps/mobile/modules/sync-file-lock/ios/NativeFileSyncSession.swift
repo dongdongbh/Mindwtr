@@ -31,14 +31,18 @@ public actor NativeFileSyncSession {
 
   init(owner: NativeFileSyncReadOwner) { self.owner = owner }
 
-  public func open() async throws {
+  public func open() async throws { _ = try await openDirectory() }
+
+  public func openDirectory() async throws -> URL {
     guard handle == nil, !opening, closing == nil else { throw Failure.unavailable }
     opening = true
     defer { opening = false }
     do {
       let opened = try await owner.open()
+      let directory = try await owner.canonicalDirectory(opened)
       guard closing == nil else { throw Failure.unavailable }
       handle = opened
+      return directory
     } catch {
       try await close()
       throw error
