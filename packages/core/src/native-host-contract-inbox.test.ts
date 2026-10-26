@@ -208,6 +208,30 @@ describe('native host contract: Process Inbox', () => {
         expect(recorder.log).toEqual([]);
     });
 
+    it('takes a picked clock time on a date row and files it, as React Native does (#1445)', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('start later'));
+        const started = host.startInboxProcessing({ mode: 'guided' });
+        if (!started.ok || !started.value.view) throw new Error('Expected an Inbox task');
+        const sessionId = started.value.sessionId!;
+        await host.commitInboxProcessingStep({ sessionId, taskId: 'inbox-a', step: 'actionable', decision: { choice: 'later' }, requestId: generateUUID() });
+        const request = { sessionId, taskId: 'inbox-a', step: 'later' as const };
+        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setPickedDate', field: 'startTime', day: '2026-10-05' } }).ok).toBe(true);
+        for (const value of ['25:00', '9:00', '14:30:00', '', 42]) {
+            expect(host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field: 'startTime', value } as never }))
+                .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        const timed = host.getInboxProcessingStep({ ...request, edit: { type: 'setTime', field: 'startTime', value: '14:30' } as never });
+        if (!timed.ok) throw new Error(JSON.stringify(timed));
+        expect(timed.value.dateRow).toMatchObject({ dateOnly: false, time: { label: '14:30', hour: 14, minute: 30, edit: { type: 'setTime', field: 'startTime' } } });
+        expect(timed.value.dateRow!.display).toMatch(/ 14:30$/);
+        // A new day keeps the picked time; date-only drops it.
+        const moved = host.getInboxProcessingStep({ ...request, edit: { type: 'setPickedDate', field: 'startTime', day: '2026-10-06' } });
+        expect(moved.ok && moved.value.draft.startTime).toEqual({ date: '2026-10-06', dateOnly: false, time: '14:30' });
+        expect(await host.commitInboxProcessingStep({ ...request, decision: { choice: 'fileIt' }, requestId: generateUUID() })).toMatchObject({ ok: true });
+        expect(useTaskStore.getState()._tasksById.get('inbox-a')?.startTime).toBe('2026-10-06T14:30');
+    });
+
     it('rejects malformed picked dates and fields without changing the draft', async () => {
         freezeClock();
         const { host, recorder } = await openHost(scenario('start later'));

@@ -126,7 +126,7 @@ internal fun NotificationsSettings(model: InboxViewModel, view: JSONObject) = wi
 private val ALLOW_BLUE = Color(0xFF2563EB)
 
 /** RN's Android time picker for [row] (core's hour and minute), in the device's 12/24-hour format; [picked] gets 'HH:MM'. */
-private fun pickTime(context: Context, row: JSONObject, picked: (String) -> Unit) {
+internal fun pickTime(context: Context, row: JSONObject, picked: (String) -> Unit) {
     TimePickerDialog(context, { _, hour, minute -> picked(coreTime(hour, minute)) }, row.getInt("hour"), row.getInt("minute"),
         DateFormat.is24HourFormat(context)).show()
 }

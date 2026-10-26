@@ -1114,6 +1114,8 @@ export type ProcessInboxDraftEdit =
     | { type: 'setDate'; field: ProcessInboxDateField; value: string | null }
     | { type: 'setPickedDate'; field: ProcessInboxDateField; day: string }
     | { type: 'setDateOnly'; field: ProcessInboxDateField; value: boolean }
+    /** A clock time ("HH:mm") from the time picker; the row stops being date-only (#1445). */
+    | { type: 'setTime'; field: ProcessInboxDateField; value: string }
     | { type: 'toggleAdvancedOptions' };
 
 const markDirty = (draft: ProcessInboxDraft, field: ProcessInboxDateField): ProcessInboxScheduleField[] => (
@@ -1172,12 +1174,15 @@ export function applyProcessInboxDraftEdit(
                 value: createDateFormatter({ calendarSystem: 'gregorian' })(normalizeProcessInboxPickedDate(picked), 'yyyy-MM-dd'),
             }, plan);
         }
-        case 'setDate':
+        case 'setDate': {
+            // A new day keeps the row's picked time, as RN's date setters do.
+            const time = draft[edit.field]?.time;
             return {
                 ...draft,
-                [edit.field]: edit.value ? { date: edit.value, dateOnly: false } : null,
+                [edit.field]: edit.value ? { date: edit.value, dateOnly: false, ...(time ? { time } : {}) } : null,
                 dirtyScheduleFields: markDirty(draft, edit.field),
             };
+        }
         case 'setDateOnly': {
             const current = draft[edit.field];
             return {
@@ -1186,6 +1191,14 @@ export function applyProcessInboxDraftEdit(
                     ...(edit.field === 'startTime' && !edit.value ? { useDefaultTime: true } : {}) } : current,
                 dirtyScheduleFields: markDirty(draft, edit.field),
             };
+        }
+        case 'setTime': {
+            const current = draft[edit.field];
+            return current ? {
+                ...draft,
+                [edit.field]: { date: current.date, dateOnly: false, time: edit.value },
+                dirtyScheduleFields: markDirty(draft, edit.field),
+            } : draft;
         }
         case 'toggleAdvancedOptions':
             return { ...draft, showAdvancedOptions: !draft.showAdvancedOptions };
@@ -1419,10 +1432,15 @@ export type ProcessInboxViewDateRow = {
     display: string;
     dateOnly: boolean;
     clear: ProcessInboxViewOption | null;
-    /** The date-only / default-time switch, shown with a default schedule time. */
+    /** The date-only / default-time switch, shown with a default schedule time or a picked time. */
     timeMode: ProcessInboxViewOption | null;
-    /** Supply the calendar day (yyyy-MM-dd); RN offers no picked time here. */
+    /** Supply the calendar day (yyyy-MM-dd). */
     pick: Pick<Extract<ProcessInboxDraftEdit, { type: 'setPickedDate' }>, 'type' | 'field'>;
+    /**
+     * RN's clock button once a day is set: the picked time or "Add time" as its label, the picker's start (the picked time,
+     * else the default schedule time, else 09:00), and the edit to send with the picked "HH:mm" as its value (#1445).
+     */
+    time: { label: string; hour: number; minute: number; edit: Pick<Extract<ProcessInboxDraftEdit, { type: 'setTime' }>, 'type' | 'field'> } | null;
     quickDates: ProcessInboxViewOption[];
 };
 
@@ -1645,10 +1663,10 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
             field,
             label,
             date: value?.date ?? null,
-            display: value ? input.formatDate(value.date, 'P') : t('common.notSet'),
+            display: value ? `${input.formatDate(value.date, 'P')}${value.time ? ` ${value.time}` : ''}` : t('common.notSet'),
             dateOnly: value?.dateOnly ?? false,
             clear: value && allowClear ? { label: t('common.clear'), selected: false, edit: { type: 'setDate', field, value: null } } : null,
-            timeMode: value && defaultScheduleTime
+            timeMode: value && (defaultScheduleTime || value.time)
                 ? {
                     label: value.dateOnly ? defaultScheduleTime : dateOnlyLabel,
                     selected: value.dateOnly,
@@ -1656,6 +1674,10 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                 }
                 : null,
             pick: { type: 'setPickedDate', field },
+            time: value ? (() => {
+                const [hour, minute] = (value.time || defaultScheduleTime || '09:00').split(':').map(Number);
+                return { label: value.time || tf('calendar.changeTime', 'Add time'), hour, minute, edit: { type: 'setTime', field } };
+            })() : null,
             quickDates: presets.filter((preset) => allowClear || preset !== 'no_date').map((preset) => {
                 const active = isQuickDatePresetSelected(preset, selectedDate, input.now);
                 const picked = active && allowClear ? null : getQuickDate(preset, input.now);

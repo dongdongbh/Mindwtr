@@ -200,7 +200,7 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
     AIOverlays(model)
     pickDate?.let { field ->
         val row = dateRows(view).firstOrNull { it.getString("field") == field }
-        // The row's own picked-day edit (core's setPickedDate) with the picker's day; RN offers no time here.
+        // The row's own picked-day edit (core's setPickedDate) with the picker's day; the row's clock picks a time.
         DayPickerDialog(row?.text("date"), { pickDate = null }) { day ->
             row?.let { send(JSONObject(it.getJSONObject("pick").toString()).put("day", day)) }
         }
@@ -460,17 +460,21 @@ private fun SectionTitle(icon: ImageVector?, text: String) {
 
 /** RN's small outlined button (startDateButton, startDateClear). */
 @Composable
-private fun SmallOutlined(text: String, description: String, enabled: Boolean, filled: Boolean, onClick: () -> Unit) {
+private fun SmallOutlined(text: String, description: String, enabled: Boolean, filled: Boolean, icon: ImageVector? = null, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
     Box(Modifier.clip(shape).then(if (filled) Modifier.background(c.cardBg) else Modifier).rnBorder(1.dp, c.border, shape)
         .button(description, enabled, onClick).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 8.dp)) {
-        Text(text, style = rnText(if (filled) 13 else 12, 400), color = if (filled) c.text else c.secondaryText)
+        if (icon != null) Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(14.dp))
+        else Text(text, style = rnText(if (filled) 13 else 12, 400), color = if (filled) c.text else c.secondaryText)
     }
 }
 
-/** RN's InboxDateSelectorRow: the label, the date button (the system date picker), Clear, the time mode, and core's quick dates. */
+/**
+ * RN's InboxDateSelectorRow: the label, the date button (the system date picker), Clear, the clock (the system time picker, #1445),
+ * the time mode, and core's quick dates.
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DateRow(row: JSONObject, locked: Boolean, send: (JSONObject) -> Unit, pickDate: (String) -> Unit) {
@@ -482,10 +486,14 @@ private fun DateRow(row: JSONObject, locked: Boolean, send: (JSONObject) -> Unit
             itemVerticalAlignment = Alignment.CenterVertically) {
             val display = row.getString("display")
             SmallOutlined(display, "$label: $display", !locked, filled = true) { pickDate(row.getString("field")) }
-            for (option in listOfNotNull(row.child("clear"), row.child("timeMode"))) {
-                val text = option.getString("label")
-                SmallOutlined(text, "$label: $text", !locked, filled = false) { send(option.getJSONObject("edit")) }
+            val context = LocalContext.current
+            row.child("clear")?.let { SmallOutlined(it.getString("label"), "$label: ${it.getString("label")}", !locked, filled = false) { send(it.getJSONObject("edit")) } }
+            row.child("time")?.let { time ->
+                SmallOutlined("", "$label: ${time.getString("label")}", !locked, filled = false, icon = Lucide.Clock) {
+                    pickTime(context, time) { picked -> send(JSONObject(time.getJSONObject("edit").toString()).put("value", picked)) }
+                }
             }
+            row.child("timeMode")?.let { SmallOutlined(it.getString("label"), "$label: ${it.getString("label")}", !locked, filled = false) { send(it.getJSONObject("edit")) } }
         }
         FlowRow(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             for (chip in row.items("quickDates")) {

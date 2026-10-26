@@ -3672,6 +3672,8 @@ function isValidInboxEdit(edit: unknown): edit is ProcessInboxDraftEdit {
                 && typeof edit.day === 'string' && DATE_ONLY_PATTERN.test(edit.day) && safeParseDate(edit.day) !== null;
         case 'setDateOnly':
             return typeof edit.field === 'string' && INBOX_DATE_FIELDS.has(edit.field) && typeof value === 'boolean';
+        case 'setTime':
+            return typeof edit.field === 'string' && INBOX_DATE_FIELDS.has(edit.field) && typeof value === 'string' && CLOCK_TIME_PATTERN.test(value);
         case 'toggleAdvancedOptions':
             return true;
         default:
