@@ -1301,6 +1301,8 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     projectNotesPreview: (input) => contract.getProjectNotesPreview(input),
     // The header's Convert to section… (ProjectDetails.kt): its row, destinations and preview (a read; the write is projectEdit).
     projectToSectionOptions: (input) => contract.getProjectToSectionOptions(input),
+    // The task editor's Share (RN's Share.share text) for the editor's unsaved draft and checklist: a read, nothing written.
+    taskShare: (input) => contract.getTaskShare(input),
 };
 /**
  * The attachments' long calls (native-host-contract-attachments.ts): Download and Open wait on the network (a synced file's bytes),
