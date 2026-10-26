@@ -9879,5 +9879,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // (1) Every date field is RN's: its heading over its date box, whether set or not; no compact row.
     assert.doesNotMatch(editorUi, /CompactRow/, 'RN draws no compact date row: every date field is its heading over its box');
     assert.match(editorUi, /"dueDate", "startTime", "reviewAt" -> FormGroup \{[\s\S]{0,600}FieldHeading\(icon, label\)\s+\/\/[^\n]*\n\s+Row\(verticalAlignment = Alignment\.CenterVertically\) \{\s+DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
+    // (2) RN's header: 12 above and below its 44 controls, and its 1 bottom border, which takes room as RN's borderBottomWidth does.
+    assert.match(editorUi, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 60\.dp\)\.background\(c\.cardBg\)\.hairline\(c\.border, top = false\)\.padding\(start = 16\.dp, end = 16\.dp, top = 12\.dp, bottom = 13\.dp\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

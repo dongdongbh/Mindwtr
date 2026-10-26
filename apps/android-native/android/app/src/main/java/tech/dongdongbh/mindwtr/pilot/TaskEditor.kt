@@ -505,7 +505,8 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
 
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("task-editor")) {
         // RN's TaskEditHeader: Close at the left, Save at the right (Close alone when read-only). Its More menu is not built yet.
-        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 8.dp),
+        // 12 above and below its 44 controls, and RN's 1 bottom border, which takes room as borderBottomWidth does (69 tall).
+        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).background(c.cardBg).hairline(c.border, top = false).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 13.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (!editor.readOnly) {
                 val closeLabel = t("common.close")
