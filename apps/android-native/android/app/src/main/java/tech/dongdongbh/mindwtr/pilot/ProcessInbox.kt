@@ -168,9 +168,20 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
     BackHandler(enabled = !failed) { if (!busy) closeProcessing() }
     // Edits and a queued answer wait while an action runs; they go on once none does.
     LaunchedEffect(busy, failed) { if (!busy && !failed) pumpStep() }
-    // Each new question or item starts at the top, as RN's scrollProcessingToTop after every answer (#1445).
+    // Each new question or item starts at the top, as RN's scrollProcessingToTop after every answer (#1445). The question last
+    // shown survives a recreation (a rotation, a theme change), which keeps the user's place.
     val scroll = rememberScrollState()
-    LaunchedEffect(flow.taskId, flow.step) { scroll.animateScrollTo(0) }
+    var shownTask by rememberSaveable { mutableStateOf<String?>(null) }
+    var shownStep by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(flow.taskId, flow.step) {
+        when (stepScroll(shownTask, shownStep, flow.taskId, flow.step)) {
+            StepScroll.Animate -> scroll.animateScrollTo(0)
+            StepScroll.Jump -> scroll.scrollTo(0)
+            StepScroll.Keep -> {}
+        }
+        shownTask = flow.taskId
+        shownStep = flow.step
+    }
 
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("process-inbox")) {
         ProgressHeader(model, flow, canAnswer("inboxSkip", ""), locked)
@@ -205,6 +216,19 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
             row?.let { send(JSONObject(it.getJSONObject("pick").toString()).put("day", day)) }
         }
     }
+}
+
+/** How Process Inbox's page scrolls when it shows a question: as it was, back to the top with RN's animation, or at once. */
+internal enum class StepScroll { Keep, Animate, Jump }
+
+/**
+ * RN's scrollProcessingToTop (#1445): a new item jumps to the top, a new question on the same item scrolls there animated, and
+ * the question already shown ([shownTask], [shownStep]: a recreated screen, after a rotation or a theme change) keeps its place.
+ */
+internal fun stepScroll(shownTask: String?, shownStep: String?, taskId: String, step: String): StepScroll = when {
+    shownTask == null || (shownTask == taskId && shownStep == step) -> StepScroll.Keep
+    shownTask != taskId -> StepScroll.Jump
+    else -> StepScroll.Animate
 }
 
 /** Every date row the view shows: the step's own, the delegate's follow-up, and More options' scheduling. */

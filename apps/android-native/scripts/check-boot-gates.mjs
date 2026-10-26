@@ -722,7 +722,9 @@ const viewStateKt = source('ViewState.kt');
 const searchUi = source('SearchScreen.kt');
 const processUi = source('ProcessInbox.kt');
 // #1445: each new question or item starts at the top, as RN's scrollProcessingToTop after every answer; one scroll position no longer spans steps.
-assert.match(processUi, /val scroll = rememberScrollState\(\)\s+LaunchedEffect\(flow\.taskId, flow\.step\) \{ scroll\.animateScrollTo\(0\) \}/);
+// Only a new question (animated) or item (at once) scrolls; the question last shown survives a recreation (ProcessInboxScrollTest).
+assert.match(processUi, /val scroll = rememberScrollState\(\)[\s\S]{0,300}LaunchedEffect\(flow\.taskId, flow\.step\) \{\s+when \(stepScroll\(shownTask, shownStep, flow\.taskId, flow\.step\)\) \{\s+StepScroll\.Animate -> scroll\.animateScrollTo\(0\)\s+StepScroll\.Jump -> scroll\.scrollTo\(0\)/);
+assert.match(processUi, /var shownTask by rememberSaveable \{ mutableStateOf<String\?>\(null\) \}/);
 assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
 const captureModalUi = source('CaptureModal.kt');
