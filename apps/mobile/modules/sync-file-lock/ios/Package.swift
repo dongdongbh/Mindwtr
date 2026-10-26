@@ -16,7 +16,8 @@ let package = Package(
     .testTarget(
       name: "SyncFileLockEngineTests",
       dependencies: ["SyncFileLockEngine"],
-      path: "Tests"
+      path: "Tests",
+      linkerSettings: [.linkedFramework("JavaScriptCore", .when(platforms: [.macOS, .iOS]))]
     ),
   ]
 )
