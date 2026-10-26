@@ -742,7 +742,8 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
                 area.isNotEmpty() -> editor.view.areas.firstOrNull { it.id == area }?.title ?: t("taskEdit.noAreaOption")
                 else -> t("common.none")
             }
-            CompactRow(Lucide.Folder, t("task.destination"), value, !locked) { openPicker("destination") }
+            FieldHeading(Lucide.Folder, t("task.destination"))
+            DateButton(value, t("task.destination"), !locked, Modifier.fillMaxWidth()) { openPicker("destination") }
         }
         "section" -> if (editor.text("projectId").isNotEmpty()) FormGroup {
             FieldHeading(Lucide.Layers, t("taskEdit.sectionLabel"))
