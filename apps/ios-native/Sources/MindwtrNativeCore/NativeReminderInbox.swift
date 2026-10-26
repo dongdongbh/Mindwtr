@@ -1,4 +1,5 @@
 import CoreFoundation
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -10,7 +11,27 @@ public actor NativeReminderInbox {
         public let stage: Stage
     }
 
+    /// Hot owner authority only. Neither the token nor exported equality data is a cold import receipt.
+    struct Seal: Equatable, Sendable { fileprivate let identifier: UUID }
+    struct SealedExport: Sendable {
+        struct Active: Sendable { let sequence: Int64; let item: Item }
+        struct Terminal: Sendable { let requestID: String; let deliveredAtBits: String }
+        let namespace: String
+        let nextSequence: Int64
+        let active: [Active]
+        let terminal: [Terminal]
+        let retiredThrough: String?
+        let sourceGeneration: Data
+    }
+    struct SealDiagnostic: Sendable {
+        let message = "Native iOS legacy reminder owner sealed"
+        let releaseCheck = "v1.3.8/ios-personal-intake-seal"
+        let operation = "seal"
+        let outcome = "confirmed"
+    }
+
     private let files: ReminderInboxFiles
+    private var sealed: (token: Seal, origin: Data, generation: Data)?
 
     // Read-only grammar reuse; personal intake does not alter the legacy writer or its v1 bytes.
     static func validateForPersonalIntake(_ response: NativeReminderResponse, namespace: String) throws {
@@ -24,6 +45,7 @@ public actor NativeReminderInbox {
     }
 
     public func capture(_ response: NativeReminderResponse) throws -> Item? {
+        try requireUnsealed()
         try files.check()
         do { try ReminderInboxState.validate(response, namespace: files.namespace) }
         catch { throw ReminderInboxFiles.failure }
@@ -53,6 +75,7 @@ public actor NativeReminderInbox {
     }
 
     public func markAdmitting(_ requestID: String) throws -> Item {
+        try requireUnsealed()
         try files.check()
         guard let index = files.state.active.firstIndex(where: { $0.response.requestID == requestID }) else {
             throw ReminderInboxFiles.failure
@@ -65,6 +88,7 @@ public actor NativeReminderInbox {
     }
 
     public func finish(_ item: Item) throws {
+        try requireUnsealed()
         try files.check()
         guard item.stage == .admitting else { throw ReminderInboxFiles.failure }
         do { try ReminderInboxState.validate(item.response, namespace: files.namespace) }
@@ -103,8 +127,38 @@ public actor NativeReminderInbox {
         try files.publish(next)
     }
 
-    public func retry() throws { try files.retry() }
+    public func retry() throws { try requireUnsealed(); try files.retry() }
     public func close() { files.close() }
+
+    /// The future App handoff must first join its entire original wrapper/domain tails.
+    /// An uncertain original publication needs explicit retry before this operation can succeed.
+    func sealForPersonalIntake(route: NativePersonalIntakeRoute,
+                               diagnostic: @Sendable (SealDiagnostic) -> Void) throws -> Seal {
+        let generation = try files.checkedSealGeneration(route: route)
+        if let sealed {
+            guard sealed.origin == route.descriptor, sealed.generation == generation else { throw ReminderInboxFiles.failure }
+            return sealed.token
+        }
+        let token = Seal(identifier: UUID())
+        sealed = (token, route.descriptor, generation)
+        diagnostic(.init())
+        return token
+    }
+
+    func exportSealed(_ token: Seal, route: NativePersonalIntakeRoute) throws -> SealedExport {
+        guard let sealed, sealed.token == token, sealed.origin == route.descriptor else { throw ReminderInboxFiles.failure }
+        // Legacy state is already bounded/validated by its existing decoder (128 active, 16,384 terminal).
+        let exported = SealedExport(namespace: files.namespace, nextSequence: files.state.nextSequence,
+            active: files.state.active.map { .init(sequence: $0.sequence, item: $0.item) },
+            terminal: files.state.tombstones.map { .init(requestID: $0.requestID, deliveredAtBits: $0.deliveredAtBits) },
+            retiredThrough: files.state.retiredThrough, sourceGeneration: sealed.generation)
+        guard try files.checkedSealGeneration(route: route) == sealed.generation else { throw ReminderInboxFiles.failure }
+        return exported
+    }
+
+    private func requireUnsealed() throws {
+        guard sealed == nil else { throw ReminderInboxFiles.failure }
+    }
 
     #if DEBUG
     func setIOFaults(beforePublication: (() throws -> Void)? = nil, afterPublication: (() throws -> Void)? = nil) {
@@ -292,6 +346,7 @@ private final class ReminderInboxFiles {
     }
 
     let namespace: String
+    private let selection: NativeLaunchSelection
     private let rootPath: String
     private var directories: [Directory] = []
     private var lockFD: Int32 = -1
@@ -308,6 +363,7 @@ private final class ReminderInboxFiles {
     #endif
 
     init(selection: NativeLaunchSelection) throws {
+        self.selection = selection
         let database: URL, container: URL
         switch selection {
         case let .standard(databaseURL, containerURL, name), let .isolated(databaseURL, containerURL, name, _):
@@ -364,6 +420,31 @@ private final class ReminderInboxFiles {
             try verifyNamespace()
             guard Self.matches(try read(), snapshot) else { throw Self.failure }
         } catch { poisoned = true; throw Self.failure }
+    }
+    func checkedSealGeneration(route: NativePersonalIntakeRoute) throws -> Data {
+        try check()
+        guard hasLease, let snapshot, let lockGeneration,
+              try Self.sameSelection(selection, route.selection) else { throw Self.failure }
+        // Fixed native equality evidence only; no serialized legacy marker or decoded IO path.
+        let values = [route.fingerprint, SHA256.hash(data: snapshot.bytes).map { String(format: "%02x", $0) }.joined(),
+                      Self.generationText(snapshot.generation), Self.generationText(lockGeneration)]
+            + directories.map { "\($0.identity.device):\($0.identity.inode)" }
+        return Data(SHA256.hash(data: Data(values.joined(separator: "|").utf8)))
+    }
+    private static func sameSelection(_ lhs: NativeLaunchSelection, _ rhs: NativeLaunchSelection) throws -> Bool {
+        func same(_ a: URL, _ b: URL) throws -> Bool {
+            try Data(NativeAttachmentFiles.filePath(a.absoluteString).utf8) == Data(NativeAttachmentFiles.filePath(b.absoluteString).utf8)
+        }
+        switch (lhs, rhs) {
+        case let (.standard(a, b, c), .standard(x, y, z)):
+            return try c == z && same(a, x) && same(b, y)
+        case let (.isolated(a, b, c, d), .isolated(x, y, z, w)):
+            return try c == z && d == w && same(a, x) && same(b, y)
+        default: return false
+        }
+    }
+    private static func generationText(_ value: stat) -> String {
+        "\(value.st_dev):\(value.st_ino):\(value.st_mode):\(value.st_nlink):\(value.st_size):\(value.st_mtimespec.tv_sec):\(value.st_mtimespec.tv_nsec):\(value.st_ctimespec.tv_sec):\(value.st_ctimespec.tv_nsec)"
     }
     func publish(_ state: ReminderInboxState) throws {
         let bytes: Data
