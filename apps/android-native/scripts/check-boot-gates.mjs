@@ -832,7 +832,7 @@ assert.match(model, /val owed = failedAction\?\.takeIf \{ action == null && it\.
 assert.match(owner, /if \(pending\.action\.kind == "storage" && failure\?\.action\?\.kind\.let \{ it != null && it != "storage" \}\) return/);
 // User actions go through perform: the three commands with their action, the reads the user asked for without one.
 assert.equal(code(model).match(/\bperform\(action\)/g).length, 17, 'complete, its Undo, a Process Inbox decision\'s Undo, editor save, Reset checklist, task star, project star, status, project create, area filter, saved search, Process Inbox answer, the storage retry, the journal replay\'s retry, and the capture popup\'s capture, lines and picker create');
-assert.equal(code(model).match(/\bperform\s*\{/g).length, 10, 'editor, reload, Try again, two More (Focus, a project), open project, open Process Inbox, open the capture popup, a Focus control\'s edit, Import .txt');
+assert.equal(code(model).match(/\bperform\s*\{/g).length, 11, 'editor, reload, Try again, two More (Focus, a project), open project, open Process Inbox, open the capture popup, a project\'s capture screen, a Focus control\'s edit, Import .txt');
 // Background reads (resume, each minute, after a command) never take busy, so they disable no control and never
 // turn a user's tap away: only perform sets busy, and its guard knows nothing of reads in flight.
 const backgroundFn = code(model.slice(model.indexOf('internal fun <T> background('), model.indexOf('internal fun perform(')));
@@ -2261,9 +2261,9 @@ for (const [kind, fn] of [['capture', 'sendCapture'], ['captureLines', 'sendLine
     assert.match(model, new RegExp(`current\\.pending\\?\\.takeIf \\{ it\\.kind == "${kind}" \\}`), `${kind}: a retry reuses the pending request`);
     assert.match(model, new RegExp(`keepCapture\\(current\\.copy\\(pending = action[^)]*\\)\\)\\s+${fn}\\(action\\)`), `${kind}: the request is persisted before the call`);
 }
-// The opener's preset (a project's "+", O2f-parity b3) rides the same saved request, so a retry keeps its project and status.
-assert.match(model, /FailedAction\("capture", current\.captureId, current\.text, patch = mapOf\("options" to current\.options\.toString\(\), "openAfterSave" to "\$openAfterSave"\) \+ presetPatch\(current\)\)/);
-assert.match(model, /FailedAction\("captureLines", current\.lineIds\.first\(\), current\.linesText \?: current\.text,\s*patch = mapOf\("options" to current\.options\.toString\(\), "captureIds" to current\.lineIds\.joinToString\(","\)\) \+ presetPatch\(current\)\)/);
+// The saved request holds core's options, so a retry keeps the draft's project and status.
+assert.match(model, /FailedAction\("capture", current\.captureId, current\.text, patch = mapOf\("options" to current\.options\.toString\(\), "openAfterSave" to "\$openAfterSave"\)\)/);
+assert.match(model, /FailedAction\("captureLines", current\.lineIds\.first\(\), current\.linesText \?: current\.text,\s*patch = mapOf\("options" to current\.options\.toString\(\), "captureIds" to current\.lineIds\.joinToString\(","\)\)\)/);
 assert.match(model, /failedAction = action\s+when \(action\.kind\) \{ "capture" -> sendCapture\(action\); "captureLines" -> sendLines\(action\); else -> sendPicker\(action\) \}/,
     'after process death an uncertain capture is sent again with the same IDs');
 assert.match(model, /if \(action\.kind in CAPTURE_KINDS\) storedCapture\?\.let \{ keepCapture\(it\.copy\(pending = action\)\) \}/, 'a new screen reopens the popup on an owed capture, never re-sends it');
@@ -9803,21 +9803,19 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // A toast with an action (Undo) honors Android's "Time to take action" (TalkBack and switch users), never below RN's time.
     assert.match(source('InboxViewModel.kt'), /if \(action != null\) actionTimeout\(shown\) else shown/);
     assert.match(source('InboxViewModel.kt'), /getRecommendedTimeoutMillis\(shown\.toInt\(\),\s+android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_TEXT or android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_CONTROLS\)/);
-    // b3: RN highlights the task a project's "+" saved and its TaskList scrolls to it once (#916); every follow-up that opens a
-    // project after another write waits for it to settle (phone runs 3 and 6).
-    assert.match(source('InboxViewModel.kt'), /val project = current\.preset\?\.optString\("projectId"\)\s+keepCapture\(null\)\s+if \(project != null\) highlight\(reply\.getString\("taskId"\), project\)/);
+    // A highlighted task's project list scrolls to it once (#916); every follow-up that opens a project after another write waits
+    // for it to settle (phone runs 3 and 6).
     assert.match(header, /LaunchedEffect\(highlightTaskId, detail\) \{[\s\S]{0,600}listState\.animateScrollToItem\(/);
     assert.match(source('DataTransfer.kt'), /else if \(openProject\) \{ menu\.whenIdle \{ menu\.openProjects\(projectId\) \}/);
     assert.match(source('StartupPrompts.kt'), /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
-    // b3: the pinned "+" opens the capture popup with RN's preset (the project, status Next), kept in the durable draft and sent
-    // with every capture call.
-    assert.match(header, /\{ openCapture\(openProjectId\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
-    const capture = source('CaptureScreen.kt'), shell = source('InboxViewModel.kt');
-    assert.match(capture, /\.put\("preset", preset \?: JSONObject\.NULL\)/);
-    assert.match(capture, /preset = saved\.optJSONObject\("preset"\)/);
-    assert.equal(shell.match(/\+ presetPatch\(current\)/g)?.length, 3, 'Save, Create tasks and the picker keep the preset');
-    assert.equal(shell.match(/\.withPreset\(action\)/g)?.length, 3, 'their sends carry it');
-    assert.match(shell, /current\.preset\?\.let \{ put\("preset", it\) \}/);
+    // The pinned "+" is RN's openProjectQuickAdd: RN routes a capture with returnTo through its capture screen (the compact card),
+    // so the project closes and that screen opens on the project's preset (the project, status Next) with the project as returnTo;
+    // core's close answer names the project (returnToProjectId) and the screen opens it again. RN's card Save highlights nothing.
+    assert.match(header, /\{ openProjectId\?\.let\(::openProjectCapture\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
+    assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ closeProject\(\); captureModal\.opened\(params, reply\) \}/);
+    assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+close\.menuText\("returnToProjectId"\)\?\.let\(shell::openProject\)/);
+    // The popup has no opener preset any more: the project "+" was its only opener.
+    assert.doesNotMatch(source('CaptureScreen.kt') + source('InboxViewModel.kt'), /presetPatch|withPreset|val preset: JSONObject/);
 }
 // Pass O2f-parity b4a: RN's pinned row "..." (More options) with Sort (core's choices, the prepared sort through runProjectEdit)
 // and Show completed (RN's device key), washed while either is on; the Completed pile folds under RN's chevron heading.

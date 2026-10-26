@@ -264,22 +264,21 @@ try {
     check(true, '(c) Clear while reordering brings every task back');
     nodes = await tapExpecting(tagged(nodes, 'project-task-reorder-toggle') ?? fail('no Done'), (current) => !tagged(current, 'project-reorder-list'), 'the list again');
     check(true, '(c) Done leaves reorder mode');
-    // The pinned "+" (RN's openProjectQuickAdd): the popup opens with Getting Started chosen, and the task saves as Next in it.
+    // The pinned "+" (RN's openProjectQuickAdd, which routes through RN's capture screen with returnTo): the project closes and
+    // the capture screen opens on its preset; Save stores the task as Next in Getting Started, which opens again.
     nodes = await tapExpecting(tagged(nodes, 'project-add-task-button') ?? fail('no project "+"'),
-        (current) => Boolean(tagged(current, 'quick-capture')) && hasText(current, STARTER_TITLE), 'the capture popup with Getting Started chosen', 15_000);
-    check(true, '(c) the project\'s "+" opens the capture popup with the project chosen');
+        (current) => Boolean(tagged(current, 'capture-modal-title')) && !projectTitled(current, STARTER_TITLE), 'the capture screen, the project closed', 15_000);
+    check(true, '(c) the project\'s "+" closes the project and opens the capture screen');
     shot('project-add');
     const ADDED = 'Paint the fence';
-    const input = nodes.find((node) => node.class === 'android.widget.EditText' && (node['resource-id'] ?? '').endsWith('capture-title'))
-        ?? nodes.filter((node) => node.class === 'android.widget.EditText').pop() ?? fail('no capture field');
-    await tap(input);
+    await tap(tagged(nodes, 'capture-modal-title'));
     requireAppFront();
     sh(`input text '${ADDED.replaceAll(' ', '%s')}'`);
-    nodes = await waitFor('the typed capture', (current) => current.some((node) => node.class === 'android.widget.EditText' && node.text === ADDED), 10_000);
-    nodes = await tapExpecting(button(nodes, en['common.save']) ?? fail('no Save'), (current) => !tagged(current, 'quick-capture') && hasText(current, ADDED), 'the task in the project', 30_000);
-    check(projectTitled(nodes, STARTER_TITLE) && nodes.some((node) => node['content-desc'] === `${ADDED}. Status: Next`),
-        '(c) the captured task shows in Getting Started, as Next');
-    // The list scrolled to the new task (RN's highlight, #916): back to the top for Getting Started's actions.
+    nodes = await waitFor('the typed capture', (current) => tagged(current, 'capture-modal-title')?.text === ADDED, 10_000);
+    nodes = await tapExpecting(button(nodes, en['common.save']) ?? fail('no Save'),
+        (current) => !tagged(current, 'capture-modal') && projectTitled(current, STARTER_TITLE), 'Getting Started open again', 30_000);
+    const added = await device.revealNode((current) => current.find((node) => node['content-desc'] === `${ADDED}. Status: Next`), `${ADDED} in Getting Started`);
+    check(Boolean(added), '(c) the captured task shows in the reopened Getting Started, as Next');
     nodes = await device.toTop();
     nodes = await tapExpecting(byText(nodes, en['starter.processInbox.check1']) ?? fail('no Open Inbox'), (current) => tabSelected(current, en['tab.inbox']), 'the Inbox');
     check(tabSelected(nodes, en['tab.inbox']), '(c) Open Inbox closes the project and shows the Inbox');

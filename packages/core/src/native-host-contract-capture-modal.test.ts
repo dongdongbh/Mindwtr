@@ -340,6 +340,28 @@ describe('native host contract: the capture confirmation screen', () => {
         expect(log).toEqual([]);
     });
 
+    it("names the project a project's + opened the screen from, so the host opens it again on close, also after a restart", async () => {
+        const fromProject = (projectId: string): CaptureModalParams => ({
+            initialProps: JSON.stringify({ projectId, status: 'next' }),
+            returnTo: `/projects-screen?projectId=${encodeURIComponent(projectId)}`,
+        });
+        const host = await openScreenHost({ data, record: { addTask: 2 }, log: [] });
+        const params = fromProject('p-launch');
+        const opened = value(host.openCaptureModal({ params }));
+        expect(value(host.discardCaptureModal({ params }))).toEqual({ close: { returnTo: params.returnTo, returnToPreviousApp: false, returnToProjectId: 'p-launch' } });
+        // The params ride the screen's file: after a restart the preset (the project, status Next) and the way back are core's again.
+        const restarted = await restartScreenHost();
+        const saved = value(await restarted.submitCaptureModal({ params, draft: { ...opened.draft, text: 'Order parts' }, captureId: requestId() }));
+        expect(saved).toMatchObject({ kind: 'saved', projectId: 'p-launch', next: 'close', close: { returnToProjectId: 'p-launch' } });
+        expect(useTaskStore.getState()._tasksById.get((saved as { taskId: string }).taskId)).toMatchObject({ title: 'Order parts', projectId: 'p-launch', status: 'next' });
+        // Save & edit leaves the editor to the project screen it reopens (#938).
+        expect(value(await restarted.submitCaptureModal({ params, draft: { ...opened.draft, text: 'Call shop' }, captureId: requestId(), openAfterSave: true })))
+            .toMatchObject({ next: 'openInProject', projectId: 'p-launch' });
+        // A project gone since is not reopened; another screen's params name none.
+        expect(value(restarted.discardCaptureModal({ params: fromProject('p-gone') })).close).toEqual({ returnTo: '/projects-screen?projectId=p-gone', returnToPreviousApp: false });
+        expect(value(restarted.discardCaptureModal({ params: linkParams })).close).toEqual({ returnTo: null, returnToPreviousApp: false });
+    });
+
     it('saves under the capture UUID; a retry, or a replay after a restart, writes nothing more', async () => {
         const log: unknown[][] = [];
         const host = await openScreenHost({ data, record: { addTask: 2, addProject: 1 }, log });

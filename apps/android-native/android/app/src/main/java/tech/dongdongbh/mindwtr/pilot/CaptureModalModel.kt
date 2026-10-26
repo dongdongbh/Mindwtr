@@ -263,12 +263,14 @@ class CaptureModalModel(private val shell: InboxViewModel, private val saved: Sa
     }
 
     /**
-     * The screen closes to the screen behind it (this app always has one, so core's returnTo is never needed); a system
+     * The screen closes to the screen behind it (this app always has one, so core's returnTo path is never needed); a project's "+"
+     * opened it, and that project (core's returnToProjectId) opens again, as RN's project screen does when capture pops. A system
      * capture then puts the app behind the previous one (RN's finishCapture, #1169).
      */
     private fun end(close: JSONObject, leave: Boolean = true) {
         keep(null)
         inFlight = null
+        close.menuText("returnToProjectId")?.let(shell::openProject)
         if (leave && close.getBoolean("returnToPreviousApp")) shell.leaveApp = true
     }
 }

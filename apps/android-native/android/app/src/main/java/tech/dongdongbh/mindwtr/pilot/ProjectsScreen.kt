@@ -444,7 +444,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 val addLabel = t("nav.addTask")
                 val addShape = RoundedCornerShape(14.dp)
                 Box(Modifier.size(width = 56.dp, height = 44.dp).clip(addShape).background(theme.filledBg).rnBorder(1.dp, theme.filledBg, addShape)
-                    .clickable(enabled = writable && failedAction == null, role = Role.Button) { openCapture(openProjectId) }
+                    .clickable(enabled = writable && failedAction == null, role = Role.Button) { openProjectId?.let(::openProjectCapture) }
                     .semantics { contentDescription = addLabel }.testTag("project-add-task-button"), contentAlignment = Alignment.Center) {
                     Icon(SettingsIonicons.Add, null, tint = theme.filledText, modifier = Modifier.size(24.dp))
                 }

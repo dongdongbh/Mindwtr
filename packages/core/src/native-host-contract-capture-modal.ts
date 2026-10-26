@@ -58,6 +58,7 @@ import {
     checkCaptureModalLines,
     createCaptureModalDraft,
     getCaptureModalBulkConfirm,
+    getProjectQuickCaptureReturnToProjectId,
     planCaptureModalRequest,
     readCaptureModalInitialProps,
     readCaptureModalOrigin,
@@ -107,8 +108,12 @@ export type NativeCaptureModalView = CaptureModalView & {
     revision: string;
 };
 
-/** Where to go when the screen closes: back, else `returnTo`, else the Inbox; then maybe behind the previous app. */
-export type NativeCaptureModalClose = { returnTo: string | null; returnToPreviousApp: boolean };
+/**
+ * Where to go when the screen closes: back, else `returnTo`, else the Inbox; then maybe behind the previous app.
+ * `returnToProjectId`: a project's + opened the screen (React Native's openProjectQuickAdd) and that project is still live;
+ * React Native closes it while capturing and opens it again here.
+ */
+export type NativeCaptureModalClose = { returnTo: string | null; returnToPreviousApp: boolean; returnToProjectId?: string };
 
 export type NativeCaptureModalSubmitResult =
     /** A blank title: Save does nothing. */
@@ -300,10 +305,12 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             revision: deps.revision(now),
         };
     };
-    const closeOf = (params: CaptureModalParams, returnToPreviousApp: boolean): NativeCaptureModalClose => ({
-        returnTo: sanitizeCaptureReturnToParam(params.returnTo),
-        returnToPreviousApp,
-    });
+    const closeOf = (params: CaptureModalParams, returnToPreviousApp: boolean): NativeCaptureModalClose => {
+        const returnTo = sanitizeCaptureReturnToParam(params.returnTo);
+        const projectId = getProjectQuickCaptureReturnToProjectId(returnTo);
+        const live = projectId !== null && useTaskStore.getState()._allProjects.some((project) => project.id === projectId && !project.deletedAt);
+        return { returnTo, returnToPreviousApp, ...(live ? { returnToProjectId: projectId } : {}) };
+    };
 
     /** The shared input checks: readiness, params and draft. */
     const readScreen = (input: unknown): NativeHostResult<{ params: CaptureModalParams; draft: CaptureModalDraft }> => {
