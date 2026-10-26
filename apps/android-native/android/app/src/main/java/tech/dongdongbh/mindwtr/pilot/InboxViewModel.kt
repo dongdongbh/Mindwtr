@@ -727,6 +727,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** Control edits are with core or wait for it (the editor's persisted queue); Save waits for them, and Close counts them as unsaved. */
     val editsPending get() = editor?.pending?.isNotEmpty() == true
+    /** No editor, or one Close would close without asking: read-only, or nothing to save (RN's clean editor, #1410). */
+    val editorClean get() = editor?.let { it.readOnly || (!it.dirty && !editsPending) } ?: true
     /** The session and number of the edit core is answering now. */
     private var inFlight: Pair<String, Long>? = null
     /** Core's message for the last refused edit; the next accepted edit clears it. */

@@ -3378,8 +3378,11 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(model, /val entries = EntryRouter\(this, File\(app\.noBackupFilesDir, "entries"\), SharedFileStager\(File\(app\.cacheDir, "shared-entries"\), ContentSharedFileSource\(app\)\)\)/);
     assert.doesNotMatch(code(entryKt), /saved\[|SavedStateHandle/, 'the queue lives on disk, not in the saved state');
     assert.match(entryKt, /if \(!queue\.add\(input\.toString\(\)\)\)/);
-    // Any open unsaved work holds the entry back (the capture popup and its draft included): a share never replaces it.
-    assert.match(entryKt, /!writable \|\| busy \|\| failedAction != null \|\| editor != null \|\| processing\?\.hidden == false \|\| capture != null \|\| captureModal\.open != null\s+\|\| menu\.dialog != null \|\| menu\.focusControls\.dialog != null \|\| menu\.calendar\.composer != null \|\| search\?\.saveName != null\s+\|\| menu\.screen == MenuScreen\.MindSweep/);
+    // Any open unsaved work holds the entry back (the capture popup and its draft included): a share never replaces it. An
+    // editor with nothing to save does not (#1410): an entry that goes somewhere closes it first, as RN's editor closes on blur.
+    assert.match(model, /val editorClean get\(\) = editor\?\.let \{ it\.readOnly \|\| \(!it\.dirty && !editsPending\) \} \?: true/);
+    assert.match(entryKt, /if \(reply\.menuText\("route"\) != null \|\| reply\.has\("capture"\) && !reply\.isNull\("capture"\) \|\| reply\.has\("captureModal"\) && !reply\.isNull\("captureModal"\)\) closeEditor\(\)/);
+    assert.match(entryKt, /!writable \|\| busy \|\| failedAction != null \|\| !editorClean \|\| processing\?\.hidden == false \|\| capture != null \|\| captureModal\.open != null\s+\|\| menu\.dialog != null \|\| menu\.focusControls\.dialog != null \|\| menu\.calendar\.composer != null \|\| search\?\.saveName != null\s+\|\| menu\.screen == MenuScreen\.MindSweep/);
     // Typed text not yet sent holds entries back too: the Add new project field while the Projects list shows it, and a
     // Settings field before its commit (a GTD text field, a Someday section's inline rename).
     assert.match(entryKt, /\|\| \(menu\.screen == MenuScreen\.Settings && menu\.settings\.uncommitted\)\s+\|\| \(projectDraft\.isNotBlank\(\) && openProjectId == null && \(menu\.screen == MenuScreen\.Projects\s+\|\| \(menu\.screen == null && screen == Screen\.Projects && menu\.quickView == "projects"\)\)\)/);

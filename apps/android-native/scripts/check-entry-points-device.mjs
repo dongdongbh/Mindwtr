@@ -13,7 +13,8 @@
 // the capture screen, its Cancel puts the app behind the previous screen (RN's #1169), and a warm Back stays in the app;
 // (e) two shares sent together open
 // one after the other; (f) a share arriving over a typed capture draft waits until the draft closes; (g) the closed screens
-// stored nothing; (h) a share waiting behind the editor survives a force-stop and opens after the relaunch. Nothing but (b)'s share is saved; its title is 77 + a 12-digit run id + 1
+// stored nothing; (h) a share over an editor with nothing to save closes it and opens at once (#1410); (i) a share waiting
+// behind an editor with an unsaved edit survives a force-stop and opens after the relaunch. Nothing but (b)'s share is saved; its title is 77 + a 12-digit run id + 1
 // (check-projects-device.mjs --prune-old removes earlier runs'). It types only digits, never launches over another app, and
 // leaves the app on its Inbox. Leave the device on its home screen before running. It needs host `bun`.
 // Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
@@ -51,7 +52,7 @@ const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 // Digits only: no keyboard is involved, and the prune shape stays simple.
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const titles = { shared: `77${run}1`, link: `77${run}2`, note: `77${run}3`, typed: `77${run}4`, first: `77${run}5`, second: `77${run}6`,
-    overDraft: `77${run}7`, killed: `77${run}8` };
+    overDraft: `77${run}7`, killed: `77${run}8`, clean: `77${run}9` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, home, front, requireAppFront, pid, screen, waitFor, tapExpecting } = device;
@@ -298,8 +299,22 @@ try {
     check(entries('captureModal') >= 7 && entries('capture') >= 1 && entries('notice') >= 1 && entries('task') >= 1 && entries('screen') >= 5,
         `(g) the entry-point log lines: captureModal ${entries('captureModal')}, capture ${entries('capture')}, notice ${entries('notice')}, task ${entries('task')}, screen ${entries('screen')}`);
 
-    // (h) A share that waits behind the editor survives a force-stop before it opened: the relaunch opens it.
+    // (h) An editor with nothing to save never holds an entry (#1410): a share closes it and opens at once, as RN's editor closes
+    // when a widget or link navigates. Its Cancel stores nothing and leaves no editor behind.
     await link(`/open?task=${stored.tasks.shared[0].id}`, (current) => inEditor(current) && hasText(current, titles.shared), 'the shared task in the editor');
+    share(titles.clean);
+    nodes = await waitFor('the share\'s capture screen over the closed clean editor', modal(titles.clean), 15_000);
+    await cancelModal(nodes, (current) => !tagged(current, 'capture-modal') && !inEditor(current), 'the tabs, with no editor');
+    check(core().tasks.clean.length === 0, '(h) a share over a clean editor closes it and opens at once (#1410)');
+
+    // (i) A share that waits behind an editor with an unsaved edit survives a force-stop before it opened: the relaunch opens it.
+    await link(`/open?task=${stored.tasks.shared[0].id}`, (current) => inEditor(current) && hasText(current, titles.shared), 'the shared task in the editor');
+    nodes = await screen();
+    await tapExpecting(withDescription(nodes, 'Edit') ?? fail('no Edit tab in the editor'), (current) => Boolean(field(current)), 'the editor\'s Form tab');
+    // device.type is the capture sheet's (it waits for the field to hold only what it typed): type at the title's end here.
+    await device.focusAtEnd(field(await screen()) ?? fail('no title field in the editor'));
+    sh('input text 9');
+    await waitFor('the unsaved title edit', (current) => field(current)?.text === `${titles.shared}9`, 10_000);
     share(titles.killed);
     await holds((current) => inEditor(current) && !tagged(current, 'capture-modal'), 3_000, 'the editor');
     sh(`am force-stop ${PKG}`);
@@ -308,7 +323,7 @@ try {
     nodes = await waitFor('the waiting share\'s capture screen after the relaunch', modal(titles.killed), 60_000);
     await cancelModal(nodes);
     stored = core();
-    check(stored.tasks.killed.length === 0 && entries('captureModal') >= 1, '(h) a share queued before a force-stop opens after the relaunch, once');
+    check(stored.tasks.killed.length === 0 && entries('captureModal') >= 1, '(i) a share queued before a force-stop opens after the relaunch, once');
     console.log('Entry points device check passed');
 } catch (error) {
     evidenced(error);

@@ -164,9 +164,12 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         threads.close()
     }
 
-    /** Something keeps the entry from opening now: the app is not ready, a command runs or is owed, or the user's work is open. */
+    /**
+     * Something keeps the entry from opening now: the app is not ready, a command runs or is owed, or the user's work is open. An
+     * editor with nothing to save is no work (#1410): an entry that goes somewhere closes it, as RN's editor closes on navigation.
+     */
     val blocked: Boolean get() = with(shell) {
-        !writable || busy || failedAction != null || editor != null || processing?.hidden == false || capture != null || captureModal.open != null
+        !writable || busy || failedAction != null || !editorClean || processing?.hidden == false || capture != null || captureModal.open != null
             || menu.dialog != null || menu.focusControls.dialog != null || menu.calendar.composer != null || search?.saveName != null
             || menu.screen == MenuScreen.MindSweep
             // Typed text not yet sent: a Settings field before its commit, and the Add new project field while the list shows it
@@ -253,6 +256,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         }
         // A missing task link's notice has no title (#1368): showToast(JSONObject) reads an absent or empty title as none.
         reply.optJSONObject("notice")?.let { showToast(it) }
+        if (reply.menuText("route") != null || reply.has("capture") && !reply.isNull("capture") || reply.has("captureModal") && !reply.isNull("captureModal")) closeEditor()
         reply.menuText("route")?.let { go(it, reply) }
         reply.optJSONObject("captureModal")?.let { captureModal.opened(it.getJSONObject("params"), view ?: return) }
         val capture = reply.optJSONObject("capture") ?: return
