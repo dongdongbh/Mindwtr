@@ -95,7 +95,9 @@ const choose = async (label, after, what, expected) => {
         const rows = menuRows(nodes);
         check(JSON.stringify(rows) === JSON.stringify(expected), `${what}: the menu lists ${JSON.stringify(expected)} (shown ${JSON.stringify(rows)})`);
     }
-    return tapExpecting(withDescription(nodes, label) ?? fail(`no "${label}" row in the menu`), after, what);
+    // Sticky: tapExpecting's last waitFor dumps again, and a 3.2 s toast (Copy's) can be gone by then though a dump saw it.
+    let seen = false;
+    return tapExpecting(withDescription(nodes, label) ?? fail(`no "${label}" row in the menu`), (current) => (seen ||= after(current)), what);
 };
 /** Closes the keyboard if it shows: Back then only closes the keyboard, never the editor. */
 const hideKeyboard = async () => {
