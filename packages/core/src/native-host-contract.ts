@@ -287,6 +287,7 @@ import { createSavedSearchWriteMethods } from './native-host-contract-saved-sear
 import { createProjectCreateMethods } from './native-host-contract-project-create';
 import { createTaskPromotionMethods } from './native-host-contract-task-promote';
 import { createTaskToSectionMethods } from './native-host-contract-task-to-section';
+import { createTaskEditorActionMethods } from './native-host-contract-task-editor-action';
 import { createProjectFocusMethods } from './native-host-contract-project-focus';
 import { createProjectRenameMethods } from './native-host-contract-project-rename';
 import { createProjectFlowMethods } from './native-host-contract-project-flow';
@@ -1740,6 +1741,8 @@ export function createNativeHostContract(options: {
         ...createTaskPromotionMethods({ readiness, save, isReadOnly: isInArchivedProject }),
         // The editor's Convert to section (RN's convertTaskToSection), prepared and journaled.
         ...createTaskToSectionMethods({ readiness, receipts, isReadOnly: isInArchivedProject }),
+        // The editor's "..." menu writes as one journaled command (Android's taskEditorAction).
+        ...createTaskEditorActionMethods({ readiness, save, receipts, contract: () => self ?? {} }),
         ...inboxProcessingMethods,
         // Settings › AI and the AI actions: native-host-contract-ai.ts.
         ...createAIMethods({

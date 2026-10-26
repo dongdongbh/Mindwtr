@@ -791,7 +791,7 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
 type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
     | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'savedSearchDelete'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
-    | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | DataCommand | StartupPromptCommand;
+    | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | TaskEditorCommand | DataCommand | StartupPromptCommand;
 /** Settings › Data's own write (DataTransfer.kt's DATA_COMMANDS): Getting Started's seed, journaled with its frozen language. */
 type DataCommand = 'gettingStarted';
 /** The startup prompts' own write (StartupPrompts.kt's STARTUP_PROMPT_COMMANDS): the donation ask's synced record. */
@@ -810,6 +810,8 @@ type CalendarScreenCommand = 'calendarFeedAdd';
 type AttachmentCommand = 'attachmentAddFile' | 'attachmentLinks' | 'attachmentRemove';
 /** Project details' edit, sent by ProjectDetails.kt (journaled ahead): core's runProjectEdit. */
 type ProjectDetailCommand = 'projectEdit';
+/** The task editor's "..." menu writes, sent by the editor (journaled ahead): core's runTaskEditorAction. */
+type TaskEditorCommand = 'taskEditorAction';
 type Command = 'create' | 'complete' | 'completeUndo' | 'update' | 'saveTaskDraft' | 'resetChecklist' | 'taskFocus' | 'projectFocus' | 'createProject' | 'areaFilter'
     | 'saveSearch' | 'inboxCommit' | 'inboxSkip' | 'inboxDecisionUndo' | 'quickCapture' | 'quickCaptureLines' | 'quickCapturePicker' | 'captureModal' | 'captureModalLines' | 'ingest' | 'reminderDone' | 'reminderSnooze' | MenuCommand;
 const taskResult = <T>(operation: Command, result: Parameters<typeof unwrap<T>>[0]): T => {
@@ -1449,6 +1451,8 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     attachmentRemove: (input) => contract.removeAttachment(input),
     // Project details (ProjectDetails.kt): the user's edit, journaled ahead of its send; core reads, prepares and commits it.
     projectEdit: (input) => contract.runProjectEdit(input),
+    // The task editor's "..." menu (Convert to section, Create project, Delete, Cancel, Skip and the Undos): journaled ahead of its send.
+    taskEditorAction: (input) => contract.runTaskEditorAction(input),
 };
 
 let bootAdapter: ValidatedSqliteAdapter | null = null;
