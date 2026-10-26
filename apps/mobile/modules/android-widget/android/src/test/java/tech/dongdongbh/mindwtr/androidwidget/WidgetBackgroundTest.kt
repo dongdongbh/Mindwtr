@@ -28,27 +28,73 @@ class WidgetBackgroundTest {
   private val manager = AppWidgetManager.getInstance(context)
 
   @Test fun theChoiceDefaultsToTheDefaultBackgroundIsKeptPerWidgetAndClearedOnDelete() {
-    assertFalse(WidgetListStore.isTransparent(context, 60))
-    WidgetListStore.writeTransparent(context, 60, true)
+    assertEquals(WidgetBackground.DEFAULT, WidgetListStore.background(context, 60))
+    WidgetListStore.writeBackground(context, 60, WidgetBackground.DARK_TEXT)
     WidgetListStore.write(context, 60, "next")
-    assertTrue(WidgetListStore.isTransparent(context, 60))
-    assertFalse(WidgetListStore.isTransparent(context, 61))
+    assertEquals(WidgetBackground.DARK_TEXT, WidgetListStore.background(context, 60))
+    assertEquals(WidgetBackground.DEFAULT, WidgetListStore.background(context, 61))
 
-    WidgetListStore.writeTransparent(context, 61, true)
-    WidgetListStore.writeTransparent(context, 61, false)
-    assertFalse(WidgetListStore.isTransparent(context, 61))
+    WidgetListStore.writeBackground(context, 61, WidgetBackground.LIGHT_TEXT)
+    assertEquals(WidgetBackground.LIGHT_TEXT, WidgetListStore.background(context, 61))
+    WidgetListStore.writeBackground(context, 61, WidgetBackground.DEFAULT)
+    assertEquals(WidgetBackground.DEFAULT, WidgetListStore.background(context, 61))
     assertFalse(context.getSharedPreferences(WidgetListStore.BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).contains("61"))
 
     CompactWidgetProvider().onDeleted(context, intArrayOf(60))
-    assertFalse(WidgetListStore.isTransparent(context, 60))
+    assertEquals(WidgetBackground.DEFAULT, WidgetListStore.background(context, 60))
     assertEquals(WidgetListStore.DEFAULT_LIST, WidgetListStore.read(context, 60))
+  }
+
+  @Test fun aWidgetSavedAsTransparentByTheFirstReleaseReadsAsLightText() {
+    val prefs = context.getSharedPreferences(WidgetListStore.BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE)
+    prefs.edit().putBoolean("69", true).putString("70", "sepia").commit()
+    assertEquals(WidgetBackground.LIGHT_TEXT, WidgetListStore.background(context, 69))
+    assertEquals(WidgetBackground.DEFAULT, WidgetListStore.background(context, 70))
+  }
+
+  @Test fun transparentWidgetsUseTheirOwnTextColorsWhateverTheAppTheme() {
+    // An explicit dark app theme: light text would be its own, dark text must still win.
+    WidgetPayloadStore.write(context, JSONObject().put("themeMode", "dark").put("palette", JSONObject()
+      .put("background", "#000000").put("card", "#000000").put("border", "#222222").put("text", "#EEEEEE")
+      .put("mutedText", "#AAAAAA").put("accent", "#FF0000").put("onAccent", "#FFFFFF").put("warning", "#FFAA00"))
+      .put("lists", JSONObject().put("focus", JSONObject().put("title", "Focus").put("items", org.json.JSONArray()
+        .put(JSONObject().put("id", "t1").put("title", "Row").put("dueLabel", "Fri").put("dueTone", "normal")))))
+      .toString())
+    for ((id, background, palette) in listOf(
+      Triple(71, WidgetBackground.LIGHT_TEXT, WidgetPayload.DARK_THEME_PALETTE),
+      Triple(72, WidgetBackground.DARK_TEXT, WidgetPayload.LIGHT_THEME_PALETTE),
+    )) {
+      bind(id, TasksWidgetProvider::class.java.name)
+      WidgetListStore.writeBackground(context, id, background)
+      WidgetRenderer.render(context, manager, intArrayOf(id), WidgetKind.TASKS)
+      val widget = shadowOf(manager).getViewFor(id)
+      assertEquals(View.GONE, widget.findViewById<View>(R.id.mindwtr_widget_surface).visibility)
+      assertEquals(palette.text, widget.findViewById<TextView>(R.id.mindwtr_widget_title).currentTextColor)
+      val row = TasksWidgetFactory(context, WidgetKind.TASKS, id).apply { onCreate() }.getViewAt(0).apply(context, null)
+      assertEquals(palette.text, row.findViewById<TextView>(R.id.mindwtr_widget_item_title).currentTextColor)
+      assertEquals(palette.mutedText, row.findViewById<TextView>(R.id.mindwtr_widget_item_due).currentTextColor)
+    }
+  }
+
+  @Test fun aSystemThemeRowTakesItsGreyFromTheThemeWhenTheLauncherDrawsIt() {
+    WidgetPayloadStore.write(context, JSONObject().put("themeMode", "system")
+      .put("lists", JSONObject().put("focus", JSONObject().put("title", "Focus").put("items", org.json.JSONArray()
+        .put(JSONObject().put("id", "t1").put("title", "Row").put("dueLabel", "Fri").put("dueTone", "normal")))))
+      .toString())
+    bind(73, TasksWidgetProvider::class.java.name)
+    val row = TasksWidgetFactory(context, WidgetKind.TASKS, 73).apply { onCreate() }.getViewAt(0)
+    assertEquals(0xFF475569.toInt(), row.apply(context, null).findViewById<TextView>(R.id.mindwtr_widget_item_due).currentTextColor)
+    // The same cached row, drawn after a switch to night mode.
+    org.robolectric.RuntimeEnvironment.setQualifiers("+night")
+    val night = row.apply(context.createConfigurationContext(context.resources.configuration), null)
+    assertEquals(0xFFCBD5E1.toInt(), night.findViewById<TextView>(R.id.mindwtr_widget_item_due).currentTextColor)
   }
 
   @Test fun transparentDropsOnlyThePanelAndHeaderSurfaces() {
     WidgetPayloadStore.write(context, JSONObject().put("listTitles", JSONObject().put("next", "Next Actions")).toString())
     fun rendered(id: Int, kind: WidgetKind, transparent: Boolean): View {
       bind(id, if (kind == WidgetKind.TASKS) TasksWidgetProvider::class.java.name else CompactWidgetProvider::class.java.name)
-      WidgetListStore.writeTransparent(context, id, transparent)
+      WidgetListStore.writeBackground(context, id, if (transparent) WidgetBackground.LIGHT_TEXT else WidgetBackground.DEFAULT)
       WidgetRenderer.render(context, manager, intArrayOf(id), kind)
       return shadowOf(manager).getViewFor(id)
     }
@@ -70,32 +116,32 @@ class WidgetBackgroundTest {
   @Test fun compactSettingsShowOnlyTheBackgroundRowAndSaveItWithoutAList() {
     bind(66, CompactWidgetProvider::class.java.name)
     WidgetPayloadStore.write(context, JSONObject().put("listTitles", JSONObject()
-      .put("background", "Fond").put("groupDefault", "Défaut").put("backgroundTransparent", "Sans fond")).toString())
+      .put("background", "Fond").put("groupDefault", "Défaut").put("backgroundLightText", "Sans fond, texte clair").put("backgroundDarkText", "Sans fond, texte foncé")).toString())
     val activity = configure(66)
     assertEquals(View.GONE, activity.findViewById<View>(R.id.mindwtr_widget_configure_lists).visibility)
     assertEquals(View.GONE, activity.findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility)
     assertEquals(View.VISIBLE, activity.findViewById<View>(R.id.mindwtr_widget_configure_background_row).visibility)
     assertEquals("Fond", activity.findViewById<TextView>(R.id.mindwtr_widget_configure_background_label).text.toString())
     val spinner = activity.findViewById<Spinner>(R.id.mindwtr_widget_configure_background)
-    assertEquals(listOf("Défaut", "Sans fond"), (0 until spinner.count).map { spinner.getItemAtPosition(it) })
-    spinner.setSelection(1)
+    assertEquals(listOf("Défaut", "Sans fond, texte clair", "Sans fond, texte foncé"), (0 until spinner.count).map { spinner.getItemAtPosition(it) })
+    spinner.setSelection(2)
     shadowOf(android.os.Looper.getMainLooper()).idle()
     activity.findViewById<Button>(R.id.mindwtr_widget_configure_ok).performClick()
-    assertTrue(WidgetListStore.isTransparent(context, 66))
+    assertEquals(WidgetBackground.DARK_TEXT, WidgetListStore.background(context, 66))
     assertFalse(context.getSharedPreferences(WidgetListStore.PREFS_NAME, Context.MODE_PRIVATE).contains("66"))
     assertEquals(View.GONE, shadowOf(manager).getViewFor(66).findViewById<View>(R.id.mindwtr_widget_surface).visibility)
   }
 
   @Test fun tasksSettingsReopenOnTheSavedChoiceAndTheHeaderDropdownLeavesItOut() {
     bind(67, TasksWidgetProvider::class.java.name)
-    WidgetListStore.writeTransparent(context, 67, true)
+    WidgetListStore.writeBackground(context, 67, WidgetBackground.LIGHT_TEXT)
     val full = configure(67)
     assertEquals(View.VISIBLE, full.findViewById<View>(R.id.mindwtr_widget_configure_lists).visibility)
     assertEquals(1, full.findViewById<Spinner>(R.id.mindwtr_widget_configure_background).selectedItemPosition)
     full.findViewById<Spinner>(R.id.mindwtr_widget_configure_background).setSelection(0)
     shadowOf(android.os.Looper.getMainLooper()).idle()
     full.findViewById<Button>(R.id.mindwtr_widget_configure_ok).performClick()
-    assertFalse(WidgetListStore.isTransparent(context, 67))
+    assertEquals(WidgetBackground.DEFAULT, WidgetListStore.background(context, 67))
 
     val dropdown = configure(67, dropdown = true)
     assertEquals(View.GONE, dropdown.findViewById<View>(R.id.mindwtr_widget_configure_background_row).visibility)

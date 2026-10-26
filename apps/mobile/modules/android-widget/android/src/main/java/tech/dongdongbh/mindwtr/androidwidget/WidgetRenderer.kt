@@ -179,7 +179,7 @@ object WidgetRenderer {
 
   private fun buildViews(context: Context, appWidgetId: Int, kind: WidgetKind, payload: WidgetPayload): RenderedViews {
     val views = RemoteViews(context.packageName, kind.layoutRes)
-    val palette = payload.resolvedPalette(context)
+    val palette = palette(context, appWidgetId, payload)
     views.setOnClickPendingIntent(
       R.id.mindwtr_widget_capture,
       capturePendingIntent(context, appWidgetId, kind),
@@ -276,8 +276,12 @@ object WidgetRenderer {
     WidgetKind.QUICK_CAPTURE -> emptyList()
   }
 
+  /** A transparent widget's own text colors, else the app theme's (null = the launcher's day/night resources). */
+  internal fun palette(context: Context, appWidgetId: Int, payload: WidgetPayload): WidgetPayload.Palette? =
+    WidgetListStore.background(context, appWidgetId).textPalette ?: payload.resolvedPalette(context)
+
   private fun hideSurfacesIfTransparent(context: Context, views: RemoteViews, appWidgetId: Int, kind: WidgetKind) {
-    if (!WidgetListStore.isTransparent(context, appWidgetId)) return
+    if (!WidgetListStore.background(context, appWidgetId).isTransparent) return
     for (id in backgroundSurfaces(kind)) views.setViewVisibility(id, View.GONE)
   }
 

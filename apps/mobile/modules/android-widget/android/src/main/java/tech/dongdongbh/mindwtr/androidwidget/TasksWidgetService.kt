@@ -3,6 +3,7 @@ package tech.dongdongbh.mindwtr.androidwidget
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.view.View
 import android.text.SpannableString
 import android.text.Spanned
@@ -81,7 +82,7 @@ class TasksWidgetFactory(
   override fun getViewAt(position: Int): RemoteViews = viewForRow(rows[position])
 
   internal fun viewForRow(row: Row): RemoteViews {
-    val palette = payload.resolvedPalette(context)
+    val palette = WidgetRenderer.palette(context, appWidgetId, payload)
     return when (row) {
       is Row.Header -> RemoteViews(context.packageName, R.layout.mindwtr_widget_section).apply {
         // Section rows live inside the ListView, so the parent's blank-space
@@ -115,7 +116,6 @@ class TasksWidgetFactory(
   private fun taskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews {
     if (kind == WidgetKind.COMPACT) return compactTaskRow(item, palette)
     val views = RemoteViews(context.packageName, R.layout.mindwtr_widget_item)
-    val mutedText = palette?.mutedText ?: context.getColor(R.color.mindwtr_widget_muted_text)
     val struck = item.id.isNotEmpty() && CheckoffStore.isStruck(context, item.id)
     val title = boundedDisplayText(item.title)
     views.setTextViewText(R.id.mindwtr_widget_item_title, if (struck) struck(title) else title)
@@ -125,7 +125,8 @@ class TasksWidgetFactory(
       R.id.mindwtr_widget_item_priority,
       if (struck) R.drawable.mindwtr_widget_circle else R.drawable.mindwtr_widget_ring,
     )
-    views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", item.priorityColor ?: mutedText)
+    item.priorityColor?.let { views.setInt(R.id.mindwtr_widget_item_priority, "setColorFilter", it) }
+      ?: views.setThemeColor(R.id.mindwtr_widget_item_priority, "setColorFilter", palette?.mutedText, R.color.mindwtr_widget_muted_text)
     // The ring checks the task off or undoes it only inside the short window;
     // later stale taps reconcile presentation without touching the queue.
     // Without an action here the tap fell through
@@ -146,12 +147,11 @@ class TasksWidgetFactory(
     views.setViewVisibility(R.id.mindwtr_widget_item_due, if (dueLabel == null) View.GONE else View.VISIBLE)
     if (dueLabel != null) {
       views.setTextViewText(R.id.mindwtr_widget_item_due, dueLabel)
-      val dueColor = when (item.dueTone) {
-        WidgetPayload.DueTone.TODAY -> palette?.accent ?: context.getColor(R.color.mindwtr_widget_accent)
-        WidgetPayload.DueTone.OVERDUE -> palette?.warning ?: context.getColor(R.color.mindwtr_widget_warning)
-        WidgetPayload.DueTone.NORMAL -> mutedText
+      when (item.dueTone) {
+        WidgetPayload.DueTone.TODAY -> views.setThemeColor(R.id.mindwtr_widget_item_due, "setTextColor", palette?.accent, R.color.mindwtr_widget_accent)
+        WidgetPayload.DueTone.OVERDUE -> views.setThemeColor(R.id.mindwtr_widget_item_due, "setTextColor", palette?.warning, R.color.mindwtr_widget_warning)
+        WidgetPayload.DueTone.NORMAL -> views.setThemeColor(R.id.mindwtr_widget_item_due, "setTextColor", palette?.mutedText, R.color.mindwtr_widget_muted_text)
       }
-      views.setTextColor(R.id.mindwtr_widget_item_due, dueColor)
     }
     if (palette != null) {
       views.setTextColor(R.id.mindwtr_widget_item_title, palette.text)
@@ -163,6 +163,19 @@ class TasksWidgetFactory(
     val rowUri = if (item.id.isNotEmpty()) WidgetTapActivity.peekUri(item.id) else payload.focusUri
     views.setOnClickFillInIntent(R.id.mindwtr_widget_item, Intent().setData(Uri.parse(rowUri)))
     return views
+  }
+
+  /**
+   * A fixed palette color, else the theme's resource color. From API 31 the
+   * launcher resolves the resource itself when it applies the row, so a
+   * day/night switch recolors cached rows without the app publishing again.
+   */
+  private fun RemoteViews.setThemeColor(viewId: Int, method: String, color: Int?, colorRes: Int) {
+    when {
+      color != null -> setInt(viewId, method, color)
+      Build.VERSION.SDK_INT >= 31 -> setColor(viewId, method, colorRes)
+      else -> setInt(viewId, method, context.getColor(colorRes))
+    }
   }
 
   private fun compactTaskRow(item: WidgetPayload.Item, palette: WidgetPayload.Palette?): RemoteViews =

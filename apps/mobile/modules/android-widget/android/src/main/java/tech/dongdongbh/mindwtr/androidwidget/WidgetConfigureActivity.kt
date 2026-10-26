@@ -23,7 +23,7 @@ import androidx.appcompat.app.AppCompatActivity
 
 /**
  * Picks which list a Tasks widget shows (#1173): the fixed GTD lists, then
- * saved filters, contexts and tags, and its background (Default or Transparent).
+ * saved filters, contexts and tags, and its background (Default, or transparent with light or dark text).
  * A Compact widget gets the background row only. Runs on placement (`android:configure`),
  * from the launcher's edit action (`reconfigurable`), and, for Tasks, as a list-only
  * dropdown sheet when the widget's own header chevron is tapped. OK stores the choice
@@ -36,7 +36,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private var pendingSelection = WidgetListStore.DEFAULT_LIST
   private var groupingOptions = WidgetListStore.GROUPINGS
   private var kind = WidgetKind.TASKS
-  private var pendingTransparent = false
+  private var pendingBackground = WidgetBackground.DEFAULT
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -73,7 +73,8 @@ class WidgetConfigureActivity : AppCompatActivity() {
     val palette = payload.resolvedPalette(this)
     val current = WidgetListStore.read(this, appWidgetId)
     pendingSelection = savedInstanceState?.getString("listSelection") ?: current
-    pendingTransparent = savedInstanceState?.getBoolean("transparent") ?: WidgetListStore.isTransparent(this, appWidgetId)
+    pendingBackground = savedInstanceState?.getString("background")?.let { name -> WidgetBackground.entries.firstOrNull { it.name == name } }
+      ?: WidgetListStore.background(this, appWidgetId)
 
     val list = findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val textColor = palette?.text ?: getColor(R.color.mindwtr_widget_text)
@@ -112,11 +113,13 @@ class WidgetConfigureActivity : AppCompatActivity() {
       setTextColor(textColor)
     }
     findViewById<Spinner>(R.id.mindwtr_widget_configure_background).apply {
+      // Spinner positions follow WidgetBackground's order.
       this.adapter = spinnerAdapter(listOf(payload.listTitles["groupDefault"] ?: "Default",
-        payload.listTitles["backgroundTransparent"] ?: "Transparent"), textColor, palette)
-      setSelection(if (pendingTransparent) 1 else 0)
+        payload.listTitles["backgroundLightText"] ?: "Transparent, light text",
+        payload.listTitles["backgroundDarkText"] ?: "Transparent, dark text"), textColor, palette)
+      setSelection(pendingBackground.ordinal)
       onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { pendingTransparent = position == 1 }
+        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) { pendingBackground = WidgetBackground.entries[position] }
         override fun onNothingSelected(parent: AdapterView<*>?) {}
       }
     }
@@ -145,13 +148,13 @@ class WidgetConfigureActivity : AppCompatActivity() {
 
   override fun onSaveInstanceState(outState: Bundle) {
     outState.putString("listSelection", pendingSelection)
-    outState.putBoolean("transparent", pendingTransparent)
+    outState.putString("background", pendingBackground.name)
     super.onSaveInstanceState(outState)
   }
 
   private fun save() {
     if (kind == WidgetKind.TASKS) WidgetListStore.write(this, appWidgetId, pendingSelection)
-    WidgetListStore.writeTransparent(this, appWidgetId, pendingTransparent)
+    WidgetListStore.writeBackground(this, appWidgetId, pendingBackground)
     val manager = AppWidgetManager.getInstance(this)
     WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), kind)
     CaptureSyncHeadlessService.startWidgetRefresh(this)

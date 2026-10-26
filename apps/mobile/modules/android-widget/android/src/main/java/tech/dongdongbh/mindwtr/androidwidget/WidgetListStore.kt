@@ -7,6 +7,24 @@ import android.net.Uri
 import java.net.URLDecoder
 
 /**
+ * A Tasks or Compact widget's background. Transparent drops the panel and picks
+ * the text colors itself, light or dark, so the rows stay readable on the
+ * wallpaper whatever the app theme is.
+ */
+enum class WidgetBackground(internal val stored: String?) {
+  DEFAULT(null), LIGHT_TEXT("light"), DARK_TEXT("dark");
+
+  val isTransparent: Boolean get() = this != DEFAULT
+
+  /** The theme palette whose text this background uses; null draws as the app theme does. */
+  val textPalette: WidgetPayload.Palette? get() = when (this) {
+    DEFAULT -> null
+    LIGHT_TEXT -> WidgetPayload.DARK_THEME_PALETTE
+    DARK_TEXT -> WidgetPayload.LIGHT_THEME_PALETTE
+  }
+}
+
+/**
  * Which list each placed Tasks widget shows (#1173): SharedPreferences `mindwtr_widget_lists`, key = widget id.
  * Also each Tasks or Compact widget's background choice, in `mindwtr_widget_backgrounds`; both stay on the device.
  */
@@ -76,13 +94,16 @@ object WidgetListStore {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(appWidgetId.toString(), listId).commit()
   }
 
-  /** False (the default background) until the widget's settings pick Transparent. */
-  fun isTransparent(context: Context, appWidgetId: Int): Boolean =
-    context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).getBoolean(appWidgetId.toString(), false)
+  /** Default until the widget's settings pick another. The first release stored Transparent as `true`: that reads as light text. */
+  fun background(context: Context, appWidgetId: Int): WidgetBackground =
+    when (val stored = context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).all[appWidgetId.toString()]) {
+      true -> WidgetBackground.LIGHT_TEXT
+      else -> WidgetBackground.entries.firstOrNull { it.stored != null && it.stored == stored } ?: WidgetBackground.DEFAULT
+    }
 
-  fun writeTransparent(context: Context, appWidgetId: Int, transparent: Boolean) {
+  fun writeBackground(context: Context, appWidgetId: Int, background: WidgetBackground) {
     val editor = context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).edit()
-    if (transparent) editor.putBoolean(appWidgetId.toString(), true) else editor.remove(appWidgetId.toString())
+    background.stored?.let { editor.putString(appWidgetId.toString(), it) } ?: editor.remove(appWidgetId.toString())
     editor.commit()
   }
 

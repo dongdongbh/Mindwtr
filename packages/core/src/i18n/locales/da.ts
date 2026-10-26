@@ -2012,7 +2012,8 @@ export const daOverrides: Record<string, string> = {
     'widget.upcomingStarts': 'Starter',
     'widget.upcomingReturns': 'Vender tilbage',
     'widget.background': 'Baggrund',
-    'widget.backgroundTransparent': 'Gennemsigtig',
+    'widget.backgroundLightText': 'Gennemsigtig, lys tekst',
+    'widget.backgroundDarkText': 'Gennemsigtig, mørk tekst',
     'agenda.laterToday': 'Senere i dag',
     'agenda.allClear': 'Alt klart!',
     'agenda.noTasks':

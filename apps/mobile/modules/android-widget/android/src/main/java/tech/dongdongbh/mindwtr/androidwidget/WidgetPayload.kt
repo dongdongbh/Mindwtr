@@ -308,6 +308,19 @@ data class WidgetPayload(
       accent = 0xFF4F9DFF.toInt(), onAccent = 0xFF000000.toInt(),
       border = 0xFF1F2937.toInt(), warning = 0xFFFBBF24.toInt(),
     )
+    // res/values(-night)/colors.xml, i.e. core's light and dark palettes: a transparent widget's fixed text colors.
+    internal val LIGHT_THEME_PALETTE = Palette(
+      background = 0xFFF8FAFC.toInt(), card = 0xFFFFFFFF.toInt(),
+      text = 0xFF0F172A.toInt(), mutedText = 0xFF475569.toInt(),
+      accent = 0xFF2563EB.toInt(), onAccent = 0xFFFFFFFF.toInt(),
+      border = 0xFFCBD5E1.toInt(), warning = 0xFFD97706.toInt(),
+    )
+    internal val DARK_THEME_PALETTE = Palette(
+      background = 0xFF111827.toInt(), card = 0xFF1F2937.toInt(),
+      text = 0xFFF9FAFB.toInt(), mutedText = 0xFFCBD5E1.toInt(),
+      accent = 0xFF2563EB.toInt(), onAccent = 0xFFFFFFFF.toInt(),
+      border = 0xFF374151.toInt(), warning = 0xFFF59E0B.toInt(),
+    )
     const val DEFAULT_FOCUS_URI = "mindwtr:///focus"
     const val NEXT_LIST_ID = "next"
     const val UPCOMING_LIST_ID = "upcoming"

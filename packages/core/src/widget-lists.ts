@@ -97,7 +97,7 @@ const LIST_TITLE_KEYS: Record<WidgetFixedListId, [string, string]> = {
 
 // The fixed list titles plus the picker's labels: the group above its
 // saved-filter rows, the grouping row, and the background row.
-export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters' | 'groupBy' | 'groupDefault' | 'groupNone' | 'groupContext' | 'groupProject' | 'groupPriority' | 'background' | 'backgroundTransparent', string> {
+export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixedListId | 'savedFilters' | 'groupBy' | 'groupDefault' | 'groupNone' | 'groupContext' | 'groupProject' | 'groupPriority' | 'background' | 'backgroundLightText' | 'backgroundDarkText', string> {
     return {
         ...(Object.fromEntries(
             WIDGET_FIXED_LIST_IDS.map((id) => [id, tr[LIST_TITLE_KEYS[id][0]] ?? LIST_TITLE_KEYS[id][1]]),
@@ -110,7 +110,8 @@ export function widgetListTitles(tr: Record<string, string>): Record<WidgetFixed
         groupProject: tr['list.groupByProject'] ?? 'Project',
         groupPriority: tr['taskEdit.priorityLabel'] ?? 'Priority',
         background: tr['widget.background'] ?? 'Background',
-        backgroundTransparent: tr['widget.backgroundTransparent'] ?? 'Transparent',
+        backgroundLightText: tr['widget.backgroundLightText'] ?? 'Transparent, light text',
+        backgroundDarkText: tr['widget.backgroundDarkText'] ?? 'Transparent, dark text',
     };
 }
 
