@@ -163,15 +163,16 @@ describe('Gmail receipt storage opening under the RN URL shim', () => {
 
     // A crash between creating the file and writing its schema left a 0-byte file, and a damaged file failed the schema check:
     // either stopped capture for good, with no button left to recover (13a Gmail design review P3-11). The file is moved aside,
-    // never deleted, and a fresh one starts with capture off until the user starts it again.
+    // never deleted, and a fresh one starts with capture off until the user starts it again. Every receipt that can still be
+    // read from it is carried into the fresh file, so starting capture again never captures that mail a second time.
     it.each([
-        ['an empty file', (path: string) => writeFileSync(path, ''), 'file'],
+        ['an empty file', (path: string) => writeFileSync(path, ''), 'file', '0'],
         ['a file whose schema fails the check', (path: string) => {
             const damaged = new DatabaseSync(path);
-            damaged.exec("CREATE TABLE receipts (account TEXT, message TEXT); INSERT INTO receipts VALUES ('a', 'kept')");
+            damaged.exec("CREATE TABLE receipts (account TEXT, message TEXT); INSERT INTO receipts VALUES ('a', 'kept'), ('a', NULL)");
             damaged.close();
-        }, 'schema'],
-    ])('moves %s aside and starts a fresh store with capture off', async (_name, damage, stage) => {
+        }, 'schema', '1'],
+    ])('moves %s aside and starts a fresh store with capture off', async (_name, damage, stage, carried) => {
         const harness = openerHarness();
         const receiptDirectory = join(harness.document, 'GmailCapture');
         mkdirSync(receiptDirectory);
@@ -185,17 +186,17 @@ describe('Gmail receipt storage opening under the RN URL shim', () => {
         expect(harness.reload().gmailReceiptsWereReset()).toBe(true);
         module.clearGmailReceiptsReset();
         expect(module.gmailReceiptsWereReset()).toBe(false);
-        expect(store.seen('a', 'kept')).toBe(false);
+        expect(store.seen('a', 'kept')).toBe(stage === 'schema');
         const aside = readdirSync(receiptDirectory).filter((name) => /^receipts\.corrupt-\d+\.sqlite$/.test(name));
         expect(aside).toHaveLength(1);
         if (stage === 'schema') {
             harness.closeDatabases();
             const kept = new DatabaseSync(join(receiptDirectory, aside[0]));
-            expect(kept.prepare('SELECT message FROM receipts').all()).toEqual([{ message: 'kept' }]);
+            expect(kept.prepare('SELECT message FROM receipts').all()).toEqual([{ message: 'kept' }, { message: null }]);
             kept.close();
         }
         await vi.waitFor(() => expect(harness.logWarn).toHaveBeenCalledExactlyOnceWith('Gmail receipt storage recovered', {
-            force: true, scope: 'gmail-capture', extra: { releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage },
+            force: true, scope: 'gmail-capture', extra: { releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage, count: carried },
         }));
     });
 });
