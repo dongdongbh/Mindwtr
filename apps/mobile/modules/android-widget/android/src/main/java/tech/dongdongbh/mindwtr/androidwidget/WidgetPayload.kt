@@ -44,6 +44,7 @@ data class WidgetPayload(
   val chooseListLabel: String = "Change",
   val viewAllLabel: String = "View all {{count}} tasks",
   val prioritiesEnabled: Boolean = true,
+  val upcomingDays: UpcomingDays? = null,
 ) {
   data class DisplaySnapshot(val sourceTaskIds: Set<String>, val payload: WidgetPayload)
 
@@ -97,6 +98,9 @@ data class WidgetPayload(
   }
 
   data class SavedFilterOption(val id: String, val name: String)
+
+  /** Core's relative-day words (#1455); weekdays are short names, Sunday first. */
+  data class UpcomingDays(val today: String, val tomorrow: String, val weekdays: List<String>, val dayFirst: Boolean)
 
   data class Palette(
     val background: Int,
@@ -166,7 +170,7 @@ data class WidgetPayload(
    * payload. [sourceTaskIds] deliberately comes from the unfiltered payload so
    * committed check-offs can still be reconciled after the app ingests them.
    */
-  fun displaySnapshot(hiddenTaskIds: Set<String>, timeZone: TimeZone = TimeZone.getDefault()): DisplaySnapshot {
+  fun displaySnapshot(hiddenTaskIds: Set<String>, timeZone: TimeZone = TimeZone.getDefault(), now: Date = Date()): DisplaySnapshot {
     if (hiddenTaskIds.isEmpty() && lists.keys.none { WidgetListStore.baseListId(it) == UPCOMING_LIST_ID }) return DisplaySnapshot(allTaskIds(), this)
     fun visible(items: List<Item>): List<Item> = items.filterNot { it.id in hiddenTaskIds }
     fun visible(sections: List<Section>): List<Section> = sections.mapNotNull { section ->
@@ -195,22 +199,21 @@ data class WidgetPayload(
         sections = visible(sections),
         lists = lists.mapValues { (id, list) ->
           val unhidden = visible(list)
-          if (WidgetListStore.baseListId(id) == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(timeZone) else unhidden
+          if (WidgetListStore.baseListId(id) == UPCOMING_LIST_ID) unhidden.upcomingSnapshot(timeZone, now) else unhidden
         },
       ),
     )
   }
 
-  private fun ListPayload.upcomingSnapshot(timeZone: TimeZone): ListPayload {
+  private fun ListPayload.upcomingSnapshot(timeZone: TimeZone, now: Date): ListPayload {
     // Keep membership with the published Focus generation until core rebuilds both lists.
     fun preview(items: List<Item>): List<Item> = items.map { item ->
       val raw = item.upcomingDate ?: return@map item
       val date = parseUpcomingDate(raw, timeZone) ?: return@map item
-      val format = if (DATE_ONLY.matches(raw)) DateFormat.getDateInstance(DateFormat.MEDIUM)
-      else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-      format.timeZone = timeZone
+      // A payload cached before the day words existed keeps its published label.
+      val day = upcomingDays?.let { upcomingDayLabel(date, !DATE_ONLY.matches(raw), it, now, timeZone) }
       item.copy(
-        dueLabel = item.upcomingLabel?.let { "$it ${format.format(date)}" } ?: item.dueLabel,
+        dueLabel = if (day != null && item.upcomingLabel != null) "${item.upcomingLabel} $day" else item.dueLabel,
         dueEmphasis = false,
         dueTone = DueTone.NORMAL,
       )
@@ -313,6 +316,44 @@ data class WidgetPayload(
     private val FIXED_LIST_IDS = setOf(WidgetListStore.DEFAULT_LIST, "inbox", NEXT_LIST_ID, UPCOMING_LIST_ID, "waiting", "someday")
     private val DATE_ONLY = Regex("""\d{4}-\d{2}-\d{2}""")
     private val DATE_TIME = Regex("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?""")
+
+    private const val DAY_MS = 24L * 60 * 60 * 1000
+
+    /** Core's formatRelativeDayLabel at render time, so the label rolls over at local midnight. */
+    fun upcomingDayLabel(
+      date: Date,
+      hasTime: Boolean,
+      days: UpcomingDays,
+      now: Date,
+      timeZone: TimeZone,
+      locale: Locale = Locale.getDefault(),
+    ): String {
+      fun epochDay(value: Date): Long = Math.floorDiv(value.time + timeZone.getOffset(value.time), DAY_MS)
+      val day = epochDay(date)
+      val ahead = day - epochDay(now)
+      val calendar = java.util.Calendar.getInstance(timeZone).apply { time = date }
+      val month = calendar.get(java.util.Calendar.MONTH) + 1
+      val dayOfMonth = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+      val label = when {
+        ahead == 0L -> days.today
+        ahead == 1L -> days.tomorrow
+        ahead in 2..6 -> days.weekdays[Math.floorMod(day + 4, 7L).toInt()] // 1970-01-01 was a Thursday.
+        days.dayFirst -> "$dayOfMonth/$month"
+        else -> "$month/$dayOfMonth"
+      }
+      if (!hasTime) return label
+      val time = DateFormat.getTimeInstance(DateFormat.SHORT, locale).apply { this.timeZone = timeZone }
+      return "$label ${time.format(date)}"
+    }
+
+    private fun parseUpcomingDays(json: JSONObject?): UpcomingDays? {
+      json ?: return null
+      val weekdays = json.optJSONArray("weekdays")?.let { array -> (0 until array.length()).map { array.optString(it) } }
+      val today = json.optString("today").trim()
+      val tomorrow = json.optString("tomorrow").trim()
+      if (today.isEmpty() || tomorrow.isEmpty() || weekdays?.size != 7 || weekdays.any { it.isBlank() }) return null
+      return UpcomingDays(today, tomorrow, weekdays, json.optBoolean("dayFirst", false))
+    }
 
     private fun parseUpcomingDate(raw: String, timeZone: TimeZone): Date? {
       val pattern = when {
@@ -471,6 +512,7 @@ data class WidgetPayload(
         taskPeek = taskPeek,
         viewAllLabel = root.stringOr("viewAllLabel", defaults.viewAllLabel),
         prioritiesEnabled = root.optBoolean("prioritiesEnabled", true),
+        upcomingDays = parseUpcomingDays(root.optJSONObject("upcomingDays")),
       )
     }
 

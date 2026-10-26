@@ -6,7 +6,7 @@ struct MindwtrWidgetTaskItem: Decodable {
     let title: String
     let statusLabel: String?
     let showStatus: Bool?
-    let dueLabel: String?
+    var dueLabel: String?
     let dueTone: String?
     let openUri: String?
     let priorityColor: String?
@@ -20,8 +20,17 @@ struct MindwtrWidgetTaskItem: Decodable {
 
     var isUpcomingPreview: Bool { upcomingDate != nil }
 
-    var displayDueLabel: String? {
-        MindwtrWidgetUpcomingProjection.label(date: upcomingDate, prefix: upcomingLabel) ?? dueLabel
+    /// An Upcoming row relabeled for the day `now` falls on; other rows, and
+    /// payloads cached before the day words existed, keep the published label.
+    func relabeled(
+        days: MindwtrWidgetUpcomingDays?, now: Date, calendar: Calendar = .current, locale: Locale = .current
+    ) -> MindwtrWidgetTaskItem {
+        guard let days, let label = MindwtrWidgetUpcomingProjection.label(
+            date: upcomingDate, prefix: upcomingLabel, days: days, now: now, calendar: calendar, locale: locale
+        ) else { return self }
+        var copy = self
+        copy.dueLabel = label
+        return copy
     }
 
     var contextsLabel: String? {
@@ -42,20 +51,45 @@ struct MindwtrWidgetTaskItem: Decodable {
     }
 }
 
-// Absolute labels stay honest while the app-published membership is cached.
+/// Core's relative-day words (#1455); weekdays are short names, Sunday first.
+struct MindwtrWidgetUpcomingDays: Decodable {
+    let today: String
+    let tomorrow: String
+    let weekdays: [String]
+    let dayFirst: Bool
+}
+
+// Core's formatRelativeDayLabel at render time, so a cached row rolls over at
+// local midnight and follows a timezone change.
 enum MindwtrWidgetUpcomingProjection {
     static func label(
-        date value: String?, prefix: String?, calendar: Calendar = .current, locale: Locale = .current
+        date value: String?, prefix: String?, days: MindwtrWidgetUpcomingDays, now: Date,
+        calendar: Calendar = .current, locale: Locale = .current
     ) -> String? {
-        guard let value, let prefix, let date = parsedDate(value, calendar: calendar) else { return nil }
+        guard let value, let prefix, days.weekdays.count == 7,
+              let date = parsedDate(value, calendar: calendar) else { return nil }
+        var gregorian = Calendar(identifier: .gregorian)
+        gregorian.timeZone = calendar.timeZone
+        guard let ahead = gregorian.dateComponents(
+            [.day], from: gregorian.startOfDay(for: now), to: gregorian.startOfDay(for: date)
+        ).day else { return nil }
+        let parts = gregorian.dateComponents([.month, .day, .weekday], from: date)
+        let day: String
+        switch ahead {
+        case 0: day = days.today
+        case 1: day = days.tomorrow
+        case 2...6: day = days.weekdays[(parts.weekday ?? 1) - 1]
+        default:
+            let month = parts.month ?? 0, dayOfMonth = parts.day ?? 0
+            day = days.dayFirst ? "\(dayOfMonth)/\(month)" : "\(month)/\(dayOfMonth)"
+        }
+        guard value.contains("T") else { return "\(prefix) \(day)" }
         let formatter = DateFormatter()
         formatter.locale = locale
-        formatter.calendar = calendar
         formatter.timeZone = calendar.timeZone
-        formatter.dateStyle = .medium
-        formatter.timeStyle = value.contains("T") ? .short : .none
-        formatter.doesRelativeDateFormatting = false
-        return "\(prefix) \(formatter.string(from: date))"
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return "\(prefix) \(day) \(formatter.string(from: date))"
     }
 
     private static func parsedDate(_ value: String, calendar: Calendar) -> Date? {

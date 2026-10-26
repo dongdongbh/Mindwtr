@@ -60,6 +60,7 @@ final class MindwtrWidgetPayloadTests: XCTestCase {
       },
       "emptyMessage":"No tasks","captureLabel":"Capture","focusUri":"mindwtr:///focus",
       "quickCaptureUri":"mindwtr:///capture-quick?mode=text",
+      "upcomingDays":{"today":"Today","tomorrow":"Tomorrow","weekdays":["Sun","Mon","Tue","Wed","Thu","Fri","Sat"],"dayFirst":false},
       "palette":{"background":"#FFFFFF","card":"#FFFFFF","border":"#CCCCCC","text":"#000000","mutedText":"#777777","accent":"#0000FF","onAccent":"#FFFFFF"}
     }
     """#
@@ -84,7 +85,10 @@ final class MindwtrWidgetPayloadTests: XCTestCase {
             precondition(upcoming.sections?.first?.detail == "7 days", "section metadata changed")
             precondition(upcoming.headerTitle == "Upcoming" && upcoming.dateLabel == "Published Mar 7", "header advanced without app publication")
             precondition(upcoming.items.first?.isUpcomingPreview == true, "preview became completable")
-            precondition(upcoming.items.first?.displayDueLabel?.contains("2026") == true, "preview lost its absolute date")
+            let local = Calendar.current.dateComponents([.year, .month, .day], from: date)
+            let expected = local.day == 7 ? "Starts Tomorrow" : local.day == 8 ? "Starts Today" : "Starts 3/8"
+            precondition(local.year == 2026 && local.month == 3, "unexpected test date \(date)")
+            precondition(upcoming.items.first?.dueLabel == expected, "preview label \(upcoming.items.first?.dueLabel ?? "nil") at \(date) in \(zone)")
             let focus = original.selectingList("focus", at: date)
             precondition(focus.items.map(\.id) == ["focused"], "native code promoted Upcoming into Focus")
             precondition(focus.dateLabel == "Mar 7" && focus.focusedCount == 1, "Focus metadata advanced")

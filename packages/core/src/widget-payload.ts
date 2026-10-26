@@ -179,6 +179,16 @@ export interface TasksWidgetPayload {
     quickCaptureUri: string;
     themeMode?: string;
     palette: WidgetPalette;
+    /** Words native needs to redo the Upcoming rows' relative day after midnight (#1455). */
+    upcomingDays?: WidgetUpcomingDays;
+}
+
+/** formatRelativeDayLabel's inputs: weekdays are short names, Sunday first. */
+export interface WidgetUpcomingDays {
+    today: string;
+    tomorrow: string;
+    weekdays: string[];
+    dayFirst: boolean;
 }
 
 // Labels for the native Android quick-capture dialog (#1169). Localized here
@@ -591,7 +601,8 @@ export function createWidgetPayloadProjection(
         const upcomingLabel = safeParseDate(task.startTime)
             ? tr['widget.upcomingStarts'] ?? 'Starts'
             : tr['widget.upcomingReturns'] ?? 'Returns';
-        const label = formatAbsoluteDate(upcomingDate, hasTimeComponent(upcomingDate) ? 'P p' : 'P');
+        const day = formatRelativeDayLabel(parsed, tr, language, dayFirst, startOfToday, endOfToday);
+        const label = hasTimeComponent(source) ? `${day} ${formatTime(parsed)}` : day;
         return { ...item, upcomingDate, upcomingLabel, dueLabel: `${upcomingLabel} ${label}`, dueTone: 'normal', dueEmphasis: false };
     };
     // The Focus screen's own pools through the shared derivation (#1173),
@@ -719,8 +730,10 @@ export function createWidgetPayloadProjection(
                     openUri: WIDGET_LIST_DIRECT_URIS.focus,
                 },
             };
+            let hasUpcoming = false;
             for (const [selection, list] of taskLists) {
                 const listId = parseWidgetListSelection(selection)!.listId;
+                if (listId === 'upcoming') hasUpcoming = true;
                 const directUri = WIDGET_LIST_DIRECT_URIS[listId as keyof typeof WIDGET_LIST_DIRECT_URIS];
                 const openUri = directUri
                     ?? `mindwtr:///widget-list/${encodeURIComponent(listId)}`;
@@ -778,6 +791,13 @@ export function createWidgetPayloadProjection(
                 focusUri: WIDGET_FOCUS_URI,
                 quickCaptureUri: WIDGET_QUICK_CAPTURE_URI,
                 themeMode: typeof data.settings?.theme === 'string' ? data.settings.theme : 'system',
+                ...(hasUpcoming ? { upcomingDays: {
+                    today: tr['quickDate.today'] ?? 'Today',
+                    tomorrow: tr['quickDate.tomorrow'] ?? 'Tomorrow',
+                    // 2026-01-04 is a Sunday.
+                    weekdays: Array.from({ length: 7 }, (_, day) => formatShortWeekday(new Date(2026, 0, 4 + day), language)),
+                    dayFirst,
+                } } : {}),
                 palette,
             };
         },

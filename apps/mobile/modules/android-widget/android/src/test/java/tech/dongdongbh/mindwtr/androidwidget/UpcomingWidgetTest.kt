@@ -82,7 +82,7 @@ class UpcomingWidgetTest {
   }
 
   @Test
-  fun labelsAreAbsoluteAndReformattedInTheCurrentZone() {
+  fun labelsAreReformattedInTheCurrentZone() {
     for (listId in listOf("upcoming", "group:project:upcoming")) {
       val published = payload(listOf(item("instant", "2026-10-19T00:30:00Z")))
       val list = published.listFor("upcoming")
@@ -108,6 +108,51 @@ class UpcomingWidgetTest {
       val item = payload.displaySnapshot(emptySet(), timeZone = TimeZone.getTimeZone(zone)).payload.listFor("upcoming").items.single()
       assertEquals(expected, item.dueLabel)
     }
+  }
+
+  private fun at(value: String): java.util.Date =
+    SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.ROOT).apply { timeZone = utc }.parse(value)!!
+
+  private fun label(payload: WidgetPayload, now: String, zone: TimeZone = utc): String? =
+    payload.displaySnapshot(emptySet(), timeZone = zone, now = at(now)).payload.listFor("upcoming").items.single().dueLabel
+
+  @Test
+  fun labelsFollowTheNextActionsDayRuleAndRollOverAtLocalMidnight() {
+    // Monday 2026-10-26, as in #1455.
+    val cases = mapOf(
+      "2026-10-26" to "Starts Today", "2026-10-27" to "Starts Tomorrow", "2026-10-28" to "Starts Wed",
+      "2026-11-01" to "Starts Sun", "2026-11-02" to "Starts 11/2", "2026-10-20" to "Starts 10/20",
+    )
+    for ((date, expected) in cases) assertEquals(date, expected, label(payload(listOf(item("t", date))), "2026-10-26T12:00"))
+    val dayFirst = payload(listOf(item("t", "2026-11-02")), JSONObject(days.toString()).put("dayFirst", true))
+    assertEquals("Starts 2/11", label(dayFirst, "2026-10-26T12:00"))
+
+    val tomorrow = payload(listOf(item("t", "2026-10-27")))
+    assertEquals("Starts Tomorrow", label(tomorrow, "2026-10-26T23:59"))
+    assertEquals("Starts Today", label(tomorrow, "2026-10-27T00:00"))
+    // The day is the device's local day, not UTC's.
+    val tokyo = TimeZone.getTimeZone("Asia/Tokyo")
+    assertEquals("Starts Today", label(tomorrow, "2026-10-26T15:00", tokyo))
+  }
+
+  @Test
+  fun timedLabelsKeepTheLocaleTimeAfterTheRelativeDay() {
+    val locale = Locale.getDefault()
+    try {
+      Locale.setDefault(Locale.US)
+      assertEquals("Starts Tomorrow 9:30 AM", label(payload(listOf(item("t", "2026-10-27T09:30:00.000"))), "2026-10-26T12:00")?.replace('\u202F', ' '))
+      Locale.setDefault(Locale.UK)
+      assertEquals("Starts Tomorrow 09:30", label(payload(listOf(item("t", "2026-10-27T09:30:00.000Z"))), "2026-10-26T12:00"))
+    } finally {
+      Locale.setDefault(locale)
+    }
+  }
+
+  @Test
+  fun payloadsCachedBeforeTheDayWordsKeepTheirPublishedLabel() {
+    assertEquals("stale", label(payload(listOf(item("t", "2026-10-27")), null), "2026-10-26T12:00"))
+    val broken = JSONObject(days.toString()).put("weekdays", JSONArray(listOf("Sun")))
+    assertEquals("stale", label(payload(listOf(item("t", "2026-10-27")), broken), "2026-10-26T12:00"))
   }
 
   @Test
@@ -153,7 +198,11 @@ class UpcomingWidgetTest {
     .put("upcomingDate", upcomingDate).put("upcomingLabel", "Starts")
     .put("dueLabel", "stale").put("dueEmphasis", true).put("dueTone", "overdue")
 
-  private fun payload(items: List<JSONObject>): WidgetPayload = WidgetPayload.parse(JSONObject()
+  private val days = JSONObject().put("today", "Today").put("tomorrow", "Tomorrow").put("dayFirst", false)
+    .put("weekdays", JSONArray(listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")))
+
+  private fun payload(items: List<JSONObject>, upcomingDays: JSONObject? = days): WidgetPayload = WidgetPayload.parse(JSONObject()
+    .put("upcomingDays", upcomingDays)
     .put("lists", JSONObject()
       .put("focus", JSONObject().put("title", "Focus").put("items", JSONArray().put(item("focus", null))))
       .put("upcoming", JSONObject().put("title", "Upcoming").put("items", JSONArray(items)).put("totalCount", items.size)))

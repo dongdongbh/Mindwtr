@@ -112,7 +112,8 @@ describe('ios-widgets-and-shortcuts', () => {
     expect(tasksSource).not.toContain('MindwtrWidgetUpcomingProjection.timelineDates(');
     expect(tasksSource).toContain('if !item.isUpcomingPreview {\n                MindwtrWidgetTaskAction(');
     expect(tasksSource).toContain('Button(intent: MindwtrOpenWidgetTaskIntent(taskId: item.id))');
-    expect(tasksSource).toContain('nonEmpty(item.displayDueLabel)');
+    expect(tasksSource).toContain('item.relabeled(days: upcomingDays, now: date)');
+    expect(tasksSource).toContain('calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))');
     expect(tasksSource).toContain('!item.isUpcomingPreview && item.id == taskId');
     expect(tasksSource).toContain('completionToken: isUpcomingPreview ? nil : completionToken');
     expect(tasksSource).toContain('let payload = entry.payload');

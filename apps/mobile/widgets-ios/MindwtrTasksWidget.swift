@@ -100,6 +100,7 @@ struct MindwtrTasksWidgetPayload: Decodable {
     let quickCaptureUri: String
     let themeMode: String?
     let palette: MindwtrWidgetPalette
+    let upcomingDays: MindwtrWidgetUpcomingDays?
 
     static var fallback: MindwtrTasksWidgetPayload {
         MindwtrTasksWidgetPayload(
@@ -119,7 +120,8 @@ struct MindwtrTasksWidgetPayload: Decodable {
             focusUri: "mindwtr:///focus",
             quickCaptureUri: "mindwtr:///capture-quick?mode=text",
             themeMode: "system",
-            palette: .light
+            palette: .light,
+            upcomingDays: nil
         )
     }
 
@@ -232,9 +234,12 @@ struct MindwtrTasksWidgetPayload: Decodable {
             }
             return !MindwtrWidgetActionProjection.isHidden(item.actionIdentity, by: pendingActions, at: date)
         }
-        let visibleItems = items.filter(isVisible)
+        func relabeled(_ item: MindwtrWidgetTaskItem) -> MindwtrWidgetTaskItem {
+            item.relabeled(days: upcomingDays, now: date)
+        }
+        let visibleItems = items.filter(isVisible).map(relabeled)
         let visibleSections = sections?.compactMap { section -> MindwtrWidgetSection? in
-            let items = section.items.filter(isVisible)
+            let items = section.items.filter(isVisible).map(relabeled)
             guard !items.isEmpty else { return nil }
             let groupPrefixes = ["context:", "tag:", "project:", "area:", "energy:", "priority:", "person:"]
             let grouped = groupPrefixes.contains { section.key?.hasPrefix($0) == true }
@@ -280,7 +285,8 @@ struct MindwtrTasksWidgetPayload: Decodable {
             focusUri: nonEmpty(openUri) ?? focusUri,
             quickCaptureUri: quickCaptureUri,
             themeMode: themeMode,
-            palette: palette
+            palette: palette,
+            upcomingDays: upcomingDays
         )
     }
 }
@@ -349,10 +355,13 @@ enum MindwtrTasksWidgetSnapshotStore {
     ) -> [MindwtrTasksWidgetEntry] {
         let payload = loadPayload(for: family)
         let pendingActions = (try? MindwtrWidgetActionStore.appGroupStore().pendingActions()) ?? []
+        let calendar = Calendar.current
+        // Upcoming rows say Today/Tomorrow, so a new entry starts each local day (#1455).
+        let midnight = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
         let dates = MindwtrWidgetActionProjection.timelineDates(
             pendingActions: pendingActions,
             now: now
-        )
+        ) + [midnight].compactMap { $0 }
         return Set(dates).sorted().map { date in
             MindwtrTasksWidgetEntry(
                 date: date,
@@ -810,7 +819,7 @@ private struct MindwtrWidgetTaskRow: View {
 
                 Spacer(minLength: 2)
 
-                if let dueLabel = nonEmpty(item.displayDueLabel) {
+                if let dueLabel = nonEmpty(item.dueLabel) {
                     Text(dueLabel)
                         .foregroundColor(dueColor)
                         .lineLimit(1)
