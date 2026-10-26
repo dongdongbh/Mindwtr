@@ -2329,9 +2329,12 @@ describe('native host contract', () => {
                 expect(moved.draft.dueDate).toBe('2026-10-01T09:05');
                 const chip = edited(host, plain, undefined, 'plain').fields.dueDate.quickDates.find(({ preset }) => preset === 'tomorrow')!;
                 expect(chip).toMatchObject({ label: 'Tomorrow', selected: false, value: '2026-09-24T09:05' });
-                // Labels follow the user's date settings through the host's formatter, not the global one.
+                // The host also applies the user's settings globally, for quick add's parsing, as RN's root layout does (#1006).
+                expect(getDateFormattingConfig().dateFormat).toBe('ymd');
+                // Labels follow the user's date settings through the host's formatter, never the global one.
+                configureDateFormatting({ dateFormat: 'mdy' });
                 expect(edited(host, plain, undefined, 'plain').fields.dueDate.label).toBe('2026-09-25');
-                expect(getDateFormattingConfig().dateFormat).not.toBe('ymd');
+                configureDateFormatting();
             });
 
             it('sets a picked time on the field\'s own day, across DST changes and late in the evening', async () => {
