@@ -12,6 +12,11 @@ public actor NativeReminderInbox {
 
     private let files: ReminderInboxFiles
 
+    // Read-only grammar reuse; personal intake does not alter the legacy writer or its v1 bytes.
+    static func validateForPersonalIntake(_ response: NativeReminderResponse, namespace: String) throws {
+        try ReminderInboxState.validate(response, namespace: namespace)
+    }
+
     /// The selected container must already exist; only its selected library descendants may be created.
     public init(selection: NativeLaunchSelection) throws {
         do { files = try ReminderInboxFiles(selection: selection) }

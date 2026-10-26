@@ -44,7 +44,8 @@ enum DurableFile {
     // if promotion succeeded but directory synchronization failed. No pathname
     // protection/backup mutation is performed through a possibly replaced root.
     static func write(_ data: Data, to name: String, in directoryFD: Int32,
-                      retainingFile: inout Int32, preservingProtectionFrom sourceFD: Int32? = nil) throws {
+                      retainingFile: inout Int32, preservingProtectionFrom sourceFD: Int32? = nil,
+                      exclusive: Bool = false) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.utf8.contains(0),
               retainingFile < 0 else { throw HostFailure("Invalid anchored recovery publication") }
         let temporary = ".pending-\(UUID().uuidString)"
@@ -70,7 +71,10 @@ enum DurableFile {
         }
         #endif
         try fillAndSync(data, fd: fd)
-        guard renameat(directoryFD, temporary, directoryFD, name) == 0 else {
+        let promoted = exclusive
+            ? renameatx_np(directoryFD, temporary, directoryFD, name, UInt32(RENAME_EXCL))
+            : renameat(directoryFD, temporary, directoryFD, name)
+        guard promoted == 0 else {
             throw HostFailure("Cannot promote pending command journal")
         }
         guard fsync(directoryFD) == 0 else { throw HostFailure("Cannot synchronize recovery data") }
