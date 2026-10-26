@@ -256,7 +256,10 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         }
         // A missing task link's notice has no title (#1368): showToast(JSONObject) reads an absent or empty title as none.
         reply.optJSONObject("notice")?.let { showToast(it) }
-        if (reply.menuText("route") != null || reply.has("capture") && !reply.isNull("capture") || reply.has("captureModal") && !reply.isNull("captureModal")) closeEditor()
+        if (reply.menuText("route") != null || reply.has("capture") && !reply.isNull("capture") || reply.has("captureModal") && !reply.isNull("captureModal")) {
+            if (editor != null) anyTime({ it.logLine("Native Android task editor dismissed on navigation releaseCheck=v1.3.8/native-editor-navigation", JSONObject().put("releaseCheck", "v1.3.8/native-editor-navigation").put("outcome", "closed-clean")) }, {})
+            closeEditor()
+        }
         reply.menuText("route")?.let { go(it, reply) }
         reply.optJSONObject("captureModal")?.let { captureModal.opened(it.getJSONObject("params"), view ?: return) }
         val capture = reply.optJSONObject("capture") ?: return

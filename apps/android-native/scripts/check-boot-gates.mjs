@@ -3380,8 +3380,15 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /if \(!queue\.add\(input\.toString\(\)\)\)/);
     // Any open unsaved work holds the entry back (the capture popup and its draft included): a share never replaces it. An
     // editor with nothing to save does not (#1410): an entry that goes somewhere closes it first, as RN's editor closes on blur.
-    assert.match(model, /val editorClean get\(\) = editor\?\.let \{ it\.readOnly \|\| \(!it\.dirty && !editsPending\) \} \?: true/);
-    assert.match(entryKt, /if \(reply\.menuText\("route"\) != null \|\| reply\.has\("capture"\) && !reply\.isNull\("capture"\) \|\| reply\.has\("captureModal"\) && !reply\.isNull\("captureModal"\)\) closeEditor\(\)/);
+    // RN's whole navigationBlurRef list (review of 79ac32ea9): the Waiting prompt, and anything covering the editor that Close
+    // cannot reach but an entry can (the Add link sheet, an image preview or audio player, the editor's AI request or answer, its
+    // pickers) keep it, as unsaved edits do. EditorNavigationTest drives closesOnNavigation.
+    assert.match(model, /val editorClean get\(\) = editor\?\.closesOnNavigation\(editsPending, covered = editorPickerOpen \|\| attachments\.link != null \|\| attachments\.view != null\s+\|\| ai\.working == "editor" \|\| ai\.answer != null\) \?: true/);
+    assert.match(editorUi, /fun closesOnNavigation\(editsPending: Boolean, covered: Boolean\) = readOnly \|\| \(!dirty && !editsPending && waitingFor == null && !covered\)/);
+    assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null\s+DisposableEffect\(pickerOpen\) \{ editorPickerOpen = pickerOpen; onDispose \{ editorPickerOpen = false \} \}/);
+    assert.match(entryKt, /if \(reply\.menuText\("route"\) != null \|\| reply\.has\("capture"\) && !reply\.isNull\("capture"\) \|\| reply\.has\("captureModal"\) && !reply\.isNull\("captureModal"\)\) \{/);
+    // The tester's line for #1410, as RN's v1.3.7/mobile-editor-navigation closed-clean.
+    assert.match(entryKt, /if \(editor != null\) anyTime\(\{ it\.logLine\("Native Android task editor dismissed on navigation releaseCheck=v1\.3\.8\/native-editor-navigation", JSONObject\(\)\.put\("releaseCheck", "v1\.3\.8\/native-editor-navigation"\)\.put\("outcome", "closed-clean"\)\) \}, \{\}\)\s+closeEditor\(\)/);
     assert.match(entryKt, /!writable \|\| busy \|\| failedAction != null \|\| !editorClean \|\| processing\?\.hidden == false \|\| capture != null \|\| captureModal\.open != null\s+\|\| menu\.dialog != null \|\| menu\.focusControls\.dialog != null \|\| menu\.calendar\.composer != null \|\| search\?\.saveName != null\s+\|\| menu\.screen == MenuScreen\.MindSweep/);
     // Typed text not yet sent holds entries back too: the Add new project field while the Projects list shows it, and a
     // Settings field before its commit (a GTD text field, a Someday section's inline rename).

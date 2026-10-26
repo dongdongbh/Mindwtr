@@ -41,6 +41,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
@@ -311,6 +312,12 @@ data class TaskEditor(
     fun withChecklist(next: String?) = copy(checklist = next, checklistFrom = if (next == null) checklistFrom else checklistFrom ?: model.checklistBase)
     /** Unsaved: a changed field, checklist or attachment, or typed text core has not turned into a draft value yet (RN asks before closing any). */
     val dirty get() = patch.isNotEmpty() || waiting || checklistChanged || attachmentsChanged || checklistAdd.isNotBlank()
+    /**
+     * RN's close on navigation (task-edit-modal.tsx navigationBlurRef, #1410): a widget tap or a link closes the editor only while
+     * it holds nothing. Read-only closes; otherwise any unsaved edit, edit still with core ([editsPending]), the Waiting prompt, or
+     * anything [covered] over it (a sheet, picker, preview or AI request, which Close cannot reach but an entry can) keeps it.
+     */
+    fun closesOnNavigation(editsPending: Boolean, covered: Boolean) = readOnly || (!dirty && !editsPending && waitingFor == null && !covered)
 
     /** The View tab's typed item as core's append edit, queued like any checklist edit; the field empties. Nothing typed: unchanged. */
     fun checklistAddQueued(): TaskEditor = checklistAdd.trim().takeIf { it.isNotEmpty() }?.let { title ->
@@ -454,6 +461,9 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     // The open date picker (a date field, or "until" for the recurrence end) and the open time picker (a date field).
     var pickDate by rememberSaveable { mutableStateOf<String?>(null) }
     var pickTime by rememberSaveable { mutableStateOf<String?>(null) }
+    // An open picker keeps the editor from a widget tap or link (editorClean), as RN's showDatePicker and list pickers do.
+    val pickerOpen = picker != null || pickDate != null || pickTime != null
+    DisposableEffect(pickerOpen) { editorPickerOpen = pickerOpen; onDispose { editorPickerOpen = false } }
     // As in the mobile editor: with nothing to save it closes; unsaved edits (typed text core has not resolved included) ask first.
     val leave = { if (editor.readOnly || (!editor.dirty && !editsPending)) closeEditor() else confirmLeave = true }
     BackHandler(enabled = !failed) { if (!busy) leave() }

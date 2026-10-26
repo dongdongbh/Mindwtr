@@ -732,8 +732,15 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** Control edits are with core or wait for it (the editor's persisted queue); Save waits for them, and Close counts them as unsaved. */
     val editsPending get() = editor?.pending?.isNotEmpty() == true
-    /** No editor, or one Close would close without asking: read-only, or nothing to save (RN's clean editor, #1410). */
-    val editorClean get() = editor?.let { it.readOnly || (!it.dirty && !editsPending) } ?: true
+    /** The editor's own date, time or list picker is open: TaskEditorScreen keeps it here, so an entry sees it. */
+    var editorPickerOpen by mutableStateOf(false)
+    /**
+     * No editor, or one a widget tap or link may close (TaskEditor.closesOnNavigation, RN's navigationBlurRef, #1410): nothing to
+     * save, and nothing over it that Close cannot reach but an entry can (the Add link sheet, an image preview or audio player,
+     * the editor's AI request or its answer, a picker).
+     */
+    val editorClean get() = editor?.closesOnNavigation(editsPending, covered = editorPickerOpen || attachments.link != null || attachments.view != null
+        || ai.working == "editor" || ai.answer != null) ?: true
     /** The session and number of the edit core is answering now. */
     private var inFlight: Pair<String, Long>? = null
     /** Core's message for the last refused edit; the next accepted edit clears it. */
