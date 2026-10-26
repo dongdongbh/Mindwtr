@@ -19,8 +19,11 @@ final class NativeReminderImportTests: XCTestCase {
     private final class Diagnostics: @unchecked Sendable {
         private let lock = NSLock()
         private var values: [NativeReminderInbox.ImportDiagnostic] = []
+        private var intakeValues: [NativePersonalIntake.Diagnostic] = []
         func receive(_ event: NativeReminderInbox.ImportDiagnostic) { lock.lock(); defer { lock.unlock() }; values.append(event) }
         var events: [NativeReminderInbox.ImportDiagnostic] { lock.lock(); defer { lock.unlock() }; return values }
+        func receive(_ event: NativePersonalIntake.Diagnostic) { lock.lock(); defer { lock.unlock() }; intakeValues.append(event) }
+        var intakeEvents: [NativePersonalIntake.Diagnostic] { lock.lock(); defer { lock.unlock() }; return intakeValues }
     }
     private var home: URL!
     private var route: NativePersonalIntakeRoute!
@@ -70,8 +73,14 @@ final class NativeReminderImportTests: XCTestCase {
         let owner = try NativeReminderInbox(selection: route.selection); sources.append(owner)
         return (owner, try await owner.sealForPersonalIntake(route: route, diagnostic: { _ in }))
     }
-    private func target() throws -> NativePersonalIntake {
-        let value = try NativePersonalIntake(route: route, diagnostic: { _ in }); targets.append(value); return value
+    private func target(diagnostic: @escaping NativePersonalIntake.DiagnosticSink = { _ in }) throws -> NativePersonalIntake {
+        let value = try NativePersonalIntake(route: route, diagnostic: diagnostic); targets.append(value); return value
+    }
+    private func terminalTarget(_ diagnostics: Diagnostics, floor: Double? = nil) async throws -> (NativePersonalIntake, NativeReminderResponse) {
+        let ids = try seed([], terminalCount: 1, floor: floor)
+        let (owner, token) = try await source(), destination = try target { diagnostics.receive($0) }
+        try await owner.importSealed(token, into: destination, route: route, diagnostic: { _ in })
+        return (destination, try response(id: XCTUnwrap(ids.first), delivered: 101))
     }
     private func failure(_ operation: () async throws -> Void, file: StaticString = #filePath, line: UInt = #line) async {
         do { try await operation(); XCTFail("Original sealed import must refuse", file: file, line: line) }
@@ -421,4 +430,189 @@ final class NativeReminderImportTests: XCTestCase {
         try await owner.importSealed(token, into: destination, route: route) { diagnostics.receive($0) }
         XCTAssertEqual(try Data(contentsOf: state), before); XCTAssertEqual(diagnostics.events.count, 1)
     }
+
+    func testReminderKnownTerminalFromActualFinishHasNoItemWriteOrCapturedMarker() async throws {
+        let event = try response(), owner = try NativeReminderInbox(selection: route.selection), diagnostics = Diagnostics()
+        sources.append(owner)
+        _ = try await owner.capture(event)
+        let admitted = try await owner.markAdmitting(event.requestID); try await owner.finish(admitted)
+        let token = try await owner.sealForPersonalIntake(route: route, diagnostic: { _ in })
+        let destination = try target { diagnostics.receive($0) }
+        try await owner.importSealed(token, into: destination, route: route, diagnostic: { _ in })
+        let header = try Data(contentsOf: state), sidecar = try Data(contentsOf: terminals)
+        for _ in 0..<2 {
+            guard case .knownTerminal = try await destination.captureReminder(event) else { return XCTFail("Expected exact known terminal") }
+        }
+        do { _ = try await destination.capture(.reminder(event)); XCTFail("Item-only capture must refuse a terminal") }
+        catch { XCTAssertEqual(error as? NativePersonalIntakeError, .legacyHeld) }
+        XCTAssertEqual(try Data(contentsOf: state), header); XCTAssertEqual(try Data(contentsOf: terminals), sidecar)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("records").path), [])
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("order").path), [])
+        XCTAssertEqual(diagnostics.intakeEvents.map(\.outcome), ["knownTerminal", "knownTerminal", "knownTerminal"])
+        XCTAssertTrue(diagnostics.intakeEvents.allSatisfy { $0.releaseCheck == "v1.3.8/ios-personal-intake-disposition" && $0.operation == "reminder-capture" })
+    }
+
+    func testReminderFloorUnknownAndOriginalActiveKeepTruthfulHotColdDispositionAndFirstBytes() async throws {
+        let captured = try response(delivered: 90), admitting = try response(delivered: 95)
+        _ = try seed([(captured, 2, .captured), (admitting, 9, .admitting)], floor: 100)
+        let (owner, token) = try await source(), diagnostics = Diagnostics()
+        var destination = try target { diagnostics.receive($0) }
+        try await owner.importSealed(token, into: destination, route: route, diagnostic: { _ in })
+        let equal = try response(delivered: 100), below = try response(delivered: 99), above = try response(delivered: 101)
+        for event in [equal, below] {
+            guard case let .ambiguousFloor(item) = try await destination.captureReminder(event) else { return XCTFail("Unknown at/below floor must remain durable ambiguity") }
+            XCTAssertEqual(item.event?.response, event); XCTAssertEqual(item.stage, .captured)
+        }
+        guard case .captured = try await destination.captureReminder(above) else { return XCTFail("Above floor must capture") }
+        let settled = try Data(contentsOf: state)
+        for cold in [false, true] {
+            if cold { await destination.close(); destination = try target { diagnostics.receive($0) } }
+            for (event, phase) in [(captured, NativePersonalIntake.Stage.captured), (admitting, .admitting)] {
+                let newer = try response(id: event.requestID, clock: event.requestedAtMs + 1, delivered: event == captured ? 90 : 95, task: "later payload")
+                guard case let .captured(item) = try await destination.captureReminder(newer) else { return XCTFail("Original active is captured even below floor") }
+                XCTAssertEqual(item.event?.response, event); XCTAssertEqual(item.stage, phase)
+                await failure { _ = try await destination.markAdmitting(item) }
+                await failure { try await destination.finish(item, outcome: .completed) }
+            }
+            for (event, delivery) in [(equal, Double(100)), (below, Double(99))] {
+                let newer = try response(id: event.requestID, clock: event.requestedAtMs + 1, delivered: delivery, task: "later payload")
+                guard case let .ambiguousFloor(item) = try await destination.captureReminder(newer) else { return XCTFail("Ambiguous delivery must stay ambiguous after retry/reopen") }
+                XCTAssertEqual(item.event?.response, event)
+                let generic = try await destination.capture(.reminder(newer)); XCTAssertEqual(generic.sequence, item.sequence)
+                await failure { _ = try await destination.markAdmitting(item) }
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: state), settled)
+        let page = try await destination.pendingPage(); XCTAssertEqual(page.items.map(\.sequence), [1, 2, 3, 4, 5])
+    }
+
+    func testReminderDispositionIdentityMismatchAndTerminalTargetCollisionNeverRewrite() async throws {
+        let event = try response(delivered: 200), ids = try seed([(event, 1, .captured)], terminalCount: 1)
+        let terminalID = try XCTUnwrap(ids.first), diagnostics = Diagnostics(), destination = try target { diagnostics.receive($0) }
+        let collision = try await destination.capture(.url("mindwtr://kept", id: XCTUnwrap(UUID(uuidString: terminalID))))
+        let (owner, token) = try await source()
+        try await owner.importSealed(token, into: destination, route: route, diagnostic: { _ in })
+        let header = try Data(contentsOf: state), accepted = try Data(contentsOf: record(event.requestID)), kept = try Data(contentsOf: record(terminalID))
+        let wrongIdentifier = NativeReminderResponse(requestID: event.requestID, notificationIdentifier: "mindwtr-native:\(route.namespace):2", action: .complete, deliveredAtBits: event.deliveredAtBits, requestedAtMs: event.requestedAtMs, payloadJSON: event.payloadJSON)
+        let wrongAction = NativeReminderResponse(requestID: event.requestID, notificationIdentifier: event.notificationIdentifier, action: .dismiss, deliveredAtBits: event.deliveredAtBits, requestedAtMs: event.requestedAtMs, payloadJSON: "{}")
+        for incoming in [wrongIdentifier, wrongAction, try response(id: event.requestID, delivered: 201), try response(id: terminalID, delivered: 101), try response(id: terminalID, delivered: 102)] {
+            await failure { _ = try await destination.captureReminder(incoming) }
+        }
+        XCTAssertEqual(try Data(contentsOf: state), header); XCTAssertEqual(try Data(contentsOf: record(event.requestID)), accepted)
+        XCTAssertEqual(try Data(contentsOf: record(terminalID)), kept); XCTAssertEqual(collision.kind, .url)
+        XCTAssertFalse(diagnostics.intakeEvents.contains { $0.operation == "reminder-capture" })
+    }
+
+    func testReminderTerminalDeliveryMismatchRefusesWithoutPublication() async throws {
+        let diagnostics = Diagnostics(), (destination, event) = try await terminalTarget(diagnostics)
+        let header = try Data(contentsOf: state)
+        let wrong = try response(id: event.requestID, delivered: 102)
+        await failure { _ = try await destination.captureReminder(wrong) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: record(event.requestID).path))
+    }
+
+    func testGenericReminderCaptureValidatesOriginalEnvelopeBeforeDisposition() async throws {
+        let diagnostics = Diagnostics(), (destination, event) = try await terminalTarget(diagnostics)
+        var raw = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(NativePersonalIntakeEvent.reminder(event))) as? [String: Any])
+        raw["id"] = UUID().uuidString.lowercased()
+        let malformed = try JSONDecoder().decode(NativePersonalIntakeEvent.self, from: JSONSerialization.data(withJSONObject: raw))
+        let header = try Data(contentsOf: state)
+        await failure { _ = try await destination.capture(malformed) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+    }
+
+    func testReminderDispositionRejectsSameByteForeignTerminalWitnessWithoutPositiveMarker() async throws {
+        let diagnostics = Diagnostics(), (destination, event) = try await terminalTarget(diagnostics)
+        let header = try Data(contentsOf: state), bytes = try Data(contentsOf: terminals), foreign = try substitute(terminals)
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty)
+        var value = stat(); XCTAssertEqual(lstat(terminals.path, &value), 0); XCTAssertEqual(UInt64(value.st_ino), foreign)
+        XCTAssertEqual(try Data(contentsOf: state), header); XCTAssertEqual(try Data(contentsOf: terminals), bytes)
+    }
+
+    func testReminderDispositionMissingTerminalSnapshotRefusesWithoutMutation() async throws {
+        let diagnostics = Diagnostics(), (destination, event) = try await terminalTarget(diagnostics)
+        let header = try Data(contentsOf: state); try FileManager.default.removeItem(at: terminals)
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: terminals.path))
+    }
+
+    func testReminderDispositionCorruptTerminalSnapshotRefusesWithoutRepair() async throws {
+        let diagnostics = Diagnostics(), (destination, event) = try await terminalTarget(diagnostics)
+        let header = try Data(contentsOf: state), corrupt = Data("{}".utf8); try corrupt.write(to: terminals)
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+        XCTAssertEqual(try Data(contentsOf: terminals), corrupt)
+    }
+
+    func testReminderDispositionForeignHeaderAndLeaseRefuseWithoutPositiveMarker() async throws {
+        let diagnostics = Diagnostics(), (destination, event) = try await terminalTarget(diagnostics)
+        let header = try Data(contentsOf: state); _ = try substitute(state)
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+        await destination.close()
+        let reopened = try target { diagnostics.receive($0) }, lock = root.appendingPathComponent(".lock")
+        _ = try substitute(lock)
+        await failure { _ = try await reopened.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+    }
+
+    func testReminderDispositionMovedRootNeverWritesReplacement() async throws {
+        let diagnostics = Diagnostics(), (destination, event) = try await terminalTarget(diagnostics)
+        let oldRoot = root, held = home.appendingPathComponent("held-intake", isDirectory: true), header = try Data(contentsOf: state)
+        try FileManager.default.moveItem(at: oldRoot, to: held); try FileManager.default.createDirectory(at: oldRoot, withIntermediateDirectories: false)
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: held.appendingPathComponent("state.json")), header)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: oldRoot.path), [])
+    }
+
+    func testReminderDispositionPendingAndRejectedOriginalAcknowledgementRemainHeld() async throws {
+        let ids = try seed([], terminalCount: 1), event = try response(id: XCTUnwrap(ids.first), delivered: 101)
+        let (owner, token) = try await source(), diagnostics = Diagnostics(), destination = try target { diagnostics.receive($0) }, barrier = Barrier()
+        await owner.setImportAcknowledgementBarrier { await barrier.hold() }
+        let operation = Task { try await owner.importSealed(token, into: destination, route: route, diagnostic: { _ in }) }
+        await barrier.wait(); let header = try Data(contentsOf: state)
+        await failure { _ = try await destination.captureReminder(event) }
+        await owner.close(); await barrier.open(); await failure { try await operation.value }
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+    }
+
+    func testReminderDispositionIncompleteImportCannotUseTerminalMetadataEarly() async throws {
+        let ids = try seed([], terminalCount: 1), event = try response(id: XCTUnwrap(ids.first), delivered: 101)
+        let (owner, token) = try await source(), diagnostics = Diagnostics(), destination = try target { diagnostics.receive($0) }
+        await destination.setIOFaults(beforePublication: { if $0 == "legacy-reminder-terminals.json" { throw Injected.failure } })
+        await failure { try await owner.importSealed(token, into: destination, route: route, diagnostic: { _ in }) }
+        let header = try Data(contentsOf: state)
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty); XCTAssertEqual(try Data(contentsOf: state), header)
+        await destination.setIOFaults()
+        try await owner.importSealed(token, into: destination, route: route, diagnostic: { _ in })
+        guard case .knownTerminal = try await destination.captureReminder(event) else { return XCTFail("Exact import retry must establish the stored fact") }
+        XCTAssertEqual(diagnostics.intakeEvents.map(\.outcome), ["knownTerminal"])
+    }
+
+    private func retryReminderDispositionCut(_ cut: String) async throws {
+        let diagnostics = Diagnostics(), (destination, _) = try await terminalTarget(diagnostics, floor: 100)
+        let event = try response(delivered: 100), stateURL = state
+        await destination.setIOFaults(afterPublication: { name in
+            if (cut == "record" && name == event.requestID + ".json") || (cut == "order" && name == "0000000000000001.json") { throw Injected.failure }
+            if cut == "clear", name == "state.json", let raw = try JSONSerialization.jsonObject(with: Data(contentsOf: stateURL)) as? [String: Any],
+               raw["pending"] == nil, (raw["nextSequence"] as? NSNumber)?.intValue == 2 { throw Injected.failure }
+        })
+        await failure { _ = try await destination.captureReminder(event) }
+        XCTAssertTrue(diagnostics.intakeEvents.isEmpty)
+        await destination.setIOFaults(); try await destination.retry()
+        guard case let .ambiguousFloor(item) = try await destination.captureReminder(event) else { return XCTFail("Exact pending publication retry must retain floor ambiguity") }
+        XCTAssertEqual(item.event?.response, event); XCTAssertEqual(item.sequence, 1)
+        guard case let .ambiguousFloor(repeated) = try await destination.captureReminder(response(id: event.requestID, clock: event.requestedAtMs + 1, delivered: 100, task: "later")) else { return XCTFail("Retry must remain ambiguous") }
+        XCTAssertEqual(repeated.sequence, item.sequence); XCTAssertEqual(repeated.event?.response, event)
+        XCTAssertEqual(diagnostics.intakeEvents.filter { $0.operation == "capture" }.count, 1)
+        XCTAssertEqual(diagnostics.intakeEvents.filter { $0.outcome == "ambiguousFloor" }.count, 2)
+    }
+    func testReminderDispositionRecordLostACKRetainsFirstDurableAmbiguity() async throws { try await retryReminderDispositionCut("record") }
+    func testReminderDispositionOrderLostACKRetainsFirstDurableAmbiguity() async throws { try await retryReminderDispositionCut("order") }
+    func testReminderDispositionHeaderClearLostACKRetainsFirstDurableAmbiguity() async throws { try await retryReminderDispositionCut("clear") }
 }

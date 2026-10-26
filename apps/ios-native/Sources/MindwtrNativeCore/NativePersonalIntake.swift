@@ -16,6 +16,12 @@ public actor NativePersonalIntake {
         fileprivate let witness: IntakeFileWitness
         fileprivate let fingerprint: String
     }
+    enum ReminderCaptureDisposition: Sendable {
+        case captured(Item)
+        case knownTerminal
+        case ambiguousFloor(Item)
+    }
+
     public struct Cursor: Sendable {
         fileprivate let owner: UUID
         fileprivate let frontier: Int64
@@ -28,10 +34,25 @@ public actor NativePersonalIntake {
     }
     /// Fixed fields only. Future App binding must deliver this to Diagnostics without reopening a personal host.
     public struct Diagnostic: Sendable {
-        public let message = "Native iOS personal intake capture confirmed"
-        public let releaseCheck = "v1.3.8/ios-personal-intake"
-        public let operation = "capture"
-        public let outcome = "confirmed"
+        public let message: String
+        public let releaseCheck: String
+        public let operation: String
+        public let outcome: String
+        init() {
+            message = "Native iOS personal intake capture confirmed"
+            releaseCheck = "v1.3.8/ios-personal-intake"
+            operation = "capture"; outcome = "confirmed"
+        }
+        fileprivate init(disposition: ReminderCaptureDisposition) {
+            message = "Native iOS reminder capture disposition confirmed"
+            releaseCheck = "v1.3.8/ios-personal-intake-disposition"
+            operation = "reminder-capture"
+            switch disposition {
+            case .captured: outcome = "captured"
+            case .knownTerminal: outcome = "knownTerminal"
+            case .ambiguousFloor: outcome = "ambiguousFloor"
+            }
+        }
     }
     public typealias DiagnosticSink = @Sendable (Diagnostic) -> Void
     private let files: NativePersonalIntakeFiles
@@ -73,6 +94,52 @@ public actor NativePersonalIntake {
 
     /// First accepted bytes/clock win. A matching reservation is settled before any duplicate acknowledgement.
     public func capture(_ event: NativePersonalIntakeEvent) throws -> Item {
+        if event.kind == .reminder {
+            try event.validate(namespace: files.route.namespace)
+            guard let response = event.response else { throw NativePersonalIntakeError.unavailable }
+            switch try captureReminder(response) {
+            case let .captured(item), let .ambiguousFloor(item): return item
+            case .knownTerminal: throw NativePersonalIntakeError.legacyHeld
+            }
+        }
+        return try captureRecord(event)
+    }
+
+    /// Stored facts only; a terminal has no truthful Item and the floor proves ambiguity, not completion.
+    func captureReminder(_ response: NativeReminderResponse) throws -> ReminderCaptureDisposition {
+        try requireNoImportWork(); try files.check()
+        let event = NativePersonalIntakeEvent.reminder(response)
+        try event.validate(namespace: files.route.namespace)
+        guard header.pending == nil || header.pending?.event.id == event.id else { throw NativePersonalIntakeError.pendingPublication }
+        let legacy: LegacyTerminals?
+        if header.legacy != nil { legacy = try readLegacyTerminals() }
+        else { legacy = nil }
+        let existing = try readRecord(event.id)
+        if let terminal = legacy?.terminal.first(where: { $0.requestID == response.requestID }) {
+            guard terminal.deliveredAtBits == response.deliveredAtBits, existing == nil, header.pending == nil else {
+                throw NativePersonalIntakeError.unavailable
+            }
+            return try confirmReminderDisposition(.knownTerminal)
+        }
+        let originalActive: Bool
+        if let (record, _) = existing { originalActive = record.legacySequence != nil }
+        else { originalActive = false }
+        let accepted = try captureRecord(event)
+        if !originalActive, let floor = legacy?.retiredThrough,
+           try NativeReminderInbox.deliveryForPersonalIntake(response.deliveredAtBits) <= NativeReminderInbox.deliveryForPersonalIntake(floor) {
+            return try confirmReminderDisposition(.ambiguousFloor(accepted))
+        }
+        return try confirmReminderDisposition(.captured(accepted))
+    }
+
+    private func confirmReminderDisposition(_ disposition: ReminderCaptureDisposition) throws -> ReminderCaptureDisposition {
+        if header.legacy != nil { _ = try readLegacyTerminals() }
+        try files.check()
+        diagnostic(.init(disposition: disposition))
+        return disposition
+    }
+
+    private func captureRecord(_ event: NativePersonalIntakeEvent) throws -> Item {
         try requireNoImportWork()
         try files.check(); try event.validate(namespace: files.route.namespace)
         guard header.pending == nil || header.pending?.event.id == event.id else { throw NativePersonalIntakeError.pendingPublication }
