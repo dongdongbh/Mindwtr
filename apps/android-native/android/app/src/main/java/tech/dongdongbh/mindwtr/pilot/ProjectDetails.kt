@@ -1389,7 +1389,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                 modifier = Modifier.weight(1f).semantics { heading() })
             val done = t("common.done")
             val shape = RoundedCornerShape(8.dp)
-            Box(Modifier.heightIn(min = 36.dp).clip(shape).background(c.tint).border(1.dp, c.tint, shape).clickable(role = Role.Button) { toggleReorder() }
+            Box(Modifier.heightIn(min = 36.dp).clip(shape).background(c.tint).rnBorder(1.dp, c.tint, shape).clickable(role = Role.Button) { toggleReorder() }
                 .semantics { contentDescription = done }.testTag("project-task-reorder-toggle").padding(horizontal = 12.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center) { Text(done, style = rnText(13, 700), color = c.onTint) }
         }
@@ -1426,7 +1426,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                                 val can = enabled && (if (direction == "up") position > 0 else position < sectionIds.size - 1)
                                 val label = "${t(key)}: $title"
                                 val shape = RoundedCornerShape(8.dp)
-                                Box(Modifier.size(32.dp).fade(if (can) 1f else 0.4f).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                                Box(Modifier.size(32.dp).fade(if (can) 1f else 0.4f).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                                     .clickable(enabled = can, role = Role.Button) { moveOrderSection(real, direction, sectionIds) }
                                     .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
                                     Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
@@ -1446,13 +1446,13 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                     Row(Modifier.fillMaxWidth().height(80.dp).then(if (active) Modifier.offset { IntOffset(0, shift.roundToInt()) }.fade(0.92f) else Modifier)
                         .testTag("project-task-reorder-row"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         val shape = RoundedCornerShape(8.dp)
-                        Column(Modifier.weight(1f).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.taskItemBg).border(1.dp, if (active) c.tint else c.border, shape)
+                        Column(Modifier.weight(1f).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.taskItemBg).rnBorder(1.dp, if (active) c.tint else c.border, shape)
                             .padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.Center) {
                             Text(title, style = rnText(15, 700, 19), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(t("status.${row.optString("status")}"), style = rnText(12, 600, 15), color = c.secondaryText, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
                         }
                         val handle = "${t("board.dragTask")}: $title"
-                        Box(Modifier.width(44.dp).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                        Box(Modifier.width(44.dp).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
                             .semantics { contentDescription = handle; role = Role.Button; if (enabled) customActions = moves else disabled() }
                             .pointerInput(id, enabled, items) {
                                 if (!enabled) return@pointerInput
