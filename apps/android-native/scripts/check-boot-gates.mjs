@@ -3416,7 +3416,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /val entry = lifecycle\.next\(blocked\) \?: return/);
     assert.match(entryKt, /\} catch \(failure: Throwable\) \{\s+ui\(threads\.guarded \{ failed\(entry, failure\.message\) \}\)\s+\/\/[^\n]*\s+if \(!entryRetryable\(failure\.message\)\) return@perform\s+throw failure\s+\}\s+\/\/[^\n]*\s+ui\(threads\.guarded \{ menu\.whenIdle\(threads\.guarded \{ opened\(entry, reply, view\) \}\) \}\)/);
     assert.match(entryKt, /is EntryLifecycle\.Failure\.Retry -> threads\.later\(outcome\.delayMs\) \{ pump\(\) \}\s+is EntryLifecycle\.Failure\.Refused -> \{\s+shell\.showToast\(null, outcome\.notice, \"warning\"\)\s+lifecycle\.dismissed\(entry\)/, 'a refused entry shows its notice before it leaves');
-    assert.match(entryKt, /if \(blocked\) \{\s+lifecycle\.deferred\(entry\)\s+return\s+\}\s+open\(reply, view\)\s+lifecycle\.opened\(entry\)/);
+    // A context automation link opens nothing, so only it goes on over open work.
+    assert.match(entryKt, /if \(blocked && reply\.optJSONObject\("contextAutomation"\) == null\) \{\s+lifecycle\.deferred\(entry\)\s+return\s+\}\s+open\(reply, view\)\s+lifecycle\.opened\(entry\)/);
     assert.doesNotMatch(code(entryKt), /queue\.remove\(/, 'only EntryLifecycle takes an entry out of the queue');
     assert.equal(code(source('EntryLifecycle.kt')).match(/queue\.remove\(/g).length, 2, 'an entry leaves only after it opened, or when core refused its input');
     assert.match(readFileSync(resolve(app, 'android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/EntryLifecycleTest.kt'), 'utf8'), /fun severalQueuedEntriesOpenInOrderAcrossARestart\(\)/);
@@ -3452,6 +3453,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(entryCode, /SimpleDateFormat|DateTimeFormatter|java\.time|Calendar\.getInstance|currentTimeMillis|\bDate\(|\bColor\(|"#[0-9A-Fa-f]{3,8}"/);
     for (const [, key] of entryCode.matchAll(/"([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)"/g)) assert(labelKeys.includes(key), `EntryPoints.kt: ${key} is not in LABEL_KEYS`);
     assert.doesNotMatch(entryCode, /\bText\(|contentDescription|showToast\("/, 'EntryPoints.kt: every word is core\'s');
+    // RN's quiet context automation link: core's payload goes to the broadcast's job, nothing opens, and the app leaves (exitApp).
+    assert.match(entryKt, /reply\.optJSONObject\("contextAutomation"\)\?\.let \{ trigger ->\s+val outcome = queueTrigger\(trigger\.getString\("action"\), trigger\.getString\("context"\)\) \{ CoreWork\.enqueue\(getApplication\(\), CoreJob\.CONTEXT, it\) \}[\s\S]{0,160}leaveApp = true\s+return\s+\}/);
 }
 
 // Pass A4 (L1): RN's diagnostics log (files/logs/mindwtr.log) written by core's diagnostics-log.ts through Kotlin's file bridge,

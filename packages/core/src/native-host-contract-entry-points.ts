@@ -26,6 +26,7 @@ import {
     resolveEntityOpenTarget,
     resolveSystemPath,
 } from './entry-points';
+import { parseContextAutomationUrl, type ContextAutomationPayload } from './context-automation';
 import { DEFAULT_GLOBAL_SEARCH_FILTERS, type GlobalSearchFilterState } from './global-search-model';
 import type { CaptureModalParams } from './capture-modal-model';
 import { CAPTURE_MODAL_PARAM_LIMIT } from './native-host-contract-capture-modal';
@@ -88,6 +89,11 @@ export type NativeEntryPoint = {
     captureModal: { params: CaptureModalParams } | null;
     /** React Native's toast (a missing task link's has no title). */
     notice: QuickCaptureNotice | Omit<QuickCaptureNotice, 'title'> | null;
+    /**
+     * A context automation link (`mindwtr://contexts?context=@home&contextAction=activate`): run it as the automation broadcast
+     * runs (runContextAutomation), open nothing, and leave the app, as React Native's root layout does.
+     */
+    contextAutomation: ContextAutomationPayload | null;
 };
 
 /** The capture popup's Import .txt: ask to create one task per line, put one line in the field, do nothing, or refuse. */
@@ -120,7 +126,7 @@ const fitsCaptureModal = (params: CaptureModalParams) => Object.values(params).e
 export function createEntryPointMethods(deps: EntryPointDeps) {
     const opened = (value: Partial<Omit<NativeEntryPoint, 'version'>>): NativeHostResult<NativeEntryPoint> => ({
         ok: true,
-        value: { version: NATIVE_HOST_CONTRACT_VERSION, route: null, taskId: null, projectId: null, search: null, capture: null, captureModal: null, notice: null, ...value },
+        value: { version: NATIVE_HOST_CONTRACT_VERSION, route: null, taskId: null, projectId: null, search: null, capture: null, captureModal: null, notice: null, contextAutomation: null, ...value },
     });
     const notice = (titleKey: string, title: string, messageKey: string, message: string): QuickCaptureNotice => ({
         tone: 'warning', title: tFallback(deps.t(), titleKey, title), message: tFallback(deps.t(), messageKey, message),
@@ -163,6 +169,9 @@ export function createEntryPointMethods(deps: EntryPointDeps) {
         const path = `mindwtr:${url.slice(scheme.length + 1)}`;
         // React Native's root layout handles no capture, share or entity link in sandbox mode: they stay on the Inbox.
         const sandbox = isSandboxMode();
+        // React Native's context automation hook reads every link first; it is off in sandbox mode, where the link is a route.
+        const automation = sandbox ? null : parseContextAutomationUrl(path);
+        if (automation) return opened({ contextAutomation: automation });
         const route = resolveSystemPath(path, true);
         switch (route.kind) {
             case 'shareHandoff':

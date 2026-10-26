@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.IntentCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import tech.dongdongbh.mindwtr.contextautomation.queueTrigger
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.io.File
 import java.io.InputStream
@@ -229,7 +230,8 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
 
     /** Opens core's answer, then (only then) the entry leaves the queue. Work opened meanwhile keeps it for a later read. */
     private fun opened(entry: EntryQueue.Entry, reply: JSONObject, view: JSONObject?) {
-        if (blocked) {
+        // A context automation link opens nothing, so work opened meanwhile never holds it.
+        if (blocked && reply.optJSONObject("contextAutomation") == null) {
             lifecycle.deferred(entry)
             return
         }
@@ -242,6 +244,13 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
 
     /** Core's answer: its toast, its route (with the task or project it names), then RN's capture screen over it, or the popup over the tabs. */
     private fun open(reply: JSONObject, view: JSONObject?): Unit = with(shell) {
+        // RN's quiet context automation link: the broadcast's job (its notification), then the app leaves, as RN's exitApp.
+        reply.optJSONObject("contextAutomation")?.let { trigger ->
+            val outcome = queueTrigger(trigger.getString("action"), trigger.getString("context")) { CoreWork.enqueue(getApplication(), CoreJob.CONTEXT, it) }
+            if (outcome != "queued") Log.w(CoreHost.TAG, "Native Android context link dropped reason=$outcome")
+            leaveApp = true
+            return
+        }
         // A missing task link's notice has no title (#1368): showToast(JSONObject) reads an absent or empty title as none.
         reply.optJSONObject("notice")?.let { showToast(it) }
         reply.menuText("route")?.let { go(it, reply) }

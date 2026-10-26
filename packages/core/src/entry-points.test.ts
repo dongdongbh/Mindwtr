@@ -166,7 +166,7 @@ describe('native host contract: resolveNativeEntryPoint', () => {
         note: '', dueDate: null, dueDateHasTime: false, startTime: null, contexts: [],
         projectId: null, areaId: null, priority: null, focus: false, addAnother: false,
     });
-    const none = { version: 1, route: null, taskId: null, projectId: null, search: null, capture: null, captureModal: null, notice: null };
+    const none = { version: 1, route: null, taskId: null, projectId: null, search: null, capture: null, captureModal: null, notice: null, contextAutomation: null };
 
     it('opens what React Native opened for every link of the fixture', () => {
         for (const { url, redirectCold, delivered } of fixture.urls) {
@@ -201,6 +201,13 @@ describe('native host contract: resolveNativeEntryPoint', () => {
             }
             expect([url, native]).toEqual([url, expected]);
         }
+    });
+
+    it('runs a context automation link quietly, opening no screen, as React Native does', () => {
+        expect(link('mindwtr://contexts?context=@home&contextAction=activate')).toEqual({ ...none, contextAutomation: { action: 'activate', context: '@home' } });
+        expect(link('mindwtr://deactivate-context/work')).toEqual({ ...none, contextAutomation: { action: 'deactivate', context: '@work' } });
+        // A Contexts link without an action is the screen, as before.
+        expect(link('mindwtr://contexts')).toEqual({ ...none, route: '/contexts' });
     });
 
     it('opens every text share React Native opened, in its capture screen, which closes to the Inbox', () => {
