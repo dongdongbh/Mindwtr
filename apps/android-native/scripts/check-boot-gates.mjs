@@ -9851,5 +9851,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /"project-view-completed-option"[\s\S]{0,1200}"project-view-reorder-option"/);
     assert.match(header, /if \(projectDetails\.reorderMode\) \{\s+LazyColumn\([^\n]*userScrollEnabled = false\) \{\s+openProjectId\?\.let \{ id -> projectDetailsItems\(model, id, detail\) \}\s+\}\s+ProjectReorderList\(model, Modifier\.weight\(1f\)\)\s+return@Column/);
     assert.match(details, /customActions = moves/);
+    // A drop that changes the top row keeps the list where it is, as RN's list does: rows keyed by task id would let the
+    // list follow the first visible task and scroll the row moved above it out of sight.
+    assert.doesNotMatch(details, /itemsIndexed\(items, key =/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

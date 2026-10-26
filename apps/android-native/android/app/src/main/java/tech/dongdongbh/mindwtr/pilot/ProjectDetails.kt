@@ -1410,7 +1410,9 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
             if (target != from) moveTask(moved.getJSONObject("row").getString("id"), afterAt(rest, target))
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp)) {
-            itemsIndexed(items, key = { _, item -> if (item.getString("type") == "section") "section:${item.getString("id")}" else "task:${item.getJSONObject("row").getString("id")}" }) { index, item ->
+            // Rows by position, as RN's list: a key per task would keep the first visible task in place and scroll a row dropped
+            // above it out of sight.
+            itemsIndexed(items) { index, item ->
                 if (item.getString("type") == "section") {
                     val title = item.getString("title")
                     val sectionId = item.menuText("sectionId")
