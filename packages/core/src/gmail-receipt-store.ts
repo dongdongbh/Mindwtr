@@ -86,40 +86,45 @@ const resetMarker = 'receipts-reset';
  */
 export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailReceiptOpenOptions = {}): GmailReceiptStore {
     const now = options.now ?? Date.now;
+    // The marker goes first: a reset cut short anywhere after it is finished by the next open's carry-over below. The journals
+    // move before the file, so a hot journal is never left beside a fresh file to be played back into it.
     const moveAside = () => {
-        const name = `receipts.corrupt-${now()}.sqlite`;
-        for (const extension of ['', '-wal', '-shm', '-journal']) {
-            if (files.exists(`${receiptsFile}${extension}`)) files.rename(`${receiptsFile}${extension}`, `${name}${extension}`);
+        if (!files.exists(resetMarker)) files.create(resetMarker);
+        let time = now();
+        while (files.exists(`receipts.corrupt-${time}.sqlite`)) time += 1;
+        for (const extension of ['-wal', '-shm', '-journal', '']) {
+            if (files.exists(`${receiptsFile}${extension}`)) files.rename(`${receiptsFile}${extension}`, `receipts.corrupt-${time}.sqlite${extension}`);
         }
         files.create(receiptsFile);
-        // Kept on disk, so Settings says why capture is off even after a restart, until capture starts again.
-        if (!files.exists(resetMarker)) files.create(resetMarker);
-        return name;
     };
-    // Every receipt still readable from the moved file goes into the fresh one, so starting capture again never captures
-    // that mail twice (a task whose tombstone was purged would come back). An unreadable file carries none.
-    const carryOver = (fresh: GmailReceiptStore, moved: string, failedStage: string) => {
+    // While the marker is kept (Settings shows the reset until capture starts again), every receipt still readable from any
+    // moved file goes into the fresh one, so starting capture again never captures that mail twice (a task whose tombstone
+    // was purged would come back). INSERT OR IGNORE makes a repeat harmless; an unreadable file carries none.
+    const carryOver = (fresh: GmailReceiptStore, stage: string) => {
         let carried = 0;
-        let old: ReturnType<GmailReceiptFiles['open']> | undefined;
-        try {
-            old = files.open(moved);
-            const byAccount = new Map<string, string[]>();
-            for (const row of old.executeSync('SELECT account, message FROM receipts').rows) {
-                if (typeof row.account !== 'string' || typeof row.message !== 'string' || !row.account || !row.message) continue;
-                byAccount.set(row.account, [...(byAccount.get(row.account) ?? []), row.message]);
-            }
-            for (const [account, messages] of byAccount) { fresh.acknowledge(account, messages); carried += messages.length; }
-        } catch { /* nothing readable to carry */ }
-        finally { try { old?.close(); } catch { /* the moved file stays as it is */ } }
+        for (const moved of files.list().filter((name) => /^receipts\.corrupt-\d+\.sqlite$/.test(name)).sort()) {
+            let old: ReturnType<GmailReceiptFiles['open']> | undefined;
+            try {
+                old = files.open(moved);
+                const byAccount = new Map<string, string[]>();
+                for (const row of old.executeSync('SELECT account, message FROM receipts').rows) {
+                    if (typeof row.account !== 'string' || typeof row.message !== 'string' || !row.account || !row.message) continue;
+                    byAccount.set(row.account, [...(byAccount.get(row.account) ?? []), row.message]);
+                }
+                for (const [account, messages] of byAccount) { fresh.acknowledge(account, messages); carried += messages.length; }
+            } catch { /* nothing readable to carry */ }
+            finally { try { old?.close(); } catch { /* the moved file stays as it is */ } }
+        }
         options.logWarn?.('Gmail receipt storage recovered', {
-            releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage: failedStage, count: String(carried),
+            releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage, count: String(carried),
         });
     };
     options.onStage?.('file');
     let newlyCreated = !files.exists(receiptsFile);
-    let moved: { name: string; stage: string } | null = null;
+    // An earlier start moved the file (perhaps cut short); this open carries over again, unless it moves a file itself.
+    let stage = 'resume';
     if (newlyCreated) files.create(receiptsFile);
-    else if (files.size(receiptsFile) < 100) { moved = { name: moveAside(), stage: 'file' }; newlyCreated = true; }
+    else if (files.size(receiptsFile) < 100) { moveAside(); stage = 'file'; newlyCreated = true; }
     options.onStage?.('open');
     let database: ReturnType<GmailReceiptFiles['open']> | undefined = files.open(receiptsFile);
     try {
@@ -131,11 +136,12 @@ export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailRe
             if (newlyCreated) throw error;
             database.close();
             database = undefined;
-            moved = { name: moveAside(), stage: 'schema' };
+            moveAside();
+            stage = 'schema';
             database = files.open(receiptsFile);
             store = createGmailReceiptStore(database, true);
         }
-        if (moved) carryOver(store, moved.name, moved.stage);
+        if (files.exists(resetMarker)) carryOver(store, stage);
         return store;
     } catch (error) {
         try { database?.close(); } catch { /* Keep the database intact for diagnosis. */ }

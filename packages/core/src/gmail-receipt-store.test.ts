@@ -57,6 +57,7 @@ function receiptFolder(faults: { create?: (name: string) => boolean; rename?: (n
     mkdirSync(parent, { recursive: true });
     const root = mkdtempSync(join(parent, 'gmail-receipts-'));
     const databases: DatabaseSync[] = [];
+    const renames: Array<[string, string]> = [];
     const path = (name: string) => join(root, name);
     const files: GmailReceiptFiles = {
         exists: (name) => existsSync(path(name)),
@@ -69,6 +70,7 @@ function receiptFolder(faults: { create?: (name: string) => boolean; rename?: (n
             if (faults.rename?.(from)) throw new Error('injected rename failure');
             if (existsSync(path(to))) throw new Error('Destination exists');
             renameSync(path(from), path(to));
+            renames.push([from, to]);
         },
         remove: (name) => rmSync(path(name)),
         list: () => readdirSync(root),
@@ -94,7 +96,7 @@ function receiptFolder(faults: { create?: (name: string) => boolean; rename?: (n
         db.close();
     };
     const aside = () => readdirSync(root).filter((name) => /^receipts\.corrupt-\d+\.sqlite$/.test(name)).sort();
-    return { root, path, files, closeAll, damage, aside };
+    return { root, path, files, closeAll, damage, aside, renames };
 }
 const cleanUps: Array<() => void> = [];
 afterEach(() => { cleanUps.splice(0).forEach((cleanUp) => cleanUp()); });
@@ -131,5 +133,71 @@ describe('Gmail receipts file reset', () => {
         expect(logWarn).toHaveBeenCalledExactlyOnceWith('Gmail receipt storage recovered', {
             releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage, count: carried,
         });
+    });
+});
+
+// An interrupted reset must not lose the moved file's receipts (G1 review finding 1): the marker is written first, and every
+// open while it exists carries over from every moved file, so the next start finishes what the first one could not.
+describe('Gmail receipts reset interrupted part way', () => {
+    it.each([
+        ['the fresh file cannot get its schema (a full disk)', { sql: (name: string, sql: string) => name === 'receipts.sqlite' && sql.startsWith('CREATE TABLE receipts') }, 'file'],
+        ['the fresh file cannot be created (the app dies after the move)', { create: (name: string) => name === 'receipts.sqlite' }, 'resume'],
+        ['the reset marker cannot be written', { create: (name: string) => name === 'receipts-reset' }, 'schema'],
+        ['the receipts file cannot be moved', { rename: (name: string) => name === 'receipts.sqlite' }, 'schema'],
+    ])('keeps every receipt when %s', (_name, fault, stage) => {
+        let armed = true;
+        const faults = fault as { create?: (name: string) => boolean; rename?: (name: string) => boolean; sql?: (name: string, sql: string) => boolean };
+        const folder = receiptFolder({
+            create: (name) => armed && faults.create?.(name) === true,
+            rename: (name) => armed && faults.rename?.(name) === true,
+            sql: (name, sql) => armed && faults.sql?.(name, sql) === true,
+        });
+        folder.damage();
+        const now = () => 1000;
+        expect(() => openGmailReceiptStore(folder.files, { now })).toThrow();
+        folder.closeAll();
+
+        armed = false;
+        const logWarn = vi.fn();
+        const store = openGmailReceiptStore(folder.files, { now, logWarn });
+        expect(store.seen('a', 'kept')).toBe(true);
+        expect(store.config()).toEqual({ account: null, label: null, enabled: false, blocked: true });
+        expect(gmailReceiptsWereReset(folder.files)).toBe(true);
+        expect(logWarn).toHaveBeenCalledExactlyOnceWith('Gmail receipt storage recovered', {
+            releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage, count: '1',
+        });
+        folder.closeAll();
+
+        // Carrying over again is harmless, and it stops once capture starts again.
+        expect(openGmailReceiptStore(folder.files, { now, logWarn }).seen('a', 'kept')).toBe(true);
+        expect(logWarn).toHaveBeenCalledTimes(2);
+        folder.closeAll();
+        clearGmailReceiptsReset(folder.files);
+        openGmailReceiptStore(folder.files, { now, logWarn });
+        expect(logWarn).toHaveBeenCalledTimes(2);
+    });
+
+    // A hot journal left beside a fresh file would be played back into it, so the journals move first and the file last.
+    it.each(['receipts.sqlite', 'receipts.sqlite-journal'])('never leaves a journal beside a fresh file when moving %s fails', (failing) => {
+        let armed = true;
+        const folder = receiptFolder({ rename: (name) => armed && name === failing });
+        writeFileSync(folder.path('receipts.sqlite'), '');
+        writeFileSync(folder.path('receipts.sqlite-journal'), 'journal of the empty file');
+        expect(() => openGmailReceiptStore(folder.files, { now: () => 1000 })).toThrow();
+        if (existsSync(folder.path('receipts.sqlite-journal'))) expect(existsSync(folder.path('receipts.sqlite'))).toBe(true);
+        armed = false;
+        openGmailReceiptStore(folder.files, { now: () => 1000 });
+        expect(existsSync(folder.path('receipts.sqlite-journal'))).toBe(false);
+        expect(folder.renames).toContainEqual(['receipts.sqlite-journal', 'receipts.corrupt-1000.sqlite-journal']);
+    });
+
+    it('moves the journal files with the damaged file', () => {
+        const folder = receiptFolder();
+        writeFileSync(folder.path('receipts.sqlite'), '');
+        for (const extension of ['-wal', '-shm', '-journal']) writeFileSync(folder.path(`receipts.sqlite${extension}`), extension);
+        openGmailReceiptStore(folder.files, { now: () => 1000 });
+        expect(folder.renames).toEqual(['-wal', '-shm', '-journal', ''].map((extension) => [
+            `receipts.sqlite${extension}`, `receipts.corrupt-1000.sqlite${extension}`,
+        ]));
     });
 });
