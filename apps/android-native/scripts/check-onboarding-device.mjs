@@ -211,7 +211,8 @@ try {
     nodes = await tapExpecting(button(await screen(), en['common.back']) ?? fail('no Back on the contexts page'),
         (current) => Boolean(withDescription(current, `${en['filters.contexts']}: @computer`)), 'the sheet overview');
     nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => Boolean(tagged(current, 'project-task-filter-button')), 'the filter chip');
-    check(tagged(nodes, 'project-task-filter-button')?.['content-desc'] === `${en['filters.label']} · 1`, '(c) the pinned row shows core\'s "Filters · 1"');
+    // The chip's words are its child text (the tagged node's own description stays empty in the dump; TalkBack reads the text).
+    check(Boolean(tagged(nodes, 'project-task-filter-button')) && hasText(nodes, `${en['filters.label']} · 1`), '(c) the pinned row shows core\'s "Filters · 1"');
     nodes = await tapExpecting(tagged(nodes, 'project-task-filter-button'), sheetUp, 'the filter sheet again');
     nodes = await tapExpecting(button(nodes, en['filters.clear']) ?? fail('no Clear'), (current) => !button(current, en['filters.clear']), 'the filters cleared');
     nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => !sheetUp(current) && !tagged(current, 'project-task-filter-button'), 'the chip gone');
