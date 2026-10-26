@@ -9854,5 +9854,9 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // A drop that changes the top row keeps the list where it is, as RN's list does: rows keyed by task id would let the
     // list follow the first visible task and scroll the row moved above it out of sight.
     assert.doesNotMatch(details, /itemsIndexed\(items, key =/);
+    // A list update or a busy action mid-drag restarts the handle's gesture: the drag ends on its own task (dragged holds the
+    // task id, never a position), and the restart clears it, so no row stays lifted.
+    assert.match(details, /onDragStart = \{ dragged = id; shift = 0f \}/);
+    assert.match(details, /\} finally \{\s+if \(dragged == id\) \{ dragged = null; shift = 0f \}\s+\}/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

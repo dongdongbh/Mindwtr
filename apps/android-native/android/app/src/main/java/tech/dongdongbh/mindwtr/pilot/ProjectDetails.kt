@@ -1458,15 +1458,21 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                             .semantics { contentDescription = handle; role = Role.Button; if (enabled) customActions = moves else disabled() }
                             .pointerInput(id, enabled, items) {
                                 if (!enabled) return@pointerInput
-                                detectDragGestures(
-                                    onDragStart = { dragged = id; shift = 0f },
-                                    onDragEnd = {
-                                        val to = (index + (shift / rowHeight).roundToInt()).coerceIn(0, items.size - 1)
-                                        dragged = null; shift = 0f
-                                        dropAt(index, to)
-                                    },
-                                    onDragCancel = { dragged = null; shift = 0f },
-                                ) { change, amount -> change.consume(); shift += amount.y }
+                                // A list update or a busy action mid-drag restarts this gesture without onDragCancel: the
+                                // restart drops the drag, so the row does not stay lifted.
+                                try {
+                                    detectDragGestures(
+                                        onDragStart = { dragged = id; shift = 0f },
+                                        onDragEnd = {
+                                            val to = (index + (shift / rowHeight).roundToInt()).coerceIn(0, items.size - 1)
+                                            dragged = null; shift = 0f
+                                            dropAt(index, to)
+                                        },
+                                        onDragCancel = { dragged = null; shift = 0f },
+                                    ) { change, amount -> change.consume(); shift += amount.y }
+                                } finally {
+                                    if (dragged == id) { dragged = null; shift = 0f }
+                                }
                             }.testTag("project-task-drag-handle"), contentAlignment = Alignment.Center) {
                             Icon(Lucide.GripVertical, null, tint = if (active) c.tint else c.secondaryText, modifier = Modifier.size(20.dp))
                         }
