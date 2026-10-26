@@ -2005,7 +2005,7 @@ assert.match(activity, /private fun RowScope\.TabItem\(model: InboxViewModel, ta
 assert.match(model, /enum class Screen\(val label: String\) \{ Inbox\("tab\.inbox"\), Focus\("tab\.next"\), Projects\("nav\.projects"\) \}/);
 // A failed boot shows only its message, found by a test tag, and no command control.
 assert.match(activity, /\} else if \(!writable\) \{[^}]*Text\(error\.orEmpty\(\), color = MaterialTheme\.colorScheme\.error, modifier = Modifier\.testTag\("boot-failure"\)\.padding\(24\.dp\)\)\s*\} else \{/);
-assert.match(activity, /if \(open != null && writable\) TaskEditorScreen\(model, open\)/);
+assert.match(activity, /if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)/);
 
 // Landscape: the Inbox's controls, Process button and scope line are the list's first items; only the header, the tabs (and a
 // failure, and the bulk bar while selecting) stay fixed.
@@ -3773,7 +3773,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.deepEqual([...new Set([...code(modalKt + captureModalUi).matchAll(/put\("type", "(\w+)"\)/g)].map(([, type]) => type))].sort(), ['setDescription', 'setText']);
     assert.match(captureModalUi, /edit\(help\.getJSONObject\("edit"\)\)/, 'the ? button sends core\'s toggleHelp');
     // Full screen over every other screen, as RN presents its modal route; a system capture ends behind the previous app.
-    assert.match(activity, /if \(modal != null && writable\) CaptureModalScreen\(model, modal\)\s+else if \(open != null && writable\) TaskEditorScreen\(model, open\)/);
+    assert.match(activity, /if \(modal != null && writable\) CaptureModalScreen\(model, modal\)\s+else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)/);
     assert.match(modalKt, /if \(leave && close\.getBoolean\("returnToPreviousApp"\)\) shell\.leaveApp = true/);
     // Back pops the screen as RN's Back pops its route: the app stays; Cancel and a save end a system capture behind the previous app.
     assert.match(captureModalUi, /if \(modal\.confirm != null\) cancelLines\(\) else cancel\(leave = false\)/);
@@ -9915,5 +9915,10 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(model, /in EDITOR_MENU_KINDS -> editorMenu\.run\(action\)/);
     // RN's preserved-draft list holds projectConversionOpen: Create project's dialog keeps the editor from an entry (#1410).
     assert.match(model, /editorMenu\.promoteTitle != null/);
+    // The device check's three: RN's toasts over the editor (the copy rows'), the project opened once the action ended, and
+    // Skip and Cancel's recurrence baseline only with a recurrence edit (EditorActionSaveTest).
+    assert.match(activity, /else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)\s+(?:\/\/[^\n]*\s+)*ToastCard\(model, /);
+    assert.match(menuKt, /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
+    assert.match(menuKt, /if \(editor\.patch\.keys\.any \{ it in RECURRENCE_FIELDS \}\) editor\.model\.recurrenceBase/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

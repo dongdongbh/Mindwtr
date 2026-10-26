@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -171,7 +172,11 @@ class MainActivity : FragmentActivity() {
                 // Full-screen flows over the tabs, as RN presents them: RN's capture screen (its modal route, over any screen), the
                 // editor, then Process Inbox, then search, then a Menu destination (RN pushes it over the tabs).
                 if (modal != null && writable) CaptureModalScreen(model, modal)
-                else if (open != null && writable) TaskEditorScreen(model, open)
+                else if (open != null && writable) Box(Modifier.fillMaxSize()) {
+                    TaskEditorScreen(model, open)
+                    // RN's toasts show over its editor too (the "..." menu's copy rows, say).
+                    ToastCard(model, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().imePadding().padding(bottom = 16.dp))
+                }
                 else if (flow != null && writable) ProcessInboxScreen(model, flow)
                 else if (searching != null && writable) SearchScreen(model, searching)
                 else if (listed != null && writable) MenuScreenHost(model, listed)

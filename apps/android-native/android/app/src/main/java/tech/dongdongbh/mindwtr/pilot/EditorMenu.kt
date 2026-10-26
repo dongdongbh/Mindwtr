@@ -50,6 +50,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+/** Core's RECURRENCE draft fields (native-host-contract-task-save.ts): a save that edits one carries the recurrence baseline. */
+internal val RECURRENCE_FIELDS = setOf("recurrence", "preserveChecklistOnRepeat", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence")
+
 /** The editor menu's Menu command: its owed retry is EditorMenuModel.run, and core can refuse it before writing. */
 val EDITOR_MENU_KINDS = setOf("taskEditorAction")
 
@@ -154,14 +157,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** The editor's draft save for Skip and Cancel: the fields Save sends, and the bases core reads a change since against. */
-    private fun save(editor: TaskEditor) = JSONObject().put("base", JSONObject(draftJson(editor.base))).put("patch", JSONObject(draftJson(editor.patch)))
-        .put("scheduleBase", editor.model.scheduleBase ?: JSONObject())
-        .apply {
-            editor.model.recurrenceBase?.let { put("recurrenceBase", it) }
-            editor.checklistSave.takeIf { it.isNotEmpty() }?.let { put("checklist", JSONObject(it)) }
-            editor.attachmentsSave.takeIf { it.isNotEmpty() }?.let { put("attachments", JSONObject(it)) }
-        }
+    private fun save(editor: TaskEditor) = editorActionSave(editor)
 
     private fun send(taskId: String, taskRevision: String, kind: JSONObject) {
         val requestId = UUID.randomUUID().toString()
@@ -185,7 +181,9 @@ class EditorMenuModel(private val shell: InboxViewModel) {
             "promote" -> {
                 shell.showToast(t("common.success"), t(if (reply.optBoolean("reused")) "task.promoteToProjectMoved" else "task.promoteToProjectCreated"), "success")
                 shell.closeEditor()
-                shell.menu.openProjects(reply.getString("projectId"))
+                // RN's openProjectScreen: the project opens once this command's action ended (its own read needs the app free).
+                val projectId = reply.getString("projectId")
+                shell.menu.whenIdle { shell.menu.openProjects(projectId) }
             }
             "convertToSection" -> {
                 // The tester's line: the conversion landed (or a replay found it landed); never the task's or section's text.
@@ -232,6 +230,16 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         }
     }
 }
+
+/** The editor's draft save for Skip and Cancel: the fields Save sends, and the bases core reads a change since against. */
+internal fun editorActionSave(editor: TaskEditor): JSONObject = JSONObject().put("base", JSONObject(draftJson(editor.base))).put("patch", JSONObject(draftJson(editor.patch)))
+    .put("scheduleBase", editor.model.scheduleBase ?: JSONObject())
+    .apply {
+        // Core takes the recurrence baseline exactly when the patch edits a recurrence field (its RECURRENCE list).
+        if (editor.patch.keys.any { it in RECURRENCE_FIELDS }) editor.model.recurrenceBase?.let { put("recurrenceBase", it) }
+        editor.checklistSave.takeIf { it.isNotEmpty() }?.let { put("checklist", JSONObject(it)) }
+        editor.attachmentsSave.takeIf { it.isNotEmpty() }?.let { put("attachments", JSONObject(it)) }
+    }
 
 /** RN's More button beside Close (MoreHorizontal 24, the tint): it opens the menu. */
 @Composable
