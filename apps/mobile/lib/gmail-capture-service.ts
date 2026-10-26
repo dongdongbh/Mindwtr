@@ -5,9 +5,6 @@ import { DOMParser } from '@xmldom/xmldom';
 import { getGmailReceiptStore } from './gmail-capture-storage';
 
 // The transport and parser live in core (gmail-capture-transport.ts); RN binds its native module, receipt store and parser.
-export { createGmailCaptureTransport, parseGmailMessage } from '@mindwtr/core/gmail-capture-transport';
-export type { GmailAuthorization } from '@mindwtr/core/gmail-capture-transport';
-
 let transport: GmailCaptureTransport | undefined;
 function getTransport(): GmailCaptureTransport {
     if (!transport) {
