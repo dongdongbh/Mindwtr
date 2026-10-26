@@ -27,6 +27,8 @@ export function GmailCaptureSection() {
     const [operation, setOperation] = useState<Operation>(null);
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
+    // Shown until capture starts again or the account disconnects: other actions leave capture off, so the reason holds.
+    const [receiptsReset, setReceiptsReset] = useState(false);
     const [status, setStatus] = useState(getGmailCaptureStatus);
     const generation = useRef(0);
     const busy = operation !== null;
@@ -40,7 +42,7 @@ export function GmailCaptureSection() {
                 if (current !== generation.current) return;
                 setConfig(next);
                 // The status read opens the receipts file, so a reset it just made shows too.
-                if (gmailReceiptsWereReset()) setError('settings.gmailCaptureReceiptsReset');
+                setReceiptsReset(gmailReceiptsWereReset());
                 if (next.connected) {
                     const nextLabels = await getGmailCaptureLabels();
                     if (current !== generation.current) return;
@@ -91,6 +93,7 @@ export function GmailCaptureSection() {
         setConfig((previous) => previous && ({ ...previous, enabled: false }));
         const next = await configureGmailCapture(labelId, true);
         clearGmailReceiptsReset();
+        setReceiptsReset(false);
         if (current !== generation.current) return;
         setConfig(next);
         setLabelId(next.labelId ?? '');
@@ -99,6 +102,7 @@ export function GmailCaptureSection() {
         retireAccount();
         const result = await disconnectGmailCapture();
         clearGmailReceiptsReset();
+        setReceiptsReset(false);
         if (current === generation.current) setNotice(result.revoked ? 'settings.gmailCaptureDisconnected' : 'settings.gmailCaptureRevokeManually');
     });
     const check = () => runOperation('check', async () => { await pollGmailCaptureNow(); });
@@ -115,7 +119,8 @@ export function GmailCaptureSection() {
             <Text style={{ color: tc.tint, fontWeight: '600' }}>{t(key)}</Text>
         </TouchableOpacity>
     );
-    const displayedError = error ?? (status.lastError ? gmailCaptureErrorTranslation(status.lastError) : null);
+    const displayedError = error ?? (receiptsReset ? 'settings.gmailCaptureReceiptsReset' : null)
+        ?? (status.lastError ? gmailCaptureErrorTranslation(status.lastError) : null);
 
     return (
         <View testID="gmail-capture-section" style={[styles.settingCard, localStyles.card, { backgroundColor: tc.cardBg }]}>

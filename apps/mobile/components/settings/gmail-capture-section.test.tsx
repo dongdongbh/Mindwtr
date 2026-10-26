@@ -142,4 +142,28 @@ describe('RN Gmail settings', () => {
         expect(tree.root.findAllByProps({ testID: 'gmail-error' })).toHaveLength(0);
         act(() => tree.unmount());
     });
+
+    // Any other action (Connect, Cancel, Check now) keeps the notice: capture is still off and the reason still holds.
+    it('keeps the reset notice through other actions, and Disconnect clears it', async () => {
+        gmail.status.mockResolvedValue(connected());
+        gmail.receiptsReset.mockReturnValue(true);
+        const connection = deferred<GmailCaptureConfig>();
+        gmail.connect.mockReturnValue(connection.promise);
+        const tree = await mount();
+        const notice = () => tree.root.findAllByProps({ testID: 'gmail-error' }, { deep: false }).map((node) => node.props.children);
+        await press(tree, 'gmail-connect');
+        expect(notice()).toEqual([getEnglishI18nValue('settings.gmailCaptureReceiptsReset')]);
+        await press(tree, 'gmail-cancel');
+        await act(async () => { connection.resolve(connected()); await settle(); });
+        expect(notice()).toEqual([getEnglishI18nValue('settings.gmailCaptureReceiptsReset')]);
+        gmail.connect.mockResolvedValue(connected());
+        await press(tree, 'gmail-connect');
+        expect(notice()).toEqual([getEnglishI18nValue('settings.gmailCaptureReceiptsReset')]);
+        expect(gmail.clearReceiptsReset).not.toHaveBeenCalled();
+
+        await press(tree, 'gmail-disconnect');
+        expect(gmail.clearReceiptsReset).toHaveBeenCalledOnce();
+        expect(notice()).toEqual([]);
+        act(() => tree.unmount());
+    });
 });
