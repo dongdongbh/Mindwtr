@@ -160,6 +160,7 @@ object WidgetRenderer {
     if (kind.hasTaskList && !usesDirectCollections(Build.VERSION.SDK_INT)) {
       manager.notifyAppWidgetViewDataChanged(ids, R.id.mindwtr_widget_list)
     }
+    if (kind == WidgetKind.TASKS && ids.isNotEmpty()) TasksWidgetProvider.scheduleMidnightRefresh(context)
     return stats
   }
 

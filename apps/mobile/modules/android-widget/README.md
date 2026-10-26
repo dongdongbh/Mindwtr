@@ -112,8 +112,11 @@ seven, and relabels the day with the payload's `upcomingDays` (Today, Tomorrow,
 a short weekday within six days, else a numeric date, as core's Next Actions
 rows) in the current time zone, with the time in the Android locale's format.
 Empty Upcoming stays selected. Tasks and legacy Tasks providers listen for
-date, clock, and timezone changes and request Android's inexact 30-minute widget
-updates; Compact and Quick Capture keep their existing cadence. Launcher and
+clock and timezone changes and request Android's inexact 30-minute widget
+updates. Android skips DATE_CHANGED for manifest receivers, so every Tasks
+render also sets an inexact alarm (10-minute window) for the next local
+midnight that redraws the Tasks widgets. Compact and Quick Capture keep their
+existing cadence. Launcher and
 power-management delays can postpone redraws. Native refresh only filters the
 cached rows: newly eligible tasks and data/filter changes require the app's
 next payload publication.

@@ -71,7 +71,7 @@ open class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
 
   // The check-off fallback alarm lands here when the Handler died with the process.
   override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
-    if (intent.action in setOf(android.content.Intent.ACTION_DATE_CHANGED, android.content.Intent.ACTION_TIME_CHANGED, android.content.Intent.ACTION_TIMEZONE_CHANGED)) {
+    if (intent.action in setOf(ACTION_MIDNIGHT, android.content.Intent.ACTION_DATE_CHANGED, android.content.Intent.ACTION_TIME_CHANGED, android.content.Intent.ACTION_TIMEZONE_CHANGED)) {
       val manager = android.appwidget.AppWidgetManager.getInstance(context)
       val ids = manager.getAppWidgetIds(android.content.ComponentName(context, javaClass))
       WidgetRenderer.render(context, manager, ids, WidgetKind.TASKS)
@@ -82,6 +82,38 @@ open class TasksWidgetProvider : MindwtrWidgetProvider(WidgetKind.TASKS) {
       return
     }
     super.onReceive(context, intent)
+  }
+
+  companion object {
+    const val ACTION_MIDNIGHT = "tech.dongdongbh.mindwtr.androidwidget.MIDNIGHT"
+    private const val REQUEST_MIDNIGHT = 4615
+    private const val MIDNIGHT_WINDOW_MS = 10L * 60 * 1000
+
+    /**
+     * Android skips DATE_CHANGED for manifest receivers, so an inexact alarm
+     * redraws Upcoming's Today/Tomorrow at the next local midnight (#1455).
+     * One pending intent: every render replaces the last alarm.
+     */
+    fun scheduleMidnightRefresh(context: android.content.Context, now: Long = System.currentTimeMillis()) {
+      val app = context.applicationContext
+      val alarm = app.getSystemService(android.content.Context.ALARM_SERVICE) as? android.app.AlarmManager ?: return
+      val intent = android.content.Intent(app, TasksWidgetProvider::class.java).setAction(ACTION_MIDNIGHT)
+      val pendingIntent = android.app.PendingIntent.getBroadcast(
+        app, REQUEST_MIDNIGHT, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+      )
+      // A plain inexact alarm may land an hour late; a window needs no exact-alarm permission.
+      alarm.setWindow(android.app.AlarmManager.RTC, nextLocalMidnight(now), MIDNIGHT_WINDOW_MS, pendingIntent)
+    }
+
+    fun nextLocalMidnight(now: Long, timeZone: java.util.TimeZone = java.util.TimeZone.getDefault()): Long =
+      java.util.Calendar.getInstance(timeZone).apply {
+        timeInMillis = now
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+        add(java.util.Calendar.DAY_OF_MONTH, 1)
+      }.timeInMillis
   }
 }
 

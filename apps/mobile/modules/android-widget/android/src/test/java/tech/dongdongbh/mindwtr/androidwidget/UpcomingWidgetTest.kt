@@ -149,6 +149,28 @@ class UpcomingWidgetTest {
   }
 
   @Test
+  fun aTasksRenderSchedulesTheNextLocalMidnightRedrawBecauseAndroidSkipsDateChanged() {
+    val newYork = TimeZone.getTimeZone("America/New_York")
+    // 2026-11-01 ends daylight time: that day is 25 hours long.
+    assertEquals(at("2026-11-01T04:00").time, TasksWidgetProvider.nextLocalMidnight(at("2026-10-31T16:00").time, newYork))
+    assertEquals(at("2026-11-02T05:00").time, TasksWidgetProvider.nextLocalMidnight(at("2026-11-01T04:00").time, newYork))
+
+    val alarms = org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
+    WidgetRenderer.render(context, android.appwidget.AppWidgetManager.getInstance(context), intArrayOf(), WidgetKind.TASKS)
+    assertNull(alarms.nextScheduledAlarm)
+    // Every Tasks render calls this; the second replaces the first.
+    TasksWidgetProvider.scheduleMidnightRefresh(context)
+    TasksWidgetProvider.scheduleMidnightRefresh(context)
+    val alarm = alarms.scheduledAlarms.single()
+    assertEquals(android.app.AlarmManager.RTC, alarm.type)
+    assertEquals(TasksWidgetProvider.nextLocalMidnight(System.currentTimeMillis()), alarm.triggerAtTime)
+    assertEquals(10L * 60 * 1000, alarm.windowLengthMs)
+    val intent = org.robolectric.Shadows.shadowOf(alarm.operation).savedIntent
+    assertEquals(TasksWidgetProvider.ACTION_MIDNIGHT, intent.action)
+    assertEquals(TasksWidgetProvider::class.java.name, intent.component?.className)
+  }
+
+  @Test
   fun payloadsCachedBeforeTheDayWordsKeepTheirPublishedLabel() {
     assertEquals("stale", label(payload(listOf(item("t", "2026-10-27")), null), "2026-10-26T12:00"))
     val broken = JSONObject(days.toString()).put("weekdays", JSONArray(listOf("Sun")))
