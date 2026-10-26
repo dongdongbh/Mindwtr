@@ -232,6 +232,25 @@ describe('native host contract: Process Inbox', () => {
         expect(useTaskStore.getState()._tasksById.get('inbox-a')?.startTime).toBe('2026-10-06T14:30');
     });
 
+    it('reloads the draft from the task the full editor saved, keeping the step, as RN\'s Edit button does (#1445)', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('start later'));
+        const started = host.startInboxProcessing({ mode: 'guided', mergeSyncedChanges: true });
+        if (!started.ok || !started.value.view) throw new Error('Expected an Inbox task');
+        const sessionId = started.value.sessionId!;
+        await host.commitInboxProcessingStep({ sessionId, taskId: 'inbox-a', step: 'actionable', decision: { choice: 'later' }, requestId: generateUUID() });
+        const request = { sessionId, taskId: 'inbox-a', step: 'later' as const };
+        expect(host.getInboxProcessingStep({ ...request, edit: { type: 'set', field: 'title', value: 'typed' } }).ok).toBe(true);
+        // Nothing saved since the item opened: the typed draft stays.
+        const unchanged = host.getInboxProcessingStep({ ...request, reload: true } as never);
+        expect(unchanged.ok && unchanged.value.draft.title).toBe('typed');
+        await useTaskStore.getState().updateTask('inbox-a', { title: 'Edited in the editor', contexts: ['@desk'] });
+        const reloaded = host.getInboxProcessingStep({ ...request, reload: true } as never);
+        if (!reloaded.ok) throw new Error(JSON.stringify(reloaded));
+        expect(reloaded.value).toMatchObject({ step: 'later', draft: { title: 'Edited in the editor', contexts: ['@desk'] } });
+        expect(host.getInboxProcessingStep({ ...request, reload: 'yes' } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('rejects malformed picked dates and fields without changing the draft', async () => {
         freezeClock();
         const { host, recorder } = await openHost(scenario('start later'));

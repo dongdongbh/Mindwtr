@@ -24,6 +24,7 @@ import {
     buildProcessInboxScheduleUpdates,
     prepareProcessInboxCommit,
     prepareProcessInboxDraftDecision,
+    reloadProcessInboxDraft,
     formatProcessInboxScheduleValue,
     getProcessInboxStepPrompt,
     INITIAL_PROCESS_INBOX_ANSWERS,
@@ -147,6 +148,16 @@ describe('Process Inbox steps', () => {
         const back = answerProcessInboxStep({ choice: 'back', answers: outcome.answers,
             draft: outcome.draft, mode: 'quick', plan: base, task, parseTitle: (title) => ({ title }) as never });
         expect(back).toMatchObject({ type: 'flow', answers: INITIAL_PROCESS_INBOX_ANSWERS, draft: { convertToProject: false, nextAction: '' } });
+    });
+
+    it('takes the saved task again after the full editor, keeping the step\'s own drafts, as RN\'s reloadEditedTask (#1445)', () => {
+        const task = { id: 't1', title: 'Call bank', status: 'inbox', createdAt: '', updatedAt: '' } as Task;
+        const typed = { ...createProcessInboxDraft(task), title: 'typed', delegateWho: 'Sam', followUp: { date: '2026-10-30', dateOnly: true },
+            convertToProject: true, nextAction: 'First step', extraActions: ['Second step'] };
+        const saved = { ...task, title: 'Call the bank', contexts: ['@phone'], updatedAt: '2026-10-26T10:00:00.000Z' } as Task;
+        const reloaded = reloadProcessInboxDraft(typed, saved, null);
+        expect(reloaded).toMatchObject({ title: 'Call the bank', contexts: ['@phone'], delegateWho: 'Sam', followUp: { date: '2026-10-30', dateOnly: true },
+            convertToProject: true, nextAction: 'First step', extraActions: ['Second step'] });
     });
 
     it('starts a capture with no project or area in the default area (#1445)', () => {

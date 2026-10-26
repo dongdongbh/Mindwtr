@@ -1077,6 +1077,21 @@ export function createProcessInboxDraft(task: Task, defaultAreaId?: string | nul
     };
 }
 
+/**
+ * RN's reloadEditedTask (#1445): after the full task editor saved the item, the draft takes the saved task again (as RN's
+ * primeTaskState), and the step's own drafts stay: who it waits on, the follow-up, the project conversion and its actions.
+ */
+export function reloadProcessInboxDraft(draft: ProcessInboxDraft, task: Task, defaultAreaId?: string | null): ProcessInboxDraft {
+    return {
+        ...createProcessInboxDraft(task, defaultAreaId),
+        delegateWho: draft.delegateWho,
+        followUp: draft.followUp,
+        convertToProject: draft.convertToProject,
+        nextAction: draft.nextAction,
+        extraActions: draft.extraActions,
+    };
+}
+
 const pendingDate = (value: ProcessInboxDateValue): ProcessInboxPendingDate => (
     value ? { value: value.date, dateOnly: value.dateOnly,
         ...(value.useDefaultTime ? { useDefaultTime: true } : {}),

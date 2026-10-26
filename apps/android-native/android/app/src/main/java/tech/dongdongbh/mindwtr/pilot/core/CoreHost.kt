@@ -646,7 +646,7 @@ class CoreHost(
     /** Core's startInboxProcessing in [mode] ('guided' or 'quick'). */
     fun startInboxProcessing(mode: String): JSONObject = callAsync("inboxStart", mode)
 
-    /** Core's getInboxProcessingStep with [json] unchanged: one edit or a mode, for the step on screen. */
+    /** Core's getInboxProcessingStep with [json] unchanged: one edit, a mode, or a reload after the editor, for the step on screen. */
     fun inboxProcessingStep(json: String): JSONObject = callAsync("inboxStep", json)
 
     /** Core's commitInboxProcessingStep with [json] unchanged; its requestId makes a retry exact. */

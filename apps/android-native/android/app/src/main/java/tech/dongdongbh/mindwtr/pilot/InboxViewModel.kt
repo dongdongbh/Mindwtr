@@ -972,6 +972,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * added go (core's settleTaskDraftAttachments, as RN's editor settles its draft); a Save settles its own after it landed.
      */
     fun closeEditor(settle: Boolean = true) {
+        val closed = editor
         // Never while a save is owed: its new copies are that save's, settled when it lands (sendDraft).
         editor?.takeIf { discardSettles(settle, pendingSave != null, it.attachments != null, it.readOnly) }?.let { closing ->
             val from = closing.attachmentsFrom ?: closing.model.attachmentsBase
@@ -988,6 +989,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         saveQueued = false
         error = null
         conflict = false
+        // Process Inbox's Edit (RN's reloadEditedTask, #1445): the step under the editor shows what the editor saved.
+        if (processing?.takeUnless { it.hidden }?.taskId == closed?.id) editStep(JSONObject().put("reload", true))
     }
 
     /** RN's waiting prompt, starting from the person the draft names. */

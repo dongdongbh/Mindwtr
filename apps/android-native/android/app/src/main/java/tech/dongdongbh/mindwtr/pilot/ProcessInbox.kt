@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -49,6 +51,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -231,6 +234,15 @@ internal fun stepScroll(shownTask: String?, shownStep: String?, taskId: String, 
     else -> StepScroll.Animate
 }
 
+/**
+ * RN's processingHeader top padding, max(status bar, 10), less the status bar this screen already sits below: RN's
+ * statusBarTranslucent sheet starts at the screen's top.
+ */
+internal fun headerTopPadding(statusBarDp: Float): Float = maxOf(0f, 10f - statusBarDp)
+
+/** RN's processingHeader minHeight 60, which counts its status bar padding (React Native sizes a box with its padding). */
+internal fun headerMinHeight(statusBarDp: Float): Float = maxOf(0f, 60f - statusBarDp)
+
 /** Every date row the view shows: the step's own, the delegate's follow-up, and More options' scheduling. */
 private fun dateRows(view: JSONObject): List<JSONObject> = listOfNotNull(view.child("dateRow"), view.child("delegate")?.child("followUp")) +
     (view.child("moreOptions")?.child("scheduling")?.items("rows") ?: emptyList())
@@ -241,7 +253,9 @@ private fun ProgressHeader(model: InboxViewModel, flow: InboxProcessing, canSkip
     val c = LocalTheme.current.colors
     val view = flow.view
     val progress = view.getJSONObject("progress")
-    Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).hairline(c.border, top = false).padding(horizontal = 20.dp, vertical = 10.dp),
+    val statusTop = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp().value }
+    Row(Modifier.fillMaxWidth().heightIn(min = headerMinHeight(statusTop).dp).hairline(c.border, top = false)
+        .padding(start = 20.dp, end = 20.dp, top = headerTopPadding(statusTop).dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         val close = t("common.close")
         Box(Modifier.widthIn(min = 72.dp).heightIn(min = 44.dp).clickable(enabled = !locked, role = Role.Button) { closeProcessing() }
@@ -255,6 +269,12 @@ private fun ProgressHeader(model: InboxViewModel, flow: InboxProcessing, canSkip
             Box(Modifier.fillMaxWidth(0.7f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(c.border)) {
                 Box(Modifier.fillMaxWidth(done).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(c.tint))
             }
+        }
+        // RN's Edit: the full task editor on this item (#1445); once it closes, the step shows what it saved.
+        val edit = t("common.edit")
+        Box(Modifier.size(44.dp).clickable(enabled = !locked, role = Role.Button) { openEditor(flow.taskId, "task") }
+            .semantics { contentDescription = edit }, contentAlignment = Alignment.Center) {
+            Icon(Lucide.Pencil, null, tint = c.tint, modifier = Modifier.size(20.dp))
         }
         val quick = view.getString("mode") == "quick"
         val modeLabel = view.getString("modeToggleLabel")

@@ -60,7 +60,7 @@ The v1.3.6 task-editor correction is confirmed by the visible disappearance of t
 
 - **`v1.3.8/inbox-processing-step-scroll`** — RN `useInboxProcessingController.ts`. Forced step-reset marker after moving to the top of the replacement question. In Quick process choose Start later or Delegate: the first prompt should be visible. No task content. (#1445)
 
-- **`v1.3.8/inbox-processing-editor-reload`** — RN `useInboxProcessingController.ts`. Forced `Inbox processing reloaded the edited task` after the full task editor, opened with the Edit button in Process Inbox, saved a change and closed. In Process Inbox tap Edit, add a checklist item or change the title, save, then file the item: expect this marker once, the new title on the processing screen, and the checklist kept. No task content. (#1445)
+- **`v1.3.8/inbox-processing-editor-reload`** — RN `useInboxProcessingController.ts`, and native Android through core `native-host-contract.ts` (`getInboxProcessingStep` with `reload`). Forced `Inbox processing reloaded the edited task` after the full task editor, opened with the Edit button in Process Inbox, saved a change and closed. In Process Inbox tap Edit, add a checklist item or change the title, save, then file the item: expect this marker once, the new title on the processing screen, and the checklist kept. No task content. (#1445)
 
 - **`v1.3.8/focus-subgroup-collapse`** — RN Focus screen. Forced collapse marker with `section`, `grouping`, and `collapsed` when a subgroup header is toggled. Fold a Next Actions context/project group, switch away and return: its count remains and its task rows stay folded without blank scroll space. State is device-local; native migration screens are not covered. No labels, task text or group identifiers. (#1444)
 

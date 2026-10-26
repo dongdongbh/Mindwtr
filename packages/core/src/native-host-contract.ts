@@ -124,6 +124,7 @@ import {
     buildProcessInboxStepView,
     commitProcessInboxDecision,
     createProcessInboxDraft,
+    reloadProcessInboxDraft,
     createProcessInboxTitleParser,
     formatProcessInboxCommitMessage,
     formatProcessInboxProgressLabel,
@@ -4021,7 +4022,9 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
 
         /**
          * The current step. `edit` changes the draft first, as the step's controls do;
-         * `mode` switches guided and quick for the same task.
+         * `mode` switches guided and quick for the same task. `reload` follows RN's Edit button: after the full
+         * task editor closed, a task saved since the item opened refills the draft (reloadProcessInboxDraft), on
+         * the same step with its answers; an unchanged task keeps the draft as typed.
          */
         getInboxProcessingStep(input: {
             sessionId: string;
@@ -4029,20 +4032,30 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
             step: string;
             edit?: ProcessInboxDraftEdit;
             mode?: ProcessInboxMode;
+            reload?: boolean;
         }): NativeHostResult<NativeInboxProcessingView> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!isObjectRecord(input) || typeof input.sessionId !== 'string' || typeof input.taskId !== 'string'
                 || typeof input.step !== 'string'
                 || (input.edit !== undefined && !isValidInboxEdit(input.edit))
-                || (input.mode !== undefined && !INBOX_PROCESSING_MODES.has(input.mode))) {
-                return fail('INVALID_INPUT', 'A session, task, step, and a valid edit or mode are required');
+                || (input.mode !== undefined && !INBOX_PROCESSING_MODES.has(input.mode))
+                || (input.reload !== undefined && typeof input.reload !== 'boolean')) {
+                return fail('INVALID_INPUT', 'A session, task, step, and a valid edit, mode or reload are required');
             }
             const pendingEntry = sessions.get(input.sessionId);
             if (pendingEntry && awaitingNextView(pendingEntry)) return busy();
             const checked = current(input);
             if (!checked.ok) return checked;
-            const { entry } = checked.value;
+            const { entry, task } = checked.value;
+            if (input.reload === true && inboxTaskRevision(task) !== entry.taskRevision) {
+                entry.draft = reloadProcessInboxDraft(entry.draft, task, processInboxDefaultAreaId());
+                entry.taskRevision = inboxTaskRevision(task);
+                entry.base = task;
+                void logInfo('Inbox processing reloaded the edited task', {
+                    scope: 'inbox', force: true, context: { releaseCheck: 'v1.3.8/inbox-processing-editor-reload' },
+                });
+            }
             if (input.edit) entry.draft = applyProcessInboxDraftEdit(entry.draft, input.edit, context().plan);
             if (input.mode) entry.mode = input.mode;
             return { ok: true, value: buildView(entry)! };

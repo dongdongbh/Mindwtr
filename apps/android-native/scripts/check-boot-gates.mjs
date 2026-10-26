@@ -903,6 +903,11 @@ assert.match(editorUi, /\.imePadding\(\)\.onSizeChanged \{ formViewport = it\.he
 assert.match(editorUi, /keyboardOptions = if \(commit != null\) KeyboardOptions\(imeAction = ImeAction\.Done\) else KeyboardOptions\.Default,\s+keyboardActions = KeyboardActions\(onDone = \{ focusManager\.clearFocus\(\) \}\)/);
 assert.match(editorUi, /\.onFocusChanged \{ if \(focused && !it\.isFocused\) commit\?\.invoke\(\); focused = it\.isFocused \}/);
 assert.match(editorUi, /!locked, singleLine = true, description = label, tag = "editor-\$id",\s+commit = \{ committedTokens\(editor\.input\(id\), suggestions\[id\]\)\?\.let \{ editInput\(id, it\) \} \}\)/);
+// RN's Process Inbox header (inbox-processing-modal.tsx): Close, the progress, Edit (the pencil: the full task editor on the item,
+// whose saved changes the step then shows), the mode switch and Skip; its top is max(status bar, 10) (ProcessInboxHeaderTest).
+assert.match(processUi, /val edit = t\("common\.edit"\)\s+Box\(Modifier\.size\(44\.dp\)\.clickable\(enabled = !locked, role = Role\.Button\) \{ openEditor\(flow\.taskId, "task"\) \}\s+\.semantics \{ contentDescription = edit \}, contentAlignment = Alignment\.Center\) \{\s+Icon\(Lucide\.Pencil, null, tint = c\.tint, modifier = Modifier\.size\(20\.dp\)\)/);
+assert.match(processUi, /\.heightIn\(min = headerMinHeight\(statusTop\)\.dp\)[^\n]*\s+\.padding\(start = 20\.dp, end = 20\.dp, top = headerTopPadding\(statusTop\)\.dp, bottom = 10\.dp\)/);
+assert.match(model, /if \(processing\?\.takeUnless \{ it\.hidden \}\?\.taskId == closed\?\.id\) editStep\(JSONObject\(\)\.put\("reload", true\)\)/);
 // RN's Destination (TaskEditOrganizationField): the DESTINATION heading over a full-width input-style button with the value.
 assert.match(editorUi, /FieldHeading\(Lucide\.Folder, t\("task\.destination"\)\)\s+DateButton\(value, t\("task\.destination"\), !locked, Modifier\.fillMaxWidth\(\)\) \{ openPicker\("destination"\) \}/);
 // A chip's click, label, and state are one accessibility node: one-of-many choices are selectable (TalkBack says
@@ -1754,7 +1759,6 @@ assert.doesNotMatch(code(editorUi), /\.(sort\w*|sorted\w*|groupBy|reversed|shuff
 // system date dialog's year, month and day and core's picker strings: pickedDay (picker output) and pickerStart (core's picker
 // start, yyyy-MM-dd, into the dialog); pickerClock splits core's HH:mm picker start into the time dialog's hour and minute.
 const PICKER_START = /internal fun pickerStart\(coreDate: String\?\): Triple<Int, Int, Int>\? =\s*coreDate\?\.let \{ PICKER_DAY\.matchEntire\(it\) \}\?\.destructured\?\.let \{ \(year, month, day\) -> Triple\(year\.toInt\(\), month\.toInt\(\) - 1, day\.toInt\(\)\) \}/;
-// the picker); pickerClock splits core's HH:mm picker start into the time picker's hour and minute.
 assert.match(editorUi, PICKER_START);
 assert.equal(editorUi.match(/pickerStart\(/g).length, 2, 'defined once, used once: the date dialog\'s start');
 // RN's Android date and time dialogs (datetimepicker, display "default"): the system's, on the field's day or today, dark with a
