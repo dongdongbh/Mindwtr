@@ -6,6 +6,7 @@ import { WeeklyReviewGuideModal } from './WeeklyReviewModal';
 import { fetchExternalCalendarEvents } from '../../../lib/external-calendar-events';
 import { useCalendarExternalEvents } from '../calendar/use-calendar-external-events';
 import { reportError } from '../../../lib/report-error';
+import { useUiStore } from '../../../store/ui-store';
 
 vi.mock('../../../contexts/language-context', () => ({
     useLanguage: () => ({
@@ -185,6 +186,30 @@ describe('WeeklyReviewGuideModal', () => {
         expect(useTaskStore.getState()._allTasks.find((task) => task.id === 'deferred')).toMatchObject({
             status: 'done', projectId: 'project-0', projectArchivedAt: expect.any(String),
         });
+    });
+
+    it('opens a stale project to show its tasks, add one, or open it in Projects (#1459)', () => {
+        seedProjects([makeTask({ id: 'child', title: 'Call the vendor', projectId: 'project-0', updatedAt: '2026-07-14T10:00:00.000Z' })]);
+        window.localStorage.setItem(storageKey, JSON.stringify({ step: 'stale', startedAt: new Date().toISOString() }));
+        const onClose = vi.fn();
+        const navigated: string[] = [];
+        const onNavigate = (event: Event) => navigated.push((event as CustomEvent<{ view: string }>).detail.view);
+        window.addEventListener('mindwtr:navigate', onNavigate);
+        render(<WeeklyReviewGuideModal onClose={onClose} />);
+
+        const card = screen.getByRole('button', { name: /Finish me/ });
+        expect(card).toHaveAttribute('aria-expanded', 'false');
+        expect(screen.queryByTestId('task-child')).not.toBeInTheDocument();
+        fireEvent.click(card);
+        expect(card).toHaveAttribute('aria-expanded', 'true');
+        expect(screen.getByTestId('task-child')).toHaveTextContent('Call the vendor');
+        expect(screen.getByRole('button', { name: 'Add task' })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'task.aria.openProject' }));
+        window.removeEventListener('mindwtr:navigate', onNavigate);
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(useUiStore.getState().projectView.selectedProjectId).toBe('project-0');
+        expect(navigated).toEqual(['projects']);
     });
 
     it('keeps the projects step after the final project is completed until the reviewer advances', async () => {

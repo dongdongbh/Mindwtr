@@ -44,6 +44,7 @@ import { useLanguage } from '../../../contexts/language-context';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../../lib/ai-config';
 import { fetchExternalCalendarEvents, summarizeExternalCalendarWarnings } from '../../../lib/external-calendar-events';
 import { useUiStore } from '../../../store/ui-store';
+import { dispatchNavigateEvent } from '../../../lib/navigation-events';
 import { getWorkspaceCache } from '../../../lib/workspace-cache';
 import { ShareCardDialog } from '../../ShareCardDialog';
 import { runAfterTaskEditExit } from '../../Task/task-edit-session';
@@ -105,6 +106,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const [shareCardOpen, setShareCardOpen] = useState(false);
     const [projectTaskPrompt, setProjectTaskPrompt] = useState<{ projectId: string; projectTitle: string } | null>(null);
     const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
+    const [expandedStaleProjectId, setExpandedStaleProjectId] = useState<string | null>(null);
     const [keepProjectsStep, setKeepProjectsStep] = useState(false);
     const completingProjectRef = useRef(false);
     const { requestConfirmation, confirmModal } = useConfirmDialog();
@@ -231,6 +233,16 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
     const waitingGroups = weeklyBuckets.waitingGroups;
     const somedayGroups = weeklyBuckets.somedayGroups;
     const projectEntries = weeklyBuckets.projectEntries;
+    const projectEntryById = useMemo(
+        () => new Map(projectEntries.map((entry) => [entry.project.id, entry])),
+        [projectEntries],
+    );
+    // A stale project opens in its own list: the review closes first (#1459).
+    const openProject = (projectId: string) => runAfterTaskEditExit(() => {
+        onClose();
+        useUiStore.getState().setProjectView({ selectedProjectId: projectId });
+        dispatchNavigateEvent('projects');
+    });
     const contextReviewGroups = weeklyBuckets.contextGroups;
     const calendarReviewItems = weeklyBuckets.calendarItems;
     // Only used for the "nothing waiting/someday at all" empty state; the
@@ -849,17 +861,61 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                         )}
                                     </div>
                                 ))}
-                                {staleProjectItems.map((item) => (
-                                    <div key={item.id} className="border border-border rounded-lg p-3 flex items-center justify-between gap-3">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
-                                            <span className="text-sm font-medium truncate">{item.title}</span>
+                                {staleProjectItems.map((item) => {
+                                    // Tap a stale project to see its tasks, edit them in place, add one, or open it (#1459).
+                                    const entry = projectEntryById.get(item.id.slice('project:'.length));
+                                    const expanded = Boolean(entry) && expandedStaleProjectId === entry?.project.id;
+                                    return (
+                                        <div key={item.id} className="border border-border rounded-lg">
+                                            <button
+                                                type="button"
+                                                disabled={!entry}
+                                                aria-expanded={entry ? expanded : undefined}
+                                                onClick={() => setExpandedStaleProjectId(expanded ? null : entry?.project.id ?? null)}
+                                                className="w-full p-3 flex items-center justify-between gap-3 rounded-lg text-left enabled:hover:bg-muted/40 transition-colors"
+                                            >
+                                                <div className="flex items-center gap-2 min-w-0">
+                                                    {!entry
+                                                        ? <Layers className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                                        : expanded
+                                                            ? <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+                                                            : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                                                    <span className="text-sm font-medium truncate">{item.title}</span>
+                                                </div>
+                                                <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
+                                                    {formatI18nTemplate(t('review.staleDaysInactive'), { days: item.daysStale })}
+                                                </span>
+                                            </button>
+                                            {entry && expanded && (
+                                                <div className="space-y-2 px-3 pb-3 pl-9">
+                                                    {entry.tasks.map((task) => (
+                                                        <TaskItem key={task.id} task={task} showProjectBadgeInActions={false} />
+                                                    ))}
+                                                    {entry.tasks.length === 0 && (
+                                                        <div className="text-sm text-muted-foreground italic">{t('review.noActiveTasks')}</div>
+                                                    )}
+                                                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => setProjectTaskPrompt({ projectId: entry.project.id, projectTitle: entry.project.title })}
+                                                            className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
+                                                        >
+                                                            {t('projects.addTask')}
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            aria-label={formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title })}
+                                                            onClick={() => openProject(entry.project.id)}
+                                                            className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
+                                                        >
+                                                            {t('common.open')}
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        <span className="shrink-0 text-xs text-muted-foreground whitespace-nowrap">
-                                            {formatI18nTemplate(t('review.staleDaysInactive'), { days: item.daysStale })}
-                                        </span>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                         {aiEnabled && (
@@ -965,6 +1021,14 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                                                     className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
                                                 >
                                                     {t('projects.addTask')}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    aria-label={formatI18nTemplate(t('task.aria.openProject'), { name: project.title })}
+                                                    onClick={() => openProject(project.id)}
+                                                    className="px-2.5 py-1 rounded-md border border-border text-xs text-foreground hover:bg-muted/40 transition-colors"
+                                                >
+                                                    {t('common.open')}
                                                 </button>
                                                 <button
                                                     type="button"

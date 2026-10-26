@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, create } from 'react-test-renderer';
+import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildReviewSteps, getWeeklyReviewBuckets, type Project, type Task } from '@mindwtr/core';
 
@@ -404,6 +404,35 @@ describe('ReviewModal', () => {
         expect(onClose).toHaveBeenCalledTimes(1);
         expect(openProjectScreen).toHaveBeenCalledExactlyOnceWith('project-1');
         expect(tree.toJSON()).toBeNull();
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['ios', 'android'] as const)('opens a stale project to its tasks, then its screen, on %s (#1459)', async (os) => {
+        Platform.OS = os;
+        storeState.projects = [{ ...defaultProjects[0], updatedAt: '2025-12-01T09:00:00.000Z' }];
+        storeState.tasks = [{ id: 'child', title: 'Call the vendor', status: 'next', projectId: 'project-1', contexts: [], tags: [], createdAt: at(3), updatedAt: at(3) }];
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({ step: 'stale', startedAt: NOW.toISOString() }));
+        const onClose = vi.fn();
+        let tree!: ReturnType<typeof create>;
+        await act(async () => { tree = create(<ReviewModal visible onClose={onClose} />); });
+        expect(currentStepOf(tree)).toBe('stale');
+        const rows = () => tree.root.findAll((node) => String(node.type) === 'SwipeableTaskItem');
+        expect(rows()).toHaveLength(0);
+        const hasText = (node: ReactTestInstance, text: string) => node.findAll((child) => child.props?.children === text).length > 0;
+        const pressable = (text: string) => tree.root.findAll((node) => typeof node.props?.onPress === 'function' && hasText(node, text)).at(-1)!;
+        const card = pressable('Project One');
+        expect(card.props.accessibilityState).toEqual({ expanded: false });
+        act(() => card.props.onPress());
+        expect(rows().map((row) => row.props.task.id)).toEqual(['child']);
+        const open = pressable('task.aria.openProject');
+        act(() => open.props.onPress());
+        if (os === 'ios') {
+            expect(onClose).not.toHaveBeenCalled();
+            expect(openProjectScreen).not.toHaveBeenCalled();
+            await act(async () => { tree.root.findAllByType(Modal)[0].props.onDismiss(); });
+        }
+        expect(onClose).toHaveBeenCalledTimes(1);
+        expect(openProjectScreen).toHaveBeenCalledExactlyOnceWith('project-1');
         await act(async () => tree.unmount());
     });
 

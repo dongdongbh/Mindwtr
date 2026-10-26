@@ -91,6 +91,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         handleFinish,
         handleNavigateToProject,
         handleNavigateToToken,
+        handleOpenProject,
         handleReviewDismiss,
         handleSaveTask,
         handleStatusChange,
@@ -381,6 +382,73 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         );
     };
 
+    // One card for a project in the Projects step and in the Stale step (#1459):
+    // tap to see its tasks, edit them in place, add one, or open the project.
+    const renderProjectEntry = (entry: (typeof projectReviewEntries)[number], meta?: string) => {
+        const isExpanded = expandedProject === entry.project.id;
+        return (
+            <View key={entry.project.id}>
+                <TouchableOpacity
+                    style={[styles.projectItem, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
+                    accessibilityState={{ expanded: isExpanded }}
+                    onPress={() => toggleExpandedProject(entry.project.id)}
+                >
+                    <View style={styles.projectHeader}>
+                        <View style={[styles.projectDot, { backgroundColor: entry.areaColor ?? tc.tint }]} />
+                        <Text style={[styles.projectTitle, { color: tc.text }]}>{entry.project.title}</Text>
+                        <TouchableOpacity
+                            style={[styles.reviewProjectAddTaskButton, { borderColor: tc.border }]}
+                            onPress={(event) => {
+                                event.stopPropagation();
+                                openProjectTaskPrompt(entry.project.id, entry.project.title);
+                            }}
+                        >
+                            <Text style={[styles.reviewProjectAddTaskButtonText, { color: tc.text }]}>
+                                {labels.addTask}
+                            </Text>
+                        </TouchableOpacity>
+                        <View style={[styles.statusBadge, { backgroundColor: entry.badge.background }]}>
+                            <Text style={[styles.statusText, { color: entry.badge.color }]}>
+                                {entry.badge.label}
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.projectMeta}>
+                        <Text style={[styles.taskCount, { color: tc.secondaryText }]}>
+                            {meta ?? entry.countLabel}
+                        </Text>
+                        <Text style={[styles.expandIcon, { color: tc.secondaryText }]}>
+                            {isExpanded ? '▾' : '▸'}
+                        </Text>
+                    </View>
+                </TouchableOpacity>
+                {isExpanded && (
+                    <View style={styles.projectTasks}>
+                        {entry.tasks.map((task) => (
+                            <SwipeableTaskItem
+                                key={task.id}
+                                task={task}
+                                isDark={isDark}
+                                tc={tc}
+                                actions={rowActions}
+                            />
+                        ))}
+                        <TouchableOpacity
+                            style={styles.reviewOpenProjectButton}
+                            accessibilityRole="button"
+                            onPress={() => handleOpenProject(entry.project.id)}
+                        >
+                            <FolderOpen size={14} color={tc.tint} strokeWidth={2} />
+                            <Text style={[styles.reviewOpenProjectText, { color: tc.tint }]} numberOfLines={1}>
+                                {formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title })}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+            </View>
+        );
+    };
+
     const renderContextsList = (groups: ContextReviewGroup[]) => {
         if (groups.length === 0) {
             return (
@@ -511,7 +579,10 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                     actions={rowActions}
                                 />
                             ))}
-                            {staleProjectItems.map((item) => (
+                            {staleProjectItems.map((item) => {
+                                const entry = projectReviewEntries.find((candidate) => `project:${candidate.project.id}` === item.id);
+                                if (entry) return renderProjectEntry(entry, item.daysLabel);
+                                return (
                                 <View key={item.id} style={[styles.calendarDayCard, { borderColor: tc.border }]}>
                                     <Text style={[styles.calendarEventTitle, { color: tc.text }]} numberOfLines={1}>
                                         {item.title}
@@ -520,7 +591,8 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                         {item.daysLabel}
                                     </Text>
                                 </View>
-                            ))}
+                                );
+                            })}
                             {aiEnabled && (
                                 <>
                                     <View style={[styles.stepTitleRow, { marginTop: 16 }]}>
@@ -701,59 +773,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         ) : (
                             <FlatList
                                 data={projectReviewEntries}
-                                renderItem={({ item: entry }) => {
-                                    const isExpanded = expandedProject === entry.project.id;
-                                    return (
-                                        <View>
-                                            <TouchableOpacity
-                                                style={[styles.projectItem, { backgroundColor: tc.cardBg, borderColor: tc.border }]}
-                                                onPress={() => toggleExpandedProject(entry.project.id)}
-                                            >
-                                                <View style={styles.projectHeader}>
-                                                    <View style={[styles.projectDot, { backgroundColor: entry.areaColor ?? tc.tint }]} />
-                                                    <Text style={[styles.projectTitle, { color: tc.text }]}>{entry.project.title}</Text>
-                                                    <TouchableOpacity
-                                                        style={[styles.reviewProjectAddTaskButton, { borderColor: tc.border }]}
-                                                        onPress={(event) => {
-                                                            event.stopPropagation();
-                                                            openProjectTaskPrompt(entry.project.id, entry.project.title);
-                                                        }}
-                                                    >
-                                                        <Text style={[styles.reviewProjectAddTaskButtonText, { color: tc.text }]}>
-                                                            {labels.addTask}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                    <View style={[styles.statusBadge, { backgroundColor: entry.badge.background }]}>
-                                                        <Text style={[styles.statusText, { color: entry.badge.color }]}>
-                                                            {entry.badge.label}
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                                <View style={styles.projectMeta}>
-                                                    <Text style={[styles.taskCount, { color: tc.secondaryText }]}>
-                                                        {entry.countLabel}
-                                                    </Text>
-                                                    <Text style={[styles.expandIcon, { color: tc.secondaryText }]}>
-                                                        {isExpanded ? '▾' : '▸'}
-                                                    </Text>
-                                                </View>
-                                            </TouchableOpacity>
-                                            {isExpanded && entry.tasks.length > 0 && (
-                                                <View style={styles.projectTasks}>
-                                                    {entry.tasks.map((task) => (
-                                                        <SwipeableTaskItem
-                                                            key={task.id}
-                                                            task={task}
-                                                            isDark={isDark}
-                                                            tc={tc}
-                                                            actions={rowActions}
-                                                        />
-                                                    ))}
-                                                </View>
-                                            )}
-                                        </View>
-                                    );
-                                }}
+                                renderItem={({ item: entry }) => renderProjectEntry(entry)}
                                 keyExtractor={(entry) => entry.project.id}
                                 style={styles.taskList}
                                 initialNumToRender={12}

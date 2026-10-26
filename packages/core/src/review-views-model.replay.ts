@@ -487,6 +487,14 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
         const projects: unknown[] = [];
         const suggestionChecks: boolean[] = [];
         const tasks = items.filter((item): item is Extract<NativeWeeklyReviewItem, { type: 'task' }> => item.type === 'task');
+        /** RN's renderProjectEntry (Projects and Stale): the card, then its rows and Open project while expanded (rows keep their own list). */
+        const projectCards = () => items.forEach((item) => {
+            if (item.type === 'project') {
+                texts.push(item.title, labels.addTask, item.badge.label, item.countLabel, item.expanded ? '▾' : '▸');
+                if (item.expanded) texts.push(item.openLabel);
+                projects.push([item.areaColor ?? THEME.tint, item.badge.background, item.badge.color]);
+            } else if (item.type === 'task') rows.push(item.row.id);
+        });
         if (content.step === 'inbox') {
             if (content.countLabel) texts.push(content.countLabel, labels.inboxHint, labels.processInbox);
             texts.push(labels.mindSweep);
@@ -494,7 +502,7 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
             rows.push(...tasks.map((item) => item.row.id));
         } else if (content.step === 'stale') {
             texts.push(labels.stale, labels.staleDesc);
-            rows.push(...tasks.map((item) => item.row.id));
+            projectCards();
             whole(view, content.projects, 'staleProjects').forEach((item) => texts.push(item.title, item.daysLabel));
             if (content.ai.enabled) {
                 texts.push(labels.aiDesc, labels.aiRun);
@@ -545,12 +553,7 @@ async function replayWeekly(contract: Contract, part: ReviewFixturePart, scenari
         } else if (content.step === 'projects') {
             texts.push(labels.projectsDesc, labels.projectsGuide);
             if (content.empty) texts.push(content.empty);
-            items.forEach((item) => {
-                if (item.type === 'project') {
-                    texts.push(item.title, labels.addTask, item.badge.label, item.countLabel, item.expanded ? '▾' : '▸');
-                    projects.push([item.areaColor ?? THEME.tint, item.badge.background, item.badge.color]);
-                } else if (item.type === 'task') rows.push(item.row.id);
-            });
+            projectCards();
         } else if (content.step === 'completed') {
             texts.push(labels.reviewComplete, labels.completeDesc);
             if (content.week) texts.push(content.week.heading, ...content.week.rows);

@@ -225,7 +225,10 @@ struct ReviewGuideScreen: View {
                     if !daily && content.text("step") == "calendar" { calendarTasks }
                     let items = view.objects("items")
                     let visibleItems = scheduledGroup ? items.filter { !$0.flag("scheduled") } : items
-                    ForEach(visibleItems.indices, id: \.self) { index in guideItem(visibleItems[index]) }
+                    ForEach(visibleItems.indices, id: \.self) { index in
+                        guideItem(visibleItems[index])
+                        openProjectLink(after: index, in: visibleItems)
+                    }
                     if scheduledGroup {
                         scheduledToggle
                         if scheduledExpanded {
@@ -420,6 +423,25 @@ struct ReviewGuideScreen: View {
             }
             .padding(14).background(palette.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 1))
+        }
+    }
+
+    /// RN's Open project link (#1459): under an expanded project's last row, or under its card when it has none.
+    @ViewBuilder private func openProjectLink(after index: Int, in items: [CoreObject]) -> some View {
+        let item = items[index]
+        let projectID = item.text("type") == "project" ? item.text("id") : item.text("projectId")
+        let nextProjectID = index + 1 < items.count ? items[index + 1].text("projectId") : ""
+        if !daily, !projectID.isEmpty, nextProjectID != projectID,
+           let card = items[...index].last(where: { $0.text("type") == "project" }), card.text("id") == projectID, card.flag("expanded") {
+            Button { Task { await model.openProject(card) } } label: {
+                HStack(spacing: 6) {
+                    AppIcon(name: "folder", size: 14)
+                    Text(card.text("openLabel")).rnFont(13, .semibold).lineLimit(1)
+                }
+                .foregroundStyle(palette.tint).frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).disabled(!model.reviewActionsEnabled)
+            .accessibilityLabel(card.text("openLabel")).accessibilityIdentifier("review-guide-open-project-" + projectID)
         }
     }
 

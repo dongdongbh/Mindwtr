@@ -5062,13 +5062,20 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(nested["total"] as? Int, 103)
         XCTAssertEqual((nested["items"] as? [Any])?.count, 100)
         let stale = try await weeklyStep("stale")
+        // Each stale project is its project card among the step's items (#1459); `projects` keeps none.
         let projects = try XCTUnwrap((stale["content"] as? [String: Any])?["projects"] as? [String: Any])
-        XCTAssertEqual(projects["total"] as? Int, 103)
-        XCTAssertEqual((projects["items"] as? [Any])?.count, 100)
+        XCTAssertEqual(projects["total"] as? Int, 0)
+        let staleTotal = try XCTUnwrap(stale["total"] as? Int)
+        var staleCards = 0
+        for offset in stride(from: 0, to: staleTotal, by: 50) {
+            let page = try await read("weeklyReview", ["checkpoint": try XCTUnwrap(stale["checkpoint"]), "offset": offset, "limit": 50, "revision": try XCTUnwrap(stale["revision"])])
+            staleCards += try XCTUnwrap(page["items"] as? [[String: Any]]).filter { $0["type"] as? String == "project" }.count
+        }
+        XCTAssertEqual(staleCards, 103)
         let ai = try XCTUnwrap(((stale["content"] as? [String: Any])?["ai"] as? [String: Any])?["items"] as? [String: Any])
         let aiTotal = try XCTUnwrap(ai["total"] as? Int)
         XCTAssertGreaterThan(aiTotal, 100)
-        for (view, list, key, total) in [(contexts, "contextTasks", "@review-bulk", 103), (stale, "staleProjects", "", 103), (stale, "aiItems", "", aiTotal)] {
+        for (view, list, key, total) in [(contexts, "contextTasks", "@review-bulk", 103), (stale, "aiItems", "", aiTotal)] {
             var collected: [[String: Any]] = []
             for offset in stride(from: 0, to: total, by: 50) {
                 var input: [String: Any] = ["checkpoint": try XCTUnwrap(view["checkpoint"]), "list": list, "offset": offset, "limit": 50, "revision": try XCTUnwrap(view["revision"])]
@@ -5079,7 +5086,7 @@ final class CoreHostTests: XCTestCase {
             }
             XCTAssertEqual(collected.count, total)
             XCTAssertEqual(Set(collected.compactMap { $0["id"] as? String }).count, total)
-            let initial = list == "contextTasks" ? nested : list == "staleProjects" ? projects : ai
+            let initial = list == "contextTasks" ? nested : ai
             XCTAssertEqual(try json(Array(collected.prefix(100))), try json(XCTUnwrap(initial["items"])))
             await expectFailure("STALE_REVISION") { _ = try await read("weeklyReviewList", ["checkpoint": try XCTUnwrap(view["checkpoint"]), "list": list, "key": key, "offset": 100, "limit": 50, "revision": "stale"]) }
         }

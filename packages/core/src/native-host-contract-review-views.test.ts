@@ -557,13 +557,19 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         const staleInputs = { checkpoint: at('stale'), calendar };
         const staleView = value(host.getWeeklyReview({ ...staleInputs, offset: 0, limit: 1 }));
         if (staleView.content.step !== 'stale') throw new Error('Expected the stale step');
-        expect(staleView.content.projects).toMatchObject({ total: 102 });
-        expect(staleView.content.projects.items).toHaveLength(100);
+        // Every stale project is its project card among the step's items, paged with them (#1459).
+        expect(staleView.content.projects).toEqual({ total: 0, items: [] });
+        const staleItems = [];
+        while (staleItems.length < staleView.total) {
+            staleItems.push(...value(host.getWeeklyReview({ ...staleInputs, offset: staleItems.length, limit: 100, revision: staleView.revision })).items);
+        }
+        const staleCards = staleItems.filter((item) => item.type === 'project');
+        expect(staleCards).toHaveLength(102);
+        expect(staleCards[0]).toMatchObject({ countLabel: expect.stringMatching(/days inactive/), openLabel: expect.stringMatching(/^Open project /) });
         expect(staleView.content.ai.items.total).toBeGreaterThan(200);
         expect(staleView.content.ai.items.items).toHaveLength(100);
         const aiItems = readAll(staleInputs, staleView.revision, 'aiItems', staleView.content.ai.items.total);
         expect(new Set(aiItems.map((item) => (item as { id: string }).id)).size).toBe(staleView.content.ai.items.total);
-        expect(readAll(staleInputs, staleView.revision, 'staleProjects', 102)).toHaveLength(102);
 
         const contextInputs = { checkpoint: at('contexts'), calendar };
         const contexts = value(host.getWeeklyReview({ ...contextInputs, offset: 0, limit: 100 }));

@@ -507,4 +507,14 @@ export const styles = StyleSheet.create({
         borderLeftColor: '#3B82F6',
         paddingLeft: 8,
     },
+    reviewOpenProjectButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 10,
+    },
+    reviewOpenProjectText: {
+        fontSize: 13,
+        fontWeight: '600',
+    },
 });

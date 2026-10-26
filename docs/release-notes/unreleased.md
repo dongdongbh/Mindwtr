@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Weekly Review: tap a stale project to see its tasks, edit them, add a task, or open the project. Projects in the Projects step can also be opened from the review (#1459).
 - Widgets: the Inbox list and the Inbox count now show every Inbox task, as the app's Inbox does. Before, an area filter hid Inbox tasks outside that area (including tasks with no area), so the Inbox widget could look empty (#1458).
 - Mobile: when Default area is set to use the active area filter, a task captured from a widget, the Android quick settings tile or a shortcut now goes into that area, as the in-app + button already did (#1460).
 - Desktop: in a task's right-click menu, resting the mouse on Start Date, Due Date or Review Date under Dates opens that date's calendar beside the Dates list, so you can pick a date without another click. Clicking a menu row that the mouse already opened now keeps it open instead of closing it (#1390).

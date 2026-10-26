@@ -478,6 +478,20 @@ export function useReviewModalController({
         navigateFromPreview(() => openProjectScreen(projectId));
     }, [navigateFromPreview]);
 
+    // From a review row, not the task editor: no child sheet is open, so on iOS
+    // only the review itself has to dismiss before the route changes (#1459).
+    const handleOpenProject = useCallback((projectId: string) => {
+        if (!visible) return;
+        const navigate = () => openProjectScreen(projectId);
+        if (Platform.OS === 'ios') {
+            pendingNavigationRef.current ??= { after: 'review', navigate };
+            setClosingForNavigation(true);
+        } else {
+            onClose();
+            navigate();
+        }
+    }, [onClose, visible]);
+
     const handleNavigateToToken = useCallback((token: string) => {
         navigateFromPreview(() => openContextsScreen(token));
     }, [navigateFromPreview]);
@@ -514,6 +528,7 @@ export function useReviewModalController({
         handleEditModalDismiss,
         handleFinish,
         handleNavigateToProject,
+        handleOpenProject,
         handleNavigateToToken,
         handleReviewDismiss,
         handleSaveTask,

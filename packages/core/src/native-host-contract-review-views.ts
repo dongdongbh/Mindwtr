@@ -294,8 +294,11 @@ export type NativeWeeklyReviewItem =
         /** Null: the theme tint. */
         areaColor: string | null;
         badge: { label: string; color: string; background: string };
+        /** The task count; in the Stale step, the project's "N days inactive". */
         countLabel: string;
         expanded: boolean;
+        /** "Open project <title>": the link under an expanded card's rows. */
+        openLabel: string;
     };
 
 export type NativeWeeklyReview = {
@@ -316,7 +319,10 @@ export type NativeWeeklyReview = {
     labels: WeeklyReviewLabels & { closeLabel: string; processInbox: string; inboxHint: string; mindSweep: string; mindSweepTitle: string; mindSweepIntro: string };
     content:
         | { step: 'inbox'; countLabel: string | null; empty: string | null }
-        /** getWeeklyReviewList pages 'staleProjects' and 'aiItems' (the AI analysis input). */
+        /**
+         * Stale projects are `project` items after the stale task rows, as in the Projects step (#1459); `projects` keeps
+         * only a stale project with no Projects-step card. getWeeklyReviewList pages 'staleProjects' and 'aiItems' (the AI analysis input).
+         */
         | { step: 'stale'; projects: NativeReviewWindow<NativeStaleProject>; ai: { enabled: boolean; items: NativeReviewWindow<ReviewSnapshotItem> } }
         | {
             step: 'calendar';
@@ -736,6 +742,17 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 lists.set(key, items);
                 return firstWindow(items);
             };
+            const weeklyProjects = () => getWeeklyReviewProjects(buckets.projectEntries, new Map(state.areas.map((area) => [area.id, area])), labels);
+            /** A project card, then its task rows while expanded. */
+            const pushProject = (entry: ReturnType<typeof weeklyProjects>[number], countLabel = entry.countLabel) => {
+                const expanded = entry.project.id === expandedProjectId;
+                entries.push({ kind: 'item', item: {
+                    type: 'project', id: entry.project.id, title: entry.project.title, areaColor: entry.areaColor,
+                    badge: entry.badge, countLabel, expanded,
+                    openLabel: formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title }),
+                } });
+                if (expanded) entry.tasks.forEach((task) => pushTask(task, false, entry.project.id));
+            };
             let content: NativeWeeklyReview['content'];
             if (step === 'inbox') {
                 buckets.inbox.forEach((task) => pushTask(task));
@@ -747,9 +764,16 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             } else if (step === 'stale') {
                 const stale = getWeeklyReviewStale(buckets.staleItems, state.tasks, labels);
                 stale.tasks.forEach((task) => pushTask(task));
+                // Each stale project is its Projects-step card with its days inactive (#1459).
+                const projectById = new Map(weeklyProjects().map((entry) => [`project:${entry.project.id}`, entry]));
+                const unmatched = stale.projects.filter((item) => {
+                    const entry = projectById.get(item.id);
+                    if (entry) pushProject(entry, item.daysLabel);
+                    return !entry;
+                });
                 content = {
                     step,
-                    projects: nested('staleProjects', stale.projects),
+                    projects: nested('staleProjects', unmatched),
                     ai: { enabled: aiEnabled, items: nested('aiItems', aiEnabled ? buckets.staleItems : []) },
                 };
             } else if (step === 'calendar') {
@@ -784,15 +808,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 } }));
                 content = { step, empty: buckets.contextGroups.length === 0 ? labels.contextsEmpty : null, previewCount: WEEKLY_REVIEW_PREVIEW.contextTasks };
             } else if (step === 'projects') {
-                const areaById = new Map(state.areas.map((area) => [area.id, area]));
-                getWeeklyReviewProjects(buckets.projectEntries, areaById, labels).forEach((entry) => {
-                    const expanded = entry.project.id === expandedProjectId;
-                    entries.push({ kind: 'item', item: {
-                        type: 'project', id: entry.project.id, title: entry.project.title, areaColor: entry.areaColor,
-                        badge: entry.badge, countLabel: entry.countLabel, expanded,
-                    } });
-                    if (expanded) entry.tasks.forEach((task) => pushTask(task, false, entry.project.id));
-                });
+                weeklyProjects().forEach((entry) => pushProject(entry));
                 content = { step, empty: buckets.projectEntries.length === 0 ? labels.noActiveProjects : null };
             } else {
                 const completion = getWeeklyReviewCompletion(buckets, state.settings, labels);

@@ -311,7 +311,8 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
         }
         "stale" -> {
             stepHeading(Lucide.History, labels.getString("stale"), labels.getString("staleDesc"))
-            rows(shown.items)
+            // Core's stale task rows, then each stale project as its Projects-step card with its days inactive (#1459).
+            projectEntries(model, shown.items, labels)
             val projects = shown.collection("staleProjects")
             items(projects, key = { "stale:${it.getString("id")}" }) { project -> InfoCard(project.getString("title"), project.getString("daysLabel")) }
             if (projects.size < shown.collectionTotal("staleProjects")) item(key = "stale-more") { MoreChip(menu.idle) { menu.loadCollection("staleProjects") } }
@@ -371,10 +372,7 @@ private fun LazyListScope.weeklyContent(model: InboxViewModel, shown: MenuPage, 
         "projects" -> {
             stepHeading(Lucide.FolderOpen, labels.getString("projectsDesc"), labels.getString("projectsGuide"))
             content.menuText("empty")?.let { emptyLine(it) }
-            items(shown.items, key = { it.key }) { item ->
-                val row = item.row
-                if (row != null) ExpandedTask { ReviewRow(model, row) } else ProjectCard(model, item.json, labels)
-            }
+            projectEntries(model, shown.items, labels)
         }
         else -> item(key = "completed") { CompletedStep(model, content, labels) }
     }
@@ -481,6 +479,45 @@ private fun ProjectCard(model: InboxViewModel, project: JSONObject, labels: JSON
             Text(project.getString("countLabel"), style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.padding(start = 20.dp))
             Text(if (expanded) "▾" else "▸", style = rnText(12, 400), color = c.secondaryText, modifier = Modifier.padding(start = 8.dp))
         }
+    }
+}
+
+/**
+ * RN's renderProjectEntry (Projects and Stale): each project card, then while core has it expanded its rows and RN's Open
+ * project link under them. A row of no expanded project (a stale task) is a plain review row. An expanded project's rows are
+ * keyed under it: a stale task can also show as a row of its expanded stale project.
+ */
+private fun LazyListScope.projectEntries(model: InboxViewModel, list: List<MenuItem>, labels: JSONObject) {
+    var open: JSONObject? = null
+    list.forEachIndexed { index, entry ->
+        val row = entry.row
+        val id = open?.getString("id")
+        if (row == null) {
+            open = entry.json.takeIf { it.getBoolean("expanded") }
+            item(key = entry.key) { ProjectCard(model, entry.json, labels) }
+        } else if (id != null && entry.json.menuText("projectId") == id) {
+            item(key = "$id:${entry.key}") { ExpandedTask { ReviewRow(model, row) } }
+        } else item(key = entry.key) { ReviewRow(model, row) }
+        // ponytail: the link follows the rows loaded so far; past one page of rows it shows early until the rest load.
+        val card = open ?: return@forEachIndexed
+        val next = list.getOrNull(index + 1)
+        if (next?.row != null && next.json.menuText("projectId") == card.getString("id")) return@forEachIndexed
+        item(key = "open:${card.getString("id")}") { ExpandedTask { OpenProjectLink(model, card) } }
+        open = null
+    }
+}
+
+/** RN's Open project link under an expanded project's rows: the tint folder and core's "Open project <title>"; it opens that project. */
+@Composable
+private fun OpenProjectLink(model: InboxViewModel, project: JSONObject) {
+    val menu = model.menu
+    val c = LocalTheme.current.colors
+    val label = project.getString("openLabel")
+    Row(Modifier.padding(bottom = 8.dp).clickable(enabled = menu.idle, role = Role.Button) { menu.openProjects(project.getString("id")) }
+        .semantics { contentDescription = label }.padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Icon(Lucide.FolderOpen, null, tint = c.tint, modifier = Modifier.size(14.dp))
+        Text(label, style = rnText(13, 600), color = c.tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
