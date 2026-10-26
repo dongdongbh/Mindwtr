@@ -201,3 +201,24 @@ describe('Gmail receipts reset interrupted part way', () => {
         ]));
     });
 });
+
+// Receipts are never pruned, and the carry-over runs on the JS thread inside the first status read after app start (Hermes
+// has no JIT). Copying the account's list for every row made it quadratic: 40 000 receipts took about 8 s in Node.
+describe('Gmail receipts carry-over cost', () => {
+    it('carries 40 000 receipts in linear time', () => {
+        const folder = receiptFolder();
+        const db = new DatabaseSync(folder.path('receipts.sqlite'));
+        db.exec('CREATE TABLE receipts (account TEXT, message TEXT)');
+        const insert = db.prepare("INSERT INTO receipts VALUES ('a', ?)");
+        db.exec('BEGIN');
+        for (let index = 0; index < 40_000; index += 1) insert.run(`m${index}`);
+        db.exec('COMMIT');
+        db.close();
+        const logWarn = vi.fn();
+        const started = performance.now();
+        const store = openGmailReceiptStore(folder.files, { logWarn });
+        expect(performance.now() - started).toBeLessThan(3000);
+        expect(store.seen('a', 'm39999')).toBe(true);
+        expect(logWarn.mock.calls[0][1].count).toBe('40000');
+    });
+});

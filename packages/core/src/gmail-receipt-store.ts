@@ -109,7 +109,8 @@ export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailRe
                 const byAccount = new Map<string, string[]>();
                 for (const row of old.executeSync('SELECT account, message FROM receipts').rows) {
                     if (typeof row.account !== 'string' || typeof row.message !== 'string' || !row.account || !row.message) continue;
-                    byAccount.set(row.account, [...(byAccount.get(row.account) ?? []), row.message]);
+                    const messages = byAccount.get(row.account);
+                    if (messages) messages.push(row.message); else byAccount.set(row.account, [row.message]);
                 }
                 for (const [account, messages] of byAccount) { fresh.acknowledge(account, messages); carried += messages.length; }
             } catch { /* nothing readable to carry */ }
