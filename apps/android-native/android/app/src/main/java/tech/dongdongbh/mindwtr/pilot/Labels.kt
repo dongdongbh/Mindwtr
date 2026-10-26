@@ -90,6 +90,11 @@ val LABEL_KEYS = listOf(
     "projects.reviewAt", "projects.sectionPlaceholder", "projects.moveUp", "projects.moveDown", "projects.deleteSectionConfirm", "common.add",
     // The welcome sheet's Sync and Data handoff card (RN's sync-settings-screen.tsx onboardingHandoffCard).
     "settings.gettingStartedContentContinueTitle", "settings.gettingStartedContentContinueDesc", "onboarding.startFreshTitle",
+    // The task editor's "..." menu (RN's TaskEditHeader and use-task-edit-actions.ts), its toasts and Create project's dialog.
+    "task.copyTaskLink", "task.copyTaskId", "list.taskCopied", "list.taskCopyFailed", "taskEdit.duplicateTask", "task.duplicateFailed",
+    "task.createProjectFromTask", "task.promoteToProjectCreated", "task.promoteToProjectMoved", "task.promoteToProjectFailed",
+    "projects.projectName", "task.keepChecklistDescription", "reference.convertToAction", "task.convertToSection",
+    "task.convertToSectionCreated", "task.skipOccurrence", "task.cancelledWithRestore", "list.taskDeleted", "common.undo", "common.success",
 )
 
 /** The label map: core's text for each of [LABEL_KEYS]. It has no fallback text; a key core lacks shows as the key. */

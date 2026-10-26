@@ -69,6 +69,8 @@ class WriteJournal(
             "gettingStarted" to "{requestId,language}",
             // The donation ask's synced record: the request UUID and the time the ask showed, both frozen at the showing.
             "supportPromptShown" to "{requestId,shownAt}",
+            // The task editor's "..." menu (EditorMenu.kt): the action's request UUID, its task, and its kind (core's runTaskEditorAction).
+            "taskEditorAction" to "{requestId,taskId,kind}",
         ) + listOf("archiveAction", "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction",
             "boardCreate", "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd",
             "savedSearchDelete", "generalSetting", "gtdSetting", "dataSetting", "notificationsSetting", "manageEditor", "manageDelete", "syncPreference",

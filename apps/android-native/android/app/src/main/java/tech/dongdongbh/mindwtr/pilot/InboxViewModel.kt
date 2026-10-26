@@ -92,7 +92,7 @@ internal val UPDATE_REFUSALS = listOf("STALE_REVISION", "INVALID_INPUT", "TASK_N
  */
 private val STALE_SHOWN = setOf("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo")
 /** Commands core can refuse before writing: Done and its Undos, an update, an editor save, a saved search, a Process Inbox answer, and the Menu tab's commands. */
-private val REFUSABLE = setOf("complete", "completeUndo", "inboxDecisionUndo", "update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker") + MENU_KINDS + CAPTURE_MODAL_KINDS + ATTACHMENT_KINDS + PROJECT_DETAIL_KINDS
+private val REFUSABLE = setOf("complete", "completeUndo", "inboxDecisionUndo", "update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker") + MENU_KINDS + CAPTURE_MODAL_KINDS + ATTACHMENT_KINDS + EDITOR_MENU_KINDS + PROJECT_DETAIL_KINDS
 
 /**
  * Core refused [kind] before writing ([message]: its error): no retry is owed. STALE_REVISION for any command, core's refusals for
@@ -279,6 +279,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     val ai = AIActionsModel(this)
     /** The editor's and the project screen's attachments (Attachments.kt): rows, pickers, links, downloads, opening. */
     val attachments = AttachmentsModel(this)
+    /** RN's task editor "..." menu and its actions (EditorMenu.kt). */
+    val editorMenu = EditorMenuModel(this)
     /** The open project's Details (ProjectDetails.kt): its pickers and core's prepared commits. */
     val projectDetails = ProjectDetailsModel(this)
     /** The Focus screen's Pomodoro card (Pomodoro.kt, pass R2b): core's durable session, its transitions and its alarms. */
@@ -740,7 +742,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * the editor's AI request or its answer, a picker).
      */
     val editorClean get() = editor?.closesOnNavigation(editsPending, covered = editorPickerOpen || attachments.link != null || attachments.view != null
-        || ai.working == "editor" || ai.answer != null) ?: true
+        || ai.working == "editor" || ai.answer != null || editorMenu.promoteTitle != null) ?: true
     /** The session and number of the edit core is answering now. */
     private var inFlight: Pair<String, Long>? = null
     /** Core's message for the last refused edit; the next accepted edit clears it. */
@@ -979,6 +981,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             attachments.settle(closing.id, closing.model.taskRevision, from, closing.attachmentsNow, from)
         }
         attachments.closed()
+        editorMenu.closed()
         ai.cancelEditor()
         inFlight = null
         editRefusal = null
@@ -1049,7 +1052,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         acknowledged(action)
         // The saved attachments settle the draft's copies: a file no saved attachment owns any more goes (RN's settleDraftAttachments).
         if (action.attachments.isNotEmpty()) attachments.settleSaved(runtime, action.id, JSONObject(action.attachments))
-        ui { closeEditor(settle = false) }
+        // A Create project or Convert to section the menu held for this save (RN saves first) goes now.
+        ui { editorMenu.saved(action.id); closeEditor(settle = false) }
     }
 
     fun reloadEditor() {
@@ -1278,6 +1282,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             in ATTACHMENT_KINDS -> attachments.retry(action)
             // A Project details commit (ProjectDetails.kt) with its exact request and preparation.
             in PROJECT_DETAIL_KINDS -> projectDetails.retry(action)
+            in EDITOR_MENU_KINDS -> editorMenu.run(action)
             // The Menu tab's commands (MENU_KINDS) keep their exact request in MenuModel.
             else -> menu.retry(action)
         }

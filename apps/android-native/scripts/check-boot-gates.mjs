@@ -1042,7 +1042,7 @@ assert.match(model, /focus = pending\.focus\s+projects = pending\.projects\s+kee
 // Both also start storing the last screen (pass O2b review P3-3).
 assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\); keepRoutes\(\) \}/g).length, 2);
 assert.match(model, /runtime\.completeTask\(id, taskRevision\)\s+acknowledged\(action\)/);
-assert.match(model, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{[\s\S]{0,300}?throw failure\s+\}\s+acknowledged\(action\)\s+(?:\/\/[^\n]*\s+)*if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+ui \{ closeEditor\(settle = false\) \}/);
+assert.match(model, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{[\s\S]{0,300}?throw failure\s+\}\s+acknowledged\(action\)\s+(?:\/\/[^\n]*\s+)*if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+(?:\/\/[^\n]*\s+)*ui \{ editorMenu\.saved\(action\.id\); closeEditor\(settle = false\) \}/);
 // The new contract commands: each is a perform(action) with its exact retry, acknowledged only after core's reply.
 for (const [call, fn] of [
     ['runtime\\.setTaskFocus\\(id, focused, taskRevision\\)', 'fun setTaskFocus('], ['runtime\\.setProjectFocus\\(id, focused, projectRevision\\)', 'fun setProjectFocus('],
@@ -1357,7 +1357,9 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // Settings › Data's Getting Started (pass D1b): the seed and its receipt in one transaction, frozen language.
         'seedGettingStarted',
         // The donation ask's synced record (pass O2f), with the time the ask showed.
-        'supportPromptShown'];
+        'supportPromptShown',
+        // The task editor's "..." menu: the user's action (journaled ahead; core prepares and commits it, a replay answers its first reply).
+        'runTaskEditorAction'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -1732,7 +1734,7 @@ assert.match(model, /if \(inFlight != null \|\| current == null \|\| runtime == 
 assert.match(model, /val ticket = current\.session to next\.seq/);
 assert.match(model, /val now = editor\?\.takeIf \{ it\.session == ticket\.first && it\.pending\.firstOrNull\(\)\?\.seq == ticket\.second \}/);
 assert.match(editorUi, /val session: String = UUID\.randomUUID\(\)\.toString\(\)/);
-assert.match(model, /fun closeEditor\(settle: Boolean = true\) \{[\s\S]{0,600}?attachments\.closed\(\)\s+ai\.cancelEditor\(\)\s+inFlight = null/);
+assert.match(model, /fun closeEditor\(settle: Boolean = true\) \{[\s\S]{0,600}?attachments\.closed\(\)\s+editorMenu\.closed\(\)\s+ai\.cancelEditor\(\)\s+inFlight = null/);
 // A Discard settles the draft's attachments (core's settleTaskDraftAttachments, pass A2): baseline and committed are the list the
 // draft started from, at the revision the editor read; a Save settles its own after it landed (closeEditor(settle = false)).
 assert.match(model, /attachments\.settle\(closing\.id, closing\.model\.taskRevision, from, closing\.attachmentsNow, from\)/);
@@ -2335,6 +2337,8 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     const attachmentKinds = [.../val ATTACHMENT_KINDS = setOf\(([^)]*)\)/.exec(source('Attachments.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     // Project details' writes, sent by ProjectDetails.kt: core's prepared commits.
     const projectDetailKinds = [.../val PROJECT_DETAIL_KINDS = setOf\(([^)]*)\)/.exec(source('ProjectDetails.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
+    // The task editor's "..." menu: its one journaled action, sent by EditorMenu.kt.
+    const editorMenuKinds = [.../val EDITOR_MENU_KINDS = setOf\(([^)]*)\)/.exec(source('EditorMenu.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     // Settings › Calendar's new subscription (pass C3), sent by CalendarSettings.kt; its other writes are the Settings kind calendarSetting.
     const calendarKinds = [.../val CALENDAR_COMMANDS = setOf\(([^)]*)\)/.exec(source('CalendarSettings.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     // Settings › Data's rows (pass D1b code review): off while one runs or a sync runs, every entry point and row on that guard.
@@ -2354,9 +2358,10 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     const dataKinds = [.../val DATA_COMMANDS = setOf\(([^)]*)\)/.exec(source('DataTransfer.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
     // The startup prompts' own (pass O2f): the donation ask's synced record, sent by StartupPrompts.kt.
     const promptKinds = [.../val STARTUP_PROMPT_COMMANDS = setOf\(([^)]*)\)/.exec(source('StartupPrompts.kt'))[1].matchAll(/"(\w+)"/g)].map(([, kind]) => kind);
-    assert.deepEqual(hostKinds.sort(), [...kinds, ...syncKinds, ...aiKinds, ...calendarKinds, ...attachmentKinds, ...projectDetailKinds, ...dataKinds, ...promptKinds].sort(), 'every menu command kind is one host command, logged as its operation');
-    assert.match(hostEntry, new RegExp(`type MenuCommand = ${kinds.map((kind) => `'${kind}'`).join('\\s*\\| ')}\\s*\\| SyncScreenCommand \\| AIScreenCommand \\| CalendarScreenCommand \\| AttachmentCommand \\| ProjectDetailCommand \\| DataCommand \\| StartupPromptCommand;`));
+    assert.deepEqual(hostKinds.sort(), [...kinds, ...syncKinds, ...aiKinds, ...calendarKinds, ...attachmentKinds, ...projectDetailKinds, ...dataKinds, ...promptKinds, ...editorMenuKinds].sort(), 'every menu command kind is one host command, logged as its operation');
+    assert.match(hostEntry, new RegExp(`type MenuCommand = ${kinds.map((kind) => `'${kind}'`).join('\\s*\\| ')}\\s*\\| SyncScreenCommand \\| AIScreenCommand \\| CalendarScreenCommand \\| AttachmentCommand \\| ProjectDetailCommand \\| TaskEditorCommand \\| DataCommand \\| StartupPromptCommand;`));
     assert.match(hostEntry, new RegExp(`type DataCommand = ${dataKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
+    assert.match(hostEntry, new RegExp(`type TaskEditorCommand = ${editorMenuKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type StartupPromptCommand = ${promptKinds.map((kind) => `'${kind}'`).join(' \\| ')};`));
     assert.match(hostEntry, new RegExp(`type ProjectDetailCommand = ${projectDetailKinds.map((kind) => `'${kind}'`).join('\\s*\\| ')};`));
     assert.doesNotMatch(menuModel, new RegExp(`"(${projectDetailKinds.join('|')})"`), 'the Menu tab never sends a Project details command itself');
@@ -3422,7 +3427,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // RN's whole navigationBlurRef list (review of 79ac32ea9): the Waiting prompt, and anything covering the editor that Close
     // cannot reach but an entry can (the Add link sheet, an image preview or audio player, the editor's AI request or answer, its
     // pickers) keep it, as unsaved edits do. EditorNavigationTest drives closesOnNavigation.
-    assert.match(model, /val editorClean get\(\) = editor\?\.closesOnNavigation\(editsPending, covered = editorPickerOpen \|\| attachments\.link != null \|\| attachments\.view != null\s+\|\| ai\.working == "editor" \|\| ai\.answer != null\) \?: true/);
+    assert.match(model, /val editorClean get\(\) = editor\?\.closesOnNavigation\(editsPending, covered = editorPickerOpen \|\| attachments\.link != null \|\| attachments\.view != null\s+\|\| ai\.working == "editor" \|\| ai\.answer != null \|\| editorMenu\.promoteTitle != null\) \?: true/);
     assert.match(editorUi, /fun closesOnNavigation\(editsPending: Boolean, covered: Boolean\) = readOnly \|\| \(!dirty && !editsPending && waitingFor == null && !covered\)/);
     assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null \|\| descriptionExpanded\s+DisposableEffect\(pickerOpen\) \{ editorPickerOpen = pickerOpen; onDispose \{ editorPickerOpen = false \} \}/);
     assert.match(entryKt, /if \(reply\.menuText\("route"\) != null \|\| reply\.has\("capture"\) && !reply\.isNull\("capture"\) \|\| reply\.has\("captureModal"\) && !reply\.isNull\("captureModal"\)\) \{/);
@@ -9891,5 +9896,24 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // centers each touch box on its icon (the phone pair had them 90 px left of RN's).
     assert.match(editorUi, /Box\(Modifier\.offset\(x = 10\.dp\)\.size\(66\.dp, 38\.dp\)\) \{/);
     assert.match(editorUi, /val pickerOpen = picker != null \|\| pickDate != null \|\| pickTime != null \|\| descriptionExpanded/);
+}
+// The task editor's "..." menu (task editor-menu-20261026-03): RN's TaskEditHeader rows (EditorMenuTest), each action as RN's
+// use-task-edit-actions.ts runs it. Writes are core's one journaled taskEditorAction (runTaskEditorAction); Share is core's read.
+{
+    const menuKt = source('EditorMenu.kt');
+    assert.match(editorUi, /EditorMoreButton\(model, editor\)/);
+    assert.match(menuKt, /Icon\(Lucide\.MoreHorizontal, null, tint = c\.tint, modifier = Modifier\.size\(24\.dp\)\)/);
+    // Copy task link: this build's own scheme, so a development build's link opens the development build.
+    assert.match(menuKt, /"\$\{BuildConfig\.URL_SCHEME\}:\/\/open\?task=\$\{Uri\.encode\(editor\.id\)\}"/);
+    assert.match(menuKt, /runtime\.menuRead\("taskShare", /);
+    assert.match(menuKt, /Intent\(Intent\.ACTION_SEND\)/);
+    assert.match(menuKt, /shell\.menu\.board\.duplicate\(editor\.id\)/);
+    assert.match(menuKt, /runtime\.menuCommand\("taskEditorAction", input\.toString\(\)\)/);
+    for (const kind of ['promote', 'convertToSection', 'delete', 'deleteUndo', 'cancel', 'cancelUndo', 'skip']) assert.match(menuKt, new RegExp(`"${kind}"`));
+    assert.match(menuKt, /logLine\("Native task converted to a section releaseCheck=v1\.3\.8\/native-convert-to-section"/);
+    assert.match(readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournal.kt'), 'utf8'), /"taskEditorAction" to "\{requestId,taskId,kind\}"/);
+    assert.match(model, /in EDITOR_MENU_KINDS -> editorMenu\.run\(action\)/);
+    // RN's preserved-draft list holds projectConversionOpen: Create project's dialog keeps the editor from an entry (#1410).
+    assert.match(model, /editorMenu\.promoteTitle != null/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

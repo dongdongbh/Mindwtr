@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -129,6 +130,13 @@ class EditorModel(val source: String) {
     val id: String = reply.getString("id")
     val readOnly = reply.getBoolean("readOnly")
     val canPreserveChecklistOnRepeat = reply.optBoolean("canPreserveChecklistOnRepeat")
+    /** Core's say for the "..." menu (RN's onCancelTask and onSkipOccurrence conditions) and Cancel's label (task or recurring series). */
+    val canCancel = reply.optBoolean("canCancel")
+    val canSkipOccurrence = reply.optBoolean("canSkipOccurrence")
+    val cancelLabel: String = reply.optString("cancelLabel")
+    /** The opening schedule and recurrence baselines core keeps raw: Skip and Cancel send them with the draft's save. */
+    val scheduleBase: JSONObject? = reply.optJSONObject("scheduleBase")
+    val recurrenceBase: JSONObject? = reply.optJSONObject("recurrenceBase")
     val focusStar: JSONObject = reply.getJSONObject("focusStar")
     /** createTaskDraft(task), each field as JSON text. A field core left unset is absent here and reads as null. */
     val draft: Map<String, String> = reply.getJSONObject("draft").let { d -> d.keys().asSequence().associateWith { draftLiteral(d.get(it)) } }
@@ -509,7 +517,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     LaunchedEffect(editor.session, aiDraft, busy) { if (!busy) { delay(150); ai.readEditor() } }
 
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("task-editor")) {
-        // RN's TaskEditHeader: Close at the left, Save at the right (Close alone when read-only). Its More menu is not built yet.
+        // RN's TaskEditHeader: Close and More at the left, Save at the right (More and Close when read-only).
         // 12 above and below its 44 controls, and RN's 1 bottom border, which takes room as borderBottomWidth does (69 tall).
         Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).background(c.cardBg).hairline(c.border, top = false).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 13.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -519,7 +527,11 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
                     .semantics { contentDescription = closeLabel }, contentAlignment = Alignment.CenterStart) {
                     Icon(Lucide.X, null, tint = c.tint, modifier = Modifier.size(22.dp).fade(if (!busy && !failed) 1f else 0.5f))
                 }
+                // RN's headerLeftActions: Close, then More, 1 apart.
+                Spacer(Modifier.width(1.dp))
             }
+            // RN's "..." menu (EditorMenu.kt), for every saved task, read-only ones too (their copy rows).
+            EditorMoreButton(model, editor)
             Spacer(Modifier.weight(1f))
             // Typed text core has not resolved yet queues the save until it has (saveEditor).
             val saveEnabled = if (editor.readOnly) true else writable && !busy &&
