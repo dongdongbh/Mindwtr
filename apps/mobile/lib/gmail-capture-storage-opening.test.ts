@@ -61,6 +61,11 @@ function openerHarness(fileCreationError?: Error) {
             mkdirSync(fileURLToPath(this.uri), { recursive: true });
             createdDirectories.push(this.uri);
         }
+        listAsRecords() {
+            return readdirSync(fileURLToPath(this.uri), { withFileTypes: true }).map((entry) => ({
+                isDirectory: entry.isDirectory(), uri: `${this.uri}${entry.name}${entry.isDirectory() ? '/' : ''}`,
+            }));
+        }
     }
     class NativeFile {
         constructor(public uri: string) {}
