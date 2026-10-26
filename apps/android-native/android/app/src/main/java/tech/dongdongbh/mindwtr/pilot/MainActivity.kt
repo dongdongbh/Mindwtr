@@ -69,6 +69,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
@@ -91,7 +92,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.first
@@ -156,12 +156,7 @@ class MainActivity : FragmentActivity() {
             MindwtrTheme(if (model.loading) null else ThemeChoice.current) { AppLockGate(model) { with(model) {
                 val theme = LocalTheme.current
                 val c = theme.colors
-                SideEffect {
-                    WindowCompat.getInsetsController(window, window.decorView).apply {
-                        isAppearanceLightStatusBars = !theme.isDark
-                        isAppearanceLightNavigationBars = !theme.isDark
-                    }
-                }
+                SideEffect { window.applySystemBars(c.bg.toArgb(), theme.isDark) }
                 // A waiting entry opens once the app is free (EntryRouter.pump); a system capture that ended puts the app behind the previous one.
                 LaunchedEffect(entries.head, entries.blocked) { entries.pump() }
                 // RN asks for the notification permission at start while a reminder feature is on (core's answer, once per process).
