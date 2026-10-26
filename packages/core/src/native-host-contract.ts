@@ -350,7 +350,7 @@ import {
     type NativeFocusControlsInput,
 } from './native-host-contract-focus-controls';
 import { createSettingsMethods, type NativePersistentCaptureHost } from './native-host-contract-settings';
-import { createSyncSettingsMethods, type NativeSyncSettingsHost } from './native-host-contract-settings-sync';
+import { createSyncSettingsMethods, type NativeSyncSettingsHost, type NativeSyncSettingsSettlement } from './native-host-contract-settings-sync';
 import { createAIMethods, type NativeAIHost } from './native-host-contract-ai';
 import { createAboutMethods, type NativeAboutHost } from './native-host-contract-about';
 export type { NativeAboutHost, NativeAboutNotice, NativeAboutSettings } from './native-host-contract-about';
@@ -1014,6 +1014,8 @@ const NATIVE_CONTRACT_PROMISE_COMMANDS: ReadonlySet<string> = new Set([
 
 export function createNativeHostContract(options: {
     syncSettings?: NativeSyncSettingsHost;
+    /** Native lifecycle observer, deliberately absent from generic contract commands. */
+    registerSyncSettingsRetirementStatus?: (read: () => NativeSyncSettingsSettlement) => void;
     calendar?: NativeCalendarHost;
     ai?: NativeAIHost;
     /** Settings › About, the heartbeat and the store review prompt (native-host-contract-about.ts). */
@@ -1846,6 +1848,7 @@ export function createNativeHostContract(options: {
         }),
         // Settings › Sync: native-host-contract-settings-sync.ts.
         ...createSyncSettingsMethods({
+            registerRetirementStatus: options.registerSyncSettingsRetirementStatus,
             readiness,
             save,
             t: () => translate,

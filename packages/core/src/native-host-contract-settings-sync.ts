@@ -200,7 +200,11 @@ export const NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS = [
     'runSyncEncryptionAction',
 ] as const;
 
+export type NativeSyncSettingsSettlement = { pending: boolean; uncertain: boolean };
+
 export type SyncSettingsDeps = {
+    /** Private native lifecycle observation; never a screen command or a cancellation authority. */
+    registerRetirementStatus?: (read: () => NativeSyncSettingsSettlement) => void;
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     t: () => Translate;
@@ -368,6 +372,7 @@ type Screen = {
     pending: Set<Promise<unknown>>;
     generation: number;
     configRevision: string;
+    retirementUncertain: boolean;
     unsubscribe: () => void;
 };
 
@@ -445,6 +450,9 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     const receipts = createNativeRequestReceipts({ save: durableSave });
     const toasts: NativeSyncToast[] = [];
     let screen: Screen | null = null;
+    // Closing a view does not settle its original reads/configuration ownership.
+    const closedRetirementScreens = new Set<Screen>();
+
 
     const takeToasts = (): NativeSyncToast[] => toasts.splice(0, toasts.length);
 
@@ -495,13 +503,13 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         throw new Error(`${what} is not available on this host yet`);
     };
 
-    const createTransport = (host: NativeSyncSettingsHost) => createSyncSettingsTransport({
+    const createTransport = (host: NativeSyncSettingsHost, uncertain: () => void) => createSyncSettingsTransport({
         params: () => params(host),
         storage: host.storage,
         secrets: host.secrets,
         platform: { os: () => host.platform.os },
         logInfo: (message, context) => host.log.info(message, context),
-        logSettingsError: (error) => host.log.error(error),
+        logSettingsError: (error) => { uncertain(); host.log.error(error); },
         performSync: (syncPathOverride, options) => host.performSync(syncPathOverride, options),
         clearSyncConfigCache: () => host.clearSyncConfigCache(),
         reconcileBackgroundSync: () => host.reconcileBackgroundSync(),
@@ -552,13 +560,16 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             },
             // The service reads the worklist from the sync location, not from here.
             appData: () => null,
-            logSettingsError: (error) => host.log.error(current.transport.redactError(error)),
+            logSettingsError: (error) => { current.retirementUncertain = true; host.log.error(current.transport.redactError(error)); },
         });
     };
 
     const track = (current: Screen, promise: Promise<unknown>) => {
         current.pending.add(promise);
-        void promise.finally(() => current.pending.delete(promise));
+        void promise.then(
+            () => { current.pending.delete(promise); },
+            () => { current.retirementUncertain = true; current.pending.delete(promise); },
+        );
     };
 
     /** Waits for every read the screen started, as React Native's effects finish before a user acts. */
@@ -618,10 +629,10 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
 
     const openScreen = async (host: NativeSyncSettingsHost): Promise<Screen> => {
         closeScreen();
-        const transport = createTransport(host);
+        const transport = createTransport(host, () => { current.retirementUncertain = true; });
         const current: Screen = {
             host, transport, card: null, cardCancels: [], edgeRefresh: null, lastBusy: false, lastBackend: 'off', effectsQueued: false, opening: true,
-            snapshots: [], cancels: [], pending: new Set(), generation: 0, configRevision: '', unsubscribe: () => undefined,
+            snapshots: [], cancels: [], pending: new Set(), generation: 0, configRevision: '', retirementUncertain: false, unsubscribe: () => undefined,
         };
         screen = current;
         // React Native runs these after the render a state change causes: after the
@@ -646,17 +657,18 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         if (host.listRecoverySnapshots) {
             track(current, host.listRecoverySnapshots()
                 .then((names) => { current.snapshots = names; })
-                .catch((error) => host.log.error(transport.redactError(error))));
+                .catch((error) => { current.retirementUncertain = true; host.log.error(transport.redactError(error)); }));
         }
         await settle(current);
         // An unreadable secret leaves no revision: a form's Save then reads as stale.
-        current.configRevision = await readConfigRevision(host).catch(() => '');
+        current.configRevision = await readConfigRevision(host).catch(() => { current.retirementUncertain = true; return ''; });
         current.opening = false;
         return current;
     };
 
     function closeScreen() {
         if (!screen) return;
+        if (deps.registerRetirementStatus) closedRetirementScreens.add(screen);
         screen.unsubscribe();
         for (const cancel of [...screen.cancels, ...screen.cardCancels]) cancel();
         screen.card?.closeFlow();
@@ -1164,6 +1176,25 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     const running = new Map<string, { identity: string; result: Promise<NativeHostResult<NativeSyncCommandResult>> }>();
     const finished = new Map<string, { identity: string; value: NativeSyncCommandResult }>();
 
+    deps.registerRetirementStatus?.(() => {
+        let pending = running.size > 0, uncertain = false;
+        for (const current of new Set([...closedRetirementScreens, ...(screen ? [screen] : [])])) {
+            const transport = current.transport.getState(), card = current.card?.getState();
+            const owed = current.opening || current.effectsQueued || current.pending.size > 0
+                || transport.isSyncing || transport.isTestingConnection || transport.dropboxBusy
+                || current.transport.getProven().pending || card?.busy === true
+                || card?.pendingFirstSync === true || (card !== undefined && card.flow !== 'none');
+            const unknown = current.retirementUncertain || (!current.opening && current.configRevision === '')
+                || card?.stateUnavailable === true || card?.incompleteTransition === true || card?.partlyEncrypted === true;
+            pending ||= owed;
+            uncertain ||= unknown;
+            // Only an observed clean, closed screen can release its in-memory observation.
+            if (screen !== current && !owed && !unknown && running.size === 0) closedRetirementScreens.delete(current);
+        }
+        return { pending, uncertain };
+    });
+
+
     const screenActionReceipt = (
         requestId: string,
         print: string,
@@ -1198,6 +1229,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 const refused = await run();
                 if (refused && !refused.ok) return fail(refused.error.code, current.transport.redactText(refused.error.message));
             } catch (error) {
+                current.retirementUncertain = true;
                 if (error instanceof NativeAttachmentCleanupUnconfirmedError) {
                     cleanupUnconfirmed = true;
                     throw error;
@@ -1207,7 +1239,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             } finally {
                 if (!cleanupUnconfirmed) {
                     await settle(current);
-                    current.configRevision = await readConfigRevision(current.host).catch(() => current.configRevision);
+                    current.configRevision = await readConfigRevision(current.host).catch(() => { current.retirementUncertain = true; return current.configRevision; });
                 }
             }
             const value = { toasts: takeToasts() };

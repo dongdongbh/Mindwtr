@@ -2802,3 +2802,83 @@ describe('selected directory revision admission', () => {
         expect(since(dev, at).calls.filter(([name]) => name === 'pickSyncFolder' || name === 'performMobileSync')).toEqual([]);
     });
 });
+
+
+describe('private native sync settings retirement observation', () => {
+    const observed = (host: NativeSyncSettingsHost) => {
+        let read = (): { pending: boolean; uncertain: boolean } => { throw new Error('Observer was not registered'); };
+        const methods = createSyncSettingsMethods({
+            readiness: () => ({ ok: true, value: null }), save: async () => ({ ok: true, value: null }),
+            t: () => (key) => en[key as keyof typeof en] ?? key,
+            language: () => 'en', systemLocale: () => 'en-US', dataRevision: () => 'retirement-fixture',
+            requestIdPattern: /^[0-9a-f-]{36}$/,
+            host: () => host, registerRetirementStatus: (status) => { read = status; },
+        });
+        return { methods, read: () => read() };
+    };
+
+    it('observes a healthy original screen without reads, writes, cancellation or a generic command', async () => {
+        const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        const owner = observed(dev.host);
+        expect(owner.read()).toEqual({ pending: false, uncertain: false });
+        value(await owner.methods.openSyncSettings());
+        const before = mark(dev), configuration = storedConfig(dev);
+        expect(owner.read()).toEqual({ pending: false, uncertain: false });
+        expect(Object.keys(owner.methods)).not.toContain('retirementStatus');
+        expect(since(dev, before)).toEqual({ device: [], writes: [], calls: [] });
+        value(owner.methods.closeSyncSettings());
+        expect(owner.read()).toEqual({ pending: false, uncertain: false });
+        expect(storedConfig(dev)).toEqual(configuration);
+    });
+
+    it('retains the actual opening read after close and releases only after it settles', async () => {
+        const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        const original = dev.host.secrets.get;
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let once = true;
+        dev.host.secrets.get = async (name) => { if (once) { once = false; entered(); await held; } return original(name); };
+        const owner = observed(dev.host), opening = owner.methods.openSyncSettings();
+        await reached;
+        try {
+            expect(owner.read().pending).toBe(true);
+            owner.methods.closeSyncSettings();
+            expect(owner.read().pending).toBe(true);
+        } finally { release(); await opening; }
+        expect(owner.read()).toEqual({ pending: false, uncertain: false });
+    });
+
+    it('keeps a failed original revision read uncertain across close and a healthy new screen', async () => {
+        const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        const original = dev.host.secrets.get;
+        dev.host.secrets.get = async () => { throw new Error('Synthetic unavailable original secret read'); };
+        const owner = observed(dev.host);
+        value(await owner.methods.openSyncSettings());
+        expect(owner.read().uncertain).toBe(true);
+        owner.methods.closeSyncSettings();
+        dev.host.secrets.get = original;
+        value(await owner.methods.openSyncSettings());
+        expect(owner.read().uncertain).toBe(true);
+        owner.methods.closeSyncSettings();
+        expect(owner.read().uncertain).toBe(true);
+    });
+
+    it('keeps an actual closed configuration action pending through its final revision read', async () => {
+        const { dev } = await start({ ...WEBDAV_STORED, os: 'ios' });
+        const owner = observed(dev.host); value(await owner.methods.openSyncSettings());
+        const original = dev.host.secrets.get;
+        let entered!: () => void, release!: () => void;
+        const reached = new Promise<void>((resolve) => { entered = resolve; });
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        let once = true;
+        dev.host.secrets.get = async (name) => { if (once) { once = false; entered(); await held; } return original(name); };
+        const action = owner.methods.selectSyncBackend({ requestId: generateUUID(), option: 'off' });
+        await reached;
+        try {
+            owner.methods.closeSyncSettings();
+            expect(owner.read().pending).toBe(true);
+        } finally { release(); await action; }
+        expect(owner.read().pending).toBe(false);
+    });
+});

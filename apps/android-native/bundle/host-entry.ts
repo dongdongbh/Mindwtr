@@ -686,7 +686,11 @@ const nativeCalendar = nativeSync && typeof globalThis.__mindwtrCalendarCall ===
         return bootAdapter;
     })
     : null;
-const contract = createNativeHostContract({ reminderPlatform: globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android', get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
+let readSyncSettingsRetirementStatus: (() => { pending: boolean; uncertain: boolean }) | null = null;
+const contract = createNativeHostContract({
+    ...(globalThis.__mindwtrHostPlatform === 'ios' ? {
+        registerSyncSettingsRetirementStatus: (read: () => { pending: boolean; uncertain: boolean }) => { readSyncSettingsRetirementStatus = read; },
+    } : {}), reminderPlatform: globalThis.__mindwtrHostPlatform === 'ios' ? 'ios' : 'android', get syncSettings() { return nativeSync?.settingsHost ?? iosManualSync?.settingsHost; }, ...(nativeAI ? { ai: nativeAI } : {}),
     calendar: iosCalendar ?? nativeCalendar ?? undefined,
     get attachments() {
         const selected = iosProjectAttachmentDownload ? iosSelfHostedProjectAttachments?.contractHost ?? iosManualSync?.attachmentsHost : attachmentsHost;
@@ -6490,6 +6494,18 @@ globalThis.MindwtrHost = {
         });
     },
     /** Metadata and explicit directory actions share core's existing Settings transaction. */
+    iosWorkspaceRetirementStatus(): string {
+        if (globalThis.__mindwtrHostPlatform !== 'ios' || !bootAdapter || !readSyncSettingsRetirementStatus) {
+            return JSON.stringify({ version: 1, ready: false, pending: true, uncertain: true });
+        }
+        const persistence = getPersistenceStatus(), settings = readSyncSettingsRetirementStatus();
+        return JSON.stringify({ version: 1, ready: true,
+            pending: pending.size > 0 || persistence.queued > 0 || persistence.inFlight || persistence.immediate > 0 || persistence.retrying
+                || settings.pending || iosDirectorySync !== null || iosCleanupCallback !== null || iosTaskAttachmentPreparation || iosProjectFilePreparation
+                || iosProjectAttachmentDownload || iosRelocatedProjectAvailability || iosCachedProjectAvailability || iosSelfHostedProjectAttachments !== null,
+            uncertain: persistence.failed || settings.uncertain || iosForegroundFailure !== null,
+        });
+    },
     iosDirectorySyncSettings(name: string, json: string, control: unknown): string {
         return submit(async () => {
             const channel = (globalThis as typeof globalThis & { __mindwtrFileSyncCall?: import('./host-file-sync').NativeFileSyncCall }).__mindwtrFileSyncCall;

@@ -5,6 +5,7 @@ import SwiftUI
 import UIKit
 import Combine
 import AVFoundation
+import UniformTypeIdentifiers
 
 // MARK: Board drag capture (Foundation-only seam)
 struct BoardOrderDragCapture: Equatable {
@@ -1945,6 +1946,22 @@ final class CoreModel: ObservableObject {
     private var reviewExpandedProject: String?
     private var reviewFinishPending = false
     private let reviewPreferencePrefix = "nativeFoundation.review."
+    private final class WorkspaceRetirementOwner {
+        let host: CoreHost
+        let startupToken: UUID
+        let tasks: [Task<Void, Never>]
+        let reads: [Task<String, Error>]
+        let index: NativeSearchIndex?
+        init(host: CoreHost, startupToken: UUID, tasks: [Task<Void, Never>], reads: [Task<String, Error>], index: NativeSearchIndex?) {
+            self.host = host; self.startupToken = startupToken
+            self.tasks = tasks; self.reads = reads; self.index = index
+        }
+    }
+    private var workspaceRetirementOwner: WorkspaceRetirementOwner?
+    private var workspaceRetired = false
+    private var workspaceUnavailable = false
+    var workspaceAdmissionsOpen: Bool { workspaceRetirementOwner == nil && !workspaceRetired && !workspaceUnavailable }
+
     private var preferenceDefaults: UserDefaults = .standard
     private let manageOpenSectionsKey = "mindwtr:settings:manage:openSections"
     private var manageOpenSectionsPreference = "mindwtr:settings:manage:openSections"
@@ -3481,6 +3498,7 @@ final class CoreModel: ObservableObject {
     }
     func label(_ key: String) -> String { strings.text(key) }
     func recordUpNoteHandoff(_ outcome: String, surface: String) async {
+        guard workspaceAdmissionsOpen else { return }
         _ = try? await query("logLinkHandoff", [outcome, surface])
     }
     private let taskRecoveryScheduleFields = ["startTime", "dueDate", "relativeStartOffset", "reviewAt"]
@@ -4941,10 +4959,11 @@ final class CoreModel: ObservableObject {
                   let failedMessage = plan["failedMessage"] as? String else { throw CocoaError(.coderReadCorrupt) }
             if uri.lowercased().hasPrefix("upnote://") {
                 guard current() else { return }
-                let opened = await NativeUpNoteLink.open(uri, surface: "attachment")
-                await recordUpNoteHandoff(opened ? "opened" : "failed", surface: "attachment")
-                guard current() else { return }
-                if !opened { NativeUpNoteLink.showFailure(uri, labels: strings) }
+                await NativeUpNoteLink.open(uri, surface: "attachment", admission: { self.workspaceAdmissionsOpen }) { opened in
+                    await recordUpNoteHandoff(opened ? "opened" : "failed", surface: "attachment")
+                    guard current() else { return }
+                    if !opened { NativeUpNoteLink.showFailure(uri, labels: strings, admission: { self.workspaceAdmissionsOpen }) }
+                }
                 return
             }
             guard let url = URL(string: uri) else { taskAttachmentOpenError = failedMessage; return }
@@ -5207,7 +5226,237 @@ final class CoreModel: ObservableObject {
     }
     private var taskTimeSpentPending: Bool { taskTimeSpentInput != taskTimeSpentResolvedInput }
 
+    #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+    var workspaceRetirementFixtureEnabled: Bool {
+        guard Bundle.main.bundleIdentifier == "tech.dongdongbh.mindwtr.native.dev",
+              NativeAppLaunch.arguments.filter({ $0 == "--native-workspace-retirement-fixture" }).count == 1,
+              let selection = try? NativeAppLaunch.selection.get(), case .isolated = selection else { return false }
+        return true
+    }
+    @Published private(set) var workspaceRetirementFixtureState = "idle"
+    private var workspaceRetirementReadWaiter: CheckedContinuation<Void, Never>?
+    private var workspaceRetirementHoldFocusRead = false
+    private var workspaceRetirementCloseOriginalFixture = false
+    private var workspaceRetirementIntentCaptures = 0
+    private var workspaceRetirementIntentDispatches = 0
+    private var workspaceRetirementDraftFixture: EditorDraftSnapshot?
+    private var workspaceRetirementDraftArmed = false
+    @Published private(set) var workspaceRetirementWakeRestored = false
+    var workspaceRetirementViewCurrent: Bool { selectedSurface == .focus ? focusCurrent : inboxCurrent }
+    func holdWorkspaceRetirementReadFixture() {
+        guard workspaceRetirementFixtureEnabled, workspaceAdmissionsOpen, ready, !busy,
+              selectedSurface == .focus, workspaceRetirementReadWaiter == nil else { return }
+        focusReadTask?.cancel()
+        workspaceRetirementHoldFocusRead = true
+        focusReadTask = Task {
+            await readFocus()
+            workspaceRetirementFixtureState = "read-finished"
+        }
+    }
+    func releaseWorkspaceRetirementReadFixture() {
+        let waiter = workspaceRetirementReadWaiter; workspaceRetirementReadWaiter = nil
+        waiter?.resume()
+    }
+    func closeWorkspaceRetirementHostFixture() {
+        guard workspaceRetirementFixtureEnabled, workspaceAdmissionsOpen, ready, !busy else { return }
+        workspaceRetirementCloseOriginalFixture = true
+        workspaceRetirementFixtureState = "ordinary-close-armed"
+    }
+    func dirtyWorkspaceRetirementFixture() {
+        guard workspaceRetirementFixtureEnabled, workspaceAdmissionsOpen, ready, !busy else { return }
+        draft = "Synthetic pending capture"
+        workspaceRetirementFixtureState = "dirty-draft"
+    }
+    func armWorkspaceRetirementDraftFixture() {
+        guard workspaceRetirementFixtureEnabled, workspaceAdmissionsOpen, ready, !busy,
+              let taskID = items.first?.text("id"), !taskID.isEmpty else { return }
+        workspaceRetirementDraftFixture = EditorDraftSnapshot(sessionID: UUID().uuidString.lowercased(),
+            taskID: taskID, generation: 1, payloadJSON: "{}")
+        workspaceRetirementDraftArmed = true
+        workspaceRetirementFixtureState = "native-draft-armed"
+    }
+    func cleanWorkspaceRetirementDraftFixture() async {
+        guard workspaceRetirementFixtureEnabled, workspaceAdmissionsOpen, ready, !busy,
+              let snapshot = workspaceRetirementDraftFixture, let original = host else { return }
+        busy = true
+        defer { finishOperation() }
+        do {
+            try await original.discardEditorDraft(expectedSession: snapshot.sessionID)
+            workspaceRetirementDraftFixture = nil
+            workspaceRetirementFixtureState = "native-draft-cleaned"
+        } catch { workspaceRetirementFixtureState = "native-draft-cleanup-refused" }
+    }
+    func checkWorkspaceRetirementPickerFixture() {
+        guard workspaceRetirementFixtureEnabled else { return }
+        var captures = 0
+        let id = UUID()
+        let coordinator = NativeSyncDirectoryPicker.Coordinator(pickerID: id,
+            admission: canCaptureSettingsSyncDirectory,
+            captureBookmark: { _ in captures += 1; return Data() }) { _, _ in }
+        coordinator.documentPicker(UIDocumentPickerViewController(forOpeningContentTypes: [.folder]),
+            didPickDocumentsAt: [URL(fileURLWithPath: "/native-workspace-denied-picker")])
+        workspaceRetirementFixtureState = "picker-captures=\(captures)"
+    }
+    func checkWorkspaceRetirementIntentFixture() {
+        guard workspaceRetirementFixtureEnabled else { return }
+        let wake = entityLinkWake
+        let input = URL(string: "mindwtr://task/synthetic-retirement-intent")!
+        receiveEntityLink(input)
+        receiveEntityLink(input)
+        workspaceRetirementFixtureState = "late-intent-captures=\(workspaceRetirementIntentCaptures);pending=\(entityLinkPending != nil);dispatches=\(workspaceRetirementIntentDispatches);wakeChanged=\(entityLinkWake != wake)"
+    }
+    #endif
+
+    // Capture concrete original Task handles, including their post-native refresh tails.
+    private var workspaceAdmittedTasks: [Task<Void, Never>] {
+        var tasks: [Task<Void, Never>?] = [
+            inboxFilterReadTask, inboxBulkRemoveTask, inboxBulkOrganizeTask, inboxBulkOrganizePickerTask, inboxBulkTagReadTask,
+            pomodoroWork, pomodoroWake, settingsAITask, settingsAboutTask,
+            settingsSyncReadTask, settingsSyncEncryptionTask, settingsSyncDirectoryTask, appleRemindersAutoTask, appleRemindersTask,
+            gtdPomodoroNoticeTask, notificationSettingTask, calendarSettingTask, calendarSettingsCloseTask, projectFilterReadTask,
+            referenceBulkTagReadTask, referenceBulkRemoveTask, doneBulkTagReadTask, doneBulkRemoveTask, taskFileImportTask,
+            taskAttachmentDownloadTask, foregroundSyncTask, reminderLifecycleTask, reminderDebounceTask, reminderTopUpTask,
+            calendarPushLifecycleTask, calendarPushStopTask, searchLifecycleTask, searchDeadlineTask, notificationResponseTask,
+            entityLinkTask, settingsSearchTask, boardReadTask, calendarReadTask, calendarFeedTask,
+            previewTask, processInboxUndoExpiry, processInboxEditTask, taskScheduleTask, taskRecoveryCheckpointTask,
+            taskDestinationReadTask, focusReadTask, searchTask, projectAttachmentDownloadTask, projectFileImportTask,
+            projectFileAvailabilityRecoveryTask, contextsReadTask, somedayReadTask, somedayMoveNoticeExpiry, referenceReadTask,
+            historyReadTask, referenceProjectNextActionReadTask, referenceProjectNextActionInputTask
+        ]
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        tasks.append(settingsAIProofTask)
+        #endif
+        return tasks.compactMap { $0 } + Array(taskTokenReadTasks.values)
+    }
+
+    private var workspaceControllerContextClear: Bool {
+        let windows = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows).filter({ $0.isKeyWindow })
+        return !windows.isEmpty && windows.allSatisfy {
+            guard let controller = $0.rootViewController else { return false }
+            return controller.presentedViewController == nil
+        }
+    }
+
+    private var workspaceRetirementContextClean: Bool {
+        !retryNeeded && !settingsSyncRestartRequired && !appLockRecoveryPending
+            && !appLock.concealed && !appLock.authenticating && !appLockActive
+            && notificationResponseContextClean && !backupDocumentPending && !backupTransferActive
+            && !calendarFileImporterPresented && calendarFileImporterID == nil
+            && !notificationSettingActive && !calendarSettingActive && calendarSubscriptionRuntimeRecovery == nil
+            && notificationSettingTask == nil && notificationSettingWaiter == nil
+            && calendarSettingTask == nil && calendarSettingWaiter == nil && calendarSettingsCloseTask == nil
+            && settingsSyncDirectoryOwner == nil && settingsSyncDirectoryTask == nil && settingsSyncDirectoryPickerID == nil
+            && settingsSyncEncryptionOwner == nil && settingsSyncEncryptionTask == nil && !settingsSyncChecking
+            && settingsAITask == nil && settingsAITimeoutRequest == nil && settingsAIEffortRequest == nil && settingsAIGeminiRequest == nil
+            && settingsAITimeoutHost == nil && settingsAIEffortHost == nil && settingsAIGeminiHost == nil
+            && settingsAboutTask == nil && !settingsAboutOpening && !settingsAboutChecking
+            && appleRemindersOwner == nil && appleRemindersTask == nil && appleRemindersWaiter == nil
+            && appleRemindersAutoOwner == nil && appleRemindersAutoTask == nil
+            && foregroundSyncOwner == nil && foregroundSyncTask == nil
+            && notificationResponseTask == nil && notificationResponseRetry == nil && entityLinkTask == nil
+            && taskAttachmentDownloadOwner == nil && taskAttachmentDownloadTask == nil
+            && projectAttachmentDownloadOwner == nil && projectAttachmentDownloadTask == nil
+            && projectNotesFlushTask == nil && taskRecoveryCheckpointTask == nil
+            && pomodoroCommand == nil && pomodoroWorkHost == nil && pomodoroActionsWaiting == 0
+            && boardCompletionOwner == nil && boardCompletionUndoOwner == nil
+            && NativeUpNoteLink.inFlight == 0 && workspaceControllerContextClear
+    }
+
+    func reserveWorkspaceRetirement() -> Bool {
+        guard workspaceAdmissionsOpen, ready, !busy, workspaceRetirementContextClean,
+              UIApplication.shared.applicationState == .active,
+              let currentHost = host, currentHost.workspaceMode == .personal, startupSyncCompletedHost === currentHost,
+              let token = completedStartupToken,
+              let selection = try? NativeAppLaunch.selection.get() else { return false }
+        if case .rehearsal = selection { return false }
+        let reads = [calendarSettingsReadTask].compactMap { $0 }
+        let owner = WorkspaceRetirementOwner(host: currentHost, startupToken: token,
+            tasks: workspaceAdmittedTasks, reads: reads, index: searchIndex)
+        workspaceRetirementOwner = owner
+        ready = false
+        owner.index?.sealForRetirement()
+        // New ordinary admission is fenced. Existing Task/OS owners still finish on their original host.
+        owner.tasks.forEach { $0.cancel() }
+        owner.reads.forEach { $0.cancel() }
+        return true
+    }
+
+    func finishWorkspaceRetirement() async -> NativeSandboxSession.Result {
+        guard let owner = workspaceRetirementOwner else { return .refused }
+        for task in owner.tasks { await task.value }
+        var readsFinished = true
+        for task in owner.reads { do { _ = try await task.value } catch { readsFinished = false } }
+        await owner.index?.retireAndDrain()
+        guard workspaceRetirementOwner === owner, host === owner.host, completedStartupToken == owner.startupToken else {
+            workspaceUnavailable = true; return .unavailable
+        }
+        guard readsFinished, workspaceRetirementContextClean,
+              workspaceAdmittedTasks.allSatisfy({ owner.tasks.contains($0) }) else {
+            return refuseWorkspaceRetirement(owner)
+        }
+        do {
+            #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+            if workspaceRetirementFixtureEnabled, workspaceRetirementDraftArmed,
+               let snapshot = workspaceRetirementDraftFixture {
+                workspaceRetirementDraftArmed = false
+                try await owner.host.checkpointEditorDraft(snapshot)
+                workspaceRetirementFixtureState = "native-draft-checkpointed"
+            }
+            if workspaceRetirementFixtureEnabled, workspaceRetirementCloseOriginalFixture {
+                workspaceRetirementCloseOriginalFixture = false
+                // The real negative cut is after App joins, before the actual native retirement call.
+                await owner.host.close()
+                workspaceRetirementFixtureState = "host-closed"
+            }
+            #endif
+            let receipt = try await owner.host.retireForWorkspaceTransition()
+            workspaceRetired = true
+            workspaceRetirementOwner = nil
+            ready = false
+            return .retired(receipt)
+        } catch CoreHostRetirementError.refused {
+            return refuseWorkspaceRetirement(owner)
+        } catch {
+            // Native shutdown/health uncertainty is held. A new model cannot erase it.
+            workspaceUnavailable = true
+            ready = false
+            return .unavailable
+        }
+    }
+
+    func recordWorkspaceRetirementRefusal() async {
+        guard workspaceAdmissionsOpen, let original = host else { return }
+        _ = try? await original.call("logLine", argumentsJSON: json([
+            "Native iOS workspace retirement refused",
+            #"{"releaseCheck":"v1.3.8/ios-sandbox-lifecycle","operation":"retire","outcome":"refused","workspace":"personal"}"#,
+        ]))
+    }
+
+    private func refuseWorkspaceRetirement(_ owner: WorkspaceRetirementOwner) -> NativeSandboxSession.Result {
+        guard workspaceRetirementOwner === owner, host === owner.host, workspaceRetirementContextClean,
+              workspaceAdmittedTasks.allSatisfy({ owner.tasks.contains($0) }) else {
+            workspaceUnavailable = true; return .unavailable
+        }
+        workspaceRetirementOwner = nil
+        if searchIndex === owner.index { searchIndex = nil }
+        ready = true
+        refreshRequested = true
+        finishOperation()
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        let oldWake = searchWakeTicket
+        #endif
+        requestSearchLifecycle(token: owner.startupToken, active: UIApplication.shared.applicationState == .active, force: true)
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if workspaceRetirementFixtureEnabled {
+            workspaceRetirementWakeRestored = searchWakeTicket > oldWake
+        }
+        #endif
+        return .refused
+    }
+
     func start() async {
+        guard workspaceAdmissionsOpen else { return }
         #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
         // Keep the deliberately retired fixture owner available until its held callback drains.
         guard !pomodoroAlarmTestEnabled || !pomodoroAlarmTestRetired else { return }
@@ -5972,6 +6221,7 @@ final class CoreModel: ObservableObject {
     }
 
     func requestNotificationResponses() {
+        guard workspaceAdmissionsOpen else { return }
         notificationResponseWakePending = true
         notificationResponseDeferredUntilClean = false
         admitNotificationResponses()
@@ -6087,13 +6337,13 @@ final class CoreModel: ObservableObject {
 
     func receiveSearchIdentifier(_ identifier: String) {
         guard searchAvailable, identifier.utf16.count <= 8_000 else { return }
-        ensureSearchIndex()
+        guard let selection = trustedSearchSelection else { return }
         let taskID: String?
         #if DEBUG && targetEnvironment(simulator)
         if searchTestFake { taskID = searchTestIdentifiers[identifier] }
-        else { taskID = searchIndex?.taskID(for: identifier) }
+        else { taskID = NativeSearchIndex.taskID(for: identifier, selection: selection) }
         #else
-        taskID = searchIndex?.taskID(for: identifier)
+        taskID = NativeSearchIndex.taskID(for: identifier, selection: selection)
         #endif
         guard let taskID, !taskID.isEmpty, taskID.utf16.count <= 500 else { return }
         receiveEntityInput(.searchTask(taskID))
@@ -6105,13 +6355,18 @@ final class CoreModel: ObservableObject {
         guard entityLinkLastInput != input.bytes || received - entityLinkLastReceived >= 1 else { return }
         entityLinkLastInput = input.bytes
         entityLinkLastReceived = received
-        withdrawEntityLinkPreview()
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if workspaceRetirementFixtureEnabled { workspaceRetirementIntentCaptures += 1 }
+        #endif
+        // Preserve original-route volatile intake while sealed; it is outside this App/Host retirement receipt.
+        if workspaceAdmissionsOpen { withdrawEntityLinkPreview() }
         entityLinkDeliveryToken += 1
         entityLinkPending = .init(token: entityLinkDeliveryToken, input: input)
         requestEntityLinks()
     }
 
     func requestEntityLinks() {
+        guard workspaceAdmissionsOpen else { return }
         entityLinkCleanupDelivery = nil
         entityLinkWake += 1
         admitEntityLinks()
@@ -6172,6 +6427,9 @@ final class CoreModel: ObservableObject {
               let startupToken = completedStartupToken else { return }
         guard !delivery.input.isSearch || searchPolicyAdmitted else { return }
         let owner = EntityLinkOwner(id: UUID(), host: currentHost, startupToken: startupToken, delivery: delivery)
+        #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        if workspaceRetirementFixtureEnabled { workspaceRetirementIntentDispatches += 1 }
+        #endif
         entityLinkAttemptedWake = entityLinkWake
         entityLinkTaskID = owner.id
         busy = true
@@ -6341,7 +6599,7 @@ final class CoreModel: ObservableObject {
     }
 
     func recordForegroundReminderPresentation(sound: Bool) async {
-        guard ready, let currentHost = host else { return }
+        guard workspaceAdmissionsOpen, ready, let currentHost = host else { return }
         _ = try? await currentHost.call("logLine", argumentsJSON: json([
             "Native iOS foreground reminder presentation requested",
             try json(["releaseCheck": "v1.3.5/ios-reminder-present", "outcome": sound ? "sound" : "silent"]),
@@ -6478,6 +6736,7 @@ final class CoreModel: ObservableObject {
 
     // Independent from the Inbox-only Sync opportunity. App Lock may be enabled and authenticated.
     func requestReminderLifecycle(token: UUID?, active: Bool) {
+        guard workspaceAdmissionsOpen else { return }
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
         guard active, UIApplication.shared.applicationState == .active, !appLock.concealed else {
             cancelReminderLifecycle(); return
@@ -6495,6 +6754,9 @@ final class CoreModel: ObservableObject {
     }
 
     func cancelReminderLifecycle() {
+        guard workspaceAdmissionsOpen else {
+            reminderSceneActive = false; reminderLifecycleTask?.cancel(); return
+        }
         reminderSceneActive = false; reminderGeneration += 1
         reminderDebounceTask?.cancel(); reminderDebounceTask = nil
         reminderTopUpTask?.cancel(); reminderTopUpTask = nil
@@ -6532,6 +6794,7 @@ final class CoreModel: ObservableObject {
     }
 
     func reminderClockChanged() {
+        guard workspaceAdmissionsOpen else { return }
         reminderTopUpTask?.cancel(); reminderTopUpTask = nil
         reminderWakeTicket &+= 1
         pomodoroAlarmWakeTicket &+= 1
@@ -6612,6 +6875,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func admitReminderLifecycle() {
+        guard workspaceAdmissionsOpen else { return }
         guard reminderLifecycleTask == nil, reminderDebounceReady,
               reminderWakeTicket != reminderAttemptedTicket || pomodoroAlarmWakeTicket != pomodoroAlarmAttemptedTicket,
               let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
@@ -6731,6 +6995,7 @@ final class CoreModel: ObservableObject {
     #endif
 
     func requestCalendarPushLifecycle(token: UUID?, active: Bool) {
+        guard workspaceAdmissionsOpen else { return }
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
         guard active, UIApplication.shared.applicationState == .active, !appLock.concealed else {
             cancelCalendarPushLifecycle(); return
@@ -6745,6 +7010,9 @@ final class CoreModel: ObservableObject {
     }
 
     func cancelCalendarPushLifecycle() {
+        guard workspaceAdmissionsOpen else {
+            calendarPushSceneActive = false; calendarPushLifecycleTask?.cancel(); return
+        }
         calendarPushSceneActive = false
         calendarPushRestartRequested = false
         stopCalendarPushLifecycle()
@@ -6867,6 +7135,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func admitCalendarPushLifecycle() {
+        guard workspaceAdmissionsOpen else { return }
         guard calendarPushLifecycleTask == nil, calendarPushStopTask == nil, !calendarPushSettingSuspended,
               calendarPushRestartRequested || calendarPushWakeTicket != calendarPushAttemptedTicket,
               let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
@@ -7087,6 +7356,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func ensureSearchIndex() {
+        guard workspaceAdmissionsOpen else { return }
         guard searchIndex == nil, let selection = trustedSearchSelection else { return }
         #if DEBUG && targetEnvironment(simulator)
         if searchTestFake { return }
@@ -7104,9 +7374,10 @@ final class CoreModel: ObservableObject {
         #if DEBUG && targetEnvironment(simulator)
         if searchTestFake { searchTestState = outcome + ":" + String(count) }
         #endif
-        guard let observed = host else { return }
+        guard workspaceAdmissionsOpen, let observed = host else { return }
+        let token = completedStartupToken
         Task {
-            guard self.host === observed else { return }
+            guard self.workspaceAdmissionsOpen, self.host === observed, self.completedStartupToken == token else { return }
             _ = try? await observed.call("logLine", argumentsJSON: self.json([
                 "Native iOS system search",
                 try self.json(["releaseCheck": "v1.3.5/ios-search-publication", "outcome": outcome, "count": count]),
@@ -7180,6 +7451,7 @@ final class CoreModel: ObservableObject {
     }
 
     func requestSearchLifecycle(token: UUID?, active: Bool, force: Bool = false) {
+        guard workspaceAdmissionsOpen else { return }
         ensureSearchIndex()
         if !searchPolicyAdmitted { withdrawSearchIndex() }
         guard let token, token == completedStartupToken else { return }
@@ -7201,6 +7473,7 @@ final class CoreModel: ObservableObject {
     }
 
     func searchPolicyChanged(suspendNavigation: Bool = true) {
+        guard workspaceAdmissionsOpen else { return }
         searchPublicationGeneration &+= 1
         searchDeadlineTask?.cancel(); searchDeadlineTask = nil
         searchLifecycleTask?.cancel()
@@ -7228,6 +7501,7 @@ final class CoreModel: ObservableObject {
     }
 
     func searchClockChanged() {
+        guard workspaceAdmissionsOpen else { return }
         searchDeadlineTask?.cancel(); searchDeadlineTask = nil
         searchWakeTicket &+= 1
         searchForceSnapshot = true
@@ -7265,6 +7539,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func admitSearchLifecycle() {
+        guard workspaceAdmissionsOpen else { return }
         guard searchAvailable, searchLifecycleTask == nil, searchWakeTicket != searchAttemptedTicket,
               searchSceneActive, UIApplication.shared.applicationState == .active,
               let observed = host, let token = completedStartupToken, startupSyncCompletedHost === observed,
@@ -7360,6 +7635,7 @@ final class CoreModel: ObservableObject {
     // SwiftUI requests the captured intent. This model retains the Task, so
     // changes to busy or the view tree cannot abandon an admitted invocation.
     func requestForegroundSync(token: UUID?, active: Bool) {
+        guard workspaceAdmissionsOpen else { return }
         guard !Task.isCancelled, let token, token == completedStartupToken else { return }
         let wasActive = foregroundSyncSceneActive
         foregroundSyncSceneActive = active && UIApplication.shared.applicationState == .active
@@ -7395,6 +7671,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func admitForegroundSync() {
+        guard workspaceAdmissionsOpen else { return }
         guard let intent = foregroundSyncIntent, intent.foregroundRequested else { return }
         guard host === intent.host, startupSyncCompletedHost === intent.host,
               completedStartupToken == intent.startupToken, ready, !retryNeeded, !settingsSyncRestartRequired,
@@ -7497,6 +7774,7 @@ final class CoreModel: ObservableObject {
     }
 
     func refresh() async {
+        guard workspaceAdmissionsOpen else { return }
         if selectedSurface == .calendar { calendarFeedRefreshRequested = true }
         // The alert owns its frozen Trash projection until Confirm or Cancel.
         // Ordinary reads resume on the next refresh; lifecycle/context changes
@@ -8596,6 +8874,7 @@ final class CoreModel: ObservableObject {
     }
 
     func requestAppleRemindersAutoImport(token: UUID?, active: Bool) {
+        guard workspaceAdmissionsOpen else { return }
         guard let token, token == completedStartupToken else { return }
         let currentActive = active && UIApplication.shared.applicationState == .active
         let entered = currentActive && (!appleRemindersAutoActive || appleRemindersAutoToken != token)
@@ -8609,6 +8888,7 @@ final class CoreModel: ObservableObject {
         appleRemindersAutoTask?.cancel(); appleRemindersAutoNotice = nil
     }
     private func admitAppleRemindersAutoImport() {
+        guard workspaceAdmissionsOpen else { return }
         guard appleRemindersAutoRequested, appleRemindersAutoActive, appleRemindersAutoOwner == nil,
               let token = appleRemindersAutoToken, token == completedStartupToken,
               ready, !busy, !retryNeeded, !settingsSyncRestartRequired, !appLockRecoveryPending, !appLockActive,
@@ -9256,6 +9536,12 @@ final class CoreModel: ObservableObject {
             if (error as NSError).code != CocoaError.userCancelled.rawValue { settingsSyncError = label("settings.feedback.actionFailed") }
             finishSettingsSyncDirectory(owner)
         }
+    }
+
+    func canCaptureSettingsSyncDirectory(_ pickerID: UUID) -> Bool {
+        guard workspaceAdmissionsOpen, settingsSyncDirectoryPickerID == pickerID,
+              let owner = settingsSyncDirectoryOwner, owner.id == pickerID else { return false }
+        return settingsSyncDirectoryCurrent(owner)
     }
 
     private func performSettingsSyncDirectory(_ command: String, extra: CoreObject = [:]) async {
@@ -27570,10 +27856,11 @@ final class CoreModel: ObservableObject {
                   let failedMessage = plan["failedMessage"] as? String else { throw CocoaError(.coderReadCorrupt) }
             if uri.lowercased().hasPrefix("upnote://") {
                 guard current() else { return }
-                let opened = await NativeUpNoteLink.open(uri, surface: "attachment")
-                await recordUpNoteHandoff(opened ? "opened" : "failed", surface: "attachment")
-                guard current() else { return }
-                if !opened { NativeUpNoteLink.showFailure(uri, labels: strings) }
+                await NativeUpNoteLink.open(uri, surface: "attachment", admission: { self.workspaceAdmissionsOpen }) { opened in
+                    await recordUpNoteHandoff(opened ? "opened" : "failed", surface: "attachment")
+                    guard current() else { return }
+                    if !opened { NativeUpNoteLink.showFailure(uri, labels: strings, admission: { self.workspaceAdmissionsOpen }) }
+                }
                 return
             }
             guard let url = URL(string: uri) else { projectAttachmentOpenError = failedMessage; return }
@@ -35423,6 +35710,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func admitPomodoroRuntime() {
+        guard workspaceAdmissionsOpen else { return }
         guard pomodoroNeedsRead, pomodoroActionsWaiting == 0, pomodoroWork == nil, pomodoroWorkHost == nil, pomodoroCommand == nil,
               ready, !busy, !retryNeeded, !taskPresented, !capturePresented, !projectRenameEditing,
               !appLock.concealed, !settingsSyncRestartRequired, completedStartupToken != nil,
@@ -35849,6 +36137,7 @@ final class CoreModel: ObservableObject {
     }
 
     private func scheduleFocusRead(delay: UInt64 = 150_000_000) {
+        guard workspaceAdmissionsOpen else { return }
         guard selectedSurface == .focus, !busy, !retryNeeded, !taskPresented, !areaPickerPresented else { return }
         focusReadTask?.cancel()
         focusReadTask = Task {
@@ -35915,6 +36204,14 @@ final class CoreModel: ObservableObject {
         for attempt in 0..<2 {
             do {
                 var next = try await focusPage(state: focusState)
+                #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+                if workspaceRetirementFixtureEnabled, workspaceRetirementHoldFocusRead, !Task.isCancelled {
+                    workspaceRetirementHoldFocusRead = false
+                    // The real native read returned; this original App Task has not completed its apply/refresh tail.
+                    workspaceRetirementFixtureState = "read-returned"
+                    await withCheckedContinuation { workspaceRetirementReadWaiter = $0 }
+                }
+                #endif
                 guard focusReadAllowed(generation, ownsOperation: ownsOperation) else { return }
                 for entry in edits {
                     var edit = entry.object("edit")
@@ -36528,6 +36825,7 @@ final class CoreModel: ObservableObject {
         return error is CoreHostRejection
     }
     private func finishOperation() {
+        guard workspaceAdmissionsOpen else { busy = false; return }
         if pomodoroWorkHost == nil {
             // A hidden ready panel (Pomodoro off) re-reads on source, clock and scene changes;
             // an ordinary operation does not need another read.

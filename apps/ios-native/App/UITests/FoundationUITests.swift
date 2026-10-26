@@ -1,6 +1,74 @@
 import XCTest
 
 final class FoundationUITests: XCTestCase {
+    private func workspaceRetirementApp(_ suffix: String) throws -> XCUIApplication {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--native-ui-test-library", try task371Library(suffix, prefix: "MINDWTR_SANDBOX_RETIRE_UI_"),
+            "--native-workspace-retirement-fixture", "-AppleLanguages", "(en-US)", "-AppleLocale", "en_US"]
+        app.launch()
+        boardEnabled(app.buttons["workspace-retirement-hold"], timeout: 60)
+        return app
+    }
+    private func workspaceRetirementState(_ app: XCUIApplication, containing value: String, timeout: TimeInterval = 30) {
+        let state = app.staticTexts["workspace-retirement-state"]
+        expectation(for: NSPredicate { _, _ in state.exists && state.label.contains(value) }, evaluatedWith: state)
+        waitForExpectations(timeout: timeout)
+    }
+    func testWorkspaceRetirementWaitsForOriginalReadTailAndKeepsScopeExplicit() throws {
+        let app = try workspaceRetirementApp("READ_TAIL")
+        boardTap(app, "workspace-retirement-hold")
+        workspaceRetirementState(app, containing: "read-returned")
+        boardTap(app, "workspace-retirement-request")
+        workspaceRetirementState(app, containing: "draining|pending|read-returned|none")
+        let premature = expectation(for: NSPredicate { _, _ in
+            app.staticTexts["workspace-retirement-state"].label.contains("APP_HOST_RETIREMENT_ONLY")
+        }, evaluatedWith: nil)
+        premature.isInverted = true
+        waitForExpectations(timeout: 1)
+        boardTap(app, "workspace-retirement-release")
+        workspaceRetirementState(app, containing: "retired|retired|read-finished|APP_HOST_RETIREMENT_ONLY", timeout: 60)
+        XCTAssertFalse(app.buttons["workspace-retirement-hold"].isEnabled)
+        boardTap(app, "workspace-retirement-picker")
+        workspaceRetirementState(app, containing: "picker-captures=0")
+        boardTap(app, "workspace-retirement-intent")
+        workspaceRetirementState(app, containing: "late-intent-captures=1;pending=true;dispatches=0;wakeChanged=false")
+    }
+    func testWorkspaceRetirementRefusesPendingPersonalDraft() throws {
+        let app = try workspaceRetirementApp("DIRTY")
+        boardTap(app, "workspace-retirement-dirty")
+        workspaceRetirementState(app, containing: "dirty-draft")
+        boardTap(app, "workspace-retirement-request")
+        workspaceRetirementState(app, containing: "personal|refused|dirty-draft|none")
+        XCTAssertTrue(app.buttons["workspace-retirement-hold"].isEnabled)
+    }
+    func testWorkspaceRetirementOrdinaryCloseIsNotAnAcknowledgedRetirement() throws {
+        let app = try workspaceRetirementApp("CLOSED")
+        boardTap(app, "workspace-retirement-close")
+        workspaceRetirementState(app, containing: "ordinary-close-armed")
+        boardTap(app, "workspace-retirement-request")
+        workspaceRetirementState(app, containing: "unavailable|pending|host-closed|none", timeout: 60)
+        XCTAssertFalse(app.buttons["workspace-retirement-hold"].isEnabled)
+        boardTap(app, "workspace-retirement-request")
+        workspaceRetirementState(app, containing: "unavailable|pending|host-closed|none")
+    }
+    func testWorkspaceRetirementNativeRefusalRestoresReadAndSearchBeforeExactCleanup() throws {
+        // The REFUSED personal fixture needs one synthetic Inbox task, seeded through the shared factory.
+        let app = try workspaceRetirementApp("REFUSED")
+        boardTap(app, "workspace-retirement-hold")
+        workspaceRetirementState(app, containing: "read-returned")
+        boardTap(app, "workspace-retirement-native-draft")
+        workspaceRetirementState(app, containing: "native-draft-armed")
+        boardTap(app, "workspace-retirement-request")
+        boardTap(app, "workspace-retirement-release")
+        workspaceRetirementState(app, containing: "personal|refused|native-draft-checkpointed|none", timeout: 60)
+        workspaceRetirementState(app, containing: "current=true|wakeRestored=true")
+        boardTap(app, "workspace-retirement-native-cleanup")
+        workspaceRetirementState(app, containing: "native-draft-cleaned")
+        boardTap(app, "workspace-retirement-request")
+        workspaceRetirementState(app, containing: "retired|retired|native-draft-cleaned|APP_HOST_RETIREMENT_ONLY", timeout: 60)
+    }
+
     private var task586Application: XCUIApplication?
     private var task601Application: XCUIApplication?
     private var task680Application: XCUIApplication?

@@ -133,15 +133,37 @@ actor NativeNotificationResponses {
 }
 
 final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    private struct PersonalCallbacks: Sendable {
+        let foreground: @MainActor @Sendable (Bool) async -> Void
+        let wake: @MainActor @Sendable () -> Void
+    }
+    private let callbackLock = NSLock()
+    private var callbacks: PersonalCallbacks?
+    private func personalCallbacks() -> PersonalCallbacks? {
+        callbackLock.lock(); defer { callbackLock.unlock() }; return callbacks
+    }
+
+    @MainActor
+    func bindPersonalCallbacks(to original: CoreModel) {
+        let bound = PersonalCallbacks(foreground: { [weak original] sound in
+            await original?.recordForegroundReminderPresentation(sound: sound)
+        }, wake: { [weak original] in
+            guard let original else { return }
+            original.requestNotificationResponses()
+            NotificationCenter.default.post(name: NativeNotificationResponses.changed, object: nil)
+        })
+        callbackLock.lock(); defer { callbackLock.unlock() }
+        if callbacks == nil { callbacks = bound }
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         let options = NativeReminderResponse.foregroundPresentation(notification.request,
             selection: try? NativeAppLaunch.selection.get())
         completionHandler(options)
         guard !options.isEmpty else { return }
-        Task { @MainActor in
-            await NativeAppModel.shared.recordForegroundReminderPresentation(sound: options.contains(.sound))
-        }
+        guard let original = personalCallbacks() else { return }
+        Task { await original.foreground(options.contains(.sound)) }
     }
 
     func application(_ application: UIApplication,
@@ -168,22 +190,20 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
         guard let captured = NativeReminderResponse.capture(response.notification.request,
             deliveredAt: response.notification.date, receivedAt: Date(),
             actionIdentifier: response.actionIdentifier, namespace: namespace) else { completionHandler(); return }
+        let original = personalCallbacks()
         Task {
             defer { completionHandler() }
             do {
                 if try await NativeNotificationResponses.shared.capture(captured) != nil {
                     await NativeNotificationResponses.shared.record(captured.action, outcome: "captured")
-                    await MainActor.run {
-                        NativeAppModel.shared.requestNotificationResponses()
-                        NotificationCenter.default.post(name: NativeNotificationResponses.changed, object: nil)
-                    }
+                    await original?.wake()
                 } else {
                     await NativeNotificationResponses.shared.record(captured.action, outcome: "retired")
-                    await MainActor.run { NativeAppModel.shared.requestNotificationResponses() }
+                    await original?.wake()
                 }
             } catch {
                 await NativeNotificationResponses.shared.record(captured.action, outcome: "capture-refused")
-                await MainActor.run { NativeAppModel.shared.requestNotificationResponses() }
+                await original?.wake()
             }
         }
     }
@@ -192,26 +212,35 @@ final class NativeNotificationDelegate: NSObject, UIApplicationDelegate, UNUserN
 @MainActor
 enum NativeAppModel {
     static let shared = CoreModel()
+    static let session = NativeSandboxSession(model: shared)
 }
 
 @main
 struct MindwtrNativeApp: App {
     @UIApplicationDelegateAdaptor(NativeNotificationDelegate.self) private var notificationDelegate
     @StateObject private var model = NativeAppModel.shared
+    @StateObject private var workspace = NativeAppModel.session
 
     var body: some Scene {
         WindowGroup {
-            AppLockRoot(model: model, lock: model.appLock)
+            AppLockRoot(model: model, lock: model.appLock, workspace: workspace)
                 .environment(\.nativeExternalLinkLabels, model.strings)
+                .environment(\.nativeExternalLinkAdmission, { model.workspaceAdmissionsOpen })
+                .environment(\.openURL, OpenURLAction { _ in
+                    model.workspaceAdmissionsOpen ? .systemAction : .discarded
+                })
                 .environment(\.nativeExternalLinkDiagnostic, { outcome, surface in
-                    Task { await model.recordUpNoteHandoff(outcome, surface: surface) }
+                    await model.recordUpNoteHandoff(outcome, surface: surface)
                 })
                 .onOpenURL { model.receiveEntityLink($0) }
                 .onContinueUserActivity(CSSearchableItemActionType) { activity in
                     guard let identifier = activity.userInfo?[CSSearchableItemActivityIdentifier] as? String else { return }
                     model.receiveSearchIdentifier(identifier)
                 }
-                .task { await model.start() }
+                .task {
+                    notificationDelegate.bindPersonalCallbacks(to: model)
+                    await model.start()
+                }
         }
     }
 }
@@ -362,6 +391,7 @@ private struct AppLockRoot: View {
     }
     @ObservedObject var model: CoreModel
     @ObservedObject var lock: AppLockController
+    @ObservedObject var workspace: NativeSandboxSession
     @State private var confirmingCorruptDraftDiscard = false
     @State private var observedApplicationActive: Bool?
     @Environment(\.scenePhase) private var phase
@@ -481,6 +511,7 @@ private struct AppLockRoot: View {
                 .accessibilityIdentifier("app-lock-gate")
             }
         }
+        .allowsHitTesting(model.workspaceAdmissionsOpen)
         .background {
             NativeCalendarEventEditor(presentation: model.calendarEventOpenPresentation,
                 isPresented: model.calendarEventOpenPresented,
@@ -497,6 +528,34 @@ private struct AppLockRoot: View {
         }
         .preferredColorScheme(model.theme.text("scheme").isEmpty ? nil : palette.dark ? .dark : .light)
         #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
+        .overlay(alignment: .topLeading) {
+            if model.workspaceRetirementFixtureEnabled {
+                VStack(spacing: 4) {
+                    Text("\(workspace.phase.rawValue)|\(workspace.outcome)|\(model.workspaceRetirementFixtureState)|\(workspace.receipt?.scope ?? "none")|current=\(model.workspaceRetirementViewCurrent)|wakeRestored=\(model.workspaceRetirementWakeRestored)")
+                        .accessibilityIdentifier("workspace-retirement-state")
+                    Button("Hold original read") {
+                        Task { await model.selectSurface(.focus); model.holdWorkspaceRetirementReadFixture() }
+                    }.disabled(!model.ready || model.busy || !model.workspaceAdmissionsOpen)
+                        .accessibilityIdentifier("workspace-retirement-hold")
+                    Button("Retire original owner") { workspace.requestRetirement() }
+                        .accessibilityIdentifier("workspace-retirement-request")
+                    Button("Release original read") { model.releaseWorkspaceRetirementReadFixture() }
+                        .accessibilityIdentifier("workspace-retirement-release")
+                    Button("Check stale picker") { model.checkWorkspaceRetirementPickerFixture() }
+                        .accessibilityIdentifier("workspace-retirement-picker")
+                    Button("Check late model intent") { model.checkWorkspaceRetirementIntentFixture() }
+                        .accessibilityIdentifier("workspace-retirement-intent")
+                    Button("Prepare pending draft") { model.dirtyWorkspaceRetirementFixture() }
+                        .accessibilityIdentifier("workspace-retirement-dirty")
+                    Button("Arm ordinary close") { model.closeWorkspaceRetirementHostFixture() }
+                        .accessibilityIdentifier("workspace-retirement-close")
+                    Button("Arm real native draft") { model.armWorkspaceRetirementDraftFixture() }
+                        .accessibilityIdentifier("workspace-retirement-native-draft")
+                    Button("Discard exact fixture draft") { Task { await model.cleanWorkspaceRetirementDraftFixture() } }
+                        .accessibilityIdentifier("workspace-retirement-native-cleanup")
+                }.font(.caption2).padding(4).background(palette.card).frame(maxWidth: 320)
+            }
+        }
         .overlay(alignment: .topTrailing) {
             if model.pomodoroAlarmTestEnabled {
                 VStack(spacing: 4) {

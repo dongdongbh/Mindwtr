@@ -200,6 +200,14 @@ final class NativeDeviceKV {
     }
     #endif
 
+    /// Inspect before close() releases the uncertain batch and namespace evidence.
+    func validateWorkspaceRetirement() throws {
+        guard !closed, !poisoned else { throw CoreHostRetirementError.unavailable }
+        guard pending == nil else { throw CoreHostRetirementError.refused }
+        do { _ = try checkedRead() }
+        catch { throw CoreHostRetirementError.unavailable }
+    }
+
     func get(_ key: String) throws -> String? { try multiGet([key])[0].1 }
     func multiGet(_ keys: [String]) throws -> [(String, String?)] {
         try Self.validateKeys(keys)

@@ -62,7 +62,9 @@ final class NativeSearchIndexTests: XCTestCase {
         XCTAssertEqual(Set(identifiers).count, ids.count)
         for (id, identifier) in zip(ids, identifiers) {
             XCTAssertEqual(index.taskID(for: identifier).map { Data($0.utf8) }, Data(id.utf8))
+            XCTAssertEqual(NativeSearchIndex.taskID(for: identifier, selection: selection).map { Data($0.utf8) }, Data(id.utf8))
             XCTAssertNil(index.taskID(for: identifier + "="))
+            XCTAssertNil(NativeSearchIndex.taskID(for: identifier + "=", selection: selection))
         }
         let prefix = String(identifiers[0].prefix(65))
         let malformed: [[UInt8]] = [[0xff], [0xc0, 0xaf], [0xed, 0xa0, 0x80], [0xe2, 0x82], [0xef, 0xbb, 0xbf, 0xff]]
@@ -144,5 +146,51 @@ final class NativeSearchIndexTests: XCTestCase {
         XCTAssertEqual(port.requests.count, 1)
         index.withdraw(); await waitForCalls(port, 2); port.finish(); await fulfillment(of: [removed], timeout: 2)
         XCTAssertEqual(port.requests.count, 2)
+    }
+
+    func testRetirementJoinsConstructorRemovalAndRefusesLatePublication() async throws {
+        let port = ControlledSearchIndex()
+        let index = try NativeSearchIndex(selection: selection, port: port) { _, _ in
+            XCTFail("A retired index must not publish an event")
+        }
+        await waitForCalls(port, 1)
+        index.sealForRetirement()
+        index.replace(try snapshot()); index.withdraw(); index.retry()
+        XCTAssertEqual(port.requests.count, 1, "Sealing must be synchronous before the drain waiter starts")
+        var retired = false
+        let retirement = Task { await index.retireAndDrain(); retired = true }
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertFalse(retired, "The constructor's entered OS callback still owns retirement")
+        index.replace(try snapshot()); index.withdraw(); index.retry()
+        XCTAssertEqual(port.requests.count, 1)
+        port.finish()
+        await retirement.value
+        XCTAssertTrue(retired); XCTAssertEqual(index.status, "retired")
+        index.replace(try snapshot()); index.withdraw(); index.retry()
+        await index.retireAndDrain()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(port.requests.count, 1)
+    }
+
+    func testCancelledRetirementStillJoinsEnteredAdditionAndItsFailure() async throws {
+        let port = ControlledSearchIndex()
+        let index = try NativeSearchIndex(selection: selection, port: port) { _, _ in
+            XCTFail("A retired index must not deliver the old publication or failure")
+        }
+        await waitForCalls(port, 1); index.replace(try snapshot())
+        port.finish(); await waitForCalls(port, 2); port.finish(); await waitForCalls(port, 3)
+        XCTAssertNotNil(port.requests[2].items)
+        var retired = false
+        let retirement = Task { await index.retireAndDrain(); retired = true }
+        for _ in 0..<5 { await Task.yield() }
+        retirement.cancel()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertFalse(retired, "Caller cancellation cannot cancel an entered CoreSpotlight callback")
+        index.replace(try snapshot("late")); index.withdraw(); index.retry()
+        port.finish(Injected.failed)
+        await retirement.value
+        XCTAssertTrue(retired); XCTAssertEqual(index.status, "retired")
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(port.requests.count, 3)
     }
 }

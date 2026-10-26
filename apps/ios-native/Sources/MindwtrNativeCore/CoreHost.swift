@@ -601,6 +601,22 @@ struct NativeAIProviderDeviceState: Decodable, Sendable, Equatable {
 
 /// One off-main owner for the core runtime, database and pending command journal.
 /// Every result is the JSON-encoded core value, with host/core failures thrown.
+/// Immutable native authority. Restricted is an outward-denied candidate, not Sandbox bootstrap.
+public enum NativeWorkspaceMode: Sendable, Equatable { case personal, restricted }
+
+/// Constructed only by a successful retirement of this exact, previously ready host.
+public struct CoreHostRetirementReceipt: Sendable, Equatable {
+    fileprivate let identity: UUID
+    fileprivate init(identity: UUID) { self.identity = identity }
+}
+
+public enum CoreHostRetirementError: Error, Sendable, Equatable {
+    /// No shutdown began. Existing recovery and ordinary admission remain available.
+    case refused
+    /// Original ownership stays held; neither resume nor a replacement is acknowledged.
+    case unavailable
+}
+
 public final class CoreHost: @unchecked Sendable {
     #if DEBUG
     /// Pure journal-witness check, exposed for package tests only.
@@ -610,6 +626,92 @@ public final class CoreHost: @unchecked Sendable {
     #endif
     private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.native-core", qos: .userInitiated)
     private let engine: Engine
+    public let workspaceMode: NativeWorkspaceMode
+    private enum Admission { case open, retiring, retired, unavailable }
+    private let admissionLock = NSLock()
+    private var admission = Admission.open
+    private var admittedCalls = 0
+    private var admissionWaiters: [CheckedContinuation<Void, Never>] = []
+    private var retirement: Task<CoreHostRetirementReceipt, Error>?
+    private let retirementIdentity = UUID()
+
+    private static let restrictedFailure = CoreHostRejection(message: "WORKSPACE_RESTRICTED: Native outward capability is unavailable")
+    private func beginOuterAdmission(restrictedAllowed: Bool = false) throws {
+        admissionLock.lock(); defer { admissionLock.unlock() }
+        guard case .open = admission else { throw CoreHostRetirementError.unavailable }
+        guard restrictedAllowed || workspaceMode == .personal else { throw Self.restrictedFailure }
+        admittedCalls += 1
+    }
+    private func finishOuterAdmission() {
+        admissionLock.lock()
+        admittedCalls -= 1
+        let waiting = admittedCalls == 0 ? admissionWaiters : []
+        if admittedCalls == 0 { admissionWaiters.removeAll() }
+        admissionLock.unlock()
+        for waiter in waiting { waiter.resume() }
+    }
+    private func holdOrdinaryClose() {
+        admissionLock.lock(); defer { admissionLock.unlock() }
+        if case .retired = admission { return }
+        admission = .unavailable
+    }
+    private func waitForAdmittedCalls() async {
+        await withCheckedContinuation { continuation in
+            admissionLock.lock()
+            if admittedCalls == 0 { admissionLock.unlock(); continuation.resume() }
+            else { admissionWaiters.append(continuation); admissionLock.unlock() }
+        }
+    }
+    #if DEBUG
+    // Ordering only: tests still assert rejection through the real public facade.
+    func workspaceRetirementIsFencedForTests() -> Bool {
+        admissionLock.lock(); defer { admissionLock.unlock() }
+        if case .open = admission { return false }
+        return true
+    }
+    #endif
+    private func retirementOperation() throws -> Task<CoreHostRetirementReceipt, Error> {
+        admissionLock.lock(); defer { admissionLock.unlock() }
+        if let retirement { return retirement }
+        guard case .open = admission else { throw CoreHostRetirementError.unavailable }
+        admission = .retiring
+        let operation = Task { try await self.retireOriginalHost() }
+        retirement = operation
+        return operation
+    }
+    private func completeRetirement(_ error: CoreHostRetirementError? = nil) throws -> CoreHostRetirementReceipt {
+        admissionLock.lock(); defer { admissionLock.unlock() }
+        guard case .retiring = admission else { throw CoreHostRetirementError.unavailable }
+        if let error {
+            admission = error == .refused ? .open : .unavailable
+            // Only a definite pre-shutdown refusal may be attempted again.
+            if error == .refused { retirement = nil }
+            throw error
+        }
+        admission = .retired
+        return CoreHostRetirementReceipt(identity: retirementIdentity)
+    }
+    private func retireOriginalHost() async throws -> CoreHostRetirementReceipt {
+        await waitForAdmittedCalls()
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                queue.async { [engine] in continuation.resume(with: Result { try engine.validateWorkspaceRetirement() }) }
+            }
+        } catch {
+            return try completeRetirement(error as? CoreHostRetirementError ?? .unavailable)
+        }
+        // Caller cancellation cannot dispose this retained original-host operation.
+        await closeRuntime()
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                queue.async { [engine] in continuation.resume(with: Result { try engine.validateWorkspaceShutdown() }) }
+            }
+        } catch { return try completeRetirement(.unavailable) }
+        return try completeRetirement()
+    }
+    public func retireForWorkspaceTransition() async throws -> CoreHostRetirementReceipt {
+        try await retirementOperation().value
+    }
     private let localAttachmentRequests = NativeAttachmentLocalRequests()
     private let reminderEffects = NativeReminderEffects()
     private let notificationAuthorization = NativeNotificationAuthorization()
@@ -617,51 +719,67 @@ public final class CoreHost: @unchecked Sendable {
     private let appleRemindersAuthorization = NativeCalendarAuthorization() // Reuse the callback-drain/readmission gate, not its event requester.
 
     public init(databaseURL: URL, bundleURL: URL,
-                deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
+                deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
+                workspaceMode: NativeWorkspaceMode = .personal) {
+        self.workspaceMode = workspaceMode
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL,
-                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
+                        deviceStorage: deviceStorage, workspaceMode: workspaceMode, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
     }
 
     #if DEBUG
     /// UI fixtures must isolate Keychain accounts as well as their database and device settings.
     public convenience init(databaseURL: URL, bundleURL: URL,
-                            deviceStorage: (containerURL: URL, bundleIdentifier: String), isolatedTestID: UUID) {
+                            deviceStorage: (containerURL: URL, bundleIdentifier: String), isolatedTestID: UUID,
+                            workspaceMode: NativeWorkspaceMode = .personal) {
         let faults = HostIOFaults()
         faults.secretService = "mindwtr.native-keychain.fixture." + isolatedTestID.uuidString.lowercased()
-        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: faults, deviceStorage: deviceStorage)
+        self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: faults, deviceStorage: deviceStorage, workspaceMode: workspaceMode)
     }
 
     public convenience init(databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage,
-                            deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
+                            deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
+                            workspaceMode: NativeWorkspaceMode = .personal) {
         self.init(databaseURL: databaseURL, bundleURL: bundleURL, faults: HostIOFaults(),
-                  legacyStorage: legacyStorage, deviceStorage: deviceStorage)
+                  legacyStorage: legacyStorage, deviceStorage: deviceStorage, workspaceMode: workspaceMode)
     }
 
     init(databaseURL: URL, bundleURL: URL, faults: HostIOFaults, legacyStorage: LegacyRNStorage? = nil,
-         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil) {
+         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
+         workspaceMode: NativeWorkspaceMode = .personal, restrictedFixtureRoot: URL? = nil) {
+        self.workspaceMode = workspaceMode
         engine = Engine(queue: queue, databaseURL: databaseURL, bundleURL: bundleURL, legacyStorage: legacyStorage,
-                        deviceStorage: deviceStorage, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
+                        deviceStorage: deviceStorage, workspaceMode: workspaceMode, restrictedFixtureRoot: restrictedFixtureRoot, localRequests: localAttachmentRequests, reminderAdmissions: reminderEffects)
         engine.faults = faults
     }
     #endif
 
     public func start(retainingReminderResponseIDs: [String]? = nil) async throws -> String {
-        try await perform { try $0.start(retainingReminderResponseIDs: retainingReminderResponseIDs) }
+        try beginOuterAdmission(restrictedAllowed: true)
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.start(retainingReminderResponseIDs: retainingReminderResponseIDs) }
     }
 
     public func readAISettingsProjection() async throws -> NativeAISettingsProjection {
-        try await perform { try $0.readAISettingsProjection() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.readAISettingsProjection() }
     }
 
     public func readAIRequestTimeoutOptions() async throws -> NativeAIRequestTimeoutOptions {
-        try await perform { try NativeAIRequestTimeoutOptions.validated($0.readAIRequestTimeoutOptions()) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try NativeAIRequestTimeoutOptions.validated($0.readAIRequestTimeoutOptions()) }
     }
     func probeAIRequestTimeoutOutcome(_ request: NativeAIRequestTimeoutRequest) async throws -> NativeAIRequestTimeoutResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let raw = try request.json()
         return try await perform { try NativeAIRequestTimeoutResult.validated($0.probeAIRequestTimeoutOutcome(requestJSON: raw)) }
     }
     public func setAIRequestTimeout(_ request: NativeAIRequestTimeoutRequest,
         readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAIRequestTimeoutResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
         localAttachmentRequests.register(cancellation, id: id)
         defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
@@ -694,14 +812,20 @@ public final class CoreHost: @unchecked Sendable {
     #endif
 
     public func readAIReasoningEffortOptions() async throws -> NativeAIReasoningEffortOptions {
-        try await perform { try NativeAIReasoningEffortOptions.validated($0.readAIReasoningEffortOptions()) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try NativeAIReasoningEffortOptions.validated($0.readAIReasoningEffortOptions()) }
     }
     func probeAIReasoningEffortOutcome(_ request: NativeAIReasoningEffortRequest) async throws -> NativeAIReasoningEffortResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let raw = try request.json()
         return try await perform { try NativeAIReasoningEffortResult.validated($0.probeAIReasoningEffortOutcome(requestJSON: raw)) }
     }
     public func setAIReasoningEffort(_ request: NativeAIReasoningEffortRequest,
         readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAIReasoningEffortResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
         localAttachmentRequests.register(cancellation, id: id)
         defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
@@ -734,14 +858,20 @@ public final class CoreHost: @unchecked Sendable {
     #endif
 
     public func readAIGeminiThinkingBudgetOptions() async throws -> NativeAIGeminiThinkingBudgetOptions {
-        try await perform { try NativeAIGeminiThinkingBudgetOptions.validated($0.readAIGeminiThinkingBudgetOptions()) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try NativeAIGeminiThinkingBudgetOptions.validated($0.readAIGeminiThinkingBudgetOptions()) }
     }
     func probeAIGeminiThinkingBudgetOutcome(_ request: NativeAIGeminiThinkingBudgetRequest) async throws -> NativeAIGeminiThinkingBudgetResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let raw = try request.json()
         return try await perform { try NativeAIGeminiThinkingBudgetResult.validated($0.probeAIGeminiThinkingBudgetOutcome(requestJSON: raw)) }
     }
     public func setAIGeminiThinkingBudget(_ request: NativeAIGeminiThinkingBudgetRequest,
         readmission: @escaping @Sendable () async -> Bool) async throws -> NativeAIGeminiThinkingBudgetResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation(), raw = try request.json()
         localAttachmentRequests.register(cancellation, id: id)
         defer { localAttachmentRequests.remove(id); notificationAuthorization.finish(id) }
@@ -767,6 +897,8 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     func readAIProviderDeviceState() async throws -> NativeAIProviderDeviceState {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let cancellation = NativeAttachmentCancellation(), request = UUID()
         localAttachmentRequests.register(cancellation, id: request)
         defer { localAttachmentRequests.remove(request) }
@@ -777,6 +909,8 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func chooseAppleRemindersLists(readmission: @escaping @Sendable () async -> Bool) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let owner: UUID
         do { owner = try appleRemindersAuthorization.begin() }
         catch { throw CoreHostRejection(message: "NOT_READY: Reminders access is unavailable") }
@@ -803,10 +937,14 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func readAppleRemindersSettings() async throws -> String {
-        try await perform { try $0.readAppleRemindersSettings() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.readAppleRemindersSettings() }
     }
 
     public func setAppleRemindersSetting(editJSON: String, expectedRaw: String?) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), cancellation = NativeAttachmentCancellation()
         localAttachmentRequests.register(cancellation, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -817,6 +955,8 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func importAppleReminders(automatic: Bool = false) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), cancellation = NativeAttachmentCancellation()
         localAttachmentRequests.register(cancellation, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -827,39 +967,59 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     func importAppleReminderItem(source: NativeAppleReminderSourceDTO, list: NativeAppleReminderListIdentity) async throws -> String {
-        try await perform { try $0.importAppleReminderItem(source: source, list: list) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.importAppleReminderItem(source: source, list: list) }
     }
 
     public func readPomodoroPanel(presentationJSON: String) async throws -> String {
-        try await perform { try $0.pomodoroFacade("pomodoroPanelReadHost", requestJSON: presentationJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.pomodoroFacade("pomodoroPanelReadHost", requestJSON: presentationJSON) }
     }
     public func readPomodoroAlarmIntent() async throws -> String {
-        try await perform { try $0.pomodoroFacade("pomodoroAlarmReadHost") }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.pomodoroFacade("pomodoroAlarmReadHost") }
     }
     public func readPomodoroSession() async throws -> String {
-        try await perform { try $0.pomodoroFacade("pomodoroSessionReadHost") }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.pomodoroFacade("pomodoroSessionReadHost") }
     }
     public func writePomodoroTransition(requestJSON: String) async throws -> String {
-        try await perform { try $0.pomodoroFacade("pomodoroTransitionWrite", requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.pomodoroFacade("pomodoroTransitionWrite", requestJSON: requestJSON) }
     }
     public func probePomodoroTransitionOutcome(requestJSON: String) async throws -> String {
-        try await perform { try $0.pomodoroFacade("pomodoroTransitionRetryOutcome", requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.pomodoroFacade("pomodoroTransitionRetryOutcome", requestJSON: requestJSON) }
     }
 
     public func searchSnapshot() async throws -> NativeSearchSnapshot {
-        try NativeSearchSnapshot(json: await call("iosSearchSnapshot"))
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try NativeSearchSnapshot(json: await perform { try $0.call("iosSearchSnapshot", argumentsJSON: "[]") })
     }
 
     public func searchObservation() async throws -> NativeSearchObservation {
-        try await perform { try $0.searchObservation() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.searchObservation() }
     }
 
     public func setSearchObservationHandler(_ handler: (@Sendable (NativeSearchObservation) -> Void)?) async throws {
-        try await perform { try $0.setSearchObservationHandler(handler) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.setSearchObservationHandler(handler) }
     }
 
     /// One physical cleanup decision; grants no attachment metadata authority.
     public func retireAttachmentCleanup(_ requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -871,6 +1031,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// One unjournaled foreground Sync invocation with a scoped cleanup owner.
     public func foregroundSync(command: String, requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -904,6 +1066,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// Metadata opens no directory. Explicit File actions retain this host until the existing Settings transaction settles.
     public func foregroundDirectorySyncSettings(command: String, requestJSON: String, pickedBookmark: Data? = nil) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -916,6 +1080,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// An explicit app-local foreground cycle; no saved provider capability is granted.
     public func foregroundFileSync(directoryURL: URL) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -926,6 +1092,8 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func aboutAppStoreInfo(bundleIdentifier: String, currentVersion: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -937,6 +1105,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// One cancellable, unjournaled read through the shared calendar contract.
     public func calendarRead(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -957,14 +1127,20 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func observeCalendarPush(_ callback: @escaping @Sendable ([String]?) -> Void) async throws -> UUID {
-        try await perform { try $0.observeCalendarPush(callback) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.observeCalendarPush(callback) }
     }
 
     public func removeCalendarPushObserver(_ id: UUID) async throws {
-        try await perform { $0.removeCalendarPushObserver(id) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { $0.removeCalendarPushObserver(id) }
     }
 
     public func getCalendarSubscriptionOptions() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -974,18 +1150,28 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func setCalendarSubscriptionSetting(requestJSON: String) async throws -> String {
-        try await perform { try $0.setCalendarSubscriptionSetting(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.setCalendarSubscriptionSetting(requestJSON: requestJSON) }
     }
     public func probeCalendarSubscriptionSettingOutcome(requestJSON: String) async throws -> String {
-        try await perform { try $0.probeCalendarSubscriptionSettingOutcome(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.probeCalendarSubscriptionSettingOutcome(requestJSON: requestJSON) }
     }
     public func addCalendarSubscription(requestJSON: String) async throws -> String {
-        try await perform { try $0.addCalendarSubscription(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.addCalendarSubscription(requestJSON: requestJSON) }
     }
     public func probeCalendarSubscriptionAddOutcome(requestJSON: String) async throws -> String {
-        try await perform { try $0.probeCalendarSubscriptionAddOutcome(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.probeCalendarSubscriptionAddOutcome(requestJSON: requestJSON) }
     }
     public func addLocalCalendarSubscription(selectedURL: URL, requestJSON: String) async throws -> NativeCalendarFileAddResult {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), cancellation = NativeAttachmentCancellation()
         localAttachmentRequests.register(cancellation, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1007,14 +1193,20 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func setDeviceCalendarSetting(requestJSON: String) async throws -> String {
-        try await perform { try $0.setDeviceCalendarSetting(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.setDeviceCalendarSetting(requestJSON: requestJSON) }
     }
 
     public func probeDeviceCalendarSettingOutcome(requestJSON: String) async throws -> String {
-        try await perform { try $0.probeDeviceCalendarSettingOutcome(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.probeDeviceCalendarSettingOutcome(requestJSON: requestJSON) }
     }
 
     public func grantDeviceCalendarAccess(readmission: @escaping @Sendable () async -> Bool) async throws {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let owner: UUID
         do { owner = try calendarAuthorization.begin() }
         catch { throw CoreHostRejection(message: "NOT_READY: Calendar access is unavailable") }
@@ -1056,6 +1248,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// Passive permission observation followed by a fresh, read-only shared plan.
     public func readReminderPlan() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1078,11 +1272,15 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func feedbackConfiguration(endpointURL: String) async throws -> String {
-        try await perform { try $0.feedbackConfiguration(endpointURL: endpointURL) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.feedbackConfiguration(endpointURL: endpointURL) }
     }
 
     /// One explicit, unjournaled submission. Cancellation cannot unsend a POST.
     public func submitFeedback(requestJSON: String, endpointURL: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1093,26 +1291,38 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func readAboutUpdateState() async throws -> String {
-        try await perform { try $0.readAboutUpdateState() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.readAboutUpdateState() }
     }
 
     public func recordAboutUpdateCheck(timestamp: String) async throws {
-        try await perform { try $0.recordAboutUpdateCheck(timestamp: timestamp) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.recordAboutUpdateCheck(timestamp: timestamp) }
     }
 
     public func storeAboutUpdateResult(available: Bool, latestVersion: String, checkedAt: String? = nil) async throws {
-        try await perform { try $0.storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.storeAboutUpdateResult(available: available, latestVersion: latestVersion, checkedAt: checkedAt) }
     }
 
     public func readSearchConsent() async throws -> Bool {
-        try await perform { try $0.readSearchConsent() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.readSearchConsent() }
     }
 
     public func setSearchConsent(_ enabled: Bool) async throws {
-        try await perform { try $0.setSearchConsent(enabled) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.setSearchConsent(enabled) }
     }
 
     public func snoozeReminder(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1130,14 +1340,26 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func completeReminderTask(requestJSON: String) async throws -> String {
-        try await perform { try $0.completeReminderTask(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.completeReminderTask(requestJSON: requestJSON) }
     }
 
     public func probeReminderCompletionOutcome(requestJSON: String) async throws -> String {
-        try await perform { try $0.probeReminderCompletionOutcome(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.probeReminderCompletionOutcome(requestJSON: requestJSON) }
     }
 
     public func call(_ method: String, argumentsJSON: String = "[]") async throws -> String {
+        try beginOuterAdmission(restrictedAllowed: true)
+        defer { finishOuterAdmission() }
+        if workspaceMode == .restricted {
+            guard ["window", "captureOpen", "captureSubmit", "inboxView"].contains(method) else { throw Self.restrictedFailure }
+        }
+        guard method != "iosWorkspaceRetirementStatus" else {
+            throw CoreHostRejection(message: "INVALID_INPUT: Workspace retirement health requires original native authority")
+        }
         guard method != "iosAISummaryCheckpointSettled" else { throw CoreHostRejection(message: "INVALID_INPUT: AI summary checkpoint requires fixture authority") }
         guard !Engine.pomodoroFacadeMethods.contains(method) else { throw CoreHostRejection(message: "INVALID_INPUT: Pomodoro requires its explicit facade") }
         guard method != "iosPruneReceipts" else {
@@ -1162,6 +1384,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// Task-local byte operations only; no project/store command or picker UI.
     public func localAttachmentRequest(name: String, requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1173,6 +1397,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// Validates a read-only local file plan before the App presents system UI.
     public func prepareTaskFileOpen(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1184,6 +1410,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// Prepares already-present Project bytes without availability or metadata writes.
     public func prepareProjectFileOpen(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1195,6 +1423,8 @@ public final class CoreHost: @unchecked Sendable {
 
     /// Copies one provider file under a real Project journal owner, never a Task draft.
     public func addProviderProjectAttachment(selectedURL: URL, requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1204,6 +1434,8 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func recoverProjectFileAdd(requestId: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1213,6 +1445,8 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func abandonProjectFileAdd(requestId: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1222,18 +1456,28 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     /// Bounded structural inventory, also available after a retained-operation startup refusal.
-    public func projectFileAddSummary() async throws -> String { try await perform { try $0.projectFileAddSummary() } }
+    public func projectFileAddSummary() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.projectFileAddSummary() }
+    }
     #if DEBUG
     func configureProjectFileAddHost(_ hooks: ProjectFileAddHostHooks) async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform { $0.projectFileAddHooks = hooks }
     }
     #endif
 
     public func recoverProjectFileAvailability(requestId: String) async throws -> String {
-        try await projectFileAvailabilityRecovery(requestId: requestId, abandon: false)
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await projectFileAvailabilityRecovery(requestId: requestId, abandon: false)
     }
     public func abandonProjectFileAvailability(requestId: String) async throws -> String {
-        try await projectFileAvailabilityRecovery(requestId: requestId, abandon: true)
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await projectFileAvailabilityRecovery(requestId: requestId, abandon: true)
     }
     private func projectFileAvailabilityRecovery(requestId: String, abandon: Bool) async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
@@ -1244,65 +1488,101 @@ public final class CoreHost: @unchecked Sendable {
             try await perform { try $0.recoverProjectFileAvailability(requestId: requestId, abandon: abandon, cancellation: token) }
         }, onCancel: { token.cancel() })
     }
-    public func projectFileAvailabilitySummary() async throws -> String { try await perform { try $0.projectFileAvailabilitySummary() } }
+    public func projectFileAvailabilitySummary() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.projectFileAvailabilitySummary() }
+    }
     #if DEBUG
     func configureProjectFileDownloadHost(_ hooks: ProjectFileDownloadHostHooks) async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform { $0.projectFileDownloadHooks = hooks }
     }
     /// Existing DEBUG isolated-library fixture only, one known durable boundary.
     public func configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: Bool = false) async throws {
-        try await perform { try $0.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnly) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedProjectFileDownloadFilledFailureOnce(metadataOnly: metadataOnly) }
     }
     #endif
     #if DEBUG && os(iOS) && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     public func configureIsolatedBoardMoveCommitFailureOnce() async throws {
-        try await perform { try $0.configureIsolatedBoardMoveCommitFailureOnce() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedBoardMoveCommitFailureOnce() }
     }
     public func configureIsolatedAIRequestTimeoutCommitFailureOnce() async throws {
-        try await perform { try $0.configureIsolatedAIRequestTimeoutCommitFailureOnce() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedAIRequestTimeoutCommitFailureOnce() }
     }
     public func isolatedAIRequestTimeoutFixtureState() async throws -> NativeAIRequestTimeoutFixtureState {
-        try await perform { try $0.isolatedAIRequestTimeoutFixtureState() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.isolatedAIRequestTimeoutFixtureState() }
     }
     public func configureIsolatedAIReasoningEffortCommitFailureOnce() async throws {
-        try await perform { try $0.configureIsolatedAIReasoningEffortCommitFailureOnce() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedAIReasoningEffortCommitFailureOnce() }
     }
     public func isolatedAIReasoningEffortFixtureState() async throws -> NativeAIReasoningEffortFixtureState {
-        try await perform { try $0.isolatedAIReasoningEffortFixtureState() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.isolatedAIReasoningEffortFixtureState() }
     }
     public func configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce() async throws {
-        try await perform { try $0.configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedAIGeminiThinkingBudgetCommitFailureOnce() }
     }
     public func isolatedAIGeminiThinkingBudgetFixtureState() async throws -> NativeAIGeminiThinkingBudgetFixtureState {
-        try await perform { try $0.isolatedAIGeminiThinkingBudgetFixtureState() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.isolatedAIGeminiThinkingBudgetFixtureState() }
     }
     #endif
     #if DEBUG && os(iOS) && targetEnvironment(simulator)
     #if targetEnvironment(simulator)
     public func configureIsolatedAppleRemindersFixture(denied: Bool, failPreferenceOnce: Bool) async throws {
-        try await perform { try $0.configureIsolatedAppleRemindersFixture(denied: denied, failPreferenceOnce: failPreferenceOnce) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedAppleRemindersFixture(denied: denied, failPreferenceOnce: failPreferenceOnce) }
     }
     #endif
     public func configureIsolatedCaptureTerminalFailureOnce(pomodoroOnly: Bool = false) async throws {
-        try await perform { try $0.configureIsolatedCaptureTerminalFailureOnce(pomodoroOnly: pomodoroOnly) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedCaptureTerminalFailureOnce(pomodoroOnly: pomodoroOnly) }
     }
     public func configureIsolatedCalendarEventTaskTerminalFailureOnce() async throws {
-        try await perform { try $0.configureIsolatedCalendarEventTaskTerminalFailureOnce() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedCalendarEventTaskTerminalFailureOnce() }
     }
     public func configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() async throws {
-        try await perform { try $0.configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedCalendarSubscriptionCommitReplyFailureOnce() }
     }
     #endif
 
     public func beginAttachmentDraft(expectedSession: String, expectedGeneration: Int) async throws -> String {
-        try await perform { try $0.beginAttachmentDraft(expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.beginAttachmentDraft(expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
     }
     public func beginAttachmentDraftV2(expectedSession: String, expectedGeneration: Int) async throws -> String {
-        try await perform { try $0.beginAttachmentDraftV2(expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.beginAttachmentDraftV2(expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
     }
     /// Begins or validates the V3 attachment owner for the exact unfrozen editor checkpoint.
     /// Selected history5 availability; no saved Task mutation or automatic sync.
     public func downloadTaskAttachmentV5(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1313,6 +1593,8 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func beginAttachmentDraftV3(expectedSession: String, expectedGeneration: Int) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1323,6 +1605,8 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func beginAttachmentDraftV4(expectedSession: String, expectedGeneration: Int) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1334,6 +1618,8 @@ public final class CoreHost: @unchecked Sendable {
     }
     /// Records a V3 metadata removal; retained interrupted work requires exact recovery.
     public func removeAttachmentDraftV3(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1343,6 +1629,8 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     func addAttachmentDraftV3(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1354,12 +1642,16 @@ public final class CoreHost: @unchecked Sendable {
     /// Copies one provider selection and runs the existing V3 Add owner with the supplied exact request UUID.
     public func addProviderAttachmentV3(selectedURL: URL, expectedSession: String, expectedGeneration: Int,
                                  requestId: String) async throws -> String {
-        try await addProviderAttachment(selectedURL: selectedURL, expectedSession: expectedSession,
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await addProviderAttachment(selectedURL: selectedURL, expectedSession: expectedSession,
             expectedGeneration: expectedGeneration, requestId: requestId, historyVersion: 3)
     }
     public func addProviderAttachmentV4(selectedURL: URL, expectedSession: String, expectedGeneration: Int,
                                          requestId: String) async throws -> String {
-        try await addProviderAttachment(selectedURL: selectedURL, expectedSession: expectedSession,
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await addProviderAttachment(selectedURL: selectedURL, expectedSession: expectedSession,
             expectedGeneration: expectedGeneration, requestId: requestId, historyVersion: 4)
     }
     private func addProviderAttachment(selectedURL: URL, expectedSession: String, expectedGeneration: Int,
@@ -1376,12 +1668,16 @@ public final class CoreHost: @unchecked Sendable {
     /// Captures and processes one selected photo before its provider callback lease ends.
     public func addPhotoProviderAttachmentV3(itemProvider: NSItemProvider, expectedSession: String,
                                              expectedGeneration: Int, requestId: String) async throws -> String {
-        try await addPhotoProviderAttachment(itemProvider: itemProvider, expectedSession: expectedSession,
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await addPhotoProviderAttachment(itemProvider: itemProvider, expectedSession: expectedSession,
             expectedGeneration: expectedGeneration, requestId: requestId, historyVersion: 3)
     }
     public func addPhotoProviderAttachmentV4(itemProvider: NSItemProvider, expectedSession: String,
                                              expectedGeneration: Int, requestId: String) async throws -> String {
-        try await addPhotoProviderAttachment(itemProvider: itemProvider, expectedSession: expectedSession,
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await addPhotoProviderAttachment(itemProvider: itemProvider, expectedSession: expectedSession,
             expectedGeneration: expectedGeneration, requestId: requestId, historyVersion: 4)
     }
     private func addPhotoProviderAttachment(itemProvider: NSItemProvider, expectedSession: String,
@@ -1408,6 +1704,8 @@ public final class CoreHost: @unchecked Sendable {
     }
     /// Finishes only the retained V3 Add, Remove or checkpoint advance for this session.
     public func recoverAttachmentDraftV3(expectedSession: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1417,11 +1715,15 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func saveAttachmentDraftAdds(saveRequestJSON: String, expectedSession: String, expectedGeneration: Int) async throws -> String {
-        try await perform { try $0.saveAttachmentDraftAdds(saveRequestJSON: saveRequestJSON,
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.saveAttachmentDraftAdds(saveRequestJSON: saveRequestJSON,
             expectedSession: expectedSession, expectedGeneration: expectedGeneration) }
     }
     // Internal until the real mixed Add producer and editor UI are admitted.
     func saveAttachmentDraftMixed(saveRequestJSON: String, expectedSession: String, expectedGeneration: Int) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1433,6 +1735,8 @@ public final class CoreHost: @unchecked Sendable {
     }
     /// Saves the full editor request and settles attachments through the existing durable V3 owner.
     public func saveAttachmentDraftComplete(saveRequestJSON: String, expectedSession: String, expectedGeneration: Int) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1444,6 +1748,8 @@ public final class CoreHost: @unchecked Sendable {
     }
     /// Checks the exact V3 editor owner and fresh opening fields without rewriting buffers or proving file existence.
     public func checkAttachmentDraftResumeV3(expectedSession: String, expectedGeneration: Int) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1454,13 +1760,19 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func readAttachmentDraft() async throws -> String {
-        try await perform { try $0.readAttachmentDraft() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.readAttachmentDraft() }
     }
     public func discardAttachmentDraft(requestJSON: String) async throws -> String {
-        try await perform { try $0.discardAttachmentDraft(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.discardAttachmentDraft(requestJSON: requestJSON) }
     }
     /// Records and finishes the exact V3 Discard decision under the existing native owner.
     public func discardAttachmentDraftV3(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1471,6 +1783,8 @@ public final class CoreHost: @unchecked Sendable {
     }
     /// Retries the retained V3 Discard decision identified by its original session and request UUID.
     public func finishAttachmentDraftDiscardV3(expectedSession: String, requestId: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1481,6 +1795,8 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func finishAttachmentDraftDiscard(expectedSession: String, requestId: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1491,6 +1807,8 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func addAttachmentDraft(requestJSON: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1500,6 +1818,8 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
     public func recoverAttachmentDraft(expectedSession: String) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
         defer { localAttachmentRequests.remove(id) }
@@ -1510,114 +1830,170 @@ public final class CoreHost: @unchecked Sendable {
     }
     #if DEBUG
     func configureAttachmentDraftHost(_ hooks: AttachmentDraftHostHooks) async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform { $0.attachmentDraftHooks = hooks }
     }
     func configureCaptureLinesFilesForTesting(_ configure: @escaping (NativeBackupOperationFiles) -> Void) async throws {
-        try await perform { $0.configureCaptureLinesFilesForTesting(configure) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { $0.configureCaptureLinesFilesForTesting(configure) }
     }
     #endif
 
     #if DEBUG
     func configureAttachmentHost(_ hooks: NativeAttachmentHostHooks) async throws {
-        try await perform { try $0.configureAttachmentHost(hooks) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureAttachmentHost(hooks) }
     }
     #endif
 
     /// Initialized file actions cannot activate, replay or acknowledge domain work.
     public func diagnosticsFileAction(_ method: String) async throws -> String {
-        try await perform { try $0.diagnosticsFileAction(method) }
+        try beginOuterAdmission(restrictedAllowed: true)
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.diagnosticsFileAction(method) }
     }
 
     /// Best-effort proof that the app accepted a matching editor attachment result.
     public func recordEditorAttachmentAcknowledgment(operation: String) async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform { try $0.recordEditorAttachmentAcknowledgment(operation: operation) }
     }
 
     /// Fixed, best-effort proof that the foreground Task player accepted playback.
     public func recordTaskAudioPlaybackStarted() async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform { try $0.recordTaskAudioPlaybackStarted() }
     }
 
     public func validatedDiagnosticsShareURL(_ path: String) async throws -> URL {
-        try await perform { try $0.validatedDiagnosticsShareURL(path) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.validatedDiagnosticsShareURL(path) }
     }
 
     public func prepareDataBackup(format: NativeBackupFormat = .json) async throws -> NativeBackupExport {
-        try await perform { try $0.prepareDataBackup(format: format) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.prepareDataBackup(format: format) }
     }
 
     public func discardDataBackup(_ id: UUID) async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform { $0.backupExportFile.discard(id) }
     }
 
     public func prepareBackupImport(_ url: URL, action: NativeBackupImportAction = .merge) async throws -> NativeBackupImportPreview {
-        try await perform { try $0.prepareBackupImport(url, action: action) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.prepareBackupImport(url, action: action) }
     }
 
     public func discardBackupImport(_ id: UUID) async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform { $0.discardBackupImport(id) }
     }
 
     public func mergeBackupImport(_ id: UUID) async throws -> String {
-        try await perform { try $0.mergeBackupImport(id) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.mergeBackupImport(id) }
     }
 
     public func listBackupSnapshots() async throws -> String {
-        try await perform { try $0.listBackupSnapshots() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.listBackupSnapshots() }
     }
 
     public func restoreBackupSnapshot(_ referenceJSON: String) async throws -> String {
-        try await perform { try $0.restoreBackupSnapshot(referenceJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.restoreBackupSnapshot(referenceJSON) }
     }
 
     public func backupDocumentResultModel(_ replyJSON: String) async throws -> String {
-        try await perform { try $0.backupDocumentResultModel(replyJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.backupDocumentResultModel(replyJSON) }
     }
 
     public func backupSnapshotRestoreModel(_ referenceJSON: String) async throws -> String {
-        try await perform { try $0.backupSnapshotRestoreModel(referenceJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.backupSnapshotRestoreModel(referenceJSON) }
     }
 
     public func readEditorDraft() async throws -> EditorDraftSnapshot? {
-        try await perform { try $0.readEditorDraft() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.readEditorDraft() }
     }
 
     public func checkpointEditorDraft(_ snapshot: EditorDraftSnapshot) async throws {
-        try await perform { try $0.checkpointEditorDraft(snapshot) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.checkpointEditorDraft(snapshot) }
     }
 
     public func discardEditorDraft(expectedSession: String) async throws {
-        try await perform { try $0.discardEditorDraft(expectedSession: expectedSession) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.discardEditorDraft(expectedSession: expectedSession) }
     }
 
     public func discardCorruptEditorDraft() async throws {
-        try await perform { try $0.discardCorruptEditorDraft() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.discardCorruptEditorDraft() }
     }
 
     public func saveEditorDraft(_ method: String, argumentsJSON: String,
                                 expectedSession: String, expectedGeneration: Int) async throws -> String {
-        try await perform { try $0.saveEditorDraft(method, argumentsJSON: argumentsJSON,
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.saveEditorDraft(method, argumentsJSON: argumentsJSON,
                                                    expectedSession: expectedSession,
                                                    expectedGeneration: expectedGeneration) }
     }
 
     @discardableResult
-    public func retryPending() async throws -> String? { try await perform { try $0.retryPending() } }
+    public func retryPending() async throws -> String? {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.retryPending() }
+    }
 
-    public func cancelAppLockRecovery() async throws { try await perform { try $0.cancelAppLockRecovery() } }
+    public func cancelAppLockRecovery() async throws {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.cancelAppLockRecovery() }
+    }
 
     public func readNotificationSettingsOptions() async throws -> String {
-        try await perform { try $0.readNotificationSettingsOptions() }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.readNotificationSettingsOptions() }
     }
 
     public func probeNotificationSettingOutcome(requestJSON: String) async throws -> String {
-        try await perform { try $0.probeNotificationSettingOutcome(requestJSON: requestJSON) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.probeNotificationSettingOutcome(requestJSON: requestJSON) }
     }
 
     /// The trusted App closure waits for the same active page/host intent and observes cancellation.
     /// A temporary permission-sheet inactivity is not cancellation; real background/navigation is.
     public func setNotificationSetting(requestJSON: String,
         readmission: @escaping @Sendable () async -> Bool) async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let owner = try notificationAuthorization.begin(), cancellation = NativeAttachmentCancellation()
         localAttachmentRequests.register(cancellation, id: owner)
         defer { localAttachmentRequests.remove(owner); notificationAuthorization.finish(owner) }
@@ -1672,14 +2048,20 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func observeReminders(_ callback: @escaping @Sendable (NativeReminderWake) -> Void) async throws -> NativeReminderObserverRegistration {
-        try await perform(reminderOwned: true) { try $0.observeReminders(callback) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform(reminderOwned: true) { try $0.observeReminders(callback) }
     }
 
     public func removeReminderObserver(_ id: UUID) async {
+        guard (try? beginOuterAdmission(restrictedAllowed: false)) != nil else { return }
+        defer { finishOuterAdmission() }
         _ = try? await perform(reminderOwned: true) { $0.removeReminderObserver(id) }
     }
 
     public func reconcileReminders() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let token = NativeAttachmentCancellation(), request = UUID()
         localAttachmentRequests.register(token, id: request)
         defer { localAttachmentRequests.remove(request) }
@@ -1801,6 +2183,8 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func reconcilePomodoroAlarms() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let cancellation = NativeAttachmentCancellation(), request = UUID()
         localAttachmentRequests.register(cancellation, id: request)
         defer { localAttachmentRequests.remove(request) }
@@ -1874,13 +2258,19 @@ public final class CoreHost: @unchecked Sendable {
 
     #if DEBUG && (targetEnvironment(simulator) || NATIVE_DEVICE_TEST)
     public func configureIsolatedPomodoroAlarmFixture(holdFirstAdd: Bool = false, denied: Bool = false, seedOwned: Bool = false) async throws {
-        try await perform { try $0.configureIsolatedPomodoroAlarmFixture(holdFirstAdd: holdFirstAdd, denied: denied, seedOwned: seedOwned) }
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
+        return try await perform { try $0.configureIsolatedPomodoroAlarmFixture(holdFirstAdd: holdFirstAdd, denied: denied, seedOwned: seedOwned) }
     }
     public func readIsolatedPomodoroAlarmFixture() async throws -> String {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let port = try await perform(reminderOwned: true) { try $0.isolatedPomodoroAlarmFixture() }
         return try await port.snapshot()
     }
     public func releaseIsolatedPomodoroAlarmFixture() async throws {
+        try beginOuterAdmission()
+        defer { finishOuterAdmission() }
         let port = try await perform(reminderOwned: true) { try $0.isolatedPomodoroAlarmFixture() }
         await port.release()
     }
@@ -2012,6 +2402,11 @@ public final class CoreHost: @unchecked Sendable {
     }
 
     public func close() async {
+        holdOrdinaryClose()
+        await closeRuntime()
+    }
+
+    private func closeRuntime() async {
         // This primitive flag reaches a running local invoke immediately; an
         // ordinary durable command remains governed by its existing journal.
         localAttachmentRequests.close()
@@ -2468,6 +2863,8 @@ private final class Engine: @unchecked Sendable {
     private let journalURL: URL
     private let editorDrafts: EditorDraftStore
     private let legacyStorage: LegacyRNStorage?
+    private let workspaceMode: NativeWorkspaceMode
+    private let restrictedFixtureRoot: URL?
     private let deviceStorageLocation: (containerURL: URL, bundleIdentifier: String)?
     private var deviceStorage: NativeDeviceKV?
     private var context: JSContext?
@@ -3196,9 +3593,12 @@ private final class Engine: @unchecked Sendable {
     }
 
     init(queue: DispatchQueue, databaseURL: URL, bundleURL: URL, legacyStorage: LegacyRNStorage? = nil,
-         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil, localRequests: NativeAttachmentLocalRequests,
+         deviceStorage: (containerURL: URL, bundleIdentifier: String)? = nil,
+         workspaceMode: NativeWorkspaceMode = .personal, restrictedFixtureRoot: URL? = nil, localRequests: NativeAttachmentLocalRequests,
          reminderAdmissions: NativeReminderEffects) {
         self.queue = queue
+        self.workspaceMode = workspaceMode
+        self.restrictedFixtureRoot = restrictedFixtureRoot
         self.localRequests = localRequests
         self.reminderAdmissions = reminderAdmissions
         self.databaseURL = databaseURL
@@ -3572,6 +3972,7 @@ private final class Engine: @unchecked Sendable {
                 try denyCleanupOwner()
                 return try startupWindow(retentionJSON: retentionJSON)
             }
+            try validateRestrictedFixtureStorage()
             let source = try String(contentsOf: bundleURL, encoding: .utf8)
             guard !source.isEmpty else { throw HostFailure("Core bundle is empty") }
             try FileManager.default.createDirectory(at: databaseURL.deletingLastPathComponent(), withIntermediateDirectories: true,
@@ -3579,6 +3980,7 @@ private final class Engine: @unchecked Sendable {
             try DurableFile.sync(databaseURL.deletingLastPathComponent().deletingLastPathComponent(), directory: true)
             lockFD = open(databaseURL.appendingPathExtension("host-lock").path, O_CREAT | O_RDWR | O_NOFOLLOW, 0o600)
             guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { throw HostFailure("Native database is already in use or cannot be locked") }
+            if workspaceMode == .personal {
             // Device storage is explicitly opted in; an unavailable namespace
             // leaves a refusing port, never an empty fallback or failed boot.
             if let location = deviceStorageLocation {
@@ -3613,6 +4015,7 @@ private final class Engine: @unchecked Sendable {
             calendarJobs = NativeCalendarJobs(registry: localRequests, readFile: readCalendarFile)
             cryptoJobs = NativeCryptoJobs(registry: localRequests)
             #endif
+            }
             let httpGeneration = attachmentGeneration
             httpJobs?.setWake { [weak self] in
                 guard let self else { return }
@@ -7382,6 +7785,7 @@ private final class Engine: @unchecked Sendable {
         try requireRetainedOrdinaryTurn()
     }
     private func requireRawAttachmentRead(_ json: String, installer: Bool = false) throws {
+        try requirePersonalWorkspace()
         try requireEncryptionUnlockTurn()
         try denyCleanupOwner()
         if let turn = projectDownloadTurn {
@@ -27839,6 +28243,7 @@ private final class Engine: @unchecked Sendable {
     private static let deviceStorageFrameLimit = 12 * 1024 * 1024
 
     private func requireDeviceStorageAdmission() throws -> NativeDeviceKV {
+        try requirePersonalWorkspace()
         guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
@@ -27918,6 +28323,7 @@ private final class Engine: @unchecked Sendable {
     }
     private func deviceStorageResult(legacySecretRemoval: () -> Bool = { false }, _ work: () throws -> String?) -> String? {
         dispatchPrecondition(condition: .onQueue(queue))
+        if workspaceMode == .restricted { return "!MindwtrNativeError:WORKSPACE_RESTRICTED: Native outward capability is unavailable" }
         do {
             let result = try work()
             try requireEncryptionUnlockTurn()
@@ -27950,6 +28356,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireHTTPAdmission(_ input: String) throws {
+        try requirePersonalWorkspace()
         guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
@@ -27979,6 +28386,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireSecretAdmission(_ input: String) throws {
+        try requirePersonalWorkspace()
         guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
@@ -28012,6 +28420,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireCalendarAdmission() throws {
+        try requirePersonalWorkspace()
         dispatchPrecondition(condition: .onQueue(queue))
         guard started, !closed, !localRequests.isClosing, !recoveryActivationPending, pending == nil, lockFD >= 0,
               retainedOrdinaryTurn == nil, projectFileAddTurn == nil, projectDownloadTurn == nil,
@@ -28024,6 +28433,7 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func requireCryptoAdmission(_ input: String) throws {
+        try requirePersonalWorkspace()
         guard aiRequestTimeoutTurn == nil, aiReasoningEffortTurn == nil, aiGeminiThinkingBudgetTurn == nil, deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil else { throw Self.deviceStorageUnavailable }
         try requireEncryptionUnlockTurn()
         dispatchPrecondition(condition: .onQueue(queue))
@@ -28232,10 +28642,10 @@ private final class Engine: @unchecked Sendable {
             return String(decoding: (try? JSONEncoder().encode(bytes)) ?? Data(), as: UTF8.self)
         }
         let rnState: @convention(block) (String) -> String? = { [weak self] change in
-            guard let self, let legacy = self.legacyStorage else {
-                return "!MindwtrNativeError:Legacy app storage is unavailable in the foundation"
-            }
+            guard let self else { return "!MindwtrNativeError:Legacy app storage is unavailable in the foundation" }
             return self.guarded {
+                try self.requirePersonalWorkspace()
+                guard let legacy = self.legacyStorage else { throw HostFailure("Legacy app storage is unavailable in the foundation") }
                 try self.denyCleanupOwner()
                 try legacy.commit(changeJSON: change, checkpointURL: self.databaseURL.appendingPathExtension("rn-state.prewrite"))
                 return nil
@@ -28412,7 +28822,7 @@ private final class Engine: @unchecked Sendable {
         }
         let calendarPushCall: @convention(block) (JSValue) -> String = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
-            return self.guarded { try self.calendarPushCall(json) } ?? "!MindwtrNativeError:Calendar push is unavailable"
+            return self.guarded { try self.requirePersonalWorkspace(); return try self.calendarPushCall(json) } ?? "!MindwtrNativeError:Calendar push is unavailable"
         }
         let calendarPushAbort: @convention(block) (JSValue) -> Void = { [weak self] request in
             guard let self, request.isString, let id = request.toString() else { return }
@@ -28422,6 +28832,7 @@ private final class Engine: @unchecked Sendable {
         let calendarPushDue: @convention(block) (JSValue) -> String? = { [weak self] request in
             guard let self, request.isString, let json = request.toString() else { return "!MindwtrNativeError:Calendar request is invalid" }
             return self.guarded {
+                try self.requirePersonalWorkspace()
                 guard self.started, !self.closed, !self.localRequests.isClosing,
                       let observer = self.calendarPushObserver, observer.generation == self.attachmentGeneration else {
                     throw NativeCalendarWriteError.unavailable
@@ -28435,6 +28846,7 @@ private final class Engine: @unchecked Sendable {
             }
         }
         let fileSyncCall: @convention(block) (JSValue) -> String = { [weak self, weak context] input in
+            if self?.workspaceMode == .restricted { return "!MindwtrNativeError:WORKSPACE_RESTRICTED: Native outward capability is unavailable" }
             guard let self, let context, let turn = self.fileSyncTurn, turn.runtime === context,
                   self.context === context, input.context === context, input.isString,
                   let text = input.toString(), self.attachmentGeneration == turn.generation,
@@ -28457,12 +28869,12 @@ private final class Engine: @unchecked Sendable {
                               "calendarAbort": calendarAbort as Any, "ioNext": next as Any, "ioBody": body as Any] {
             bridge.setObject(block, forKeyedSubscript: name as NSString)
         }
-        if deviceStorageLocation != nil {
+        if deviceStorageLocation != nil || workspaceMode == .restricted {
             bridge.setObject(calendarPushCall, forKeyedSubscript: "calendarPushCall" as NSString)
             bridge.setObject(calendarPushAbort, forKeyedSubscript: "calendarPushAbort" as NSString)
             bridge.setObject(calendarPushDue, forKeyedSubscript: "calendarPushDue" as NSString)
         }
-        if deviceStorageLocation != nil {
+        if deviceStorageLocation != nil || workspaceMode == .restricted {
             let calendarSubscriptionRead: @convention(block) () -> String = { [weak self] in
                 guard let self else { return "!MindwtrNativeError:Device settings storage is unavailable" }
                 return self.guarded { try self.calendarSubscriptionRead() } ?? "!MindwtrNativeError:Device settings storage is unavailable"
@@ -28622,6 +29034,88 @@ private final class Engine: @unchecked Sendable {
     private func guarded(_ work: () throws -> String?) -> String? {
         do { return try work() }
         catch { return "!MindwtrNativeError:" + error.localizedDescription }
+    }
+
+    private func requirePersonalWorkspace() throws {
+        guard workspaceMode == .personal else {
+            throw CoreHostRejection(message: "WORKSPACE_RESTRICTED: Native outward capability is unavailable")
+        }
+    }
+
+    private func validateRestrictedFixtureStorage() throws {
+        guard workspaceMode == .restricted else { return }
+        #if DEBUG
+        // Production sample-root admission/seed is deliberately absent in this unit.
+        guard let root = restrictedFixtureRoot, legacyStorage == nil, deviceStorageLocation == nil,
+              root.isFileURL, root.standardizedFileURL == root,
+              root.resolvingSymlinksInPath() == root,
+              UUID(uuidString: root.lastPathComponent) != nil,
+              root.deletingLastPathComponent().lastPathComponent == "restricted-workspace-fixtures",
+              databaseURL == root.appendingPathComponent("mindwtr.sqlite") else { throw CoreHostRetirementError.unavailable }
+        var info = stat()
+        guard lstat(root.path, &info) == 0, (info.st_mode & S_IFMT) == S_IFDIR,
+              info.st_uid == geteuid(), (info.st_mode & 0o077) == 0,
+              try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty else { throw CoreHostRetirementError.unavailable }
+        #else
+        throw CoreHostRetirementError.unavailable
+        #endif
+    }
+
+    func validateWorkspaceRetirement() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        // Ordinary close and failed startup clear evidence and cannot prove retirement.
+        guard started, !closed, context != nil, database != nil, lockFD >= 0,
+              !localRequests.isClosing, !fileSyncCloseFailed, !reminderSourceStale,
+              !aiRequestTimeoutRetired, !aiReasoningEffortRetired, !aiGeminiThinkingBudgetRetired else { throw CoreHostRetirementError.unavailable }
+        guard !recoveryActivationPending, !unresolvedAppLockRecovery, pending == nil,
+              cleanupTurn == nil, !foregroundCleanupActive, foregroundCleanupCancellation == nil,
+              retainedOrdinaryTurn == nil, ordinaryMutationDepth == 0,
+              projectFileAddTurn == nil, projectDownloadTurn == nil, projectDownloadAcknowledgedTurn == nil,
+              projectAvailabilityTurn == nil, encryptionUnlockTurn == nil, providerCopy == nil, taskDownloadTurn == nil,
+              fileSyncTurn == nil, reminderEffectsTurn == nil, pomodoroAlarmTurn == nil,
+              notificationSettingTurn == nil, !notificationSettingOwnerAccess,
+              aiRequestTimeoutTurn == nil, !aiRequestTimeoutOwnerAccess,
+              aiReasoningEffortTurn == nil, !aiReasoningEffortOwnerAccess,
+              aiGeminiThinkingBudgetTurn == nil, !aiGeminiThinkingBudgetOwnerAccess,
+              deviceCalendarSettingTurn == nil, calendarSubscriptionSettingTurn == nil,
+              calendarPushTurn == nil, retainedCalendarPushTurn == nil, calendarFileCaptureTurn == nil,
+              calendarAccessTurn == nil, reminderSnoozeMutation == nil, !reminderOwnerAccess,
+              appleRemindersAccess == nil, !appleReminderJournalOwned, !appleReminderJournalNeedsSync,
+              !appleReminderRemovalPending, appleReminderJournalBinding == nil,
+              backupSelections.isEmpty, !backupReplayReadOnly, backupUnreturnedReply == nil, !invoking else {
+            throw CoreHostRetirementError.refused
+        }
+        do {
+            guard try loadPendingJournal() == nil, try editorDrafts.read() == nil,
+                  !attachmentDraftEvidence else { throw CoreHostRetirementError.refused }
+            if deviceStorageLocation != nil {
+                guard let deviceStorage else { throw CoreHostRetirementError.unavailable }
+                try deviceStorage.validateWorkspaceRetirement()
+            }
+            guard let context, let host = context.objectForKeyedSubscript("MindwtrHost"),
+                  let status = host.invokeMethod("iosWorkspaceRetirementStatus", withArguments: []), status.isString,
+                  let text = status.toString(), text.utf8.count <= 1024 else { throw CoreHostRetirementError.unavailable }
+            try checkException()
+            guard let value = try NativeJSON.jsonObject(with: Data(text.utf8)) as? [String: Any],
+                  Set(value.keys) == Set(["version", "ready", "pending", "uncertain"]),
+                  Self.isInteger(value["version"]), (value["version"] as? NSNumber)?.intValue == 1,
+                  let ready = value["ready"] as? NSNumber, CFGetTypeID(ready) == CFBooleanGetTypeID(), ready.boolValue,
+                  let pending = value["pending"] as? NSNumber, CFGetTypeID(pending) == CFBooleanGetTypeID(),
+                  let uncertain = value["uncertain"] as? NSNumber, CFGetTypeID(uncertain) == CFBooleanGetTypeID() else {
+                throw CoreHostRetirementError.unavailable
+            }
+            guard !uncertain.boolValue else { throw CoreHostRetirementError.unavailable }
+            guard !pending.boolValue else { throw CoreHostRetirementError.refused }
+        } catch let error as CoreHostRetirementError { throw error }
+        catch { throw CoreHostRetirementError.unavailable }
+    }
+
+    func validateWorkspaceShutdown() throws {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard closed, !started, context == nil, database == nil, lockFD < 0,
+              !fileSyncCloseFailed, fileSyncTurn == nil, deviceStorage == nil,
+              httpJobs == nil, secretJobs == nil, calendarJobs == nil, cryptoJobs == nil,
+              attachmentJobs == nil, appleRemindersJobs == nil else { throw CoreHostRetirementError.unavailable }
     }
 
     func shutdown() {

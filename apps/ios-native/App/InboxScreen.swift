@@ -1644,6 +1644,7 @@ struct TaskCard: View {
     }
 
     private func openDescriptionURL(_ url: URL) -> OpenURLAction.Result {
+        guard model.workspaceAdmissionsOpen else { return .discarded }
         if url.scheme == "mindwtr-native-row", url.host == "reference",
            let index = Int(url.lastPathComponent),
            url.absoluteString == "mindwtr-native-row://reference/\(index)" {
@@ -1662,9 +1663,10 @@ struct TaskCard: View {
         if url.scheme?.lowercased() == "upnote",
            let original = NativeMarkdownLinkURL.originalHref(url, runs: meta.object("description").objects("inline")) {
             Task {
-                let opened = await NativeUpNoteLink.open(original, surface: "markdown")
-                await model.recordUpNoteHandoff(opened ? "opened" : "failed", surface: "markdown")
-                if !opened { NativeUpNoteLink.showFailure(original, labels: model.strings) }
+                await NativeUpNoteLink.open(original, surface: "markdown", admission: { model.workspaceAdmissionsOpen }) { opened in
+                    await model.recordUpNoteHandoff(opened ? "opened" : "failed", surface: "markdown")
+                    if !opened { NativeUpNoteLink.showFailure(original, labels: model.strings, admission: { model.workspaceAdmissionsOpen }) }
+                }
             }
             return .handled
         }

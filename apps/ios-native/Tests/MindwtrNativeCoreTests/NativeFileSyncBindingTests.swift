@@ -249,6 +249,71 @@ final class NativeFileSyncBindingTests: XCTestCase {
         try Data(json(configuration).utf8).write(to: manifest)
         return (configuration, file, bytes)
     }
+    func testWorkspaceRetirementWaitsForAcceptedDirectoryConfigurationAndRealRollback() async throws {
+        let prior = try seedPriorDirectory("Prior retirement rollback"), observation = FileBindingDrainObservation()
+        let selectedPath = selected.appendingPathComponent("data.json").absoluteString, manifest = self.manifest
+        defer { observation.release.signal() }
+        let host = self.host(configure: { faults in
+            faults.configureFileSyncJobs = { _ in observation.record("constructed") }
+            faults.secretStatus = { operation, _ in
+                if observation.count("gate") > 0 {
+                    observation.record("secret-after-gate")
+                    if operation == "get" && observation.record("verification-read") == 1 {
+                        observation.record("verification-failed"); return errSecNotAvailable
+                    }
+                }
+                return errSecItemNotFound
+            }
+            faults.configureDeviceStorage = { storage in
+                storage.faults.beforeReadback = {
+                    guard let bytes = try? Data(contentsOf: manifest),
+                          let values = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                          values["@mindwtr_sync_backend"] as? String == "off",
+                          values["@mindwtr_sync_path"] as? String == selectedPath,
+                          observation.record("candidate-readback") == 1 else { return }
+                    observation.record("gate"); observation.entered.signal(); observation.release.wait()
+                }
+            }
+        })
+        _ = try await host.start(); _ = try await directorySettings(host, "openSyncSettings")
+        let revision = try await directoryRevision(host), bookmark = try CoreHost.captureSyncDirectoryBookmark(selected)
+        let request = try json(["requestId": UUID().uuidString.lowercased(), "revision": revision])
+        let call = Task.detached {
+            do { _ = try await host.foregroundDirectorySyncSettings(command: "pickSyncFolder", requestJSON: request, pickedBookmark: bookmark) }
+            catch { observation.record("call-refused") }
+            observation.returned.signal()
+        }
+        guard observation.entered.wait(timeout: .now() + 15) == .success else {
+            call.cancel(); observation.release.signal(); await call.value; XCTFail("Actual accepted paired KV batch was not entered"); return
+        }
+        let retirement = Task { () -> CoreHostRetirementError? in
+            defer { observation.record("retirement-terminal") }
+            do { _ = try await host.retireForWorkspaceTransition(); observation.record("retirement-ack"); return nil }
+            catch { return error as? CoreHostRetirementError }
+        }
+        for _ in 0..<1000 { if host.workspaceRetirementIsFencedForTests() { break }; await Task.yield() }
+        XCTAssertTrue(host.workspaceRetirementIsFencedForTests())
+        if host.workspaceRetirementIsFencedForTests() {
+            do { _ = try await host.call("captureOpen"); XCTFail("New unrelated outer admission must close") }
+            catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable) }
+        }
+        call.cancel(); retirement.cancel()
+        XCTAssertEqual(observation.count("retirement-terminal"), 0)
+        XCTAssertEqual(observation.returned.wait(timeout: .now() + 0.02), .timedOut)
+        observation.release.signal(); await call.value
+        let error = await retirement.value
+        XCTAssertEqual(error, .unavailable, "Original unresolved screen outcome remains held after actual rollback")
+        XCTAssertEqual(observation.count("retirement-ack"), 0)
+        XCTAssertGreaterThan(observation.count("secret-after-gate"), 0)
+        XCTAssertEqual(observation.count("verification-failed"), 1)
+        XCTAssertEqual(try readConfiguration(), prior.configuration, "Retirement cannot revoke the captured original rollback owner")
+        XCTAssertEqual(try Data(contentsOf: prior.file), prior.bytes)
+        XCTAssertEqual(observation.count("constructed"), 1, "No cancellation follow-up cycle")
+        await host.close()
+        do { _ = try await host.retireForWorkspaceTransition(); XCTFail("Disposal cannot manufacture acknowledgement") }
+        catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable) }
+    }
+
     func testCancellationDuringAcceptedConfigurationWriteRetainsTransactionAndRealRollbackReads() async throws {
         for failReadback in [false, true] {
             let prior = try seedPriorDirectory(failReadback ? "Prior rollback" : "Prior commit")
@@ -594,10 +659,14 @@ final class NativeFileSyncBindingTests: XCTestCase {
         await refuses { _ = try await host.foregroundFileSync(directoryURL: directory) }
         XCTAssertEqual(observation.count("constructed"), 1, "An unavailable host cannot admit another session")
         XCTAssertEqual(observation.count("read"), 1)
+        do { _ = try await host.retireForWorkspaceTransition(); XCTFail("Actual failed cleanup must refuse clean retirement") }
+        catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable) }
         let closeFinished = DispatchSemaphore(value: 0)
         let close = Task.detached { await host.close(); closeFinished.signal() }
         guard closeFinished.wait(timeout: .now() + 10) == .success else { XCTFail("CoreHost.close did not terminate"); return }
         await close.value
+        do { _ = try await host.retireForWorkspaceTransition(); XCTFail("Ordinary close cannot erase retained cleanup failure") }
+        catch { XCTAssertEqual(error as? CoreHostRetirementError, .unavailable) }
         XCTAssertEqual(try Data(contentsOf: file), before)
         XCTAssertEqual(Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)),
                        Set(["data.json", "unknown.bin", ".mindwtr.lock", "retained-original-lock"]))

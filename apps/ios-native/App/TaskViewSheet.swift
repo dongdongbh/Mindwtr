@@ -1573,8 +1573,9 @@ struct NativeDocumentPicker: UIViewControllerRepresentable {
 /// A separate directory picker leaves existing copied data/backup imports unchanged.
 struct NativeSyncDirectoryPicker: UIViewControllerRepresentable {
     let pickerID: UUID
+    let admission: (UUID) -> Bool
     let completion: (Result<Data, Error>, UUID) -> Void
-    func makeCoordinator() -> Coordinator { Coordinator(pickerID: pickerID, completion: completion) }
+    func makeCoordinator() -> Coordinator { Coordinator(pickerID: pickerID, admission: admission, completion: completion) }
     func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
         picker.allowsMultipleSelection = false
@@ -1584,15 +1585,24 @@ struct NativeSyncDirectoryPicker: UIViewControllerRepresentable {
     func updateUIViewController(_ picker: UIDocumentPickerViewController, context: Context) {}
     final class Coordinator: NSObject, UIDocumentPickerDelegate {
         let pickerID: UUID
+        let admission: (UUID) -> Bool
+        let captureBookmark: (URL) throws -> Data
         let completion: (Result<Data, Error>, UUID) -> Void
-        init(pickerID: UUID, completion: @escaping (Result<Data, Error>, UUID) -> Void) {
-            self.pickerID = pickerID; self.completion = completion
+        init(pickerID: UUID, admission: @escaping (UUID) -> Bool,
+             captureBookmark: @escaping (URL) throws -> Data = CoreHost.captureSyncDirectoryBookmark,
+             completion: @escaping (Result<Data, Error>, UUID) -> Void) {
+            self.pickerID = pickerID; self.admission = admission
+            self.captureBookmark = captureBookmark; self.completion = completion
         }
         func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard admission(pickerID) else {
+                completion(.failure(CocoaError(.userCancelled)), pickerID)
+                return
+            }
             // Capture synchronously, before any Task suspension loses UIKit's temporary URL scope.
             let result = Result<Data, Error> {
                 guard urls.count == 1, let url = urls.first else { throw CocoaError(.fileReadInvalidFileName) }
-                return try CoreHost.captureSyncDirectoryBookmark(url)
+                return try captureBookmark(url)
             }
             completion(result, pickerID)
         }
@@ -1715,10 +1725,15 @@ enum NativeMarkdownLinkURL {
     }
 }
 
-private struct NativeExternalLinkDiagnostic: EnvironmentKey { static let defaultValue: ((String, String) -> Void)? = nil }
+private struct NativeExternalLinkDiagnostic: EnvironmentKey { static let defaultValue: ((String, String) async -> Void)? = nil }
 private struct NativeExternalLinkLabels: EnvironmentKey { static let defaultValue: CoreObject = [:] }
+private struct NativeExternalLinkAdmission: EnvironmentKey { static let defaultValue: () -> Bool = { true } }
 extension EnvironmentValues {
-    var nativeExternalLinkDiagnostic: ((String, String) -> Void)? {
+    var nativeExternalLinkAdmission: () -> Bool {
+        get { self[NativeExternalLinkAdmission.self] }
+        set { self[NativeExternalLinkAdmission.self] = newValue }
+    }
+    var nativeExternalLinkDiagnostic: ((String, String) async -> Void)? {
         get { self[NativeExternalLinkDiagnostic.self] }
         set { self[NativeExternalLinkDiagnostic.self] = newValue }
     }
@@ -1730,15 +1745,22 @@ extension EnvironmentValues {
 
 @MainActor
 enum NativeUpNoteLink {
-    static func open(_ original: String, surface: String) async -> Bool {
-        guard let url = NativeMarkdownLinkURL.externalURL(original), url.scheme?.lowercased() == "upnote" else { return false }
+    private(set) static var inFlight = 0
+    static func open(_ original: String, surface: String, admission: () -> Bool, completion: (Bool) async -> Void) async {
+        guard admission() else { return }
+        inFlight += 1
+        defer { inFlight -= 1 }
+        guard let url = NativeMarkdownLinkURL.externalURL(original), url.scheme?.lowercased() == "upnote" else {
+            await completion(false); return
+        }
         let opened = await withCheckedContinuation { continuation in
             UIApplication.shared.open(url, options: [:]) { continuation.resume(returning: $0) }
         }
         NSLog("Native iOS UpNote handoff scope=links outcome=%@ surface=%@ scheme=upnote", opened ? "opened" : "failed", surface)
-        return opened
+        await completion(opened)
     }
-    static func showFailure(_ original: String, labels: CoreObject) {
+    static func showFailure(_ original: String, labels: CoreObject, admission: () -> Bool) {
+        guard admission() else { return }
         let alert = UIAlertController(title: labels.text("common.error"), message: labels.text("markdown.openLinkFailed"), preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: labels.text("markdown.copyLink"), style: .default) { _ in
             UIPasteboard.general.string = original
@@ -1761,12 +1783,14 @@ struct NativeMarkdownInline: View {
     var onReference: ((Int) -> Void)? = nil
     @Environment(\.nativeExternalLinkLabels) private var linkLabels
     @Environment(\.nativeExternalLinkDiagnostic) private var linkDiagnostic
+    @Environment(\.nativeExternalLinkAdmission) private var linkAdmission
 
     var body: some View {
         Text(Self.attributedText(runs, labels: labels, palette: palette, referenceLinks: onReference != nil)).rnFont(size, weight).textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.openURL, OpenURLAction { url in
+                guard linkAdmission() else { return .discarded }
                 if let onReference, url.scheme == "mindwtr-native-row", url.host == "reference",
                    let index = Int(url.lastPathComponent),
                    url.absoluteString == "mindwtr-native-row://reference/\(index)",
@@ -1778,9 +1802,10 @@ struct NativeMarkdownInline: View {
                 if url.scheme?.lowercased() == "upnote",
                    let original = NativeMarkdownLinkURL.originalHref(url, runs: runs) {
                     Task {
-                        let opened = await NativeUpNoteLink.open(original, surface: "markdown")
-                        linkDiagnostic?(opened ? "opened" : "failed", "markdown")
-                        if !opened { NativeUpNoteLink.showFailure(original, labels: linkLabels) }
+                        await NativeUpNoteLink.open(original, surface: "markdown", admission: linkAdmission) { opened in
+                            await linkDiagnostic?(opened ? "opened" : "failed", "markdown")
+                            if !opened { NativeUpNoteLink.showFailure(original, labels: linkLabels, admission: linkAdmission) }
+                        }
                     }
                     return .handled
                 }

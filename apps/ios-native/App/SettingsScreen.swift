@@ -307,7 +307,7 @@ struct SettingsScreen: View {
                     model.completeSettingsSyncDirectory(.failure(CocoaError(.userCancelled)), pickerID: pickerID)
                 }
             })) { claim in
-                NativeSyncDirectoryPicker(pickerID: claim.id) { result, capturedID in
+                NativeSyncDirectoryPicker(pickerID: claim.id, admission: model.canCaptureSettingsSyncDirectory) { result, capturedID in
                     model.completeSettingsSyncDirectory(result, pickerID: capturedID)
                 }.id(claim.id).interactiveDismissDisabled()
             }
