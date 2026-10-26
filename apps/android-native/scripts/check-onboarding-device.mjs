@@ -232,6 +232,36 @@ try {
     sh(`input swipe ${Math.round((hx1 + hx2) / 2)} ${Math.round((hy1 + hy2) / 2)} ${Math.round((hx1 + hx2) / 2)} ${Math.round((hy1 + hy2) / 2 + rowPx * 1.3)} 900`);
     nodes = await waitFor('the first task one row down', (current) => { const now = reorderTitles(current); return now[1] === before[0] && now[0] === before[1]; }, 20_000);
     check(true, '(c) a drag on the first task\'s handle moves it one row down, as core orders it');
+    // Review rb4c 2: a filter set while reordering reads the order again (only @computer tasks stay), and Clear brings every row
+    // back. The reorder bar has its own Done, so the sheet's Done is found outside it.
+    const outsideToggle = (current) => {
+        const toggle = tagged(current, 'project-task-reorder-toggle');
+        if (!toggle) return current;
+        const [l, t, r, b] = box(toggle);
+        return current.filter((node) => { const [x1, y1, x2, y2] = box(node); return !(x1 >= l && y1 >= t && x2 <= r && y2 <= b); });
+    };
+    const allRows = reorderTitles(nodes);
+    nodes = await openView();
+    nodes = await tapExpecting(tagged(nodes, 'project-view-filter-option') ?? fail('no Filters row in reorder mode'), sheetUp, 'the filter sheet in reorder mode');
+    nodes = await tapExpecting(withDescription(nodes, `${en['filters.contexts']}: ${en['common.all']}`) ?? fail('no Contexts & tags row'),
+        (current) => Boolean(withDescription(current, pickerSearch)) && Boolean(withDescription(current, '@computer')), 'the contexts page in reorder mode');
+    await tapExpecting(withDescription(nodes, '@computer'), (current) => isOn(withDescription(current, '@computer'))
+        || current.some((node) => node.text === en['bulk.selected']), '@computer chosen in reorder mode');
+    nodes = await tapExpecting(button(await screen(), en['common.back']) ?? fail('no Back on the contexts page'),
+        (current) => Boolean(withDescription(current, `${en['filters.contexts']}: @computer`)), 'the sheet overview in reorder mode');
+    nodes = await tapExpecting(button(outsideToggle(nodes), en['common.done']) ?? fail('no sheet Done'),
+        (current) => !sheetUp(current) && Boolean(tagged(current, 'project-reorder-list')), 'the reorder list under the filter');
+    nodes = await waitFor('only the @computer tasks in the reorder list', (current) => {
+        const now = reorderTitles(current);
+        return now.length > 0 && now.length < allRows.length && now.every((title) => allRows.includes(title));
+    }, 20_000);
+    check(true, '(c) a filter set while reordering reads the order again: only its tasks stay in the reorder list');
+    nodes = await tapExpecting(tagged(nodes, 'project-task-filter-button') ?? fail('no filter chip in reorder mode'), sheetUp, 'the filter sheet in reorder mode again');
+    nodes = await tapExpecting(button(outsideToggle(nodes), en['filters.clear']) ?? fail('no Clear'), (current) => !button(current, en['filters.clear']), 'the filters cleared in reorder mode');
+    nodes = await tapExpecting(button(outsideToggle(nodes), en['common.done']) ?? fail('no sheet Done'),
+        (current) => !sheetUp(current) && Boolean(tagged(current, 'project-reorder-list')), 'the reorder list without the filter');
+    nodes = await waitFor('every task back in the reorder list', (current) => reorderTitles(current).length === allRows.length, 20_000);
+    check(true, '(c) Clear while reordering brings every task back');
     nodes = await tapExpecting(tagged(nodes, 'project-task-reorder-toggle') ?? fail('no Done'), (current) => !tagged(current, 'project-reorder-list'), 'the list again');
     check(true, '(c) Done leaves reorder mode');
     // The pinned "+" (RN's openProjectQuickAdd): the popup opens with Getting Started chosen, and the task saves as Next in it.

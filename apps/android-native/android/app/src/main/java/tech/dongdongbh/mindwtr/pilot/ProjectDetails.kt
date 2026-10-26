@@ -67,7 +67,19 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.platform.LocalConfiguration
@@ -280,11 +292,11 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     /** Core's project order view (getProjectTaskOrderView): its words, orderToken, and every row (all windows) in core's order. */
     var orderView by mutableStateOf<JSONObject?>(null); private set
 
-    /** Reorder on (core's order read) or Done (back to the list, read again). */
+    /** Reorder on (the list reads core's order as it shows) or Done (back to the list, read again). */
     fun toggleReorder() {
         viewOptionsOpen = false
         reorderMode = !reorderMode
-        if (reorderMode) readOrder() else { orderView = null; shell.refreshProjects() }
+        if (!reorderMode) { orderView = null; shell.refreshProjects() }
     }
 
     fun readOrder() {
@@ -1379,7 +1391,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
     val theme = LocalTheme.current
     val c = theme.colors
     val view = orderView
-    val items = view?.menuObjects("items").orEmpty()
+    val items = remember(view) { view?.menuObjects("items").orEmpty() }
     val sectionIds = items.mapNotNull { item -> item.takeIf { it.getString("type") == "section" }?.menuText("sectionId") }
     val enabled = view?.optBoolean("canReorder") == true && !model.busy && model.failedAction == null
     Column(modifier.background(c.bg).testTag("project-reorder-list")) {
@@ -1393,94 +1405,181 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                 .semantics { contentDescription = done }.testTag("project-task-reorder-toggle").padding(horizontal = 12.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center) { Text(done, style = rnText(13, 700), color = c.onTint) }
         }
-        val rowHeight = with(LocalDensity.current) { 80.dp.toPx() }
-        var dragged by remember { mutableStateOf<String?>(null) }
-        var shift by remember { mutableFloatStateOf(0f) }
-        // The row a task lands after when it sits at [to] in [order] with itself taken out: the row before it, or the top.
-        val afterAt = { order: List<JSONObject>, to: Int ->
-            order.getOrNull(to - 1)?.let { prev ->
-                if (prev.getString("type") == "section") JSONObject().put("type", "section").put("id", prev.getString("id"))
-                else JSONObject().put("type", "task").put("id", prev.getJSONObject("row").getString("id"))
+        val listState = rememberLazyListState()
+        // The order shown: core's, or a move made just now until core's next read (DraggableFlatList shows a drop at once).
+        var local by remember(view) { mutableStateOf<List<JSONObject>?>(null) }
+        val shown = local ?: items
+        // FlatList keeps its scroll offset when its rows change. Compose would follow the first visible key instead, and scroll
+        // a row moved above it out of sight.
+        val seen = remember { arrayOfNulls<List<JSONObject>>(1) }
+        SideEffect {
+            if (seen[0] != null && seen[0] !== shown) listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
+            seen[0] = shown
+        }
+        // A drop or TalkBack's move: the row at [from] shown at [to] at once, and core's prepared move after the row before it.
+        val moveRow = { from: Int, to: Int ->
+            val moved = shown[from]
+            val next = shown.toMutableList().apply { removeAt(from); add(to.coerceIn(0, size), moved) }
+            local = next
+            val prev = next.getOrNull(next.indexOf(moved) - 1)
+            moveTask(moved.getJSONObject("row").getString("id"), prev?.let { row ->
+                if (row.getString("type") == "section") JSONObject().put("type", "section").put("id", row.getString("id"))
+                else JSONObject().put("type", "task").put("id", row.getJSONObject("row").getString("id"))
+            })
+        }
+        // The drag in progress, as DraggableFlatList holds it: the row's slot and height, and its top in the list as the finger moves.
+        var dragFrom by remember { mutableIntStateOf(-1) }
+        var dragSize by remember { mutableFloatStateOf(0f) }
+        var dragTop by remember { mutableFloatStateOf(0f) }
+        val target = if (dragFrom < 0) -1 else dropTarget(listState.layoutInfo, dragFrom, dragTop, dragSize)
+        // DraggableFlatList's autoscroll (autoscrollThreshold 80, autoscrollSpeed 120): while the row is near an edge the list
+        // scrolls one step, larger the nearer the edge, and the next once it lands.
+        val threshold = with(LocalDensity.current) { 80.dp.toPx() }
+        val speed = with(LocalDensity.current) { 120.dp.toPx() }
+        LaunchedEffect(dragFrom >= 0) {
+            if (dragFrom < 0) return@LaunchedEffect
+            while (dragFrom >= 0) {
+                val height = listState.layoutInfo.viewportSize.height.toFloat()
+                val toTop = maxOf(0f, dragTop)
+                val toBottom = maxOf(0f, height - dragTop - dragSize)
+                val step = when {
+                    toTop <= threshold && listState.canScrollBackward -> -(1 - toTop / threshold) * speed
+                    toBottom <= threshold && listState.canScrollForward -> (1 - toBottom / threshold) * speed
+                    else -> 0f
+                }
+                if (step != 0f) listState.animateScrollBy(step) else withFrameNanos { }
             }
         }
-        val dropAt = { from: Int, to: Int ->
-            val moved = items[from]
-            val rest = items.toMutableList().apply { removeAt(from) }
-            val target = to.coerceIn(0, rest.size)
-            if (target != from) moveTask(moved.getJSONObject("row").getString("id"), afterAt(rest, target))
-        }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
-            // Rows by position, as RN's list: a key per task would keep the first visible task in place and scroll a row dropped
-            // above it out of sight.
-            itemsIndexed(items) { index, item ->
-                if (item.getString("type") == "section") {
-                    val title = item.getString("title")
-                    val sectionId = item.menuText("sectionId")
-                    Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (item.optBoolean("muted")) c.secondaryText else c.text,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })
-                        // RN's arrows only on a real section (a string sectionId), never on the No section row.
-                        val real = sectionId
-                        val position = real?.let(sectionIds::indexOf) ?: -1
-                        if (real != null && position >= 0 && sectionIds.size > 1) {
-                            for ((direction, icon, key) in listOf(Triple("up", Lucide.ArrowUp, "projects.moveSectionUp"), Triple("down", Lucide.ArrowDown, "projects.moveSectionDown"))) {
-                                val can = enabled && (if (direction == "up") position > 0 else position < sectionIds.size - 1)
-                                val label = "${t(key)}: $title"
-                                val shape = RoundedCornerShape(8.dp)
-                                Box(Modifier.size(32.dp).fade(if (can) 1f else 0.4f).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
-                                    .clickable(enabled = can, role = Role.Button) { moveOrderSection(real, direction, sectionIds) }
-                                    .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
-                                    Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+        Box(Modifier.weight(1f).fillMaxWidth().pointerInput(enabled, shown) {
+            if (!enabled) return@pointerInput
+            val inset = 12.dp.toPx()
+            val handle = 44.dp.toPx()
+            val gap = 8.dp.toPx()
+            // The handle lifts its row at once (RN's onPressIn), before the list can take the touch as a scroll.
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                val hit = listState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                    shown.getOrNull(item.index)?.getString("type") == "task" && down.position.x in (size.width - inset - handle)..(size.width - inset)
+                        && down.position.y >= item.offset && down.position.y < item.offset + item.size - gap
+                } ?: return@awaitEachGesture
+                down.consume()
+                val start = hit.offset.toFloat()
+                dragSize = hit.size.toFloat(); dragTop = start; dragFrom = hit.index
+                try {
+                    while (true) {
+                        val change = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                        change.consume()
+                        if (!change.pressed) {
+                            val to = dropTarget(listState.layoutInfo, dragFrom, dragTop, dragSize)
+                            val from = dragFrom
+                            dragFrom = -1
+                            if (to != from) moveRow(from, to)
+                            break
+                        }
+                        dragTop = (start + change.position.y - down.position.y).coerceIn(0f, maxOf(0f, size.height - dragSize))
+                    }
+                } finally {
+                    dragFrom = -1
+                }
+            }
+        }) {
+            LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
+                itemsIndexed(shown, key = { _, item -> reorderKey(item) }) { index, item ->
+                    // DraggableFlatList's live preview: the rows between the lifted row's slot and the drop slot step aside by its height.
+                    val shift by animateFloatAsState(when {
+                        dragFrom < 0 || index == dragFrom -> 0f
+                        dragFrom < index && index <= target -> -dragSize
+                        target <= index && index < dragFrom -> dragSize
+                        else -> 0f
+                    }, if (dragFrom < 0) snap() else spring(dampingRatio = 2.33f, stiffness = 1600f), label = "reorder-shift")
+                    val placed = Modifier.graphicsLayer { translationY = shift; alpha = if (index == dragFrom) 0f else 1f }
+                    if (item.getString("type") == "section") {
+                        val title = item.getString("title")
+                        val sectionId = item.menuText("sectionId")
+                        Row(placed.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (item.optBoolean("muted")) c.secondaryText else c.text,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })
+                            // RN's arrows only on a real section (a string sectionId), never on the No section row.
+                            val real = sectionId
+                            val position = real?.let(sectionIds::indexOf) ?: -1
+                            if (real != null && position >= 0 && sectionIds.size > 1) {
+                                for ((direction, icon, key) in listOf(Triple("up", Lucide.ArrowUp, "projects.moveSectionUp"), Triple("down", Lucide.ArrowDown, "projects.moveSectionDown"))) {
+                                    val can = enabled && (if (direction == "up") position > 0 else position < sectionIds.size - 1)
+                                    val label = "${t(key)}: $title"
+                                    val shape = RoundedCornerShape(8.dp)
+                                    Box(Modifier.size(32.dp).fade(if (can) 1f else 0.4f).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
+                                        .clickable(enabled = can, role = Role.Button) { moveOrderSection(real, direction, sectionIds) }
+                                        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+                                        Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+                                    }
                                 }
                             }
                         }
-                    }
-                } else {
-                    val row = item.getJSONObject("row")
-                    val id = row.getString("id")
-                    val title = row.getString("title")
-                    val active = dragged == id
-                    val moves = listOfNotNull(
-                        CustomAccessibilityAction(t("projects.moveUp")) { if (enabled && index > 0) dropAt(index, index - 1); enabled }.takeIf { index > 0 },
-                        CustomAccessibilityAction(t("projects.moveDown")) { if (enabled) dropAt(index, index + 1); enabled }.takeIf { index < items.size - 1 },
-                    )
-                    Row(Modifier.fillMaxWidth().height(80.dp).then(if (active) Modifier.offset { IntOffset(0, shift.roundToInt()) }.fade(0.92f) else Modifier)
-                        .testTag("project-task-reorder-row"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        val shape = RoundedCornerShape(8.dp)
-                        Column(Modifier.weight(1f).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.taskItemBg).rnBorder(1.dp, if (active) c.tint else c.border, shape)
-                            .padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.Center) {
-                            Text(title, style = rnText(15, 700, 19), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(t("status.${row.optString("status")}"), style = rnText(12, 600, 15), color = c.secondaryText, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
-                        }
+                    } else {
+                        val row = item.getJSONObject("row")
+                        val title = row.getString("title")
+                        // TalkBack's Move up passes a task, or a heading that is not the first row: above the first heading a task
+                        // would leave every section.
+                        val canUp = index > 0 && (shown[index - 1].getString("type") == "task" || index - 1 > 0)
+                        val moves = listOfNotNull(
+                            CustomAccessibilityAction(t("projects.moveUp")) { if (enabled) moveRow(index, index - 1); enabled }.takeIf { canUp },
+                            CustomAccessibilityAction(t("projects.moveDown")) { if (enabled) moveRow(index, index + 1); enabled }.takeIf { index < shown.size - 1 },
+                        )
                         val handle = "${t("board.dragTask")}: $title"
-                        Box(Modifier.width(44.dp).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
+                        ReorderTaskRow(row, false, placed.testTag("project-task-reorder-row"), Modifier
                             .semantics { contentDescription = handle; role = Role.Button; if (enabled) customActions = moves else disabled() }
-                            .pointerInput(id, enabled, items) {
-                                if (!enabled) return@pointerInput
-                                // A list update or a busy action mid-drag restarts this gesture without onDragCancel: the
-                                // restart drops the drag, so the row does not stay lifted.
-                                try {
-                                    detectDragGestures(
-                                        onDragStart = { dragged = id; shift = 0f },
-                                        onDragEnd = {
-                                            val to = (index + (shift / rowHeight).roundToInt()).coerceIn(0, items.size - 1)
-                                            dragged = null; shift = 0f
-                                            dropAt(index, to)
-                                        },
-                                        onDragCancel = { dragged = null; shift = 0f },
-                                    ) { change, amount -> change.consume(); shift += amount.y }
-                                } finally {
-                                    if (dragged == id) { dragged = null; shift = 0f }
-                                }
-                            }.testTag("project-task-drag-handle"), contentAlignment = Alignment.Center) {
-                            Icon(Lucide.GripVertical, null, tint = if (active) c.tint else c.secondaryText, modifier = Modifier.size(20.dp))
-                        }
+                            .testTag("project-task-drag-handle"))
                     }
                 }
             }
+            // The lifted row under the finger, over the list (its own slot stays empty while the rows around it step aside).
+            if (dragFrom >= 0) shown.getOrNull(dragFrom)?.takeIf { it.getString("type") == "task" }?.let { item ->
+                ReorderTaskRow(item.getJSONObject("row"), true, Modifier.padding(horizontal = 12.dp).offset { IntOffset(0, dragTop.roundToInt()) }
+                    .fade(0.92f), Modifier)
+            }
         }
     }
+}
+
+/** A task row in reorder mode: RN's card (title and status) and its 44-dp drag handle, RN's fixed 80-dp row. */
+@Composable
+private fun ReorderTaskRow(row: JSONObject, active: Boolean, modifier: Modifier, handleModifier: Modifier) {
+    val c = LocalTheme.current.colors
+    Row(modifier.fillMaxWidth().height(80.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        val shape = RoundedCornerShape(8.dp)
+        Column(Modifier.weight(1f).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.taskItemBg).rnBorder(1.dp, if (active) c.tint else c.border, shape)
+            .padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.Center) {
+            Text(row.getString("title"), style = rnText(15, 700, 19), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(t("status.${row.optString("status")}"), style = rnText(12, 600, 15), color = c.secondaryText, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+        }
+        Box(handleModifier.width(44.dp).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape),
+            contentAlignment = Alignment.Center) {
+            Icon(Lucide.GripVertical, null, tint = if (active) c.tint else c.secondaryText, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+private fun reorderKey(item: JSONObject): String =
+    if (item.getString("type") == "section") "section:${item.getString("id")}" else "task:${item.getJSONObject("row").getString("id")}"
+
+/**
+ * DraggableFlatList's drop slot for the row lifted from [from], [size] tall, its top at [top] in the viewport: it passes each row
+ * whose middle its far edge crosses. Rows outside the viewport count by their side of it.
+ */
+private fun dropTarget(info: LazyListLayoutInfo, from: Int, top: Float, size: Float): Int {
+    val visible = info.visibleItemsInfo
+    val first = visible.firstOrNull()?.index ?: return from
+    val last = visible.last().index
+    var after = maxOf(0, first - from - 1)
+    var before = maxOf(0, from - last - 1)
+    for (item in visible) {
+        if (item.index == from) continue
+        val middle = item.offset + item.size / 2f
+        if (item.index > from && top + size >= middle) after++
+        if (item.index < from && top < middle) before++
+    }
+    return from + after - before
 }
 
 /** RN's ProjectOptionRow: a 32-dp icon tile, the label (and its description), a hairline under it. */

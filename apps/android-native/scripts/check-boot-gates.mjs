@@ -9849,14 +9849,23 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /runtime\.menuRead\("projectTaskOrderView", /);
     assert.match(details, /edit\(projectId, "taskOrder", refused = \{ readOrder\(\) \}, answer = \{ readOrder\(\) \}\) \{\s+put\("taskId", taskId\)\.put\("after", after \?: JSONObject\.NULL\)[\s\S]{0,200}\.put\("expectedOrder", token\)/);
     assert.match(details, /"project-view-completed-option"[\s\S]{0,1200}"project-view-reorder-option"/);
-    assert.match(header, /if \(projectDetails\.reorderMode\) \{\s+LazyColumn\([^\n]*userScrollEnabled = false\) \{\s+openProjectId\?\.let \{ id -> projectDetailsItems\(model, id, detail\) \}\s+\}\s+ProjectReorderList\(model, Modifier\.weight\(1f\)\)\s+return@Column/);
+    assert.match(header, /if \(projectDetails\.reorderMode\) \{[\s\S]{0,400}LazyColumn\([^\n]*userScrollEnabled = false\) \{\s+openProjectId\?\.let \{ id -> projectDetailsItems\(model, id, detail\) \}\s+\}\s+ProjectReorderList\(model, Modifier\.weight\(1f\)\)\s+return@Column/);
+    // Review rb4c 2: the order reads again with every read of the project (view options, filter chip, Details, sync), not only
+    // after its own moves, so a drop never meets an order the screen no longer shows.
+    assert.match(header, /if \(projectDetails\.reorderMode\) \{\s+(?:\/\/[^\n]*\n\s+)*LaunchedEffect\(detail\) \{ projectDetails\.readOrder\(\) \}/);
+    assert.doesNotMatch(details, /if \(reorderMode\) readOrder\(\)/);
     assert.match(details, /customActions = moves/);
-    // A drop that changes the top row keeps the list where it is, as RN's list does: rows keyed by task id would let the
-    // list follow the first visible task and scroll the row moved above it out of sight.
-    assert.doesNotMatch(details, /itemsIndexed\(items, key =/);
-    // A list update or a busy action mid-drag restarts the handle's gesture: the drag ends on its own task (dragged holds the
-    // task id, never a position), and the restart clears it, so no row stays lifted.
-    assert.match(details, /onDragStart = \{ dragged = id; shift = 0f \}/);
-    assert.match(details, /\} finally \{\s+if \(dragged == id\) \{ dragged = null; shift = 0f \}\s+\}/);
+    // Review rb4c 3/4, RN's DraggableFlatList: rows keyed by task id (TalkBack stays on its task), the scroll offset held when
+    // the rows change (FlatList keeps it; Compose would follow the first visible key and scroll a row dropped above it away),
+    // the drop slot from the measured rows (a row's middle crossed), live neighbour shifts, and RN's autoscroll (80, 120).
+    assert.match(details, /itemsIndexed\(shown, key = \{ _, item -> reorderKey\(item\) \}\)/);
+    assert.match(details, /SideEffect \{\s+if \(seen\[0\] != null && seen\[0\] !== shown\) listState\.requestScrollToItem\(listState\.firstVisibleItemIndex, listState\.firstVisibleItemScrollOffset\)/);
+    assert.match(details, /val target = if \(dragFrom < 0\) -1 else dropTarget\(listState\.layoutInfo, dragFrom, dragTop, dragSize\)/);
+    assert.match(details, /if \(item\.index > from && top \+ size >= middle\) after\+\+\s+if \(item\.index < from && top < middle\) before\+\+/);
+    assert.match(details, /dragFrom < index && index <= target -> -dragSize\s+target <= index && index < dragFrom -> dragSize/);
+    assert.match(details, /val threshold = with\(LocalDensity\.current\) \{ 80\.dp\.toPx\(\) \}\s+val speed = with\(LocalDensity\.current\) \{ 120\.dp\.toPx\(\) \}/);
+    // A drag a list update or a busy change restarts lets go of its row; TalkBack's Move up only past a task or a later header.
+    assert.match(details, /\} finally \{\s+dragFrom = -1\s+\}/);
+    assert.match(details, /val canUp = index > 0 && \(shown\[index - 1\]\.getString\("type"\) == "task" \|\| index - 1 > 0\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

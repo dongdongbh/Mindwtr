@@ -470,6 +470,9 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         }
         // RN's reorder mode: the list's header rows (Getting Started's actions, Details) pinned above its own reorder list.
         if (projectDetails.reorderMode) {
+            // The order reads again with every read of the project (on Reorder, after a move, the view options, the filter chip,
+            // Details and sync), so the list never drops onto an order the screen no longer shows.
+            LaunchedEffect(detail) { projectDetails.readOrder() }
             LazyColumn(Modifier.fillMaxWidth().background(c.bg), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp), userScrollEnabled = false) {
                 openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
             }
