@@ -243,6 +243,74 @@ describe('TaskQuickActionMenu', () => {
             expect(screen.getByRole('dialog', { name: 'Dates…' })).toBeVisible();
         });
 
+        it.each(['Start Date', 'Due Date', 'Review Date'])('opens the %s calendar beside the Dates list on hover', (label) => {
+            vi.useFakeTimers();
+            const props = renderMenu();
+            const menu = screen.getByRole('menu', { name: 'More options' });
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Dates…' }));
+            const datesList = screen.getByRole('dialog', { name: 'Dates…' });
+            act(() => menu.focus());
+            const row = within(datesList).getByRole('menuitem', { name: `${label}…` });
+            fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            expect(datesList).toBeVisible();
+            expect(row).toHaveAttribute('aria-expanded', 'true');
+            expect(screen.getByRole('dialog', { name: label })).toBeVisible();
+            expect(screen.getByRole('dialog', { name: `${label} Calendar` })).toBeVisible();
+            expect(document.activeElement).toBe(menu);
+            expect(props.onUpdateTask).not.toHaveBeenCalled();
+        });
+
+        it('switches date editors on hover until a date draft changes', () => {
+            vi.useFakeTimers();
+            renderMenu();
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Dates…' }));
+            const hover = (name: string) => {
+                fireEvent.pointerEnter(screen.getByRole('menuitem', { name }), { pointerType: 'mouse' });
+                act(() => vi.advanceTimersByTime(250));
+            };
+            hover('Start Date…');
+            hover('Due Date…');
+            expect(screen.queryByRole('dialog', { name: 'Start Date' })).not.toBeInTheDocument();
+            const calendar = screen.getByRole('dialog', { name: 'Due Date Calendar' });
+            fireEvent.click(within(calendar).getByRole('button', { name: 'Tomorrow' }));
+            hover('Review Date…');
+            expect(screen.getByRole('dialog', { name: 'Due Date' })).toBeVisible();
+            expect(screen.queryByRole('dialog', { name: 'Review Date' })).not.toBeInTheDocument();
+        });
+
+        it.each([
+            ['Dates…', 'Dates…', 'Start Date…'],
+            ['Contexts…', 'Contexts', 'task.aria.contexts'],
+        ])('keeps a hovered %s panel open when its row is then clicked', (label, panelLabel, focusTarget) => {
+            vi.useFakeTimers();
+            renderMenu();
+            const row = screen.getByRole('menuitem', { name: label });
+            fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            fireEvent.click(row);
+            const panel = screen.getByRole('dialog', { name: panelLabel });
+            expect(panel).toBeVisible();
+            expect(document.activeElement).toBe(within(panel).getByRole(
+                focusTarget.endsWith('…') ? 'menuitem' : 'textbox',
+                { name: focusTarget },
+            ));
+            fireEvent.click(row);
+            expect(screen.queryByRole('dialog', { name: panelLabel })).not.toBeInTheDocument();
+        });
+
+        it('keeps a hovered date editor open and opens its calendar when the row is clicked', () => {
+            vi.useFakeTimers();
+            renderMenu();
+            fireEvent.click(screen.getByRole('menuitem', { name: 'Dates…' }));
+            const row = screen.getByRole('menuitem', { name: 'Due Date…' });
+            fireEvent.pointerEnter(row, { pointerType: 'mouse' });
+            act(() => vi.advanceTimersByTime(250));
+            fireEvent.click(row);
+            expect(screen.getByRole('dialog', { name: 'Due Date Calendar' })).toBeVisible();
+            expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Due Date' }));
+        });
+
         it('lets ArrowRight enter a hovered submenu', () => {
             vi.useFakeTimers();
             renderMenu();
@@ -524,6 +592,16 @@ describe('TaskQuickActionMenu', () => {
 
         openDatePanel('Review Date…');
         expect(screen.getByRole('dialog', { name: /^review date$/i })).toBeInTheDocument();
+    });
+
+    it('keeps the Dates list open beside a date editor and closes only the editor on a second click', () => {
+        renderMenu();
+        openDatePanel('Start Date…');
+        const datesList = screen.getByRole('dialog', { name: 'Dates…' });
+        expect(screen.getByRole('dialog', { name: 'Start Date' })).toBeVisible();
+        fireEvent.click(within(datesList).getByRole('menuitem', { name: 'Start Date…' }));
+        expect(screen.queryByRole('dialog', { name: 'Start Date' })).not.toBeInTheDocument();
+        expect(datesList).toBeVisible();
     });
 
     it('uses Escape to close the active panel before closing the menu', () => {

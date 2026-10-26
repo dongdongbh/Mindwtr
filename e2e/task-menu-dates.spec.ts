@@ -103,3 +103,27 @@ test('mouse hover opens panels without focus changes or saving a date draft', as
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect.poll(savedDate).toBe('2026-09-02T09:30');
 });
+
+test('hovering a date row opens its calendar beside the Dates list', async ({ page }) => {
+    await dismissOnboarding(page);
+    await seedAppData(page, {
+        projects: [{ id: 'garden', title: 'Garden project' }],
+        tasks: [{ id: 'dated-task', title: 'Order seeds', status: 'next', projectId: 'garden', startTime: '2026-09-01' }],
+        settings: { language: 'en', dateFormat: 'ymd' },
+    });
+    await page.goto('/?view=projects');
+    await page.locator('[data-project-navigation-item][data-project-id="garden"]').click();
+    await page.getByText('Order seeds', { exact: true }).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Dates…', exact: true }).hover();
+    const datesPanel = page.getByRole('dialog', { name: 'Dates…', exact: true });
+    await datesPanel.getByRole('menuitem', { name: 'Start Date…', exact: true }).hover();
+    const calendar = page.getByRole('dialog', { name: 'Start Date Calendar', exact: true });
+    await expect(calendar).toBeVisible();
+    await expect(datesPanel).toBeVisible();
+    await calendar.getByRole('button', { name: 'Wednesday, September 2, 2026', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => {
+        const data = JSON.parse(localStorage.getItem('mindwtr-data')!);
+        return data.tasks.find((task: { id: string }) => task.id === 'dated-task').startTime;
+    })).toBe('2026-09-02');
+});

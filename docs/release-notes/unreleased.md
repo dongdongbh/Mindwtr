@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Desktop: in a task's right-click menu, resting the mouse on Start Date, Due Date or Review Date under Dates opens that date's calendar beside the Dates list, so you can pick a date without another click. Clicking a menu row that the mouse already opened now keeps it open instead of closing it (#1390).
 - A project with no area and no color of its own shows a grey dot again in project group headers (Focus, Next actions, and the desktop Timeline), so its name lines up with the other groups. On mobile, a task row's project or area chip with no color is now grey too, as on desktop. In v1.3.7 desktop showed no dot in headers (the accent color on the Timeline) and mobile showed the accent color (#1422).
 - Contexts and tags added before v1.3.7, or by an older version on another device, now stay in Settings › Manage and in the pickers when completing or cancelling their project, or Archive retention, leaves no open task using them. Before, those older ones could disappear from the list. Tags added on v1.3.7 or later were already kept (#828).
 - A new task with a start date now goes to Next when you did not choose a status, the same as adding a start date to an Inbox task. This works in Quick Add, the capture popup, list add rows, widgets and Shortcuts. A status you choose (including `/inbox`) or the list you add from, like Someday or Waiting, still wins (#1452).

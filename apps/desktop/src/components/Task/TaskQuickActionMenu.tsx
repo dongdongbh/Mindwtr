@@ -49,6 +49,8 @@ const HOVER_OPEN_DELAY_MS = 250;
 
 type QuickPanelId = 'dates' | 'startTime' | 'dueDate' | 'reviewAt' | 'destination' | 'contexts' | 'priority' | null;
 
+const isDateEditorPanel = (panel: QuickPanelId) => panel === 'startTime' || panel === 'dueDate' || panel === 'reviewAt';
+
 export interface TaskQuickActionMenuProps {
     task: Task;
     x: number;
@@ -150,6 +152,29 @@ const preserveFocusedDatePanelLayout = (event: ReactMouseEvent<HTMLDivElement>) 
     event.preventDefault();
 };
 
+// Opens beside the anchor, flipping left when the right side would overflow.
+const getPanelPosition = (anchor: HTMLElement | null, panel: HTMLElement | null) => {
+    if (!anchor || !panel) return null;
+    const anchorRect = anchor.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const preferredLeft = anchorRect.right + PANEL_GAP_PX;
+    const fallbackLeft = anchorRect.left - panelRect.width - PANEL_GAP_PX;
+    const shouldOpenLeft = preferredLeft + panelRect.width > window.innerWidth - VIEWPORT_MARGIN_PX
+        && fallbackLeft >= VIEWPORT_MARGIN_PX;
+    return {
+        left: clamp(
+            shouldOpenLeft ? fallbackLeft : preferredLeft,
+            VIEWPORT_MARGIN_PX,
+            window.innerWidth - panelRect.width - VIEWPORT_MARGIN_PX,
+        ),
+        top: clamp(
+            anchorRect.top,
+            VIEWPORT_MARGIN_PX,
+            window.innerHeight - panelRect.height - VIEWPORT_MARGIN_PX,
+        ),
+    };
+};
+
 const focusPanelControl = (panel: HTMLElement | null) => {
     const control = panel?.querySelector<HTMLElement>(
         'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
@@ -184,6 +209,8 @@ export function TaskQuickActionMenu({
     extraActions = [],
 }: TaskQuickActionMenuProps) {
     const menuRef = useRef<HTMLDivElement | null>(null);
+    // The Dates list stays open while one of its date editors (panelRef) opens beside it.
+    const datesMenuRef = useRef<HTMLDivElement | null>(null);
     const panelRef = useRef<HTMLDivElement | null>(null);
     const focusedPanelRef = useRef<QuickPanelId>(null);
     const hoverTimerRef = useRef<number | null>(null);
@@ -193,7 +220,12 @@ export function TaskQuickActionMenu({
     const destinationButtonRef = useRef<HTMLButtonElement | null>(null);
     const contextsButtonRef = useRef<HTMLButtonElement | null>(null);
     const priorityButtonRef = useRef<HTMLButtonElement | null>(null);
+    const startItemRef = useRef<HTMLButtonElement | null>(null);
+    const dueItemRef = useRef<HTMLButtonElement | null>(null);
+    const reviewItemRef = useRef<HTMLButtonElement | null>(null);
     const [activePanel, setActivePanel] = useState<QuickPanelId>(null);
+    const datesMenuOpen = activePanel === 'dates' || isDateEditorPanel(activePanel);
+    const [datesMenuPosition, setDatesMenuPosition] = useState<{ left: number; top: number } | null>(null);
     const [panelPosition, setPanelPosition] = useState<{ left: number; top: number } | null>(null);
     const [menuSize, setMenuSize] = useState({ width: MENU_WIDTH_PX, height: 1 });
     const initialStartDraft = splitDateTime(task.startTime);
@@ -318,7 +350,11 @@ export function TaskQuickActionMenu({
     useEffect(() => {
         const isInsideMenuSurface = (event: Event) => event.composedPath().some((target) => {
             if (!(target instanceof Node)) return false;
-            if (menuRef.current?.contains(target) || panelRef.current?.contains(target)) return true;
+            if (
+                menuRef.current?.contains(target)
+                || datesMenuRef.current?.contains(target)
+                || panelRef.current?.contains(target)
+            ) return true;
             const targetElement = target instanceof Element ? target : target.parentElement;
             return Boolean(targetElement?.closest('[data-selector-dropdown="true"]'));
         });
@@ -392,12 +428,12 @@ export function TaskQuickActionMenu({
             }
             const inPanelSurface = inSelectorDropdown
                 || Boolean(target && panelRef.current?.contains(target));
-            // The "Dates…" panel is a menu of its own, so its items walk with the
+            // The "Dates…" list is a menu of its own, so its items walk with the
             // same keys. The form panels still bail out — their date inputs need
             // the arrows.
-            const inDatesSubmenu = activePanel === 'dates' && inPanelSurface && !inSelectorDropdown;
-            if (inPanelSurface && !inDatesSubmenu) return;
-            const surface = inDatesSubmenu ? panelRef.current : menuRef.current;
+            if (inPanelSurface) return;
+            const inDatesSubmenu = Boolean(target && datesMenuRef.current?.contains(target));
+            const surface = inDatesSubmenu ? datesMenuRef.current : menuRef.current;
 
             switch (event.key) {
                 case 'ArrowDown':
@@ -422,7 +458,7 @@ export function TaskQuickActionMenu({
                         && active.getAttribute('aria-haspopup') === 'dialog'
                     ) {
                         if (active.getAttribute('aria-expanded') === 'true') {
-                            focusPanelControl(panelRef.current);
+                            focusPanelControl(active === datesButtonRef.current ? datesMenuRef.current : panelRef.current);
                         } else {
                             active.click();
                         }
@@ -483,56 +519,51 @@ export function TaskQuickActionMenu({
     }, [readOnly]);
 
     useLayoutEffect(() => {
-        if (!activePanel) {
+        if (!datesMenuOpen) {
+            setDatesMenuPosition(null);
+            return;
+        }
+        const position = getPanelPosition(datesButtonRef.current, datesMenuRef.current);
+        if (position) setDatesMenuPosition(position);
+    }, [datesMenuOpen, menuPosition.left, menuPosition.top]);
+
+    useLayoutEffect(() => {
+        if (!activePanel || activePanel === 'dates') {
             setPanelPosition(null);
             return;
         }
-        const anchor = activePanel === 'dates'
-            || activePanel === 'startTime'
-            || activePanel === 'dueDate'
-            || activePanel === 'reviewAt'
-            ? datesButtonRef.current
-            : activePanel === 'destination'
-                ? destinationButtonRef.current
-                : activePanel === 'priority'
-                    ? priorityButtonRef.current
-                    : contextsButtonRef.current;
-        const panel = panelRef.current;
-        if (!anchor || !panel) return;
-        const anchorRect = anchor.getBoundingClientRect();
-        const panelRect = panel.getBoundingClientRect();
-        const preferredLeft = anchorRect.right + PANEL_GAP_PX;
-        const fallbackLeft = anchorRect.left - panelRect.width - PANEL_GAP_PX;
-        const shouldOpenLeft = preferredLeft + panelRect.width > window.innerWidth - VIEWPORT_MARGIN_PX
-            && fallbackLeft >= VIEWPORT_MARGIN_PX;
-
-        setPanelPosition({
-            left: clamp(
-                shouldOpenLeft ? fallbackLeft : preferredLeft,
-                VIEWPORT_MARGIN_PX,
-                window.innerWidth - panelRect.width - VIEWPORT_MARGIN_PX,
-            ),
-            top: clamp(
-                anchorRect.top,
-                VIEWPORT_MARGIN_PX,
-                window.innerHeight - panelRect.height - VIEWPORT_MARGIN_PX,
-            ),
-        });
-    }, [activePanel, menuPosition.left, menuPosition.top]);
+        const anchor = activePanel === 'startTime'
+            ? startItemRef.current
+            : activePanel === 'dueDate'
+                ? dueItemRef.current
+                : activePanel === 'reviewAt'
+                    ? reviewItemRef.current
+                    : activePanel === 'destination'
+                        ? destinationButtonRef.current
+                        : activePanel === 'priority'
+                            ? priorityButtonRef.current
+                            : contextsButtonRef.current;
+        const position = getPanelPosition(anchor, panelRef.current);
+        if (position) setPanelPosition(position);
+    }, [activePanel, datesMenuPosition, menuPosition.left, menuPosition.top]);
 
     useEffect(() => {
-        if (!activePanel || !panelPosition) {
+        const surface = activePanel === 'dates' ? datesMenuRef.current : panelRef.current;
+        if (!activePanel || !(activePanel === 'dates' ? datesMenuPosition : panelPosition)) {
             if (!activePanel) focusedPanelRef.current = null;
             return;
         }
         if (focusedPanelRef.current === activePanel) return;
         focusedPanelRef.current = activePanel;
-        if (panelOpenedByHoverRef.current) return;
-        const control = focusPanelControl(panelRef.current);
-        if (activePanel === 'startTime' || activePanel === 'dueDate' || activePanel === 'reviewAt') {
-            control?.click();
+        if (panelOpenedByHoverRef.current) {
+            // A hovered date row shows its calendar right away (#1390); focus
+            // stays put so moving on to the next row still switches editors.
+            if (isDateEditorPanel(activePanel)) surface?.querySelector<HTMLElement>('input')?.click();
+            return;
         }
-    }, [activePanel, panelPosition]);
+        const control = focusPanelControl(surface);
+        if (isDateEditorPanel(activePanel)) control?.click();
+    }, [activePanel, datesMenuPosition, panelPosition]);
 
     if (typeof document === 'undefined') return null;
 
@@ -545,8 +576,16 @@ export function TaskQuickActionMenu({
         )) return;
         if (panelId === activePanel) {
             if (fromHover) return;
+            // A click on a row the pointer already opened confirms it instead of closing it.
+            if (panelOpenedByHoverRef.current) {
+                panelOpenedByHoverRef.current = false;
+                const control = focusPanelControl(panelId === 'dates' ? datesMenuRef.current : panelRef.current);
+                if (isDateEditorPanel(panelId)) control?.click();
+                return;
+            }
             setPanelPosition(null);
-            setActivePanel(null);
+            // Clicking an open date row closes only its editor; the Dates list stays.
+            setActivePanel(isDateEditorPanel(panelId) ? 'dates' : null);
             return;
         }
         panelOpenedByHoverRef.current = fromHover;
@@ -854,10 +893,7 @@ export function TaskQuickActionMenu({
                     ref: datesButtonRef,
                     icon: <Calendar className="h-4 w-4" />,
                     label: datesLabel,
-                    active: activePanel === 'dates'
-                        || activePanel === 'startTime'
-                        || activePanel === 'dueDate'
-                        || activePanel === 'reviewAt',
+                    active: datesMenuOpen,
                     onClick: () => openPanel('dates'),
                     hoverPanel: 'dates',
                     showChevron: true,
@@ -947,14 +983,71 @@ export function TaskQuickActionMenu({
                 })}
             </div>
 
-            {activePanel && (
+            {datesMenuOpen && (
+                <div
+                    ref={datesMenuRef}
+                    role="dialog"
+                    aria-label={datesLabel}
+                    className="fixed z-50 w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-xl"
+                    style={{
+                        top: datesMenuPosition?.top ?? menuPosition.top,
+                        left: datesMenuPosition?.left ?? (menuPosition.left + 188),
+                        visibility: datesMenuPosition ? 'visible' : 'hidden',
+                    }}
+                    onContextMenu={(event) => event.preventDefault()}
+                    onPointerEnter={cancelHoverOpen}
+                >
+                    <div className="space-y-1" role="menu" aria-label={datesLabel}>
+                        {renderMenuAction({
+                            icon: <Calendar className="h-4 w-4" />,
+                            ref: startItemRef,
+                            label: `${startLabel}…`,
+                            active: activePanel === 'startTime',
+                            onClick: () => openPanel('startTime'),
+                            hoverPanel: 'startTime',
+                            showChevron: true,
+                        })}
+                        {renderMenuAction({
+                            icon: <Calendar className="h-4 w-4" />,
+                            ref: dueItemRef,
+                            label: `${dueLabel}…`,
+                            active: activePanel === 'dueDate',
+                            onClick: () => openPanel('dueDate'),
+                            hoverPanel: 'dueDate',
+                            showChevron: true,
+                        })}
+                        {renderMenuAction({
+                            icon: <CalendarClock className="h-4 w-4" />,
+                            ref: reviewItemRef,
+                            label: `${reviewLabel}…`,
+                            active: activePanel === 'reviewAt',
+                            onClick: () => openPanel('reviewAt'),
+                            hoverPanel: 'reviewAt',
+                            showChevron: true,
+                        })}
+                        {canMarkReviewed && (
+                            <div className="my-1 h-px bg-border/70" role="separator" />
+                        )}
+                        {canMarkReviewed && renderMenuAction({
+                            icon: <CalendarClock className="h-4 w-4" />,
+                            label: markReviewedLabel,
+                            onClick: () => { void handleMarkReviewed(); },
+                        })}
+                        {canMarkReviewed && renderMenuAction({
+                            icon: <CalendarClock className="h-4 w-4" />,
+                            label: advanceReviewLabel,
+                            onClick: () => { void handleAdvanceReview(); },
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {activePanel && activePanel !== 'dates' && (
                 <div
                     ref={panelRef}
                     role="dialog"
                     aria-label={
-                        activePanel === 'dates'
-                            ? datesLabel
-                            : activePanel === 'startTime'
+                        activePanel === 'startTime'
                             ? startLabel
                             : activePanel === 'dueDate'
                                 ? dueLabel
@@ -976,41 +1069,7 @@ export function TaskQuickActionMenu({
                     onKeyDown={handlePanelKeyDown}
                     onPointerEnter={cancelHoverOpen}
                 >
-                    {activePanel === 'dates' ? (
-                        <div className="space-y-1" role="menu" aria-label={datesLabel}>
-                            {renderMenuAction({
-                                icon: <Calendar className="h-4 w-4" />,
-                                label: `${startLabel}…`,
-                                onClick: () => openPanel('startTime'),
-                                showChevron: true,
-                            })}
-                            {renderMenuAction({
-                                icon: <Calendar className="h-4 w-4" />,
-                                label: `${dueLabel}…`,
-                                onClick: () => openPanel('dueDate'),
-                                showChevron: true,
-                            })}
-                            {renderMenuAction({
-                                icon: <CalendarClock className="h-4 w-4" />,
-                                label: `${reviewLabel}…`,
-                                onClick: () => openPanel('reviewAt'),
-                                showChevron: true,
-                            })}
-                            {canMarkReviewed && (
-                                <div className="my-1 h-px bg-border/70" role="separator" />
-                            )}
-                            {canMarkReviewed && renderMenuAction({
-                                icon: <CalendarClock className="h-4 w-4" />,
-                                label: markReviewedLabel,
-                                onClick: () => { void handleMarkReviewed(); },
-                            })}
-                            {canMarkReviewed && renderMenuAction({
-                                icon: <CalendarClock className="h-4 w-4" />,
-                                label: advanceReviewLabel,
-                                onClick: () => { void handleAdvanceReview(); },
-                            })}
-                        </div>
-                    ) : activePanel === 'startTime' ? (
+                    {activePanel === 'startTime' ? (
                         <div className="space-y-3">
                             <DateField
                                 t={t}
