@@ -1498,7 +1498,7 @@ export type ProcessInboxStepView = {
         request: { subject: string; message: string };
     } | null;
     contexts: ProcessInboxViewTokens | null;
-    /** On the file step, the project row comes before the contexts row. */
+    /** On the file step, the project row comes before the contexts row (Start later keeps contexts first). */
     projectFirst: boolean;
     moreOptions: {
         label: string;
@@ -1910,8 +1910,9 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                 who: draft.delegateWho,
             }),
         } : null,
-        contexts: step === 'file' && fields.contexts ? tokenRow('context') : null,
-        projectFirst: plan.projectFirst,
+        // Start later lands in Next, where contexts decide when it shows; RN's step puts them above the project (#1445).
+        contexts: (step === 'file' || step === 'later') && fields.contexts ? tokenRow('context') : null,
+        projectFirst: plan.projectFirst && step !== 'later',
         moreOptions: step === 'waiting' || step === 'file' ? moreOptions() : null,
     };
 }

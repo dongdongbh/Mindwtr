@@ -251,6 +251,19 @@ describe('Process Inbox steps', () => {
         expect(view.moreOptions.organization?.timeEstimates.map(({ label }) => label)).toContain('5 min.');
     });
 
+    it('offers contexts before the project on Start later, as React Native does (#1445)', () => {
+        const task = { id: 'inbox', title: 'Inbox', status: 'inbox' } as Task;
+        const view = buildProcessInboxStepView({ task, draft: createProcessInboxDraft(task),
+            answers: { ...INITIAL_PROCESS_INBOX_ANSWERS, actionability: 'later' },
+            mode: 'guided', plan: resolveProcessInboxPlan({ gtd: { inboxProcessing: { projectFirst: true }, taskEditor: { hidden: [] } } } as never),
+            settings: undefined, tasks: [task], projects: [], areas: [], people: [], similarityIndex: null,
+            t: (key) => key, formatDate: () => '', now: new Date(2026, 8, 23),
+        });
+        expect(view.step).toBe('later');
+        expect(view.contexts).not.toBeNull();
+        expect(view.projectFirst).toBe(false);
+    });
+
     it('clears an overdue review date when filing to Someday, but keeps a future date', () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 8, 23, 10));
