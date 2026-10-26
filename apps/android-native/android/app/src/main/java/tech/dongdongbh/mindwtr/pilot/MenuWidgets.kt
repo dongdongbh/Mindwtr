@@ -131,10 +131,10 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
                     MenuScreen.WidgetList -> menu.page?.view?.menuText("title").orEmpty()
                     else -> t(screen.title)
                 }
-                if (screen != MenuScreen.Projects || openProjectId == null) MenuHeader(title, enabled = failedAction == null, onBack = menu::closeScreen) {
+                if (screen != MenuScreen.Projects || openProjectId == null) MenuHeader(title, enabled = failedAction == null, onBack = menu::closeScreen,
+                    area = if (showsAreaFilter(screen)) model else null,
                     // Reference and Done put their list menu in the header (RN's overflowPlacement "navigation").
-                    if (list == "reference" || list == "done") OverflowTrigger(plain = true) { menu.openDialog("overflow") }
-                }
+                    right = if (list == "reference" || list == "done") { { OverflowTrigger(plain = true) { menu.openDialog("overflow") } } } else null)
                 error?.let { message ->
                     FailureBanner(message) {
                         if (failedAction == null) TextButton(onClick = { menu.retryRead() }, enabled = !busy, modifier = Modifier.testTag("read-retry")) { Text(t("common.retry")) }
@@ -167,6 +167,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
         MenuDialogs(model)
         StatusMenu(model)
         capture?.let { CapturePopup(model, it) }
+        if (areaSheet) AreaSheet(model)
     }
 }
 
@@ -188,19 +189,24 @@ fun QuickList(model: InboxViewModel, modifier: Modifier) = with(model) {
     }
 }
 
-/** RN's DrawerHeader: the card background, a hairline below, Back (Ionicons chevron-back), the title at 17/700, and a right slot. */
+/**
+ * RN's DrawerHeader: the card background, a hairline below, Back (Ionicons chevron-back), the title at 17/700 in the room left,
+ * then [area]'s area filter (#1448) and the [right] action's 44 box (kept empty without the filter, as RN's headerRightAction).
+ */
 @Composable
-fun MenuHeader(title: String, enabled: Boolean, onBack: () -> Unit, right: @Composable () -> Unit) {
+fun MenuHeader(title: String, enabled: Boolean, onBack: () -> Unit, area: InboxViewModel? = null, right: (@Composable () -> Unit)? = null) {
     val c = LocalTheme.current.colors
-    Box(Modifier.fillMaxWidth().height(52.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 8.dp)) {
+    Row(Modifier.fillMaxWidth().height(52.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
         val back = t("common.back")
-        Box(Modifier.align(Alignment.CenterStart).size(40.dp).clickable(enabled = enabled, role = Role.Button, onClick = onBack)
+        Box(Modifier.size(40.dp).clickable(enabled = enabled, role = Role.Button, onClick = onBack)
             .semantics { contentDescription = back }, contentAlignment = Alignment.Center) {
             Icon(Ionicons.ChevronBack, null, tint = c.text, modifier = Modifier.size(24.dp))
         }
-        Text(title, style = rnText(17, 700), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.align(Alignment.Center).padding(horizontal = 56.dp).semantics { heading() })
-        Box(Modifier.align(Alignment.CenterEnd).size(44.dp), contentAlignment = Alignment.Center) { right() }
+        Text(title, style = rnText(17, 700), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f).padding(horizontal = 4.dp).semantics { heading() })
+        area?.let { AreaTrigger(it) }
+        if (right != null || area == null) Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) { right?.invoke() }
     }
 }
 

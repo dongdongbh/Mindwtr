@@ -66,6 +66,14 @@ enum class MenuScreen(val title: String) {
     MindSweep("mindSweep.title"), SavedSearch("search.title"), WidgetList("search.noResults"),
 }
 
+/**
+ * RN's AREA_FILTERED_ROUTES (#1448): the Menu screens whose lists follow the area filter show it in their header, so a task it
+ * hides has a visible reason. A widget list keeps its widget's scope, and Settings has no list to filter.
+ */
+private val AREA_FILTERED = setOf(MenuScreen.Waiting, MenuScreen.Someday, MenuScreen.Reference, MenuScreen.History, MenuScreen.Contexts,
+    MenuScreen.Trash, MenuScreen.Review, MenuScreen.Projects, MenuScreen.Calendar, MenuScreen.Board, MenuScreen.SavedSearch)
+fun showsAreaFilter(screen: MenuScreen) = screen in AREA_FILTERED
+
 /** Core's bulk actions (Contexts, Trash, Review, and a Review row's Mark reviewed): each ends RN's selection mode once core answers. */
 private val BULK = setOf("moveTasks", "editTaskTokens", "trashTasks", "restoreItems", "purgeItems", "emptyTrash", "addTag", "removeTags", "markReviewedTasks",
     "organizeTasks", "markTaskReviewed")
