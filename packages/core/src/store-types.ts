@@ -123,6 +123,21 @@ export type PreparedProjectCreate = {
 };
 
 /** One saved task move, with an optional new project, and complete written-row receipts. */
+/** A frozen native Convert to section: the source task's soft delete, the new section and its checklist tasks. */
+export type PreparedTaskToSection = {
+    sourceBefore: Task;
+    project: Project;
+    sectionOrderMax: number;
+    taskOrderMax: number;
+    taskReminderDefault: string | null;
+    deviceIdBefore: string | null;
+    deviceIdToInitialize: string | null;
+    tasks: Array<{ before: Task | null; after: Task }>;
+    projects: [];
+    sections: Array<{ before: null; after: Section }>;
+    result: { projectId: string; sectionId: string };
+};
+
 export type PreparedTaskPromotion = {
     sourceBefore: Task;
     sourceProject: Project | null;
@@ -758,6 +773,7 @@ export interface TaskStore {
     duplicateTask: (id: string, asNextAction?: boolean, copyId?: string) => Promise<StoreActionResult>;
     /** Convert a task into a section of its project; checklist items become tasks and the task is soft-deleted */
     convertTaskToSection: (id: string) => Promise<StoreActionResult>;
+    commitPreparedTaskToSection: (input: PreparedTaskToSection) => Promise<PreparedTaskEditResult>;
     /** Create or reuse a project from a task, then move the task into it */
     convertChecklistToProject: (command: ChecklistProjectConversion) => Promise<StoreActionResult>;
     undoChecklistToProject: (command: ChecklistProjectConversion) => Promise<StoreActionResult>;

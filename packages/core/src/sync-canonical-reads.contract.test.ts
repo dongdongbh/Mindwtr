@@ -2725,6 +2725,20 @@ describe('canonical local reads contract', () => {
                     .toEqual(planned.prepared.projects[0].after);
             },
             convertTaskToSection: () => call('convertTaskToSection', projectTaskIds[0]),
+            commitPreparedTaskToSection: async (control) => {
+                const host = await nativeHost(control);
+                const source = useTaskStore.getState()._tasksById.get(projectTaskIds[0]);
+                if (!source) throw new Error('fixture needs a saved project Task');
+                const request = { requestId: '6a1f3c2e-8b4d-4e5f-9a6b-7c8d9e0f1a2b', taskId: source.id, taskRevision: taskRevisionOf(source) };
+                const planned = nativeValue(host.prepareTaskToSection(request));
+                control.expectPersisted((written) => {
+                    expect(written.sections.filter((entry) => entry.id === request.requestId))
+                        .toEqual([planned.prepared.sections[0].after]);
+                    expect(written.tasks.find((entry) => entry.id === source.id)).toEqual(planned.prepared.tasks[0].after);
+                });
+                expect(nativeValue(await host.commitPreparedTaskToSection({ request, prepared: planned.prepared })))
+                    .toEqual(planned.prepared.result);
+            },
             deleteArea: () => call('deleteArea', areaId),
             addContext: () => call('addContext', '@contract-unused'),
             deleteContext: () => call('deleteContext', '@home'),

@@ -19,7 +19,7 @@ import type { NativePreparedArchivedTaskRestore } from './native-host-contract-a
 import { settingsWithPurgedParentAttachmentDeletes } from './attachment-cleanup';
 import type { StorageAdapter, TaskQueryOptions } from './storage';
 import { taskMatchesQuery } from './task-query';
-import type { PreparedAreaAuthority, PreparedBoardMove, PreparedCalendarCreate, PreparedCalendarTask, PreparedChecklistEffect, PreparedChecklistWriteOptions, PreparedFocusOrder, PreparedInboxEffect, PreparedTaskEdit, PreparedTaskEditResult, PreparedTaskFocus, PreparedTaskPromotion, StoreActionResult, TaskFocusWitnessRow, TaskStore } from './store-types';
+import type { PreparedAreaAuthority, PreparedBoardMove, PreparedCalendarCreate, PreparedCalendarTask, PreparedChecklistEffect, PreparedChecklistWriteOptions, PreparedFocusOrder, PreparedInboxEffect, PreparedTaskEdit, PreparedTaskEditResult, PreparedTaskFocus, PreparedTaskPromotion, PreparedTaskToSection, StoreActionResult, TaskFocusWitnessRow, TaskStore } from './store-types';
 import { buildFocusControlsModel, canReorderFocusTasks, mergeFocusReorderIds } from './focus-controls';
 import {
     applyTaskProjectReactivationTransition,
@@ -124,6 +124,7 @@ type TaskActions = Pick<
     | 'purgeDeletedTasks'
     | 'duplicateTask'
     | 'convertTaskToSection'
+    | 'commitPreparedTaskToSection'
     | 'promoteTaskToProject'
     | 'commitPreparedTaskPromotion'
     | 'resetTaskChecklist'
@@ -960,6 +961,88 @@ const applyPreparedAffectedRows = (state: Pick<TaskStore, '_allTasks' | '_allPro
     sections: [...replaceEntitiesInArray(state._allSections, input.sections.filter((row) => row.before).map((row) => row.after)),
         ...input.sections.filter((row) => !row.before).map((row) => row.after)],
 });
+
+/** The highest live section order in [projectId], -1 for none (RN's Convert to section puts the new one after it). */
+export const taskToSectionOrderMax = (allSections: Section[], projectId: string): number => allSections
+    .filter((section) => section.projectId === projectId && !section.deletedAt)
+    .reduce((max, section) => Math.max(max, Number.isFinite(section.order) ? section.order : -1), -1);
+
+/**
+ * RN's Convert to section and the native journal share one plan: the section (title and description trimmed, after the
+ * project's last section), one task per non-empty checklist item in it (done when the item is checked), and the source
+ * soft-deleted. [generateId] names the section first, then each new task in checklist order.
+ */
+export const planTaskToSection = ({ sourceTask, allTasks, allProjects, allSections, allAreas, settings, deviceId, now,
+    generateId = uuidv4 }: {
+    sourceTask: Task; allTasks: Task[]; allProjects: AppData['projects']; allSections: Section[]; allAreas: AppData['areas'];
+    settings: AppData['settings']; deviceId: string; now: string; generateId?: () => string;
+}): { ok: true; section: Section; tasks: Task[]; deletedSource: Task } | { ok: false; error: string } => {
+    const projectId = normalizeOptionalContainerId(sourceTask.projectId);
+    if (!projectId) return { ok: false, error: 'Task is not in a project' };
+    const projectExists = allProjects.some((project) => project.id === projectId && !project.deletedAt);
+    const sectionTitle = typeof sourceTask.title === 'string' ? sourceTask.title.trim() : '';
+    if (!projectExists || !sectionTitle) return { ok: false, error: 'Section could not be created' };
+    const description = typeof sourceTask.description === 'string' ? sourceTask.description.trim() : '';
+    const section: Section = {
+        id: generateId(),
+        projectId,
+        title: sectionTitle,
+        ...(description ? { description } : {}),
+        order: taskToSectionOrderMax(allSections, projectId) + 1,
+        isCollapsed: false,
+        rev: 1,
+        revBy: deviceId,
+        createdAt: now,
+        updatedAt: now,
+    };
+    const nextAllSections = [...allSections, section];
+    const projectOrderReserver = createProjectOrderReserver(allTasks);
+    const tasks: Task[] = [];
+    for (const item of sourceTask.checklist || []) {
+        const title = typeof item.title === 'string' ? item.title.trim() : '';
+        if (!title) continue;
+        const containerResolution = resolveTaskContainerAssignment({
+            projectId,
+            sectionId: section.id,
+            areaId: undefined,
+            allProjects,
+            allSections: nextAllSections,
+            allAreas,
+        });
+        if (!containerResolution.ok) return { ok: false, error: containerResolution.error };
+        const order = projectOrderReserver(containerResolution.projectId);
+        tasks.push({
+            id: generateId(),
+            title,
+            status: item.isCompleted ? 'done' : 'next',
+            taskMode: 'task',
+            tags: [],
+            contexts: [],
+            pushCount: 0,
+            isFocusedToday: false,
+            reminderPolicy: 'inherit',
+            suppressMindwtrReminders: settings.taskReminderDefault === 'skip',
+            projectId: containerResolution.projectId,
+            sectionId: containerResolution.sectionId,
+            areaId: containerResolution.areaId,
+            ...(item.isCompleted ? { completedAt: now } : {}),
+            order,
+            orderNum: order,
+            rev: 1,
+            revBy: deviceId,
+            createdAt: now,
+            updatedAt: now,
+        });
+    }
+    const deletedSource: Task = {
+        ...sourceTask,
+        deletedAt: now,
+        updatedAt: now,
+        rev: nextRevision(sourceTask.rev),
+        revBy: deviceId,
+    };
+    return { ok: true, section, tasks, deletedSource };
+};
 
 /** The RN action and native journal share the same saved-source promotion policy. */
 export const planTaskPromotion = ({ sourceTask, title, color, areaId, allTasks, allProjects, allSections,
@@ -2926,92 +3009,21 @@ export function createTaskActions({ set, get, getStorage, debouncedSave, flushPe
                 errorMessage = 'Task not found';
                 return state;
             }
-            const projectId = normalizeOptionalContainerId(sourceTask.projectId);
-            if (!projectId) {
-                errorMessage = 'Task is not in a project';
-                return state;
-            }
-            const projectExists = state._allProjects.some((project) => project.id === projectId && !project.deletedAt);
-            const sectionTitle = typeof sourceTask.title === 'string' ? sourceTask.title.trim() : '';
-            if (!projectExists || !sectionTitle) {
-                errorMessage = 'Section could not be created';
-                return state;
-            }
-
             const deviceState = ensureDeviceId(state.settings);
-            const sectionOrder = state._allSections
-                .filter((section) => section.projectId === projectId && !section.deletedAt)
-                .reduce((max, section) => Math.max(max, Number.isFinite(section.order) ? section.order : -1), -1) + 1;
-            const description = typeof sourceTask.description === 'string' ? sourceTask.description.trim() : '';
-            const section: Section = {
-                id: uuidv4(),
-                projectId,
-                title: sectionTitle,
-                ...(description ? { description } : {}),
-                order: sectionOrder,
-                isCollapsed: false,
-                rev: 1,
-                revBy: deviceState.deviceId,
-                createdAt: now,
-                updatedAt: now,
-            };
-            const nextAllSections = [...state._allSections, section];
-            const projectOrderReserver = createProjectOrderReserver(state._allTasks);
-            const checklistTasks: Task[] = [];
-
-            for (const item of sourceTask.checklist || []) {
-                const title = typeof item.title === 'string' ? item.title.trim() : '';
-                if (!title) continue;
-                const containerResolution = resolveTaskContainerAssignment({
-                    projectId,
-                    sectionId: section.id,
-                    areaId: undefined,
-                    allProjects: state._allProjects,
-                    allSections: nextAllSections,
-                    allAreas: state._allAreas,
-                });
-                if (!containerResolution.ok) {
-                    errorMessage = containerResolution.error;
-                    return state;
-                }
-                const order = projectOrderReserver(containerResolution.projectId);
-                checklistTasks.push({
-                    id: uuidv4(),
-                    title,
-                    status: item.isCompleted ? 'done' : 'next',
-                    taskMode: 'task',
-                    tags: [],
-                    contexts: [],
-                    pushCount: 0,
-                    isFocusedToday: false,
-                    reminderPolicy: 'inherit',
-                    suppressMindwtrReminders: state.settings.taskReminderDefault === 'skip',
-                    projectId: containerResolution.projectId,
-                    sectionId: containerResolution.sectionId,
-                    areaId: containerResolution.areaId,
-                    ...(item.isCompleted ? { completedAt: now } : {}),
-                    order,
-                    orderNum: order,
-                    rev: 1,
-                    revBy: deviceState.deviceId,
-                    createdAt: now,
-                    updatedAt: now,
-                });
+            const plan = planTaskToSection({ sourceTask, allTasks: state._allTasks, allProjects: state._allProjects,
+                allSections: state._allSections, allAreas: state._allAreas, settings: state.settings,
+                deviceId: deviceState.deviceId, now });
+            if (!plan.ok) {
+                errorMessage = plan.error;
+                return state;
             }
-
-            const deletedSource: Task = {
-                ...sourceTask,
-                deletedAt: now,
-                updatedAt: now,
-                rev: nextRevision(sourceTask.rev),
-                revBy: deviceState.deviceId,
-            };
+            const nextAllSections = [...state._allSections, plan.section];
             const nextAllTasks = [
-                ...replaceEntityInArray(state._allTasks, deletedSource.id, deletedSource),
-                ...checklistTasks,
+                ...replaceEntityInArray(state._allTasks, plan.deletedSource.id, plan.deletedSource),
+                ...plan.tasks,
             ];
-            convertedSectionId = section.id;
-            const settings = retainTaskTaxonomy(deviceState.settings, sourceTask, deletedSource);
+            convertedSectionId = plan.section.id;
+            const settings = retainTaskTaxonomy(deviceState.settings, sourceTask, plan.deletedSource);
             persist(set, debouncedSave, state, {
                 tasks: nextAllTasks,
                 sections: nextAllSections,
@@ -3028,6 +3040,40 @@ export function createTaskActions({ set, get, getStorage, debouncedSave, flushPe
         if (errorMessage) return actionFail(errorMessage);
         if (!convertedSectionId) return actionFail('Task not found');
         return actionOk({ id: convertedSectionId });
+    },
+
+    /** Atomic native Convert to section: the frozen plan lands only on the rows and orders it was made from. */
+    commitPreparedTaskToSection: async (input: PreparedTaskToSection) => {
+        let result: PreparedTaskEditResult = { success: false, reason: 'conflict',
+            error: 'Prepared Convert to section conflicts with current data' };
+        set((state) => {
+            const receipt = inspectPreparedAffectedRows(state, input);
+            if (receipt === 'after') {
+                result = { success: true, id: input.result.sectionId, outcome: 'replayed' };
+                return state;
+            }
+            if (receipt !== 'before') return state;
+            const source = state._tasksById.get(input.sourceBefore.id);
+            const project = state._projectsById.get(input.project.id);
+            if (!source || !samePreparedTask(source, input.sourceBefore) || source.deletedAt || source.purgedAt
+                || isStatusListTaskReadOnly(source, state._allProjects)
+                || !project || !samePreparedProject(project, input.project) || project.deletedAt
+                || (state.settings.deviceId ?? null) !== input.deviceIdBefore
+                || (input.deviceIdBefore === null ? !input.deviceIdToInitialize : input.deviceIdToInitialize !== null)
+                || (state.settings.taskReminderDefault ?? null) !== input.taskReminderDefault
+                || taskToSectionOrderMax(state._allSections, project.id) !== input.sectionOrderMax
+                || (getNextProjectOrder(project.id, state._allTasks) ?? 0) - 1 !== input.taskOrderMax) return state;
+            const { tasks, sections } = applyPreparedAffectedRows(state, input);
+            const settings = retainTaskTaxonomy(input.deviceIdToInitialize
+                ? { ...state.settings, deviceId: input.deviceIdToInitialize } : state.settings,
+            input.sourceBefore, input.tasks[0].after);
+            persist(set, debouncedSave, state, { tasks, sections,
+                ...(settings !== state.settings ? { settings } : {}) });
+            result = { success: true, id: input.result.sectionId, outcome: 'applied' };
+            return { _allTasks: tasks, _allSections: sections, settings,
+                lastDataChangeAt: getNextDataChangeAt(state.lastDataChangeAt) };
+        });
+        return result;
     },
 
     /**

@@ -286,6 +286,7 @@ import { createFocusSavedFilterMethods } from './native-host-contract-focus-save
 import { createSavedSearchWriteMethods } from './native-host-contract-saved-search-write';
 import { createProjectCreateMethods } from './native-host-contract-project-create';
 import { createTaskPromotionMethods } from './native-host-contract-task-promote';
+import { createTaskToSectionMethods } from './native-host-contract-task-to-section';
 import { createProjectFocusMethods } from './native-host-contract-project-focus';
 import { createProjectRenameMethods } from './native-host-contract-project-rename';
 import { createProjectFlowMethods } from './native-host-contract-project-flow';
@@ -1737,6 +1738,8 @@ export function createNativeHostContract(options: {
         ...taskChecklistMethods,
         ...createReferenceProjectNextActionMethods({ readiness, save, t: () => translate, originMethods: taskChecklistMethods }),
         ...createTaskPromotionMethods({ readiness, save, isReadOnly: isInArchivedProject }),
+        // The editor's Convert to section (RN's convertTaskToSection), prepared and journaled.
+        ...createTaskToSectionMethods({ readiness, receipts, isReadOnly: isInArchivedProject }),
         ...inboxProcessingMethods,
         // Settings › AI and the AI actions: native-host-contract-ai.ts.
         ...createAIMethods({
