@@ -9,7 +9,7 @@
 // (b) the capture screen a capture link opens (#1347's path): its focused title and its Save sit above the keyboard, and
 //     Ctrl+End puts the cursor at the title's end (a digit typed there lands last), where the keyboard tool supports it;
 // (c) the task editor on an existing task: its first field, and its lowest field on screen once focused (scrolled into view),
-//     sit above the keyboard.
+//     sit above the keyboard, with RN's clearance (18% of the form's height above the keyboard).
 // The keyboard's top is its window's frame plus its content inset (dumpsys window). It writes nothing: the capture screen is
 // cancelled and the editor closed unchanged. It touches only the development package, never launches over another app, and
 // leaves the app force-stopped with the device on its home screen.
@@ -19,7 +19,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, check, connect, evidenced, fail, Stopped, tagged, withDescription } from './device.mjs';
+import { box, check, connect, evidenced, fail, mainList, Stopped, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -168,6 +168,14 @@ try {
         nodes = await keyboardUp();
         shot(`c-editor-${label.split(' ')[0]}`);
         aboveKeyboard('(c)', `the editor's ${label}, focused`, focusedField(nodes));
+        // RN's clearance (TaskEditFormTab's scrollHandleIntoView): a focused field ends at least 18% of the form's
+        // height above the keyboard (2 px for rounding). On the S23, RN's Contexts ends 151 px above it.
+        const [, formTop, , formBottom] = box(mainList(nodes) ?? fail('no editor form'));
+        const edge = keyboardTop();
+        const clear = edge - 0.18 * (Math.min(formBottom, edge) - formTop);
+        const bottom = box(focusedField(nodes))[3];
+        results.push({ step: '(c)', what: `the editor's ${label}, RN's clearance`, bottom, clearanceEdge: Math.round(clear) });
+        check(bottom <= clear + 2, `(c) the editor's ${label} ends at ${bottom}, RN's 18% clear of the keyboard (by ${Math.round(clear)})`);
         await keyboardDown();
     }
     // Nothing was typed: Back closes the editor with no question.

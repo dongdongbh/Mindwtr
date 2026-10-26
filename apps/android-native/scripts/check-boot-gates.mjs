@@ -885,6 +885,11 @@ assert.match(model, /if \(current\.waiting \|\| editsPending\) \{ saveQueued = t
 assert.match(model, /if \(saveQueued && !resolved\.waiting && !editsPending\) \{ saveQueued = false; saveEditor\(\) \}/);
 // Text the app puts in a field (a chosen suggestion) leaves the cursor at its end, as RN's TextInput does.
 assert.match(editorUi, /if \(field\.text != value\) field = TextFieldValue\(value, TextRange\(value\.length\)\)\s+BasicTextField\(field, \{ typed -> field = typed;/);
+// A focused editor field scrolls wholly into view with RN's clearance above the keyboard (RN's scrollHandleIntoView),
+// again as the form shrinks with the keyboard; Compose alone brings only the cursor line in.
+assert.match(editorUi, /LaunchedEffect\(focused, viewport\) \{\s+if \(focused && viewport > 0\) reveal\.bringIntoView\(Rect\(0f, 0f, size\.width\.toFloat\(\), focusRevealBottom\(size\.height, viewport\)\)\)/);
+assert.match(editorUi, /modifier = Modifier\.bringIntoViewRequester\(reveal\)\.onSizeChanged \{ size = it \}\.onFocusChanged \{ focused = it\.isFocused \}/);
+assert.match(editorUi, /\.imePadding\(\)\.onSizeChanged \{ formViewport = it\.height \}\.verticalScroll\(rememberScrollState\(\)\)/);
 // A chip's click, label, and state are one accessibility node: one-of-many choices are selectable (TalkBack says
 // "selected" as RN does; uiautomator reports selected), and only on/off chips (quick tokens, after completion) toggle.
 assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.then\(if \(toggle\) Modifier\.toggleable\(value = active, enabled = enabled, role = Role\.Button, onValueChange = \{ onClick\(\) \}\)\s+else Modifier\.selectable\(selected = active, enabled = enabled, role = Role\.Tab, onClick = onClick\)\)/);

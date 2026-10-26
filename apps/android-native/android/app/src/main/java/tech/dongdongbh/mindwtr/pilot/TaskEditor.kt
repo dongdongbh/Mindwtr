@@ -40,9 +40,12 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -50,9 +53,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -69,6 +75,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import android.content.Intent
@@ -442,6 +449,8 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     val context = LocalContext.current
     var help by rememberSaveable { mutableStateOf(false) }
     var picker by rememberSaveable { mutableStateOf<String?>(null) }
+    // The form's height above the keyboard, for the fields' focus reveal (EditorInput).
+    var formViewport by remember { mutableIntStateOf(0) }
     // The open date picker (a date field, or "until" for the recurrence end) and the open time picker (a date field).
     var pickDate by rememberSaveable { mutableStateOf<String?>(null) }
     var pickTime by rememberSaveable { mutableStateOf<String?>(null) }
@@ -506,52 +515,54 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
         // RN's tabs under the header; a read-only task shows only its View tab.
         if (!editor.readOnly) EditorTabs(model, editor)
         if (editor.readOnly || editor.tab == "view") TaskViewTab(model, editor, locked, { picker = "status" }, follow, Modifier.weight(1f))
-        else Column(Modifier.weight(1f).imePadding().verticalScroll(rememberScrollState()).padding(20.dp)) {
-            if (editor.readOnly) Text(t("projects.archivedReadOnlyHint"), style = rnText(14, 400), color = c.secondaryText,
-                modifier = Modifier.padding(bottom = 16.dp))
-            FormGroup {
-                Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    FieldHeading(Lucide.Type, t("taskEdit.titleLabel"), Modifier.weight(1f), bottom = 0)
-                    // RN's Focus star sits in the Title row beside the layout help, styled like it (15c42df63 moved it from the top bar).
-                    if (!editor.readOnly && editor.text("status") != "archived") {
-                        val focused = editor.flag("focusedToday")
-                        val star = editor.view.focusStar
-                        val blocked = star.optString("blockedText").takeIf { it.isNotEmpty() && it != "null" }
-                        val starEnabled = !locked && (focused || star.getBoolean("canToggle"))
-                        val actionLabel = t(if (focused) "agenda.removeFromFocus" else "agenda.addToFocus")
-                        val starLabel = blocked ?: if (star.getBoolean("queued")) {
-                            if (focused) "$actionLabel. ${t("agenda.focusWhenAvailable")}" else t("agenda.focusWhenAvailable")
-                        } else actionLabel
-                        Box(Modifier.padding(end = 12.dp).size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(7.dp))
-                            .clickable(enabled = starEnabled, role = Role.Button) { editFields(mapOf("focusedToday" to !focused)) }
-                            .semantics { contentDescription = starLabel; selected = focused; if (!starEnabled) disabled() }
-                            .testTag("task-edit-focus-star"), contentAlignment = Alignment.Center) {
-                            FocusStar(focused, !starEnabled, 18, Modifier)
+        else Column(Modifier.weight(1f).imePadding().onSizeChanged { formViewport = it.height }.verticalScroll(rememberScrollState()).padding(20.dp)) {
+            CompositionLocalProvider(LocalFormViewport provides formViewport) {
+                if (editor.readOnly) Text(t("projects.archivedReadOnlyHint"), style = rnText(14, 400), color = c.secondaryText,
+                    modifier = Modifier.padding(bottom = 16.dp))
+                FormGroup {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FieldHeading(Lucide.Type, t("taskEdit.titleLabel"), Modifier.weight(1f), bottom = 0)
+                        // RN's Focus star sits in the Title row beside the layout help, styled like it (15c42df63 moved it from the top bar).
+                        if (!editor.readOnly && editor.text("status") != "archived") {
+                            val focused = editor.flag("focusedToday")
+                            val star = editor.view.focusStar
+                            val blocked = star.optString("blockedText").takeIf { it.isNotEmpty() && it != "null" }
+                            val starEnabled = !locked && (focused || star.getBoolean("canToggle"))
+                            val actionLabel = t(if (focused) "agenda.removeFromFocus" else "agenda.addToFocus")
+                            val starLabel = blocked ?: if (star.getBoolean("queued")) {
+                                if (focused) "$actionLabel. ${t("agenda.focusWhenAvailable")}" else t("agenda.focusWhenAvailable")
+                            } else actionLabel
+                            Box(Modifier.padding(end = 12.dp).size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(7.dp))
+                                .clickable(enabled = starEnabled, role = Role.Button) { editFields(mapOf("focusedToday" to !focused)) }
+                                .semantics { contentDescription = starLabel; selected = focused; if (!starEnabled) disabled() }
+                                .testTag("task-edit-focus-star"), contentAlignment = Alignment.Center) {
+                                FocusStar(focused, !starEnabled, 18, Modifier)
+                            }
+                        }
+                        val helpLabel = t("taskEdit.editorLayoutHelpLabel")
+                        Box(Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(7.dp))
+                            .clickable(role = Role.Button) { help = true }.semantics { contentDescription = helpLabel }, contentAlignment = Alignment.Center) {
+                            Icon(Lucide.CircleHelp, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
                         }
                     }
-                    val helpLabel = t("taskEdit.editorLayoutHelpLabel")
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(7.dp)).background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(7.dp))
-                        .clickable(role = Role.Button) { help = true }.semantics { contentDescription = helpLabel }, contentAlignment = Alignment.Center) {
-                        Icon(Lucide.CircleHelp, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
+                    // RN's title input is multiline, and a typed line break becomes a space.
+                    EditorInput(editor.text("title"), { editText("title", it.replace(Regex("[\r\n]+"), " ")) }, null, !locked)
+                }
+                // RN's AI row and the copilot's pills under the title (TaskEditFormTab.tsx), while AI is on.
+                EditorAIRows(model, locked)
+                // The Destination row stands for both Project and Area, at the first of them in core's order (RN's destinationFields).
+                val destination = editor.view.sections.flatMap { it.fields }.firstOrNull { it == "project" || it == "area" }
+                val field = @Composable { id: String -> EditorField(model, editor, id, locked, id == destination, { picker = it }, { pickDate = it }, { pickTime = it }) }
+                for (section in editor.view.sections) {
+                    if (section.titleKey == null) {
+                        section.fields.forEach { field(it) }
+                        if (editor.view.showSomedaySection) SomedaySections(model, editor, locked)
+                    } else {
+                        CollapsibleSection(editor.id, section) { section.fields.forEach { field(it) } }
                     }
                 }
-                // RN's title input is multiline, and a typed line break becomes a space.
-                EditorInput(editor.text("title"), { editText("title", it.replace(Regex("[\r\n]+"), " ")) }, null, !locked)
+                Spacer(Modifier.heightIn(min = 100.dp))
             }
-            // RN's AI row and the copilot's pills under the title (TaskEditFormTab.tsx), while AI is on.
-            EditorAIRows(model, locked)
-            // The Destination row stands for both Project and Area, at the first of them in core's order (RN's destinationFields).
-            val destination = editor.view.sections.flatMap { it.fields }.firstOrNull { it == "project" || it == "area" }
-            val field = @Composable { id: String -> EditorField(model, editor, id, locked, id == destination, { picker = it }, { pickDate = it }, { pickTime = it }) }
-            for (section in editor.view.sections) {
-                if (section.titleKey == null) {
-                    section.fields.forEach { field(it) }
-                    if (editor.view.showSomedaySection) SomedaySections(model, editor, locked)
-                } else {
-                    CollapsibleSection(editor.id, section) { section.fields.forEach { field(it) } }
-                }
-            }
-            Spacer(Modifier.heightIn(min = 100.dp))
         }
     }
 
@@ -1160,12 +1171,31 @@ internal fun FieldHeading(icon: ImageVector, label: String, modifier: Modifier =
     }
 }
 
+/** The editor form's height above the keyboard, in px (0 outside the form). */
+private val LocalFormViewport = compositionLocalOf { 0 }
+
+/**
+ * How far below a focused field's top the form scrolls into view, in px, as RN's scrollHandleIntoView does
+ * (TaskEditFormTab.tsx): the field, at most 40% of the [viewport] of it so a tall field keeps its top, then 18% of
+ * the [viewport] clear above the keyboard.
+ */
+internal fun focusRevealBottom(fieldHeight: Int, viewport: Int): Float = minOf(fieldHeight.toFloat(), viewport * 0.4f) + viewport * 0.18f
+
 /** RN's text input: 12 padding, radius 10, 16 text, the input background and border. [description] names it for TalkBack. */
 @Composable
 private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: String?, enabled: Boolean, singleLine: Boolean = false,
                         minHeight: Int = 0, description: String? = null, tag: String? = null) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(10.dp)
+    // Focused, the whole field (its border too, not only Compose's cursor line) and RN's clearance sit above the
+    // keyboard; it runs again as the form shrinks with the keyboard, so the last pass sees the settled form.
+    val reveal = remember { BringIntoViewRequester() }
+    val viewport = LocalFormViewport.current
+    var focused by remember { mutableStateOf(false) }
+    var size by remember { mutableStateOf(IntSize.Zero) }
+    LaunchedEffect(focused, viewport) {
+        if (focused && viewport > 0) reveal.bringIntoView(Rect(0f, 0f, size.width.toFloat(), focusRevealBottom(size.height, viewport)))
+    }
     // One text-and-cursor state, the only one the field and the keyboard see. Text the app puts in (a chosen
     // suggestion or quick chip) replaces it at once with the cursor at its true end and no composing region, as
     // RN's TextInput does, so the next token types after ", ". Keyboard and IME cursor moves are kept as they come.
@@ -1173,7 +1203,7 @@ private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: 
     if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled, singleLine = singleLine, textStyle = rnText(16, 400).copy(color = if (enabled) c.text else c.secondaryText),
         cursorBrush = SolidColor(c.tint),
-        modifier = Modifier.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
+        modifier = Modifier.bringIntoViewRequester(reveal).onSizeChanged { size = it }.onFocusChanged { focused = it.isFocused }.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
             .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier),
         decorationBox = { inner ->
