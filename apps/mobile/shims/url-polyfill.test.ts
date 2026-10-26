@@ -65,8 +65,12 @@ describe('URL Polyfill Shim', () => {
             document: new DOMParser().parseFromString(source, 'application/xml') as unknown as Document,
         }));
         expect(parse(inventory())).toEqual([]);
+        // #1456: the folder listed without its trailing slash is still the requested folder.
+        expect(parse('<d:multistatus xmlns:d="DAV:">' + response(path.slice(0, -1), true)
+            + response(path + 'example.pdf') + '</d:multistatus>')).toEqual(['attachments/example.pdf']);
         expect(parse(inventory(path + 'example.pdf'))).toEqual(['attachments/example.pdf']);
-        for (const child of ['example.pdf', base + 'example.pdf', './example.pdf']) {
+        for (const child of ['example.pdf', base + 'example.pdf', './example.pdf',
+            'https://DAV.example.test:443' + path + 'example.pdf']) {
             expect(parse(inventory(child))).toEqual(['attachments/example.pdf']);
         }
         for (const child of ['../outside.pdf', '%2e%2e/outside.pdf', '/elsewhere/example.pdf',
