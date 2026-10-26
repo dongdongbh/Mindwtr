@@ -577,6 +577,9 @@ fn handle_connection(
     handler: &impl Fn(&LocalApiAccess, u16, ApiRequest) -> ApiResponse,
     mut stream: TcpStream,
 ) {
+    // Windows hands out accepted sockets with the listener's non-blocking mode;
+    // a read before the request arrives would fail as a 400 and abort the client.
+    let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let deadline = Instant::now() + REQUEST_DEADLINE;
     let response = match read_request(&mut stream, deadline) {
