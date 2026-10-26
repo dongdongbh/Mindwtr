@@ -31,18 +31,26 @@ final class IntakeFileSnapshot {
     deinit { Darwin.close(fd) }
 }
 
-enum IntakeTarget: Hashable {
+enum IntakeTarget: Hashable, Sendable {
     case header
+    case legacyTerminals
     case record(String)
     case order(Int64)
     var name: String {
         switch self {
         case .header: return "state.json"
+        case .legacyTerminals: return "legacy-reminder-terminals.json"
         case let .record(id): return id + ".json"
         case let .order(sequence): return String(format: "%016lld.json", sequence)
         }
     }
-    var limit: Int { self == .header ? IntakeWire.headerLimit : IntakeWire.recordLimit }
+    var limit: Int {
+        switch self {
+        case .header: return IntakeWire.headerLimit
+        case .legacyTerminals: return 4 * 1024 * 1024
+        case .record, .order: return IntakeWire.recordLimit
+        }
+    }
 }
 
 final class IntakePublicationAttempt {
@@ -57,6 +65,45 @@ final class IntakePublicationAttempt {
     }
     func release() { if fd >= 0 { Darwin.close(fd); fd = -1 }; witness = nil }
     deinit { release() }
+}
+
+/// One concrete import reservation. The target actor fences every other file admission until terminal.
+/// Its only cross-actor file access is locked with target close; no actor-owned files escape this lifetime.
+final class IntakeImportAcknowledgement: @unchecked Sendable {
+    struct Artifact: Sendable {
+        let target: IntakeTarget
+        let witness: IntakeFileWitness
+        let digest: String
+    }
+    private enum State: Equatable { case pending, confirmed, rejected }
+    private let lock = NSLock()
+    private var state = State.pending
+    private var files: NativePersonalIntakeFiles?
+    private let artifacts: [Artifact]
+    fileprivate init(files: NativePersonalIntakeFiles, artifacts: [Artifact]) {
+        self.files = files; self.artifacts = artifacts
+    }
+    var isPending: Bool { lock.lock(); defer { lock.unlock() }; return state == .pending }
+    var isConfirmed: Bool { lock.lock(); defer { lock.unlock() }; return state == .confirmed }
+
+    /// No awaits: target validation, final original check and diagnostic share the same close boundary.
+    func confirm(_ confirmOriginal: () throws -> Void) throws {
+        lock.lock(); defer { lock.unlock() }
+        guard state == .pending, let files else { throw NativePersonalIntakeError.unavailable }
+        do {
+            try files.validateImportAcknowledgement(artifacts)
+            try confirmOriginal()
+            state = .confirmed; self.files = nil
+        } catch {
+            state = .rejected; self.files = nil
+            throw error
+        }
+    }
+    func invalidateBeforeClose(_ closeDestination: () -> Void) {
+        lock.lock(); defer { lock.unlock() }
+        state = .rejected; files = nil
+        closeDestination()
+    }
 }
 
 /// This helper is owned by one intake actor. No CoreHost, KV, secret or personal-library owner is opened.
@@ -76,7 +123,7 @@ final class NativePersonalIntakeFiles {
     private var poisoned = false
     private(set) var headerSnapshot: IntakeFileSnapshot?
     private(set) var attempt: IntakePublicationAttempt?
-    // At most the two artifacts in the single pending capture; never a queue-sized identity cache.
+    // At most one legacy terminal artifact, or the two artifacts in the single pending capture.
     private var hotArtifacts: [IntakeTarget: IntakeFileWitness] = [:]
     #if DEBUG
     var beforePublication: ((String) throws -> Void)?
@@ -208,7 +255,39 @@ final class NativePersonalIntakeFiles {
         guard witness == nil, hotArtifacts[target] == nil else { throw NativePersonalIntakeError.unavailable }
         return try publish(bytes, to: target, before: nil, exclusive: true).witness
     }
+    /// A recovered final clear may leave the exact hot pair; transfer its identity into the ACK metadata.
+    func settleImportedHotArtifacts(_ artifacts: [IntakeImportAcknowledgement.Artifact]) throws {
+        guard !hotArtifacts.isEmpty else { return }
+        do {
+            try check()
+            for (target, witness) in hotArtifacts {
+                guard let artifact = artifacts.first(where: { $0.target == target }), artifact.witness == witness,
+                      let current = try read(target), current.witness == witness,
+                      IntakeWire.digest(current.bytes) == artifact.digest else { throw NativePersonalIntakeError.unavailable }
+            }
+            try check()
+            clearHotArtifacts()
+        } catch { refuse(); throw NativePersonalIntakeError.unavailable }
+    }
+    func retainImportAcknowledgement(_ artifacts: [IntakeImportAcknowledgement.Artifact]) throws -> IntakeImportAcknowledgement {
+        guard hotArtifacts.isEmpty, (1...257).contains(artifacts.count), Set(artifacts.map(\.target)).count == artifacts.count,
+              artifacts.contains(where: { $0.target == .legacyTerminals }),
+              artifacts.allSatisfy({ $0.target != .header }) else { throw NativePersonalIntakeError.unavailable }
+        try validateImportAcknowledgement(artifacts)
+        return .init(files: self, artifacts: artifacts)
+    }
+    fileprivate func validateImportAcknowledgement(_ artifacts: [IntakeImportAcknowledgement.Artifact]) throws {
+        do {
+            try check()
+            for artifact in artifacts {
+                guard let current = try read(artifact.target), current.witness == artifact.witness,
+                      IntakeWire.digest(current.bytes) == artifact.digest else { throw NativePersonalIntakeError.unavailable }
+            }
+            try check()
+        } catch { refuse(); throw NativePersonalIntakeError.unavailable }
+    }
     func clearHotArtifacts() { hotArtifacts.removeAll() }
+    func clearHotArtifact(_ target: IntakeTarget) { hotArtifacts.removeValue(forKey: target) }
     private func accept(_ file: IntakeFileSnapshot, target: IntakeTarget) throws {
         if target == .header { headerSnapshot = file }
         else {
@@ -266,7 +345,7 @@ final class NativePersonalIntakeFiles {
         guard let root = directories.last else { throw NativePersonalIntakeError.unavailable }; return root.fd
     }
     private func directoryFD(_ target: IntakeTarget) throws -> Int32 {
-        switch target { case .header: return try rootFD(); case .record: return recordsFD; case .order: return orderFD }
+        switch target { case .header, .legacyTerminals: return try rootFD(); case .record: return recordsFD; case .order: return orderFD }
     }
     private func verifyNamespace() throws {
         guard !closed, !poisoned, let home = directories.first, let lockWitness,

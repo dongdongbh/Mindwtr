@@ -29,14 +29,30 @@ public actor NativeReminderInbox {
         let operation = "seal"
         let outcome = "confirmed"
     }
+    struct ImportDiagnostic: Sendable {
+        let message = "Native iOS sealed reminder import completed"
+        let releaseCheck = "v1.3.8/ios-personal-intake-import"
+        let operation = "import"
+        let outcome = "confirmed"
+    }
 
     private let files: ReminderInboxFiles
     private var sealed: (token: Seal, origin: Data, generation: Data)?
+    private weak var confirmedImportDestination: NativePersonalIntake?
+    private var confirmedImportGeneration: Data?
+    #if DEBUG
+    private var importAcknowledgementBarrier: (@Sendable () async -> Void)?
+    #endif
 
     // Read-only grammar reuse; personal intake does not alter the legacy writer or its v1 bytes.
     static func validateForPersonalIntake(_ response: NativeReminderResponse, namespace: String) throws {
         try ReminderInboxState.validate(response, namespace: namespace)
     }
+    static func validateTerminalForPersonalIntake(_ id: String, deliveredAtBits: String) throws -> Double {
+        guard ReminderInboxState.uuid(id) else { throw ReminderInboxFiles.failure }
+        return try ReminderInboxState.delivery(deliveredAtBits)
+    }
+    static func deliveryForPersonalIntake(_ bits: String) throws -> Double { try ReminderInboxState.delivery(bits) }
 
     /// The selected container must already exist; only its selected library descendants may be created.
     public init(selection: NativeLaunchSelection) throws {
@@ -156,11 +172,32 @@ public actor NativeReminderInbox {
         return exported
     }
 
+    /// Data transfer only. The original actor owns the final acknowledgement after all target awaits.
+    func importSealed(_ token: Seal, into destination: NativePersonalIntake, route: NativePersonalIntakeRoute,
+                      diagnostic: @Sendable (ImportDiagnostic) -> Void) async throws {
+        guard !Task.isCancelled else { throw ReminderInboxFiles.failure }
+        let original = try exportSealed(token, route: route)
+        let acknowledgement = try await destination.importSealedReminders(from: self, seal: token, route: route)
+        #if DEBUG
+        await importAcknowledgementBarrier?()
+        #endif
+        try acknowledgement.confirm {
+            guard !Task.isCancelled else { throw ReminderInboxFiles.failure }
+            let current = try exportSealed(token, route: route)
+            guard current.sourceGeneration == original.sourceGeneration else { throw ReminderInboxFiles.failure }
+            if confirmedImportDestination !== destination || confirmedImportGeneration != original.sourceGeneration {
+                confirmedImportDestination = destination; confirmedImportGeneration = original.sourceGeneration
+                diagnostic(.init())
+            }
+        }
+    }
+
     private func requireUnsealed() throws {
         guard sealed == nil else { throw ReminderInboxFiles.failure }
     }
 
     #if DEBUG
+    func setImportAcknowledgementBarrier(_ barrier: (@Sendable () async -> Void)?) { importAcknowledgementBarrier = barrier }
     func setIOFaults(beforePublication: (() throws -> Void)? = nil, afterPublication: (() throws -> Void)? = nil) {
         files.beforePublication = beforePublication
         files.afterPublication = afterPublication
