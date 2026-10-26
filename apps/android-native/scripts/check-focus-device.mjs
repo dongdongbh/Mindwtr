@@ -151,8 +151,11 @@ const editorShows = (nodes, title, values = {}) => inEditor(nodes) && field(node
     && Object.entries(values).every(([label, value]) => described(nodes, label) === value);
 /** Taps the control announced [description] and waits for [expected] (tapped once more only if the first tap provably did nothing). */
 const tapDescribed = async (description, expected, what = description) => {
-    const nodes = await screen();
-    return tapExpecting(withDescription(nodes, description) ?? fail(`no control announced "${description}"`), expected, what);
+    // RN's editor fields can sit below the fold (Compose lists them with empty bounds): scroll until the control is on screen.
+    const shown = (nodes) => [withDescription(nodes, description)].find((node) => node && node.bounds !== '[0,0][0,0]');
+    let nodes = await screen();
+    for (let step = 0; step < 4 && !shown(nodes); step += 1) nodes = await device.swipe(nodes, 'down');
+    return tapExpecting(shown(nodes) ?? fail(`no control announced "${description}" on screen`), expected, what);
 };
 /** RN's status chips: "Status: <status>", selected when chosen. */
 const chooseStatus = async (value) => {

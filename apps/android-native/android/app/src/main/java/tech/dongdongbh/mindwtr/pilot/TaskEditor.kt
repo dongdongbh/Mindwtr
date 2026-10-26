@@ -836,19 +836,14 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
             val part = editor.view.fields.dates.getValue(id)
             val label = t(when (id) { "dueDate" -> "taskEdit.dueDateLabel"; "startTime" -> "taskEdit.startDateLabel"; else -> "taskEdit.reviewDateLabel" })
             val icon = when (id) { "dueDate" -> Lucide.CalendarDays; "startTime" -> Lucide.Calendar; else -> Lucide.CalendarClock }
-            if (id == "dueDate" && part.value.isEmpty()) {
-                // RN's compact due row while no due date is set.
-                CompactRow(icon, label, part.label, !locked) { pickDate(id) }
-            } else {
-                FieldHeading(icon, label)
-                // RN's date row: core's label, the clock (not for review), Date only when it has a time, and Clear.
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    DateButton(part.label, label, !locked, Modifier.weight(1f)) { pickDate(id) }
-                    if (part.value.isNotEmpty()) {
-                        if (id != "reviewAt") SmallButton(Lucide.Clock, "${t("calendar.changeTime")} $label", !locked) { pickTime(id) }
-                        if (part.hasTime) SmallTextButton(t("taskEdit.dateOnly"), "${t("taskEdit.dateOnly")} $label", !locked) { setDate(id, part.dateOnly) }
-                        SmallButton(Lucide.CalendarX, "${t("common.clear")} $label", !locked) { setDate(id, "") }
-                    }
+            FieldHeading(icon, label)
+            // RN's date row, set or not: core's label, the clock (not for review), Date only when it has a time, and Clear.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                DateButton(part.label, label, !locked, Modifier.weight(1f)) { pickDate(id) }
+                if (part.value.isNotEmpty()) {
+                    if (id != "reviewAt") SmallButton(Lucide.Clock, "${t("calendar.changeTime")} $label", !locked) { pickTime(id) }
+                    if (part.hasTime) SmallTextButton(t("taskEdit.dateOnly"), "${t("taskEdit.dateOnly")} $label", !locked) { setDate(id, part.dateOnly) }
+                    SmallButton(Lucide.CalendarX, "${t("common.clear")} $label", !locked) { setDate(id, "") }
                 }
             }
             QuickDateChips(label, part.quickDates, !locked) { setDate(id, it) }
@@ -1282,21 +1277,6 @@ private fun InboxViewModel.ChoiceChips(editor: TaskEditor, field: String, values
                 Text(label(value), style = rnText(14, 400), color = color, modifier = Modifier.padding(start = 6.dp))
             }
         }
-    }
-}
-
-/** RN's compact picker row: the glyph and label at the left, the value in the tint at the right. */
-@Composable
-private fun CompactRow(icon: ImageVector, label: String, value: String, enabled: Boolean, onClick: () -> Unit) {
-    val c = LocalTheme.current.colors
-    val shape = RoundedCornerShape(10.dp)
-    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)
-        .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = "$label: $value" }
-        .padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(14.dp))
-        Text(label.uppercase(), style = rnText(13, 700, 17), color = c.secondaryText, modifier = Modifier.padding(start = 6.dp))
-        Text(value, style = rnText(14, 700, 18), color = c.tint, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End,
-            modifier = Modifier.weight(1f).padding(start = 12.dp))
     }
 }
 

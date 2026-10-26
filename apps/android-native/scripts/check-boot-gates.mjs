@@ -9874,4 +9874,10 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /Text\(item\.optInt\("count"\)\.toString\(\), style = rnText\(11, 600\), color = c\.secondaryText\)/);
     assert.match(details, /val canUp = index > 0 && \(shown\[index - 1\]\.getString\("type"\) == "task" \|\| index - 1 > 0\)/);
 }
+// Editor parity part 2 (task editor-parity-20261026-02), RN's TaskEditScheduleField, TaskEditHeader and TaskEditContentField:
+{
+    // (1) Every date field is RN's: its heading over its date box, whether set or not; no compact row.
+    assert.doesNotMatch(editorUi, /CompactRow/, 'RN draws no compact date row: every date field is its heading over its box');
+    assert.match(editorUi, /"dueDate", "startTime", "reviewAt" -> FormGroup \{[\s\S]{0,600}FieldHeading\(icon, label\)\s+\/\/[^\n]*\n\s+Row\(verticalAlignment = Alignment\.CenterVertically\) \{\s+DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

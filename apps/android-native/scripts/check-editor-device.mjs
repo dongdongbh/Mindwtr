@@ -159,7 +159,10 @@ const pickDay = async (day) => {
  * [day] and waits for core's new label. Returns the stored value a date-only pick writes and the label shown.
  */
 const pickDueDay = async (day) => {
-    const before = described(await screen(), 'Due Date');
+    // The Due Date field may sit below the fold (the form scrolled back to the title): bring it in before reading its label.
+    let shown = await screen();
+    for (let step = 0; step < 6 && described(shown, 'Due Date') === undefined; step += 1) shown = await device.swipe(shown, 'down');
+    const before = described(shown, 'Due Date') ?? fail('no Due Date field in the editor');
     await tapDescribed(`Due Date: ${before}`, datePicker, 'the date picker');
     await pickDay(day);
     const value = `${month()}-${String(day).padStart(2, '0')}`;
@@ -178,7 +181,8 @@ const typeInto = async (node, digits, expected, erase = 0) => {
     sh(`input text ${digits}`);
     await waitFor(`the text ${expected}`, (nodes) => nodes.some((current) => current.class === 'android.widget.EditText' && current.text === expected), 10_000);
 };
-const appendTitle = async (digits, expected) => typeInto(field(await screen()), digits, expected);
+// The title is the form's first field: back at the top first (a date pick leaves the form scrolled down to its row).
+const appendTitle = async (digits, expected) => typeInto(field(await device.toTop()), digits, expected);
 /** The Contexts field, scrolled into view first: on the S23 the open keyboard leaves it below the form's visible part. */
 const contextsField = async () => {
     await hideKeyboard();
