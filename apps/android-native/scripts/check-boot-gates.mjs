@@ -721,6 +721,9 @@ const areaUi = source('AreaSwitcher.kt');
 const viewStateKt = source('ViewState.kt');
 const searchUi = source('SearchScreen.kt');
 const processUi = source('ProcessInbox.kt');
+// #1445: each new question or item starts at the top, as RN's scrollProcessingToTop after every answer; one scroll position no longer spans steps.
+assert.match(processUi, /val scroll = rememberScrollState\(\)\s+LaunchedEffect\(flow\.taskId, flow\.step\) \{ scroll\.animateScrollTo\(0\) \}/);
+assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
 const captureModalUi = source('CaptureModal.kt');
 const captureModalModel = source('CaptureModalModel.kt');

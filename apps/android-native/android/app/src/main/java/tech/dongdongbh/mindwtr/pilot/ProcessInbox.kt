@@ -168,12 +168,15 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
     BackHandler(enabled = !failed) { if (!busy) closeProcessing() }
     // Edits and a queued answer wait while an action runs; they go on once none does.
     LaunchedEffect(busy, failed) { if (!busy && !failed) pumpStep() }
+    // Each new question or item starts at the top, as RN's scrollProcessingToTop after every answer (#1445).
+    val scroll = rememberScrollState()
+    LaunchedEffect(flow.taskId, flow.step) { scroll.animateScrollTo(0) }
 
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("process-inbox")) {
         ProgressHeader(model, flow, canAnswer("inboxSkip", ""), locked)
         error?.let { message -> FailureBanner(message) { OwedRetry(model) } }
         Column(Modifier.weight(1f).fillMaxWidth().imePadding()) {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 16.dp)) {
+            Column(Modifier.weight(1f).verticalScroll(scroll).padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 16.dp)) {
                 CaptureCard(flow, locked, send)
                 StepBody(model, flow, locked, send, canAnswer) { pickDate = it }
                 view.text("back")?.let { label ->
