@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 
 export const AUDIT_EXCEPTIONS = {
-  braces: { version: "3.0.3", advisories: { "GHSA-vfj7-8cjw-p6xm": "<=3.0.3" } },
   "node-forge": { version: "1.4.0", advisories: { "GHSA-86w9-cpqp-85rv": "<=1.4.0" } },
   "image-size": { version: "1.2.1", advisories: {
     "GHSA-5p2g-fcmc-qvqq": ">=1.2.0 <=2.0.2",
@@ -9,9 +8,9 @@ export const AUDIT_EXCEPTIONS = {
   } },
 };
 const PROFILE_ROOTS = {
-  desktop: ["braces"], mobile: ["braces", "node-forge", "image-size"], eas: ["braces", "node-forge"],
+  mobile: ["node-forge", "image-size"], eas: ["node-forge"],
 };
-export const PROFILE_PREFIXES = { desktop: "apps/desktop", mobile: "apps/mobile", eas: "tools/eas-cli" };
+export const PROFILE_PREFIXES = { mobile: "apps/mobile", eas: "tools/eas-cli" };
 const reviewedTopology = JSON.parse(readFileSync(new URL("./audit-build-tool-topology.json", import.meta.url), "utf8"));
 const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 const dependencyName = (path) => path.split("node_modules/").at(-1);
@@ -46,7 +45,6 @@ export const npmAuditTopology = (lockfile, profile) => {
       for (const [name, version] of Object.entries(metadata[kind] ?? {})) if (names.has(name)) edges[`${kind}:${name}`] = version;
     }
     graph[path] = { version: path ? metadata.version : null, edges };
-    if (profile === "desktop" && path) graph[path].dev = metadata.dev === true;
   }
   return graph;
 };
@@ -144,7 +142,7 @@ export const validateNpmAuditReport = (report, profile, lockfile) => {
 if (import.meta.main) {
   try {
     const [reportPath, profile] = process.argv.slice(2);
-    if (!reportPath || !PROFILE_PREFIXES[profile]) throw new Error("usage: validate-npm-audit.js <report.json> <desktop|mobile|eas>");
+    if (!reportPath || !PROFILE_PREFIXES[profile]) throw new Error("usage: validate-npm-audit.js <report.json> <mobile|eas>");
     const lockfile = JSON.parse(readFileSync(`${PROFILE_PREFIXES[profile]}/package-lock.json`, "utf8"));
     validateNpmAuditReport(JSON.parse(readFileSync(reportPath, "utf8")), profile, lockfile);
     console.log(`Accepted only the reviewed ${profile} build-tool advisory closure.`);

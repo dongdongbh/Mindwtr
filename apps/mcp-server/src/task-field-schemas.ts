@@ -63,6 +63,13 @@ const fieldSchemaFor = (name: keyof Task): z.ZodTypeAny => {
 // (matches the pre-existing hand-written `isFocusedToday: z.boolean().optional()`).
 const BOOLEAN_FIELD_NAMES = new Set<keyof Task>(['showFutureRecurrence', 'isFocusedToday', 'suppressMindwtrReminders']);
 
+// Zod 4 keeps .describe() on the inner schema, and JSON Schema then nests it inside the
+// nullable anyOf branch. Repeat it on the wrapper so clients see it on the property itself.
+export const nullableOptional = <T extends z.ZodTypeAny>(schema: T) => {
+  const wrapped = schema.nullable().optional();
+  return schema.description ? wrapped.describe(schema.description) : wrapped;
+};
+
 /** Shape for mindwtr_add_task's generated fields (merge into the tool's z.object alongside title/quickAdd). */
 export const buildTaskCreateFieldsShape = (): Record<string, z.ZodTypeAny> => {
   const shape: Record<string, z.ZodTypeAny> = {};
@@ -79,7 +86,7 @@ export const buildTaskUpdateFieldsShape = (): Record<string, z.ZodTypeAny> => {
     // Inheritance is explicit; null must not silently discard a reminder choice.
     shape[name] = BOOLEAN_FIELD_NAMES.has(name) || name === 'reminderPolicy'
       ? fieldSchemaFor(name).optional()
-      : fieldSchemaFor(name).nullable().optional();
+      : nullableOptional(fieldSchemaFor(name));
   }
   return shape;
 };

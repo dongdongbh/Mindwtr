@@ -11,10 +11,9 @@ import { validateBunAuditTopology, validateNpmAuditTopology, validateNpmAuditRep
 const rootRequire = createRequire(import.meta.url);
 
 const IMAGE_SIZE_ADVISORIES = ["GHSA-5p2g-fcmc-qvqq", "GHSA-w3rx-r6r6-pgpr"];
-const BRACES_ADVISORY = "GHSA-vfj7-8cjw-p6xm";
 const FORGE_ADVISORY = "GHSA-86w9-cpqp-85rv";
-const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, BRACES_ADVISORY, FORGE_ADVISORY];
-const profiles = {desktop: "apps/desktop", mobile: "apps/mobile", eas: "tools/eas-cli"};
+const BUN_ADVISORIES = [...IMAGE_SIZE_ADVISORIES, FORGE_ADVISORY];
+const profiles = {mobile: "apps/mobile", eas: "tools/eas-cli"};
 const npmLock = (profile) => JSON.parse(readFileSync(`${profiles[profile]}/package-lock.json`, "utf8"));
 const bunLock = () => {
   const parsed = ts.parseConfigFileTextToJson("bun.lock", readFileSync("bun.lock", "utf8"));
@@ -187,10 +186,7 @@ const advisory = (name, id, range) => ({
 
 const allowedReport = (profile) => {
   const vulnerabilities = {
-    braces: {name: "braces", severity: "high", via: [advisory("braces", BRACES_ADVISORY, "<=3.0.3")], nodes: ["node_modules/braces"]},
-  };
-  if (profile !== "desktop") vulnerabilities["node-forge"] = {
-    name: "node-forge", severity: "high", via: [advisory("node-forge", FORGE_ADVISORY, "<=1.4.0")], nodes: ["node_modules/node-forge"],
+    "node-forge": {name: "node-forge", severity: "high", via: [advisory("node-forge", FORGE_ADVISORY, "<=1.4.0")], nodes: ["node_modules/node-forge"]},
   };
   if (profile === "mobile") vulnerabilities["image-size"] = {
     name: "image-size", severity: "high", via: [
@@ -208,28 +204,23 @@ for (const profile of Object.keys(profiles)) {
     expect(() => validateNpmAuditReport(allowedReport(profile), profile, npmLock(profile))).not.toThrow();
     if (profile === "mobile") expect(() => validateMobileAuditReport(allowedReport(profile))).not.toThrow();
     const unexpected = allowedReport(profile);
-    unexpected.vulnerabilities.braces.via.push(advisory("braces", "GHSA-unexpected-advisory", "<=3.0.3"));
+    unexpected.vulnerabilities["node-forge"].via.push(advisory("node-forge", "GHSA-unexpected-advisory", "<=1.4.0"));
     expect(() => validateNpmAuditReport(unexpected, profile, npmLock(profile))).toThrow(/unexpected direct advisories/);
     const missing = allowedReport(profile);
-    missing.vulnerabilities.braces.via = [];
+    missing.vulnerabilities["node-forge"].via = [];
     expect(() => validateNpmAuditReport(missing, profile, npmLock(profile))).toThrow(/invalid dependency record/);
   });
 
   test(`${profile} exceptions fail on version, topology, or runtime exposure drift`, () => {
     for (const mutate of [
-      (lock) => { lock.packages["node_modules/braces"].version = "3.0.4"; },
-      (lock) => { lock.packages["node_modules/new-runtime"] = {version: "1.0.0", dependencies: {braces: "3.0.3"}}; },
-      (lock) => { lock.packages["node_modules/nested/node_modules/braces"] = {version: "3.0.3"}; },
-      (lock) => { lock.packages[""].dependencies.braces = "3.0.3"; },
-      (lock) => { lock.packages["node_modules/micromatch"].dependencies.braces = "^2.0.0"; },
+      (lock) => { lock.packages["node_modules/node-forge"].version = "1.4.1"; },
+      (lock) => { lock.packages["node_modules/new-runtime"] = {version: "1.0.0", dependencies: {"node-forge": "1.4.0"}}; },
+      (lock) => { lock.packages["node_modules/nested/node_modules/node-forge"] = {version: "1.4.0"}; },
+      (lock) => { lock.packages[""].dependencies["node-forge"] = "1.4.0"; },
+      (lock) => { lock.packages["node_modules/@expo/code-signing-certificates"].dependencies["node-forge"] = "^0.10.0"; },
     ]) {
       const lock = npmLock(profile);
       mutate(lock);
-      expect(() => validateNpmAuditTopology(lock, profile)).toThrow(/unreviewed/);
-    }
-    if (profile === "desktop") {
-      const lock = npmLock(profile);
-      lock.packages["node_modules/braces"].dev = false;
       expect(() => validateNpmAuditTopology(lock, profile)).toThrow(/unreviewed/);
     }
   });
@@ -243,15 +234,15 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
     (r) => { delete r.metadata; },
     (r) => { r.metadata.vulnerabilities.total = 999; },
     (r) => { r.metadata.vulnerabilities.high = -1; },
-    (r) => { r.vulnerabilities.braces.name = "unrelated"; },
-    (r) => { r.vulnerabilities.braces.severity = "unknown"; },
-    (r) => { r.vulnerabilities.braces.nodes = ["node_modules/unknown"]; },
-    (r) => { r.vulnerabilities.braces.via[0].dependency = "unrelated"; },
-    (r) => { r.vulnerabilities.braces.via[0].url = `https://evil.example/advisories/${BRACES_ADVISORY}`; },
-    (r) => { r.vulnerabilities.braces.via[0].range = "*"; },
-    (r) => { r.vulnerabilities.braces.via.push(null); },
-    (r) => { r.vulnerabilities.braces.via.push("unrelated"); },
-    (r) => { r.vulnerabilities.braces.via.push(r.vulnerabilities.braces.via[0]); },
+    (r) => { r.vulnerabilities["node-forge"].name = "unrelated"; },
+    (r) => { r.vulnerabilities["node-forge"].severity = "unknown"; },
+    (r) => { r.vulnerabilities["node-forge"].nodes = ["node_modules/unknown"]; },
+    (r) => { r.vulnerabilities["node-forge"].via[0].dependency = "unrelated"; },
+    (r) => { r.vulnerabilities["node-forge"].via[0].url = `https://evil.example/advisories/${FORGE_ADVISORY}`; },
+    (r) => { r.vulnerabilities["node-forge"].via[0].range = "*"; },
+    (r) => { r.vulnerabilities["node-forge"].via.push(null); },
+    (r) => { r.vulnerabilities["node-forge"].via.push("unrelated"); },
+    (r) => { r.vulnerabilities["node-forge"].via.push(r.vulnerabilities["node-forge"].via[0]); },
   ]) {
     const report = allowedReport("mobile");
     mutate(report);
@@ -261,11 +252,13 @@ test("npm exceptions reject malformed reports, API errors, unknown records, and 
 
 test("npm advisory closure rejects missing dependencies and unrelated cycles", () => {
   const missing = allowedReport("mobile");
-  missing.vulnerabilities.micromatch = {name: "micromatch", severity: "high", via: ["braces"], nodes: ["node_modules/micromatch"]};
+  missing.vulnerabilities["@expo/code-signing-certificates"] = {
+    name: "@expo/code-signing-certificates", severity: "high", via: ["node-forge"], nodes: ["node_modules/@expo/code-signing-certificates"],
+  };
   missing.metadata.vulnerabilities.high += 1;
   missing.metadata.vulnerabilities.total += 1;
   expect(() => validateMobileAuditReport(missing)).not.toThrow();
-  delete missing.vulnerabilities.braces;
+  delete missing.vulnerabilities["node-forge"];
   missing.metadata.vulnerabilities.high -= 1;
   missing.metadata.vulnerabilities.total -= 1;
   expect(() => validateMobileAuditReport(missing)).toThrow(/unexpected direct advisories/);
@@ -279,10 +272,10 @@ test("npm advisory closure rejects missing dependencies and unrelated cycles", (
 
 test("Bun exceptions reject new runtime consumers, nested copies, and changed versions", () => {
   for (const mutate of [
-    (lock) => { lock.packages.braces[0] = "braces@3.0.4"; },
-    (lock) => { lock.packages["unexpected-runtime"] = ["unexpected-runtime@1.0.0", "", {dependencies: {braces: "3.0.3"}}]; },
-    (lock) => { lock.packages["nested/braces"] = structuredClone(lock.packages.braces); },
-    (lock) => { lock.workspaces["apps/cloud"].dependencies.braces = "3.0.3"; },
+    (lock) => { lock.packages["node-forge"][0] = "node-forge@1.4.1"; },
+    (lock) => { lock.packages["unexpected-runtime"] = ["unexpected-runtime@1.0.0", "", {dependencies: {"node-forge": "1.4.0"}}]; },
+    (lock) => { lock.packages["nested/node-forge"] = structuredClone(lock.packages["node-forge"]); },
+    (lock) => { lock.workspaces["apps/cloud"].dependencies["node-forge"] = "1.4.0"; },
   ]) {
     const lock = bunLock();
     mutate(lock);

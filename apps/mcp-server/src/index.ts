@@ -55,7 +55,7 @@ import type {
   UpdateTaskInput,
 } from './queries.js';
 import { linkAttachmentsCreateSchema, linkAttachmentsUpdateSchema } from './link-attachments.js';
-import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape } from './task-field-schemas.js';
+import { buildTaskCreateFieldsShape, buildTaskUpdateFieldsShape, nullableOptional } from './task-field-schemas.js';
 
 export { parseArgs, parseBooleanFlag } from './flags.js';
 export { isAuthorizedBearerToken, resolveHttpConfig, type HttpServerConfig } from './http-server.js';
@@ -473,7 +473,7 @@ const addProjectSchema = z.object({
   attachments: linkAttachmentsCreateSchema.optional(),
 });
 const updateProjectSchema = z.object({
-  viewSectionIds: viewSectionIdsSchema.nullable().optional(),
+  viewSectionIds: nullableOptional(viewSectionIdsSchema),
   id: z.string(),
   title: z.string().min(1).max(MAX_TASK_TITLE_LENGTH).optional(),
   colorOverride: z.string().regex(/^#[0-9a-f]{6}$/i).nullable().optional(),

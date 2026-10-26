@@ -71,7 +71,6 @@ jobs:
           set -euo pipefail
           # Temporary build-tool exceptions, pinned by the preceding governance test:
           # - image-size 1.2.1: Metro asset inspection; patched 2.x needs bundling validation.
-          # - braces 3.0.3: Tailwind/Metro/Jest file globs; no patched release exists.
           # - node-forge 1.4.0: Expo development/build code signing; no patched release exists.
           # None is imported by the shipped app, core, cloud, or MCP runtime source.
           # Exact ancestor versions/edges and runtime import checks fail on new exposure.
@@ -81,7 +80,6 @@ jobs:
           if ! bun audit \
             --ignore=GHSA-5p2g-fcmc-qvqq \
             --ignore=GHSA-w3rx-r6r6-pgpr \
-            --ignore=GHSA-vfj7-8cjw-p6xm \
             --ignore=GHSA-86w9-cpqp-85rv; then
             echo "bun audit reported vulnerabilities or failed." >&2
             exit 1
@@ -90,10 +88,7 @@ jobs:
       - name: Audit shipped npm package locks
         run: |
           set -euo pipefail
-          desktop_audit_report="$RUNNER_TEMP/desktop-npm-audit.json"
-          if ! npm audit --prefix apps/desktop --audit-level=low --json > "$desktop_audit_report"; then
-            bun scripts/ci/validate-npm-audit.js "$desktop_audit_report" desktop
-          fi
+          npm audit --prefix apps/desktop --audit-level=low
           mobile_audit_report="$RUNNER_TEMP/mobile-npm-audit.json"
           if ! npm audit --prefix apps/mobile --audit-level=low --json > "$mobile_audit_report"; then
             # Validate exact advisory/package/version sets and reviewed lock topology.

@@ -1,54 +1,10 @@
 {
-  "desktop": {
-    "": {
-      "version": null,
-      "edges": {
-        "devDependencies:tailwindcss": "^3.4.1"
-      }
-    },
-    "node_modules/braces": {
-      "version": "3.0.3",
-      "edges": {},
-      "dev": true
-    },
-    "node_modules/chokidar": {
-      "version": "3.6.0",
-      "edges": {
-        "dependencies:braces": "~3.0.2"
-      },
-      "dev": true
-    },
-    "node_modules/fast-glob": {
-      "version": "3.3.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.8"
-      },
-      "dev": true
-    },
-    "node_modules/micromatch": {
-      "version": "4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
-      },
-      "dev": true
-    },
-    "node_modules/tailwindcss": {
-      "version": "3.4.19",
-      "edges": {
-        "dependencies:chokidar": "^3.6.0",
-        "dependencies:fast-glob": "^3.3.2",
-        "dependencies:micromatch": "^4.0.8"
-      },
-      "dev": true
-    }
-  },
   "mobile": {
     "": {
       "version": null,
       "edges": {
         "dependencies:expo": "~54.0.30",
-        "dependencies:react-native": "0.81.5",
-        "dependencies:tailwindcss": "3.3.2"
+        "dependencies:react-native": "0.81.5"
       }
     },
     "node_modules/@expo/cli": {
@@ -71,7 +27,6 @@
       "edges": {
         "dependencies:metro": "0.83.3",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
@@ -81,46 +36,11 @@
         "dependencies:@expo/metro": "~54.2.0"
       }
     },
-    "node_modules/@jest/environment": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "node_modules/@jest/fake-timers": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:jest-message-util": "^29.7.0"
-      }
-    },
-    "node_modules/@jest/transform": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:jest-haste-map": "^29.7.0",
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "node_modules/@react-native/community-cli-plugin": {
       "version": "0.81.5",
       "edges": {
         "dependencies:metro": "^0.83.1",
         "dependencies:metro-config": "^0.83.1"
-      }
-    },
-    "node_modules/babel-jest": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:@jest/transform": "^29.7.0"
-      }
-    },
-    "node_modules/braces": {
-      "version": "3.0.3",
-      "edges": {}
-    },
-    "node_modules/chokidar": {
-      "version": "3.6.0",
-      "edges": {
-        "dependencies:braces": "~3.0.2"
       }
     },
     "node_modules/expo": {
@@ -131,41 +51,15 @@
         "dependencies:@expo/metro-config": "54.0.17"
       }
     },
-    "node_modules/fast-glob": {
-      "version": "3.3.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.8"
-      }
-    },
     "node_modules/image-size": {
       "version": "1.2.1",
       "edges": {}
-    },
-    "node_modules/jest-environment-node": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:@jest/environment": "^29.7.0",
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "node_modules/jest-haste-map": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
-    "node_modules/jest-message-util": {
-      "version": "29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
     },
     "node_modules/metro": {
       "version": "0.83.3",
       "edges": {
         "dependencies:image-size": "^1.0.2",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
@@ -175,22 +69,10 @@
         "dependencies:metro": "0.83.3"
       }
     },
-    "node_modules/metro-file-map": {
-      "version": "0.83.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "node_modules/metro-transform-worker": {
       "version": "0.83.3",
       "edges": {
         "dependencies:metro": "0.83.3"
-      }
-    },
-    "node_modules/micromatch": {
-      "version": "4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
       }
     },
     "node_modules/node-forge": {
@@ -200,17 +82,7 @@
     "node_modules/react-native": {
       "version": "0.81.5",
       "edges": {
-        "dependencies:@react-native/community-cli-plugin": "0.81.5",
-        "dependencies:babel-jest": "^29.7.0",
-        "dependencies:jest-environment-node": "^29.7.0"
-      }
-    },
-    "node_modules/tailwindcss": {
-      "version": "3.3.2",
-      "edges": {
-        "dependencies:chokidar": "^3.5.3",
-        "dependencies:fast-glob": "^3.2.12",
-        "dependencies:micromatch": "^4.0.5"
+        "dependencies:@react-native/community-cli-plugin": "0.81.5"
       }
     }
   },
@@ -233,80 +105,19 @@
         "dependencies:node-forge": "^1.2.1"
       }
     },
-    "node_modules/@expo/plugin-help": {
-      "version": "5.1.23",
-      "edges": {
-        "dependencies:@oclif/core": "^2.11.1"
-      }
-    },
-    "node_modules/@expo/plugin-help/node_modules/@oclif/core": {
-      "version": "2.16.0",
-      "edges": {
-        "dependencies:globby": "^11.1.0"
-      }
-    },
-    "node_modules/@expo/plugin-warn-if-update-available": {
-      "version": "2.5.1",
-      "edges": {
-        "dependencies:@oclif/core": "^2.11.1"
-      }
-    },
-    "node_modules/@expo/plugin-warn-if-update-available/node_modules/@oclif/core": {
-      "version": "2.16.0",
-      "edges": {
-        "dependencies:globby": "^11.1.0"
-      }
-    },
-    "node_modules/@oclif/core": {
-      "version": "4.13.3",
-      "edges": {}
-    },
-    "node_modules/@oclif/plugin-autocomplete": {
-      "version": "3.2.55",
-      "edges": {
-        "dependencies:@oclif/core": "^4"
-      }
-    },
-    "node_modules/braces": {
-      "version": "3.0.3",
-      "edges": {}
-    },
     "node_modules/eas-cli": {
       "version": "21.5.0",
       "edges": {
         "dependencies:@expo/code-signing-certificates": "0.0.5",
         "dependencies:@expo/pkcs12": "0.1.3",
-        "dependencies:@expo/plugin-help": "5.1.23",
-        "dependencies:@expo/plugin-warn-if-update-available": "2.5.1",
-        "dependencies:@oclif/core": "^4.8.3",
-        "dependencies:@oclif/plugin-autocomplete": "^3.2.40",
-        "dependencies:fast-glob": "3.3.2",
         "dependencies:jks-js": "1.1.0",
         "dependencies:node-forge": "1.4.0"
-      }
-    },
-    "node_modules/fast-glob": {
-      "version": "3.3.2",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
-    "node_modules/globby": {
-      "version": "11.1.0",
-      "edges": {
-        "dependencies:fast-glob": "^3.2.9"
       }
     },
     "node_modules/jks-js": {
       "version": "1.1.0",
       "edges": {
         "dependencies:node-forge": "^1.3.1"
-      }
-    },
-    "node_modules/micromatch": {
-      "version": "4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
       }
     },
     "node_modules/node-forge": {
@@ -335,7 +146,6 @@
       "edges": {
         "dependencies:metro": "0.83.3",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
@@ -345,46 +155,11 @@
         "dependencies:@expo/metro": "~54.2.0"
       }
     },
-    "@jest/environment": {
-      "version": "@jest/environment@29.7.0",
-      "edges": {
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "@jest/fake-timers": {
-      "version": "@jest/fake-timers@29.7.0",
-      "edges": {
-        "dependencies:jest-message-util": "^29.7.0"
-      }
-    },
-    "@jest/transform": {
-      "version": "@jest/transform@29.7.0",
-      "edges": {
-        "dependencies:jest-haste-map": "^29.7.0",
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "@react-native/community-cli-plugin": {
       "version": "@react-native/community-cli-plugin@0.81.5",
       "edges": {
         "dependencies:metro": "^0.83.1",
         "dependencies:metro-config": "^0.83.1"
-      }
-    },
-    "babel-jest": {
-      "version": "babel-jest@29.7.0",
-      "edges": {
-        "dependencies:@jest/transform": "^29.7.0"
-      }
-    },
-    "braces": {
-      "version": "braces@3.0.3",
-      "edges": {}
-    },
-    "chokidar": {
-      "version": "chokidar@3.6.0",
-      "edges": {
-        "dependencies:braces": "~3.0.2"
       }
     },
     "expo": {
@@ -395,41 +170,15 @@
         "dependencies:@expo/metro-config": "54.0.12"
       }
     },
-    "fast-glob": {
-      "version": "fast-glob@3.3.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.8"
-      }
-    },
     "image-size": {
       "version": "image-size@1.2.1",
       "edges": {}
-    },
-    "jest-environment-node": {
-      "version": "jest-environment-node@29.7.0",
-      "edges": {
-        "dependencies:@jest/environment": "^29.7.0",
-        "dependencies:@jest/fake-timers": "^29.7.0"
-      }
-    },
-    "jest-haste-map": {
-      "version": "jest-haste-map@29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
-    "jest-message-util": {
-      "version": "jest-message-util@29.7.0",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
     },
     "metro": {
       "version": "metro@0.83.3",
       "edges": {
         "dependencies:image-size": "^1.0.2",
         "dependencies:metro-config": "0.83.3",
-        "dependencies:metro-file-map": "0.83.3",
         "dependencies:metro-transform-worker": "0.83.3"
       }
     },
@@ -439,22 +188,10 @@
         "dependencies:metro": "0.83.3"
       }
     },
-    "metro-file-map": {
-      "version": "metro-file-map@0.83.3",
-      "edges": {
-        "dependencies:micromatch": "^4.0.4"
-      }
-    },
     "metro-transform-worker": {
       "version": "metro-transform-worker@0.83.3",
       "edges": {
         "dependencies:metro": "0.83.3"
-      }
-    },
-    "micromatch": {
-      "version": "micromatch@4.0.8",
-      "edges": {
-        "dependencies:braces": "^3.0.3"
       }
     },
     "node-forge": {
@@ -464,39 +201,14 @@
     "react-native": {
       "version": "react-native@0.81.5",
       "edges": {
-        "dependencies:@react-native/community-cli-plugin": "0.81.5",
-        "dependencies:babel-jest": "^29.7.0",
-        "dependencies:jest-environment-node": "^29.7.0"
-      }
-    },
-    "tailwindcss": {
-      "version": "tailwindcss@3.4.19",
-      "edges": {
-        "dependencies:chokidar": "^3.6.0",
-        "dependencies:fast-glob": "^3.3.2",
-        "dependencies:micromatch": "^4.0.8"
-      }
-    },
-    "mobile/tailwindcss": {
-      "version": "tailwindcss@3.3.2",
-      "edges": {
-        "dependencies:chokidar": "^3.5.3",
-        "dependencies:fast-glob": "^3.2.12",
-        "dependencies:micromatch": "^4.0.5"
-      }
-    },
-    "workspace:apps/desktop": {
-      "version": null,
-      "edges": {
-        "devDependencies:tailwindcss": "^3.4.1"
+        "dependencies:@react-native/community-cli-plugin": "0.81.5"
       }
     },
     "workspace:apps/mobile": {
       "version": null,
       "edges": {
         "dependencies:expo": "~54.0.30",
-        "dependencies:react-native": "0.81.5",
-        "dependencies:tailwindcss": "3.3.2"
+        "dependencies:react-native": "0.81.5"
       }
     }
   }

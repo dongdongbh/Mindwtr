@@ -7,7 +7,7 @@ export const listViewSectionsSchema = z.object({ view: z.enum(['someday', 'waiti
 export type ListViewSectionsInput = z.infer<typeof listViewSectionsSchema>;
 export type ViewSectionEntry = Pick<ViewSectionDefinition, 'id' | 'title'> & { view: ViewSectionScope; order?: number };
 
-export const viewSectionIdsSchema = z.record(z.string().refine((value) => value.trim().length > 0))
+export const viewSectionIdsSchema = z.record(z.string(), z.string().refine((value) => value.trim().length > 0))
   .describe('Full per-view section assignment map. Resolve IDs with mindwtr_list_view_sections. Replaces the entire map; {} clears all assignments.');
 
 export const normalizeViewSectionIds = (value: unknown, allowNull = false): Record<string, string> | undefined => {

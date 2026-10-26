@@ -11,8 +11,12 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { TIME_ESTIMATE_OPTIONS } from '@mindwtr/core';
 import { TASK_SYNC_FIELD_SCHEMA } from '@mindwtr/core/task-sync-schema';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-import { addTaskSchema, updateTaskSchema } from './index.js';
+import { addTaskSchema, registerMindwtrTools, updateTaskSchema } from './index.js';
+import type { MindwtrService } from './service.js';
 import {
   TASK_CREATE_FIELD_NAMES,
   TASK_PATCH_FIELD_NAMES,
@@ -132,6 +136,31 @@ describe('MCP task write-surface derivation (TASK_SYNC_FIELD_SCHEMA -> Zod tool 
     const shapeKeys = new Set(Object.keys(addTaskSchema.shape));
     for (const name of ['checklist', 'areaId', 'reviewAt', 'isFocusedToday']) {
       expect(shapeKeys.has(name)).toBe(true);
+    }
+  });
+
+  // Zod 4 nests a nullable field's description inside its anyOf branch; LLM clients read the
+  // property's own description to pick fields, so the advertised update schemas must keep it.
+  test('advertised update tools keep each generated field description on the property itself', async () => {
+    const server = new McpServer({ name: 'field-descriptions-test', version: '1' });
+    registerMindwtrTools(server, {} as MindwtrService, false, { localApi: false });
+    const client = new Client({ name: 'field-descriptions-client', version: '1' });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    try {
+      const { tools } = await client.listTools();
+      const properties = (name: string) => tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { description?: string }>;
+      const add = properties('mindwtr_add_task');
+      const update = properties('mindwtr_update_task');
+      for (const name of TASK_PATCH_FIELD_NAMES) {
+        if (add[name]?.description) expect({ name, description: update[name]?.description }).toEqual({ name, description: add[name].description });
+      }
+      expect(properties('mindwtr_update_project').viewSectionIds?.description).toBe(properties('mindwtr_add_project').viewSectionIds?.description);
+      expect(typeof properties('mindwtr_update_project').viewSectionIds?.description).toBe('string');
+    } finally {
+      await client.close();
+      await server.close();
     }
   });
 });
