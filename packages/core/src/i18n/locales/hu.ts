@@ -39,6 +39,7 @@ export const huOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "A Gmail átmenetileg nem érhető el. A begyűjtés később újra próbálkozik.",
     "settings.gmailCaptureConfigFailed": "Ellenőrizd a Gmail-címkét és a kapcsolatot.",
     "settings.gmailCaptureStorageFailed": "A Gmail-begyűjtés nem tudott biztonságosan menteni. Ellenőrizd a biztonságos tárolót és a szabad lemezterületet.",
+    "settings.gmailCaptureReceiptsReset": "A már mentett e-mailek nyilvántartása megsérült, ezért visszaállítottuk, és a rögzítés ki van kapcsolva. Válassz egy címkét, és indítsd újra a rögzítést.",
     "settings.gmailCaptureCancelled": "A Gmail-csatlakozás megszakítva.",
     "attachments.webUploadRequiresCloud": "A böngészős feltöltéshez saját üzemeltetésű felhőszinkronizálás szükséges.",
     "attachments.webUploadEncrypted": "A böngészős feltöltéshez ki kell kapcsolni a szinkronizálás titkosítását.",

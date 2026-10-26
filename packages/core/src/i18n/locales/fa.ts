@@ -37,6 +37,7 @@ export const faOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail موقتاً در دسترس نیست. دریافت بعداً دوباره تلاش خواهد شد.",
     "settings.gmailCaptureConfigFailed": "برچسب Gmail و اتصال را بررسی کنید.",
     "settings.gmailCaptureStorageFailed": "دریافت از Gmail نتوانست به‌طور امن ذخیره کند. فضای ذخیره‌سازی امن و فضای خالی دیسک را بررسی کنید.",
+    "settings.gmailCaptureReceiptsReset": "فهرست ایمیل‌های ذخیره‌شده در دریافت از Gmail آسیب دیده بود، پس بازنشانی شد و دریافت خاموش است. یک برچسب انتخاب کنید و دریافت را دوباره شروع کنید.",
     "settings.gmailCaptureCancelled": "اتصال به Gmail لغو شد.",
     "attachments.webUploadRequiresCloud": "بارگذاری در مرورگر به همگام‌سازی ابری با میزبانی شخصی نیاز دارد.",
     "attachments.webUploadEncrypted": "برای بارگذاری در مرورگر باید رمزگذاری همگام‌سازی خاموش باشد.",

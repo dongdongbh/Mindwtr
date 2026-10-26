@@ -6,6 +6,8 @@ export type { GmailReceiptConfig, GmailReceiptDatabase, GmailReceiptStore } from
 
 const storageFailure = () => ({ kind: 'storage', message: 'Gmail capture could not save securely.' });
 
+const RESET_MARKER = 'receipts-reset';
+
 let store: GmailReceiptStore | undefined;
 let initializationFailed = false;
 export function getGmailReceiptStore(): GmailReceiptStore {
@@ -37,6 +39,9 @@ export function getGmailReceiptStore(): GmailReceiptStore {
                 force: true, scope: 'gmail-capture', extra: { releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage: failedStage },
             })).catch(() => {});
             new File(`${folder}/receipts.sqlite`).create({ overwrite: false });
+            // Kept on disk, so Settings says why capture is off even after a restart, until capture starts again.
+            const marker = new File(`${folder}/${RESET_MARKER}`);
+            if (!marker.exists) marker.create({ overwrite: false });
         };
         let newlyCreated = !file.exists;
         if (newlyCreated) file.create({ overwrite: false });
@@ -67,4 +72,18 @@ export function getGmailReceiptStore(): GmailReceiptStore {
         try { database?.close(); } catch { /* Keep the database intact for diagnosis. */ }
         throw storageFailure();
     }
+}
+
+const resetMarker = () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { File, Paths } = require('expo-file-system') as typeof import('expo-file-system');
+    return new File(`${Paths.document.uri.replace(/\/$/, '')}/GmailCapture/${RESET_MARKER}`);
+};
+/** True after a damaged receipts file was moved aside and capture restarted off, until [clearGmailReceiptsReset]. */
+export function gmailReceiptsWereReset(): boolean {
+    try { return resetMarker().exists; } catch { return false; }
+}
+/** Capture was started again (or the account disconnected): Settings no longer explains the reset. */
+export function clearGmailReceiptsReset(): void {
+    try { const marker = resetMarker(); if (marker.exists) marker.delete(); } catch { /* the notice shows again; nothing is lost */ }
 }

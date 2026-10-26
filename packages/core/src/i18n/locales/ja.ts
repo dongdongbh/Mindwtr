@@ -47,6 +47,7 @@ export const jaOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "一時的に Gmail に接続できません。後で取り込みを再試行します。",
     "settings.gmailCaptureConfigFailed": "Gmail のラベルと接続を確認してください。",
     "settings.gmailCaptureStorageFailed": "Gmail の取り込みデータを安全に保存できませんでした。安全なストレージとディスクの空き容量を確認してください。",
+    "settings.gmailCaptureReceiptsReset": "保存済みメールの記録が破損していたため、リセットしました。取り込みはオフになっています。ラベルを選んで、取り込みをもう一度開始してください。",
     "settings.gmailCaptureCancelled": "Gmail への接続をキャンセルしました。",
     'settings.importDiagnostics.unknownColumns': "不明な列 {{count}} 件を無視しました。",
     'settings.importDiagnostics.csvLocation': "{{row}} 行目、{{column}} 列目",

@@ -4,9 +4,9 @@ import { safeFormatDate } from '@mindwtr/core';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import {
-    cancelGmailCapture, configureGmailCapture, connectGmailCapture, disconnectGmailCapture,
+    cancelGmailCapture, clearGmailReceiptsReset, configureGmailCapture, connectGmailCapture, disconnectGmailCapture,
     getGmailCaptureConfig, getGmailCaptureLabels, getGmailCaptureStatus, gmailCaptureErrorTranslation,
-    pollGmailCaptureNow, subscribeGmailCaptureStatus, toGmailCaptureError,
+    gmailReceiptsWereReset, pollGmailCaptureNow, subscribeGmailCaptureStatus, toGmailCaptureError,
     type GmailCaptureConfig, type GmailCaptureLabel,
 } from '@/lib/gmail-capture';
 
@@ -39,6 +39,8 @@ export function GmailCaptureSection() {
                 const next = await getGmailCaptureConfig();
                 if (current !== generation.current) return;
                 setConfig(next);
+                // The status read opens the receipts file, so a reset it just made shows too.
+                if (gmailReceiptsWereReset()) setError('settings.gmailCaptureReceiptsReset');
                 if (next.connected) {
                     const nextLabels = await getGmailCaptureLabels();
                     if (current !== generation.current) return;
@@ -88,6 +90,7 @@ export function GmailCaptureSection() {
     const save = () => runOperation('save', async (current) => {
         setConfig((previous) => previous && ({ ...previous, enabled: false }));
         const next = await configureGmailCapture(labelId, true);
+        clearGmailReceiptsReset();
         if (current !== generation.current) return;
         setConfig(next);
         setLabelId(next.labelId ?? '');
@@ -95,6 +98,7 @@ export function GmailCaptureSection() {
     const disconnect = () => runOperation('disconnect', async (current) => {
         retireAccount();
         const result = await disconnectGmailCapture();
+        clearGmailReceiptsReset();
         if (current === generation.current) setNotice(result.revoked ? 'settings.gmailCaptureDisconnected' : 'settings.gmailCaptureRevokeManually');
     });
     const check = () => runOperation('check', async () => { await pollGmailCaptureNow(); });

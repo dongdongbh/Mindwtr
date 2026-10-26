@@ -37,6 +37,7 @@ export const ukOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail тимчасово недоступний. Збирання повториться пізніше.",
     "settings.gmailCaptureConfigFailed": "Перевірте мітку Gmail і підключення.",
     "settings.gmailCaptureStorageFailed": "Не вдалося безпечно зберегти дані з Gmail. Перевірте захищене сховище та вільне місце на диску.",
+    "settings.gmailCaptureReceiptsReset": "Список уже збережених листів був пошкоджений, тому його скинуто, а захоплення вимкнено. Виберіть мітку й знову запустіть захоплення.",
     "settings.gmailCaptureCancelled": "Підключення до Gmail скасовано.",
     'projects.useAreaColor': "Використовувати колір області",
     'projects.colorSaveFailed': "Не вдалося зберегти колір.",

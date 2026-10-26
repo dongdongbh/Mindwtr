@@ -37,6 +37,7 @@ export const en: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail is temporarily unreachable. Capture will retry later.",
     "settings.gmailCaptureConfigFailed": "Check your Gmail label and connection.",
     "settings.gmailCaptureStorageFailed": "Gmail capture could not save securely. Check secure storage and available disk space.",
+    "settings.gmailCaptureReceiptsReset": "Gmail capture's record of saved emails was damaged, so it was reset and capture is off. Choose a label and start capture again.",
     "settings.gmailCaptureCancelled": "Gmail connection cancelled.",
 
     "task.expandChecklist": "Turn checklist items into project tasks",

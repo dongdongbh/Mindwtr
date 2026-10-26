@@ -7,6 +7,7 @@ import { GmailCaptureSection } from './gmail-capture-section';
 
 const gmail = vi.hoisted(() => ({
     status: vi.fn(), labels: vi.fn(), connect: vi.fn(), cancel: vi.fn(), configure: vi.fn(), disconnect: vi.fn(), check: vi.fn(),
+    receiptsReset: vi.fn(), clearReceiptsReset: vi.fn(),
 }));
 vi.mock('@/lib/gmail-capture', async () => {
     const core = await import('@mindwtr/core/gmail-capture');
@@ -17,6 +18,7 @@ vi.mock('@/lib/gmail-capture', async () => {
         getGmailCaptureStatus: () => ({ lastPollAt: null, lastImportCount: 0, lastError: null, terminal: false }),
         subscribeGmailCaptureStatus: () => () => undefined,
         toGmailCaptureError: core.toGmailCaptureError, gmailCaptureErrorTranslation: core.gmailCaptureErrorTranslation,
+        gmailReceiptsWereReset: gmail.receiptsReset, clearGmailReceiptsReset: gmail.clearReceiptsReset,
     };
 });
 vi.mock('@/hooks/use-theme-colors', () => ({ useThemeColors: () => ({
@@ -49,6 +51,7 @@ beforeEach(() => {
     gmail.connect.mockResolvedValue(connected());
     gmail.cancel.mockResolvedValue(undefined);
     gmail.disconnect.mockResolvedValue({ revoked: true });
+    gmail.receiptsReset.mockReturnValue(false);
 });
 
 describe('RN Gmail settings', () => {
@@ -118,6 +121,25 @@ describe('RN Gmail settings', () => {
         expect(JSON.stringify(tree.toJSON())).toContain('Gmail capture is unavailable in this build.');
         expect(tree.root.findAllByProps({ testID: 'gmail-connect' })).toHaveLength(0);
         expect(gmail.connect).not.toHaveBeenCalled();
+        act(() => tree.unmount());
+    });
+
+    // A damaged receipts file is moved aside and capture restarts off (gmail-capture-storage.ts): the screen says why and what to
+    // do, in the error style, until the user starts capture again. A silent stop is not OK (Gmail design review, 10-25).
+    it('says plainly that the captured-mail record was reset, until capture is started again', async () => {
+        gmail.status.mockResolvedValue(connected());
+        gmail.receiptsReset.mockReturnValue(true);
+        const tree = await mount();
+        const alert = tree.root.findByProps({ testID: 'gmail-error' });
+        expect(alert.props.accessibilityRole).toBe('alert');
+        expect(alert.props.children).toBe(getEnglishI18nValue('settings.gmailCaptureReceiptsReset'));
+        expect(alert.props.children).toContain('start capture again');
+        expect(gmail.clearReceiptsReset).not.toHaveBeenCalled();
+
+        gmail.configure.mockResolvedValue({ ...connected(), labelId: 'one', enabled: true });
+        await press(tree, 'gmail-save');
+        expect(gmail.clearReceiptsReset).toHaveBeenCalledOnce();
+        expect(tree.root.findAllByProps({ testID: 'gmail-error' })).toHaveLength(0);
         act(() => tree.unmount());
     });
 });

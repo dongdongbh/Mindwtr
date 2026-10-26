@@ -29,6 +29,7 @@ export const deOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail ist vorübergehend nicht erreichbar. Die Erfassung versucht es später erneut.",
     "settings.gmailCaptureConfigFailed": "Prüfe dein Gmail-Label und die Verbindung.",
     "settings.gmailCaptureStorageFailed": "Die Gmail-Erfassung konnte nicht sicher speichern. Prüfe den sicheren Speicher und den verfügbaren Speicherplatz.",
+    "settings.gmailCaptureReceiptsReset": "Die Liste der bereits übernommenen E-Mails war beschädigt. Sie wurde zurückgesetzt, und die Gmail-Erfassung ist aus. Wähle ein Label und starte die Erfassung erneut.",
     "settings.gmailCaptureCancelled": "Die Gmail-Verbindung wurde abgebrochen.",
     "attachments.webUploadRequiresCloud": "Browser-Uploads erfordern die Synchronisierung mit einer selbst gehosteten Cloud.",
     "attachments.webUploadEncrypted": "Für Browser-Uploads muss die Synchronisierungsverschlüsselung ausgeschaltet sein.",

@@ -37,6 +37,7 @@ export const zhHant: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "暫時無法連接 Gmail。稍後會重試擷取。",
     "settings.gmailCaptureConfigFailed": "請檢查 Gmail 標籤和連線。",
     "settings.gmailCaptureStorageFailed": "Gmail 擷取無法安全儲存。請檢查安全儲存空間和可用磁碟空間。",
+    "settings.gmailCaptureReceiptsReset": "已儲存郵件的記錄已損壞，因此已重設，擷取已關閉。請選擇一個標籤，然後重新開始擷取。",
     "settings.gmailCaptureCancelled": "已取消 Gmail 連接。",
     'contexts.new': '新增情境',
     'tags.new': '新增標籤',

@@ -37,6 +37,7 @@ export const daOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail kan midlertidigt ikke nås. Indsamlingen forsøger igen senere.",
     "settings.gmailCaptureConfigFailed": "Kontrollér din Gmail-etiket og forbindelsen.",
     "settings.gmailCaptureStorageFailed": "Gmail-indsamlingen kunne ikke gemme sikkert. Kontrollér sikker lagring og ledig diskplads.",
+    "settings.gmailCaptureReceiptsReset": "Gmail-optagelsens liste over gemte e-mails var beskadiget, så den blev nulstillet, og optagelsen er slået fra. Vælg en etiket, og start optagelsen igen.",
     "settings.gmailCaptureCancelled": "Tilslutningen til Gmail blev annulleret.",
     "attachments.webUploadRequiresCloud": "Upload i browseren kræver synkronisering med en selvhostet sky.",
     "attachments.webUploadEncrypted": "Upload i browseren kræver, at synkroniseringskryptering er slået fra.",

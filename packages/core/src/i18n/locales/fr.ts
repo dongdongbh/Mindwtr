@@ -29,6 +29,7 @@ export const frOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail est temporairement inaccessible. La capture réessaiera plus tard.",
     "settings.gmailCaptureConfigFailed": "Vérifiez votre libellé Gmail et la connexion.",
     "settings.gmailCaptureStorageFailed": "La capture Gmail n’a pas pu enregistrer les données de manière sécurisée. Vérifiez le stockage sécurisé et l’espace disque disponible.",
+    "settings.gmailCaptureReceiptsReset": "Le registre des e-mails déjà enregistrés était endommagé : il a été réinitialisé et la capture est désactivée. Choisissez un libellé et relancez la capture.",
     "settings.gmailCaptureCancelled": "Connexion à Gmail annulée.",
     "attachments.webUploadRequiresCloud": "Les envois depuis le navigateur nécessitent la synchronisation avec un serveur auto-hébergé.",
     "attachments.webUploadEncrypted": "Les envois depuis le navigateur nécessitent de désactiver le chiffrement de synchronisation.",

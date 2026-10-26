@@ -39,6 +39,7 @@ export const esOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail no está disponible temporalmente. La captura volverá a intentarlo más tarde.",
     "settings.gmailCaptureConfigFailed": "Comprueba la etiqueta de Gmail y la conexión.",
     "settings.gmailCaptureStorageFailed": "La captura de Gmail no pudo guardar los datos de forma segura. Comprueba el almacenamiento seguro y el espacio disponible en disco.",
+    "settings.gmailCaptureReceiptsReset": "El registro de correos ya guardados estaba dañado, así que se restableció y la captura está desactivada. Elige una etiqueta y vuelve a iniciar la captura.",
     "settings.gmailCaptureCancelled": "Conexión con Gmail cancelada.",
     "attachments.webUploadRequiresCloud": "Las cargas desde el navegador requieren sincronización con una nube autoalojada.",
     "attachments.webUploadEncrypted": "Las cargas desde el navegador requieren desactivar el cifrado de sincronización.",

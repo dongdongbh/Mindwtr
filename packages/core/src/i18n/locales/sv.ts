@@ -37,6 +37,7 @@ export const svOverrides: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "Gmail kan tillfälligt inte nås. Insamlingen försöker igen senare.",
     "settings.gmailCaptureConfigFailed": "Kontrollera din Gmail-etikett och anslutning.",
     "settings.gmailCaptureStorageFailed": "Gmail-insamlingen kunde inte spara säkert. Kontrollera säker lagring och ledigt diskutrymme.",
+    "settings.gmailCaptureReceiptsReset": "Listan över redan sparade mejl var skadad, så den återställdes och inhämtningen är avstängd. Välj en etikett och starta inhämtningen igen.",
     "settings.gmailCaptureCancelled": "Gmail-anslutningen avbröts.",
     "attachments.webUploadRequiresCloud": "Uppladdning i webbläsaren kräver synkronisering med ett självhostat moln.",
     "attachments.webUploadEncrypted": "Uppladdning i webbläsaren kräver att synkroniseringskryptering är avstängd.",

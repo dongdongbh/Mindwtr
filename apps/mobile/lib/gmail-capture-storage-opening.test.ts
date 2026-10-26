@@ -76,6 +76,7 @@ function openerHarness(fileCreationError?: Error) {
             writeFileSync(fileURLToPath(this.uri), '', { flag: 'wx' });
             createdFiles.push(this.uri);
         }
+        delete() { rmSync(fileURLToPath(this.uri)); }
         rename(name: string) {
             const target = join(dirname(fileURLToPath(this.uri)), name);
             if (existsSync(target)) throw new Error('Destination exists');
@@ -112,7 +113,8 @@ function openerHarness(fileCreationError?: Error) {
         } satisfies GmailReceiptDatabase & { close: () => void };
     });
     const logWarn = vi.fn();
-    const reload = () => evaluate<{ getGmailReceiptStore: () => GmailReceiptStore }>(join(mobile, 'lib/gmail-capture-storage.ts'), {
+    const reload = () => evaluate<{ getGmailReceiptStore: () => GmailReceiptStore; gmailReceiptsWereReset: () => boolean;
+        clearGmailReceiptsReset: () => void }>(join(mobile, 'lib/gmail-capture-storage.ts'), {
         '@mindwtr/core/gmail-receipt-store': coreReceiptStore,
         'expo-file-system': fileSystem,
         '@op-engineering/op-sqlite': { open },
@@ -175,8 +177,14 @@ describe('Gmail receipt storage opening under the RN URL shim', () => {
         mkdirSync(receiptDirectory);
         damage(join(receiptDirectory, 'receipts.sqlite'));
 
-        const store = harness.reload().getGmailReceiptStore();
+        const module = harness.reload();
+        expect(module.gmailReceiptsWereReset()).toBe(false);
+        const store = module.getGmailReceiptStore();
         expect(store.config()).toEqual({ account: null, label: null, enabled: false, blocked: true });
+        // Settings explains the reset, even after a restart, until capture starts again.
+        expect(harness.reload().gmailReceiptsWereReset()).toBe(true);
+        module.clearGmailReceiptsReset();
+        expect(module.gmailReceiptsWereReset()).toBe(false);
         expect(store.seen('a', 'kept')).toBe(false);
         const aside = readdirSync(receiptDirectory).filter((name) => /^receipts\.corrupt-\d+\.sqlite$/.test(name));
         expect(aside).toHaveLength(1);

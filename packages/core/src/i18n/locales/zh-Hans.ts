@@ -37,6 +37,7 @@ export const zhHans: Record<string, string> = {
     "settings.gmailCaptureNetworkFailed": "暂时无法连接 Gmail。稍后会重试采集。",
     "settings.gmailCaptureConfigFailed": "请检查 Gmail 标签和连接。",
     "settings.gmailCaptureStorageFailed": "Gmail 采集无法安全保存。请检查安全存储和可用磁盘空间。",
+    "settings.gmailCaptureReceiptsReset": "已保存邮件的记录已损坏，因此已重置，捕获已关闭。请选择一个标签，然后重新开始捕获。",
     "settings.gmailCaptureCancelled": "已取消 Gmail 连接。",
     'contexts.new': '新建情境',
     'tags.new': '新建标签',
