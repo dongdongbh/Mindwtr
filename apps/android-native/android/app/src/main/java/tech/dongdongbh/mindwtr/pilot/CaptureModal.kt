@@ -61,6 +61,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import org.json.JSONObject
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 
 /*
  * RN's capture confirmation screen (app/capture-modal.tsx), drawn from core's capture screen view: the Add Task card
@@ -211,6 +213,8 @@ private fun ModalField(value: String, placeholder: String, tag: String, enabled:
     val shape = RoundedCornerShape(8.dp)
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled,
         textStyle = rnText(size, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
+        // RN's TextInput default autoCapitalize "sentences": the keyboard opens with Shift on.
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
         modifier = modifier.fillMaxWidth().heightIn(min = minHeight).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).testTag(tag)
             .semantics { contentDescription = placeholder },
         decorationBox = { inner ->

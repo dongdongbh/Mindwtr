@@ -732,6 +732,9 @@ assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
 const captureModalUi = source('CaptureModal.kt');
 const captureModalModel = source('CaptureModalModel.kt');
+// RN's capture TextInputs keep RN's default autoCapitalize ("sentences"): the keyboard opens with Shift on for the title and the
+// description alike, through the one ModalField.
+assert.match(captureModalUi, /private fun ModalField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences\)/);
 // The Menu tab (pass 6): its model, the More sheet, the shared widgets, and one file per list screen.
 const menuModel = source('MenuModel.kt');
 const moreUi = source('MoreSheet.kt');
