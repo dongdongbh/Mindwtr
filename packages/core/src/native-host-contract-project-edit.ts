@@ -39,7 +39,10 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'toSection'; destinationProjectId: string; title: string; expected: string }
     | { kind: 'toSectionUndo'; convertRequestId: string }
     // RN's view options Sort: the project's task sort (core's choices).
-    | { kind: 'sort'; sortBy: string });
+    | { kind: 'sort'; sortBy: string }
+    // RN's view options Reorder: [taskId] moved after [after] (a task or section row, or the top) on the reorder view's order.
+    | { kind: 'taskOrder'; taskId: string; after: { type: 'task' | 'section'; id: string } | null; showCompleted: boolean;
+        filters: Record<string, unknown>; expectedOrder: string });
 /** [reply] is the prepared command's own answer when it wrote: the copy and its toast (duplicate), RN's Undo toast (delete). */
 export type NativeProjectEditResult = { id: string; kind: NativeProjectEdit['kind']; outcome: 'saved' | 'unchanged' | 'blocked'; reply?: unknown };
 
@@ -83,6 +86,14 @@ const valid = (input: unknown): input is NativeProjectEdit => {
             && UUID.test(edit.deleteRequestId) && edit.deleteRequestId !== edit.requestId;
         case 'toSection': return keys(edit, ['destinationProjectId', 'title', 'expected']) && id(edit.destinationProjectId) && text(edit.title, 500)
             && text(edit.expected, 200);
+        case 'taskOrder': {
+            const after = edit.after as Json | null;
+            return keys(edit, ['taskId', 'after', 'showCompleted', 'filters', 'expectedOrder']) && id(edit.taskId)
+                && (after === null || (typeof after === 'object' && !Array.isArray(after) && Object.keys(after).length === 2
+                    && (after.type === 'task' || after.type === 'section') && id(after.id)))
+                && typeof edit.showCompleted === 'boolean' && !!edit.filters && typeof edit.filters === 'object' && !Array.isArray(edit.filters)
+                && text(edit.expectedOrder, 100_000) && edit.expectedOrder.length > 0;
+        }
         case 'sort': return keys(edit, ['sortBy']) && (PROJECT_TASK_SORT_OPTIONS as readonly string[]).includes(edit.sortBy as string);
         case 'toSectionUndo': return keys(edit, ['convertRequestId']) && typeof edit.convertRequestId === 'string'
             && UUID.test(edit.convertRequestId) && edit.convertRequestId !== edit.requestId;
@@ -245,6 +256,20 @@ export function createProjectEditMethods(deps: {
                 if (!same(shown, edit.order)) return { ok: true, value: { conflict: 'The Sections changed since they were shown' } };
                 return { ok: true, value: { command: 'ProjectSectionOrder', request: { ...base, sectionId: edit.sectionId,
                     direction: edit.direction, expectedSections: read.value.token } } };
+            }
+            case 'taskOrder': {
+                const read = await options('getProjectTaskOrderView', { projectId: edit.projectId, offset: 0, limit: 1,
+                    showCompleted: edit.showCompleted, filters: edit.filters });
+                if (!read.ok) return read;
+                if (read.value.canReorder === false) return { ok: true, value: { outcome: 'blocked' } };
+                const current = read.value.orderToken as string | null;
+                const request = { ...base, taskId: edit.taskId, after: edit.after, showCompleted: edit.showCompleted, filters: edit.filters,
+                    expectedOrder: current ?? edit.expectedOrder };
+                if (current === edit.expectedOrder) return { ok: true, value: { command: 'ProjectTaskOrder', request } };
+                // The order moved since the view: this move already in place (a replay) answers unchanged; any other change refuses.
+                const probe = await call('prepareProjectTaskOrder', request) as NativeHostResult<Json>;
+                return { ok: true, value: probe.ok && probe.value.kind === 'noop' ? { outcome: 'unchanged' }
+                    : { conflict: 'Project task order changed; refresh before moving' } };
             }
             case 'sort': {
                 const read = await options('getProjectTaskSortOptions');

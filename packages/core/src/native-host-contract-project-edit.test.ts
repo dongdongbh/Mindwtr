@@ -299,3 +299,26 @@ describe('runProjectEdit sort', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 });
+
+// RN's view options Reorder (ProjectTaskList's reorder mode): one task moved after another row (or to the top) on the order the
+// reorder view showed; a replay of a move already in place answers unchanged, and any other change since refuses.
+describe('runProjectEdit task order', () => {
+    const task = (id: string, order: number) => ({ id, title: id, status: 'next', projectId: 'p', order, orderNum: order, tags: [], contexts: [], createdAt: at, updatedAt: at });
+
+    it('moves a task to the top once, a replay writes nothing, and a stale order refuses', async () => {
+        const { host, data, saves } = await open({ tasks: [task('t1', 0), task('t2', 1), task('t3', 2)] as never });
+        const view = host.getProjectTaskOrderView({ projectId: 'p', offset: 0, limit: 50, showCompleted: false, filters: {} });
+        expect(view).toMatchObject({ ok: true, value: { canReorder: true, orderToken: expect.any(String) } });
+        const expectedOrder = (view as { value: { orderToken: string } }).value.orderToken;
+        const move = { requestId: uuid(70), projectId: 'p', kind: 'taskOrder', taskId: 't3', after: null, showCompleted: false, filters: {}, expectedOrder } as never;
+        expect(await host.runProjectEdit(move)).toMatchObject({ ok: true, value: { kind: 'taskOrder', outcome: 'saved' } });
+        const order = () => data().tasks.filter((row) => row.projectId === 'p').sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((row) => row.id);
+        expect(order()).toEqual(['t3', 't1', 't2']);
+        const count = saves();
+        expect(await host.runProjectEdit(move)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        const stale = { requestId: uuid(71), projectId: 'p', kind: 'taskOrder', taskId: 't1', after: { type: 'task', id: 't2' }, showCompleted: false, filters: {}, expectedOrder } as never;
+        expect(await host.runProjectEdit(stale)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(order()).toEqual(['t3', 't1', 't2']);
+    });
+});
