@@ -204,6 +204,8 @@ export * from './uuid';
 export * from './date';
 export * from './email-capture';
 export * from './gmail-capture';
+export * from './gmail-capture-transport';
+export * from './gmail-receipt-store';
 export * from './quick-add';
 export * from './area-filter';
 export * from './area-utils';

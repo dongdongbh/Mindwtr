@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as coreReceiptStore from '@mindwtr/core/gmail-receipt-store';
 import type { GmailReceiptDatabase, GmailReceiptStore } from './gmail-capture-storage';
 
 const mobile = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,6 +113,7 @@ function openerHarness(fileCreationError?: Error) {
     });
     const logWarn = vi.fn();
     const reload = () => evaluate<{ getGmailReceiptStore: () => GmailReceiptStore }>(join(mobile, 'lib/gmail-capture-storage.ts'), {
+        '@mindwtr/core/gmail-receipt-store': coreReceiptStore,
         'expo-file-system': fileSystem,
         '@op-engineering/op-sqlite': { open },
         './app-log': { logWarn },

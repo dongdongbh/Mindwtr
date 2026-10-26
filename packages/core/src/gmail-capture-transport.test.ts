@@ -1,6 +1,11 @@
+import { DOMParser } from '@xmldom/xmldom';
 import { describe, expect, it, vi } from 'vitest';
-import { createGmailCaptureTransport, parseGmailMessage, type GmailAuthorization } from './gmail-capture-service';
-import type { GmailReceiptConfig, GmailReceiptStore } from './gmail-capture-storage';
+import { createGmailCaptureTransport as createTransport, parseGmailMessage as parseMessage, type GmailAuthorization } from './gmail-capture-transport';
+import type { GmailReceiptConfig, GmailReceiptStore } from './gmail-receipt-store';
+// Moved from apps/mobile/lib/gmail-capture-service.test.ts as is: these two bind the parser RN passes, as RN's binding does.
+const createGmailCaptureTransport = (native: GmailAuthorization | null, getStore: () => GmailReceiptStore, newId = () => 'batch') => (
+    createTransport(native, getStore, newId, DOMParser));
+const parseGmailMessage = (value: unknown) => parseMessage(value, DOMParser);
 const message = (id = 'm1', text = 'Body') => ({ id, labelIds: ['label'], payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Subject' }], body: { data: Buffer.from(text).toString('base64url'), size: Buffer.byteLength(text) } } });
 function setup() {
     let config: GmailReceiptConfig = { account: 'account', label: 'label', enabled: true, blocked: false };
@@ -122,5 +127,15 @@ describe('bounded Gmail MIME parsing', () => {
         expect(() => parseGmailMessage(truncated)).toThrow();
         const value = message(); value.payload.body.data = 'invalid!';
         expect(() => parseGmailMessage(value)).toThrow();
+    });
+});
+
+// Metro maps every core subpath to the barrel, so an XML parser imported here would ship in every bundle that uses core.
+describe('core Gmail transport imports', () => {
+    it('imports no XML parser; each host passes its own', async () => {
+        const { readdirSync, readFileSync } = await import('node:fs');
+        const sources = readdirSync(__dirname).filter((name) => name.endsWith('.ts') && !name.includes('.test.'));
+        expect(sources.length).toBeGreaterThan(100);
+        expect(sources.filter((name) => /from ['"]@xmldom\//.test(readFileSync(`${__dirname}/${name}`, 'utf8')))).toEqual([]);
     });
 });

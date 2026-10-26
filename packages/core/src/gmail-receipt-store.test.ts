@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
 import { describe, expect, it } from 'vitest';
-import { createGmailReceiptStore, type GmailReceiptDatabase } from './gmail-capture-storage';
+import { createGmailReceiptStore, type GmailReceiptDatabase } from './gmail-receipt-store';
 function database() {
     const db = new DatabaseSync(':memory:');
     const adapter: GmailReceiptDatabase = { executeSync(sql, params = []) {
