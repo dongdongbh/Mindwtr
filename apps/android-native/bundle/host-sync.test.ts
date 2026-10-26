@@ -1091,3 +1091,26 @@ it.each(['android', 'ios'] as const)('binds sliceYield on %s only when the host 
         expect(resumed).toBe(true);
     }
 });
+
+
+it('requires an exact injected File path while default and saved File admission stay closed', async () => {
+    resetForTests(); iosFiles();
+    const data: AppData = { tasks: [], projects: [], sections: [], areas: [], settings: {} };
+    core.setStorageAdapter({ getData: async () => structuredClone(data), saveData: async () => undefined });
+    const fixture = host({ [SYNC_BACKEND_KEY]: 'file' }, false, async () => structuredClone(data), async () => false);
+    const path = 'file:///app/Sync%20%E8%B3%87%E6%96%99/data.json';
+    let admitted = 0;
+    const port: core.MobileSyncFileSyncPort<import('./host-file-sync').NativeFileSyncLease> = {
+        acquireLease: async () => { admitted += 1; throw new Error('Reached actual service lease seam'); },
+        revalidateLease: async () => {}, releaseLease: async () => {},
+        readVersioned: async () => { throw new Error('No owner'); }, write: async () => { throw new Error('No owner'); },
+        resolveUri: async () => { throw new Error('No owner'); }, isBookmarksAvailable: () => false, resolveBookmark: async () => null,
+    };
+    await expect(fixture.sync.settingsHost.performSync(undefined, { manual: true })).rejects.toThrow('not available');
+    const explicit = createNativeSync({ ...fixture.bindings, fileSync: { canonicalPath: path, port } });
+    await expect(explicit.settingsHost.performSync(undefined, { manual: true, configOverride: { backend: 'file', syncPath: path + '.other' } })).rejects.toThrow('not available');
+    expect(admitted).toBe(0);
+    const result = await explicit.settingsHost.performSync(undefined, { manual: true, configOverride: { backend: 'file', syncPath: path } });
+    expect(result.success).toBe(false); expect(admitted).toBe(1);
+    expect(fixture.kv.get(SYNC_BACKEND_KEY)).toBe('file'); expect(fixture.kv.has('@mindwtr_sync_path')).toBe(false);
+});

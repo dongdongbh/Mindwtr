@@ -166,7 +166,7 @@ import { createPreparedProjectAvailabilityMethods, createProjectAvailabilityMeth
 import { SYNC_ENCRYPTION_STATE_KEY } from '../../../packages/core/src/sync-storage-keys';
 import { createNativeReminders } from './host-reminders';
 import { createIosReminderMethods, createIosReminderSnoozeMethods } from './host-ios-reminders';
-import { createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
+import { createIosFileSync, createNativeSync, createHostSyncCrypto, isNativeIosSelfHostedProvider, type NativeSync, type NativeSyncBindings } from './host-sync';
 import { createWidgetPublisher, type WidgetInputs } from './host-widgets';
 
 type NativeBridge = {
@@ -6416,6 +6416,42 @@ globalThis.MindwtrHost = {
                 assertReady();
                 throw new Error('LOOKUP_FAILED: App Store lookup could not be completed');
             }
+        });
+    },
+    iosFileSyncDiagnostic(): string {
+        return submit(async () => {
+            if (globalThis.__mindwtrHostPlatform !== 'ios') throw new Error('NOT_READY: File Sync diagnostic is unavailable');
+            try { await diagnosticsLog.append({ ts: new Date().toISOString(), level: 'info', scope: 'native-ios',
+                message: 'Native iOS File Sync app binding completed',
+                context: { releaseCheck: 'v1.3.8/ios-file-sync-app-binding', operation: 'foreground', outcome: 'completed' },
+            }, { force: true }); } catch { /* Diagnostics cannot change a settled native result. */ }
+            return null;
+        });
+    },
+    /** Only the retained CoreHost FileSyncTurn supplies this transient selection. */
+    iosForegroundFileSync(turn: string, rootURI: string, canonicalPath: string): string {
+        return submit(async () => {
+            const channel = (globalThis as typeof globalThis & { __mindwtrFileSyncCall?: import('./host-file-sync').NativeFileSyncCall }).__mindwtrFileSyncCall;
+            if (iosForegroundFailure || globalThis.__mindwtrHostPlatform !== 'ios' || nativeSync || !bootAdapter || !localAttachments
+                || iosCleanupCallback || iosTaskAttachmentPreparation || iosProjectFilePreparation || isSandboxMode() || isWorkspaceTransitionActive()
+                || typeof channel !== 'function' || typeof turn !== 'string' || !turn || typeof rootURI !== 'string' || typeof canonicalPath !== 'string'
+                || typeof native().kvMultiGet !== 'function' || !globalThis.__mindwtrSyncSecrets) throw new Error('NOT_READY: File Sync is unavailable');
+            const names = ['@mindwtr_sync_backend', '@mindwtr_sync_path', '@mindwtr_sync_path_bookmark'];
+            const before = await keyValue.multiGet(names);
+            const fresh = createIosFileSync({ ...nativeSyncBindings, emit: () => {}, trace: () => {}, scheduleBackgroundSync: () => {},
+                // This slice checks both documents before merge; no attachment cleanup is authorized.
+                retireLocalAttachment: async () => { throw new NativeAttachmentCleanupUnconfirmedError(); },
+            }, { turn, rootURI, canonicalPath }, channel);
+            const unchanged = async () => {
+                if (JSON.stringify(await keyValue.multiGet(names)) !== JSON.stringify(before)) throw new Error('NOT_READY: File Sync configuration changed');
+            };
+            let result: Awaited<ReturnType<typeof fresh.settingsHost.performSync>>;
+            try {
+                result = await fresh.settingsHost.performSync(undefined, { manual: true, configOverride: { backend: 'file', syncPath: canonicalPath } });
+            } catch (error) { await unchanged(); throw error; }
+            await unchanged();
+            if (!result.success || result.skipped || result.fileSyncLockDeferred) throw new Error('NOT_READY: File Sync cycle did not complete');
+            return result;
         });
     },
     /** Only CoreHost.foregroundSync supplies this invocation-scoped physical cleanup callback. */

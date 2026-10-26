@@ -880,6 +880,17 @@ public final class CoreHost: @unchecked Sendable {
         }, onCancel: { token.cancel() })
     }
 
+    /// An explicit app-local foreground cycle; no saved provider capability is granted.
+    public func foregroundFileSync(directoryURL: URL) async throws -> String {
+        let id = UUID(), token = NativeAttachmentCancellation()
+        localAttachmentRequests.register(token, id: id)
+        defer { localAttachmentRequests.remove(id) }
+        if Task.isCancelled { token.cancel() }
+        return try await withTaskCancellationHandler(operation: {
+            try await perform { try $0.foregroundFileSync(directoryURL: directoryURL, cancellation: token) }
+        }, onCancel: { token.cancel() })
+    }
+
     public func aboutAppStoreInfo(bundleIdentifier: String, currentVersion: String) async throws -> String {
         let id = UUID(), token = NativeAttachmentCancellation()
         localAttachmentRequests.register(token, id: id)
@@ -2434,7 +2445,17 @@ private final class Engine: @unchecked Sendable {
     private var secretJobs: NativeSecretJobs?
     private var calendarJobs: NativeCalendarJobs?
     private var cryptoJobs: NativeCryptoJobs?
-    private enum IOBodySource { case file, http, crypto, calendar }
+    private final class FileSyncTurn {
+        let runtime: JSContext, generation: UInt64, databaseURL: URL
+        let cancellation: NativeAttachmentCancellation, jobs: NativeFileSyncJobs
+        init(runtime: JSContext, generation: UInt64, databaseURL: URL, cancellation: NativeAttachmentCancellation, jobs: NativeFileSyncJobs) {
+            self.runtime = runtime; self.generation = generation; self.databaseURL = databaseURL
+            self.cancellation = cancellation; self.jobs = jobs
+        }
+    }
+    private var fileSyncTurn: FileSyncTurn?
+    private var fileSyncCloseFailed = false
+    private enum IOBodySource { case file, http, crypto, calendar, fileSync }
     private var ioBodySource: IOBodySource?
     private var preferredIO = 1
     private var attachmentGeneration: UInt64 = 0
@@ -24469,7 +24490,10 @@ private final class Engine: @unchecked Sendable {
     private static func cleanupReply(_ request: CleanupRequest, outcome: String) throws -> String {
         try ownedJSON(["version": 1, "requestID": request.requestID, "outcome": outcome])
     }
-    private func denyCleanupOwner() throws { if cleanupOwed { throw Self.cleanupFailure } }
+    private func denyCleanupOwner() throws {
+        if fileSyncCloseFailed { throw Self.foregroundSyncFailure }
+        if cleanupOwed { throw Self.cleanupFailure }
+    }
     private func captureCleanupTurn(command: PendingCommand? = nil, requestJSON: String? = nil) throws -> CleanupTurn {
         if let turn = cleanupTurn { try requireCleanupTurn(); return turn }
         guard !closed, lockFD >= 0,
@@ -24735,6 +24759,51 @@ private final class Engine: @unchecked Sendable {
     }
 
     private static let foregroundSyncFailure = HostFailure("Foreground sync could not be confirmed")
+    func foregroundFileSync(directoryURL: URL, cancellation: NativeAttachmentCancellation) throws -> String {
+        dispatchPrecondition(condition: .onQueue(queue))
+        try denyCleanupOwner()
+        guard started, !closed, lockFD >= 0, !recoveryActivationPending, !invoking,
+              !fileSyncCloseFailed, fileSyncTurn == nil,
+              foregroundCleanupCancellation == nil, !foregroundCleanupActive,
+              pending == nil, projectFileAddTurn == nil, projectDownloadTurn == nil, retainedOrdinaryTurn == nil,
+              providerCopy == nil, ordinaryMutationDepth == 0,
+              try mixedSaveFileBinding(journalURL, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+              try mixedSaveFileBinding(editorDrafts.url, maximumBytes: 3_000_000) == nil,
+              try mixedSaveFileBinding(NativeAttachmentDraftStore(databaseURL: databaseURL).url, maximumBytes: Self.ownedSaveMaximumBytes) == nil,
+              let runtime = context else { throw Self.foregroundSyncFailure }
+        try cancellation.check()
+        _ = try requireDeviceStorageAdmission()
+        // This entry grants only the already-admitted app container, never a picked external scope.
+        guard let location = deviceStorageLocation else { throw Self.foregroundSyncFailure }
+        let selectedParts = try NativeAttachmentFiles.filePath(directoryURL.absoluteString).split(separator: "/").map(String.init)
+        let containerParts = try NativeAttachmentFiles.filePath(location.containerURL.absoluteString).split(separator: "/").map(String.init)
+        guard selectedParts.count >= containerParts.count,
+              zip(selectedParts, containerParts).allSatisfy({ $0.0.utf8.elementsEqual($0.1.utf8) }) else { throw Self.foregroundSyncFailure }
+        let jobs = try NativeFileSyncJobs(directoryURL: directoryURL)
+        #if DEBUG
+        faults?.configureFileSyncJobs?(jobs)
+        #endif
+        let turn = FileSyncTurn(runtime: runtime, generation: attachmentGeneration, databaseURL: databaseURL, cancellation: cancellation, jobs: jobs)
+        fileSyncTurn = turn
+        cancellation.setCancellationHandler { jobs.abort() }
+        defer { cancellation.setCancellationHandler(nil); fileSyncTurn = nil }
+        do {
+            let result = try invoke("iosForegroundFileSync", arguments: [jobs.token, jobs.rootURI, jobs.canonicalPath], localCancellation: cancellation)
+            // This outer fence is independent of shared releaseResources and its cleanup deferral.
+            do { try jobs.closeAndDrain() } catch { fileSyncCloseFailed = true; throw Self.foregroundSyncFailure }
+            try cancellation.check()
+            guard fileSyncTurn === turn, context === runtime, attachmentGeneration == turn.generation,
+                  Data(databaseURL.absoluteString.utf8) == Data(turn.databaseURL.absoluteString.utf8),
+                  started, !closed, lockFD >= 0 else { throw Self.foregroundSyncFailure }
+            try denyCleanupOwner()
+            _ = try invoke("iosFileSyncDiagnostic", arguments: [])
+            return result
+        } catch {
+            do { try jobs.closeAndDrain() } catch { fileSyncCloseFailed = true }
+            throw Self.foregroundSyncFailure
+        }
+    }
+
     func foregroundSync(command: String, requestJSON: String, cancellation: NativeAttachmentCancellation) throws -> String {
         dispatchPrecondition(condition: .onQueue(queue))
         do {
@@ -27479,8 +27548,9 @@ private final class Engine: @unchecked Sendable {
         // No timeout abandons a command while its durable result is unknown.
         // Promise jobs drain whenever JSC returns from a call; timers share this queue.
         var cancelled = false
+        var fileSyncInvocationDisposed = false
         defer {
-            if cancelled && !drainCalendarTest && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil {
+            if cancelled && !fileSyncInvocationDisposed && !drainCalendarTest && selectedTurn == nil && selectedProject == nil && selectedEncryption == nil && selectedDownload == nil {
                 attachmentJobs?.cancelAndDrain()
                 httpJobs?.cancelAndDrain()
                 secretJobs?.drain()
@@ -27499,6 +27569,17 @@ private final class Engine: @unchecked Sendable {
                 try checkException()
                 if reply == nil || reply!.isNull || reply!.isUndefined {
                     cancelled = true
+                    if let jobs = fileSyncTurn?.jobs {
+                        do { try jobs.closeAndDrain() }
+                        catch {
+                            // Native authority is drained. The unavailable latch deliberately forbids
+                            // pumping this JS ticket again, so dispose its runtime instead of polling it.
+                            fileSyncCloseFailed = true
+                            fileSyncInvocationDisposed = true
+                            releaseRuntime()
+                            throw Self.foregroundSyncFailure
+                        }
+                    }
                     _ = host.invokeMethod("cancel", withArguments: [id])
                     try checkException()
                     // Completes uninterruptible RN installer work before allowing
@@ -27847,6 +27928,10 @@ private final class Engine: @unchecked Sendable {
     private func nextIO() throws -> String {
         try denyCleanupOwner()
         guard ioBodySource == nil else { throw HostFailure("I/O response body is unavailable") }
+        if let answer = fileSyncTurn?.jobs.next() {
+            if let input = try? NativeJSON.jsonObject(with: Data(answer.utf8)) as? [String: Any], input["body"] as? Bool == true { ioBodySource = .fileSync }
+            return answer
+        }
         func file() -> String? {
             guard let answer = attachmentJobs?.next(), !answer.isEmpty else { return nil }
             if let input = try? NativeJSON.jsonObject(with: Data(answer.utf8)) as? [String: Any], input["body"] as? Bool == true {
@@ -27938,6 +28023,9 @@ private final class Engine: @unchecked Sendable {
         guard let source = ioBodySource else { throw HostFailure("I/O response body is unavailable") }
         ioBodySource = nil
         switch source {
+        case .fileSync:
+            guard let jobs = fileSyncTurn?.jobs else { throw HostFailure("I/O response body is unavailable") }
+            return try jobs.body()
         case .calendar:
             guard let jobs = calendarJobs else { throw HostFailure("I/O response body is unavailable") }
             return try jobs.body()
@@ -28214,6 +28302,18 @@ private final class Engine: @unchecked Sendable {
                 return nil
             }
         }
+        let fileSyncCall: @convention(block) (JSValue) -> String = { [weak self, weak context] input in
+            guard let self, let context, let turn = self.fileSyncTurn, turn.runtime === context,
+                  self.context === context, input.context === context, input.isString,
+                  let text = input.toString(), self.attachmentGeneration == turn.generation,
+                  Data(self.databaseURL.absoluteString.utf8) == Data(turn.databaseURL.absoluteString.utf8),
+                  self.invoking, !self.fileSyncCloseFailed else { return "!MindwtrNativeError:File Sync is unavailable" }
+            // The mailbox validates every field. End remains admitted after cancellation.
+            return turn.jobs.submit(text)
+        }
+        let fileSyncAbort: @convention(block) (String) -> Void = { [weak self] _ in self?.fileSyncTurn?.jobs.abort() }
+        bridge.setObject(fileSyncCall, forKeyedSubscript: "fileSyncCall" as NSString)
+        bridge.setObject(fileSyncAbort, forKeyedSubscript: "fileSyncAbort" as NSString)
         let next: @convention(block) () -> String = { [weak self] in
             self?.guarded { try self?.nextIO() } ?? "!MindwtrNativeError:I/O bridge is unavailable"
         }
@@ -28401,6 +28501,11 @@ private final class Engine: @unchecked Sendable {
     }
 
     private func releaseRuntime() {
+        if let turn = fileSyncTurn {
+            do { try turn.jobs.closeAndDrain() } catch { fileSyncCloseFailed = true }
+            turn.cancellation.setCancellationHandler(nil)
+            fileSyncTurn = nil
+        }
         // Drain accepted writes while their original storage, database and file lease still exist.
         if let turn = calendarPushTurn ?? retainedCalendarPushTurn {
             try? retryCalendarPushState(turn)

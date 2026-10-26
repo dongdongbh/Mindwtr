@@ -4,16 +4,16 @@ import Foundation
 /// Hidden selected-folder IO. Only owned stages/quarantines can be retired; no sync provider is exposed.
 final class NativeFileSyncReadOwner: @unchecked Sendable {
   enum Failure: Error, Equatable { case unavailable, staleBookmark, scopeUnproven, invalidName, invalidHandle, closed, incompleteRead, incompleteWrite, coordination }
-  enum CreateResult: Equatable { case created, exists }
+  enum CreateResult: Equatable, Sendable { case created, exists }
   enum Selection { case pickedDirectory(URL), bookmark(Data) }
   struct Handle: Hashable, Sendable { fileprivate let identity: UUID }
-  struct Entry: Equatable {
-    enum Kind: Equatable { case file, directory }
+  struct Entry: Equatable, Sendable {
+    enum Kind: Equatable, Sendable { case file, directory }
     let name: String
     let kind: Kind
     let byteCount: Int64?
   }
-  enum Read: Equatable { case absent, bytes(Data) }
+  enum Read: Equatable, Sendable { case absent, bytes(Data) }
   enum Diagnostic: Equatable {
     case admitted, createdWriteCompleted, quarantineCompleted, ownedDeleteCompleted
     static let message = "Native iOS File Sync read owner admitted"
@@ -116,6 +116,7 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
 
   private let selection: Selection
   private let access: Access
+  private let maximumReadBytes: Int?
   private let diagnostic: (Diagnostic) -> Void
   private let engine = SyncFileLockEngine()
   private let queue = DispatchQueue(label: "tech.dongdongbh.mindwtr.file-sync-read")
@@ -132,8 +133,8 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   // This one FD ledger also retains observed generations moved into quarantine.
   private var created: [Data: CreatedFile] = [:]
 
-  init(selection: Selection, access: Access = Access(), diagnostic: @escaping (Diagnostic) -> Void) {
-    self.selection = selection; self.access = access; self.diagnostic = diagnostic
+  init(selection: Selection, access: Access = Access(), maximumReadBytes: Int? = nil, diagnostic: @escaping (Diagnostic) -> Void) {
+    self.selection = selection; self.access = access; self.maximumReadBytes = maximumReadBytes; self.diagnostic = diagnostic
     queue.setSpecific(key: queueMarker, value: true)
   }
 
@@ -368,6 +369,22 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
 
   func cancel(_ handle: Handle) async throws { try await close(handle) }
 
+  func revalidate(_ handle: Handle) async throws {
+    try await submit(handle) { try self.validateRoot() }
+  }
+
+  /// Unlike legacy close, this barrier also reports cleanup failure after submit already shut down.
+  func finishClosing() async throws {
+    requestClose()
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      queue.async {
+        self.shutdown()
+        if let error = self.cleanupError { continuation.resume(throwing: error) }
+        else { continuation.resume() }
+      }
+    }
+  }
+
   private func submit<T>(_ supplied: Handle?, _ work: @escaping () throws -> T) async throws -> T {
     if let supplied, supplied != handle { throw Failure.invalidHandle }
     try Task.checkCancellation()
@@ -473,6 +490,7 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
   }
 
   private func readComplete(_ name: String, fd: Int32, before: Node) throws -> Data {
+    guard maximumReadBytes.map({ $0 >= 0 && before.size <= Int64($0) }) ?? true else { throw Failure.incompleteRead }
     guard try node(fd) == before else { throw Failure.incompleteRead }
     var data = Data(); var buffer = [UInt8](repeating: 0, count: 64 * 1024)
     while true {
@@ -481,6 +499,7 @@ final class NativeFileSyncReadOwner: @unchecked Sendable {
       guard count >= 0 && count <= buffer.count else { throw Failure.incompleteRead }
       if count == 0 { break }
       guard Int64(data.count) <= before.size - Int64(count) else { throw Failure.incompleteRead }
+      guard maximumReadBytes.map({ data.count <= $0 - count }) ?? true else { throw Failure.incompleteRead }
       data.append(contentsOf: buffer.prefix(count))
     }
     guard Int64(data.count) == before.size, try node(fd) == before,

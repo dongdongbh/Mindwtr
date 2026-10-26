@@ -21,6 +21,7 @@
  * iOS construction is explicit and foreground-only; the entry admits Off, WebDAV and self-hosted settings. Both admission
  * and actual self-hosted cycles refuse unfinished encryption transitions. This factory does not alter stored provider choices.
  */
+import { assertNativeFileSyncData, createNativeFileSync, type NativeFileSyncCall, type NativeFileSyncSelection, type NativeFileSyncLease } from './host-file-sync';
 import { DOMParser } from '@xmldom/xmldom';
 import { createNativeAttachments, nativeFileChannels, type NativeAttachmentBindings } from './host-attachments';
 import {
@@ -67,6 +68,7 @@ import {
     type DiagnosticsLogEntry,
     type MobileBackgroundSyncTrigger,
     type MobileSyncNetworkState,
+    type MobileSyncFileSyncPort,
     type MobileSyncTriggers,
     type NativeSyncSettingsHost,
     type SyncBadgeState,
@@ -86,6 +88,8 @@ export type HostKeyValue = {
 
 export type NativeSyncBindings = {
     keyValue: HostKeyValue;
+    /** Explicit, single-turn injection; never a saved provider capability. */
+    fileSync?: { canonicalPath: string; port: MobileSyncFileSyncPort<NativeFileSyncLease> };
     /** host-polyfills.js's secret calls (SecretStore.kt, expo-secure-store's format). */
     secrets: { getSecret(key: string): Promise<string | null>; setSecret(key: string, value: string, accessibility?: SyncSecretAccessibility): Promise<void>; deleteSecret(key: string): Promise<void> };
     /** The boot's validated SQLite adapter: the local snapshot a cycle reads and saves, on its read tokens (D9b W3). */
@@ -176,7 +180,7 @@ export const isNativeIosSelfHostedProvider = (value: string | null | undefined):
     return (provider === null || provider === 'selfhosted') && normalizeCloudProvider(provider) === 'selfhosted';
 };
 
-export const createNativeSync = (bindings: NativeSyncBindings) => {
+export const createNativeSync = (bindings: NativeSyncBindings, fileEncryptionState?: ReturnType<typeof createSyncEncryptionStateStore>) => {
     const platform = (globalThis as typeof globalThis & { __mindwtrHostPlatform?: unknown }).__mindwtrHostPlatform === 'ios' ? 'ios' : 'android';
     if (platform === 'ios' && typeof bindings.retireLocalAttachment !== 'function') {
         throw new Error('Foreground sync requires owned attachment cleanup on this iOS build');
@@ -208,7 +212,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         deleteItem: (key) => bindings.secrets.deleteSecret(key),
     };
     const secureConfig = createSecureSyncConfigStore({ storage, secrets: secretStorage, vault: createSyncSecretVault(secretStorage) });
-    const encryptionState = createSyncEncryptionStateStore({
+    const encryptionState = fileEncryptionState ?? createSyncEncryptionStateStore({
         storage,
         secureConfig,
         readActiveScope: () => readSyncLocationScope(storage),
@@ -261,7 +265,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     }, channels) : null;
 
     const syncFetch = createDeadlineFetch((input, init) => fetch(input, init));
-    const service = createMobileSyncService<never>({
+    const service = createMobileSyncService<NativeFileSyncLease>({
         // iOS cleanup authority lasts for one admitted foreground invocation.
         allowQueuedFollowUp: platform !== 'ios',
         storage,
@@ -275,7 +279,11 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             },
         },
         localData: {
-            getData: (options) => bindings.localData().getData(options),
+            getData: async (options) => {
+                const data = await bindings.localData().getData(options);
+                if (bindings.fileSync) assertNativeFileSyncData(data);
+                return data;
+            },
             saveData: (data, options) => bindings.localData().saveData(data, options),
             readTokenOf: (data) => bindings.localData().readTokenOf(data),
             prepareSave: (data) => bindings.localData().prepareSaveRows(data),
@@ -348,7 +356,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             getValidAccessTokenForTokens: unavailable('Dropbox'),
             forceRefreshAccessTokenForTokens: unavailable('Dropbox'),
         },
-        fileSync: {
+        fileSync: bindings.fileSync?.port ?? {
             readVersioned: unavailable('File sync'),
             write: unavailable('File sync'),
             resolveUri: unavailable('File sync'),
@@ -359,7 +367,9 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
             releaseLease: async () => undefined,
         },
         // Core's attachment passes on the host's files; a host without app files (the gates' stand-in) syncs metadata only.
-        attachments: attachments?.syncPort ?? {
+        attachments: attachments ? { ...attachments.syncPort,
+            ...(bindings.fileSync ? { syncFile: async (data: AppData) => { assertNativeFileSyncData(data); return null; } } : {}),
+        } : {
             syncWebdav: async () => null,
             syncCloud: async () => null,
             syncDropbox: async () => null,
@@ -443,6 +453,15 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
     };
     const readIosForegroundBackend = async (override?: Parameters<NativeSyncSettingsHost['performSync']>[1]['configOverride']) => {
         const backend = override?.backend ?? ((await keyValue.get(SYNC_BACKEND_KEY))?.trim() || 'off');
+        if (backend === 'file' && bindings.fileSync && override?.backend === 'file'
+            && override.syncPath === bindings.fileSync.canonicalPath) {
+            await assertSelfHostedSyncAdmission();
+            const status = await encryptionState.getSyncEncryptionStatus();
+            if (status.state !== 'off' || status.partlyEncrypted || await encryptionState.getSyncEncryptionMaterial()) {
+                throw new Error('Native iOS File Sync requires plaintext encryption state');
+            }
+            return backend;
+        }
         if (backend !== 'off' && backend !== 'webdav' && backend !== 'cloud') throw new Error('This sync provider is not available in native iOS yet');
         if (backend === 'cloud') {
             const provider = override?.cloudProvider ?? await keyValue.get(CLOUD_PROVIDER_KEY);
@@ -785,3 +804,23 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 };
 
 export type NativeSync = ReturnType<typeof createNativeSync>;
+
+/** Fresh foreground-only factory; its port is never retained by the ordinary Settings host. */
+export const createIosFileSync = (bindings: NativeSyncBindings, selection: NativeFileSyncSelection, call: NativeFileSyncCall) => {
+    const storage = { getItem: (name: string) => bindings.keyValue.get(name), setItem: (name: string, value: string) => bindings.keyValue.set(name, value), removeItem: (name: string) => bindings.keyValue.remove(name) };
+    const secrets: SyncSecretStoragePort = { isAvailable: async () => true, getItem: bindings.secrets.getSecret,
+        setItem: bindings.secrets.setSecret, deleteItem: bindings.secrets.deleteSecret };
+    const secureConfig = createSecureSyncConfigStore({ storage, secrets, vault: createSyncSecretVault(secrets) });
+    const log = {
+        info: (message: string, context?: { scope?: string; extra?: Record<string, unknown> }) => { void bindings.appendLog(buildDiagnosticsLogEntry('info', message, context)).catch(() => null); },
+        warn: (message: string, context?: { scope?: string; extra?: Record<string, unknown> }) => { void bindings.appendLog(buildDiagnosticsLogEntry('warn', message, context)).catch(() => null); },
+        error: (error: unknown, context?: { scope?: string; extra?: Record<string, unknown> }) => { void bindings.appendLog(buildDiagnosticsErrorEntry(error, { ...context, scope: context?.scope ?? 'sync' })).catch(() => null); },
+    };
+    const state = createSyncEncryptionStateStore({ storage, secureConfig, readActiveScope: () => readSyncLocationScope(storage), log });
+    const port = createNativeFileSync(selection, call, { log,
+        crypto: createHostSyncCrypto((globalThis as { __mindwtrCryptoCall?: HostCryptoCall }).__mindwtrCryptoCall),
+        encryption: { localState: state.syncEncryptionLocalState, flush: () => state.flushSyncEncryptionLocalState(),
+            logEvent: (event, extra) => state.logSyncEncryptionEvent(event, extra) },
+    });
+    return createNativeSync({ ...bindings, fileSync: { canonicalPath: selection.canonicalPath, port } }, state);
+};
