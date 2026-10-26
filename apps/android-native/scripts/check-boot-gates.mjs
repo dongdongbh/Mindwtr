@@ -3389,7 +3389,13 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /if \(reply\.menuText\("route"\) != null \|\| reply\.has\("capture"\) && !reply\.isNull\("capture"\) \|\| reply\.has\("captureModal"\) && !reply\.isNull\("captureModal"\)\) \{/);
     // The tester's line for #1410, as RN's v1.3.7/mobile-editor-navigation closed-clean.
     assert.match(entryKt, /if \(editor != null\) anyTime\(\{ it\.logLine\("Native Android task editor dismissed on navigation releaseCheck=v1\.3\.8\/native-editor-navigation", JSONObject\(\)\.put\("releaseCheck", "v1\.3\.8\/native-editor-navigation"\)\.put\("outcome", "closed-clean"\)\) \}, \{\}\)\s+closeEditor\(\)/);
-    assert.match(entryKt, /!writable \|\| busy \|\| failedAction != null \|\| !editorClean \|\| processing\?\.hidden == false \|\| capture != null \|\| captureModal\.open != null\s+\|\| menu\.dialog != null \|\| menu\.focusControls\.dialog != null \|\| menu\.calendar\.composer != null \|\| search\?\.saveName != null\s+\|\| menu\.screen == MenuScreen\.MindSweep/);
+    // Not ready (no store, a command, an owed retry) holds every entry; open work holds every entry but a context automation link.
+    assert.match(entryKt, /private val ready: Boolean get\(\) = with\(shell\) \{ writable && !busy && failedAction == null \}/);
+    assert.match(entryKt, /val blocked: Boolean get\(\) = !ready \|\| workOpen/);
+    assert.match(entryKt, /val entry = lifecycle\.next\(!ready, workOpen\) \?: return\s+if \(workOpen\) return peek\(entry\)/);
+    // A link read over open work: core's entry read only (it writes nothing), off the busy path, and only an automation link opens.
+    assert.match(entryKt, /private fun peek\(entry: EntryQueue\.Entry\) \{[\s\S]{0,400}runtime\.menuRead\("entryPoint", entry\.input\)[\s\S]{0,300}\?\.takeIf \{ it\.optJSONObject\("contextAutomation"\) != null \}/);
+    assert.match(entryKt, /val workOpen: Boolean get\(\) = with\(shell\) \{\s+!editorClean \|\| processing\?\.hidden == false \|\| capture != null \|\| captureModal\.open != null\s+\|\| menu\.dialog != null \|\| menu\.focusControls\.dialog != null \|\| menu\.calendar\.composer != null \|\| search\?\.saveName != null\s+\|\| menu\.screen == MenuScreen\.MindSweep/);
     // Typed text not yet sent holds entries back too: the Add new project field while the Projects list shows it, and a
     // Settings field before its commit (a GTD text field, a Someday section's inline rename).
     assert.match(entryKt, /\|\| \(menu\.screen == MenuScreen\.Settings && menu\.settings\.uncommitted\)\s+\|\| \(projectDraft\.isNotBlank\(\) && openProjectId == null && \(menu\.screen == MenuScreen\.Projects\s+\|\| \(menu\.screen == null && screen == Screen\.Projects && menu\.quickView == "projects"\)\)\)/);
@@ -3423,7 +3429,6 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /runtime\.openQuickCapture\(\)\s+runtime\.quickCaptureView\(JSONObject\(\)\.put\("text", open\.getString\("text"\)\)\.put\("options", open\.getJSONObject\("options"\)\)\.toString\(\)\)/);
     // An entry leaves the queue only after it opened, or when core refused its input; a failed read keeps it for a later try.
     assert.match(entryKt, /private val lifecycle = EntryLifecycle\(queue\) \{ SystemClock\.uptimeMillis\(\) \}/);
-    assert.match(entryKt, /val entry = lifecycle\.next\(blocked\) \?: return/);
     assert.match(entryKt, /\} catch \(failure: Throwable\) \{\s+ui\(threads\.guarded \{ failed\(entry, failure\.message\) \}\)\s+\/\/[^\n]*\s+if \(!entryRetryable\(failure\.message\)\) return@perform\s+throw failure\s+\}\s+\/\/[^\n]*\s+ui\(threads\.guarded \{ menu\.whenIdle\(threads\.guarded \{ opened\(entry, reply, view\) \}\) \}\)/);
     assert.match(entryKt, /is EntryLifecycle\.Failure\.Retry -> threads\.later\(outcome\.delayMs\) \{ pump\(\) \}\s+is EntryLifecycle\.Failure\.Refused -> \{\s+shell\.showToast\(null, outcome\.notice, \"warning\"\)\s+lifecycle\.dismissed\(entry\)/, 'a refused entry shows its notice before it leaves');
     // A context automation link opens nothing, so only it goes on over open work.
@@ -3464,7 +3469,11 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     for (const [, key] of entryCode.matchAll(/"([a-z][A-Za-z]*(?:\.[A-Za-z]+)+)"/g)) assert(labelKeys.includes(key), `EntryPoints.kt: ${key} is not in LABEL_KEYS`);
     assert.doesNotMatch(entryCode, /\bText\(|contentDescription|showToast\("/, 'EntryPoints.kt: every word is core\'s');
     // RN's quiet context automation link: core's payload goes to the broadcast's job, nothing opens, and the app leaves (exitApp).
-    assert.match(entryKt, /reply\.optJSONObject\("contextAutomation"\)\?\.let \{ trigger ->\s+val outcome = queueTrigger\(trigger\.getString\("action"\), trigger\.getString\("context"\)\) \{ CoreWork\.enqueue\(getApplication\(\), CoreJob\.CONTEXT, it\) \}[\s\S]{0,160}leaveApp = true\s+return\s+\}/);
+    assert.match(entryKt, /reply\.optJSONObject\("contextAutomation"\)\?\.let \{ trigger ->\s+val outcome = queueTrigger\(trigger\.getString\("action"\), trigger\.getString\("context"\)\) \{ CoreWork\.enqueue\(getApplication\(\), CoreJob\.CONTEXT, it\) \}[\s\S]{0,600}leaveApp = true\s+return\s+\}/);
+    // The tester's line: the link's real outcome (queued, too-long or failed), never the context's name.
+    assert.match(entryKt, /JSONObject\(\)\.put\("releaseCheck", "v1\.3\.8\/native-context-link"\)\.put\("outcome", outcome\)\.put\("action", trigger\.getString\("action"\)\)\.put\("overWork", workOpen\)/);
+    assert.match(entryKt, /anyTime\(\{ it\.logLine\("Native Android context link ran releaseCheck=v1\.3\.8\/native-context-link", fields\) \}, \{\}\)/);
+    assert.match(hostEntry, /const outcome = !entry \? 'refused' : entry\.contextAutomation \? 'contextAutomation' : entry\.captureModal/);
 }
 
 // Pass A4 (L1): RN's diagnostics log (files/logs/mindwtr.log) written by core's diagnostics-log.ts through Kotlin's file bridge,

@@ -1,5 +1,6 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import org.json.JSONObject
 import java.util.concurrent.Executors
 
 /**
@@ -25,13 +26,25 @@ class EntryLifecycle(private val queue: EntryQueue, private val now: () -> Long)
     /** The oldest waiting entry's id. */
     val head: String? get() = queue.head()?.id
 
-    /** The entry core reads now, marked as read; null while none waits, one is being read, work is open, or a failed read waits. */
-    fun next(blocked: Boolean): EntryQueue.Entry? {
-        val entry = queue.head() ?: return null
+    /** Links already read while the user's work stayed open: each waits for that work to end, then opens in its turn. */
+    private val peeked = mutableSetOf<String>()
+
+    /**
+     * The entry core reads now, marked as read; null while none waits, one is being read, the app is [blocked] (not ready, a
+     * command runs or a retry is owed), or a failed read waits. While the user's work is open ([workOpen]) only a link not read
+     * yet is: RN runs a context automation link at once over open work, and core's read writes nothing.
+     */
+    fun next(blocked: Boolean, workOpen: Boolean = false): EntryQueue.Entry? {
         if (reading != null || blocked || now() < retryAt) return null
+        if (!workOpen) peeked.clear()
+        val entry = if (!workOpen) queue.head() else queue.all().firstOrNull { it.id !in peeked && it.isLink() }
+        entry ?: return null
+        if (workOpen) peeked += entry.id
         reading = entry.id
         return entry
     }
+
+    private fun EntryQueue.Entry.isLink() = runCatching { JSONObject(input).optString("kind") == "link" }.getOrDefault(false)
 
     /** Its screen or popup opened: now the entry leaves, and the wait after failures starts over. */
     fun opened(entry: EntryQueue.Entry) {

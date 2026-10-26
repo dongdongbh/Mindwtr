@@ -56,6 +56,32 @@ class EntryLifecycleTest {
         assertEquals(read, lifecycle.next(blocked = false))
     }
 
+    /**
+     * RN runs a context automation link at once, over open work. While the user's work is open, each waiting link is read once
+     * (core's read writes nothing, and only an automation link opens then); every other entry waits for the work to end.
+     */
+    @Test fun whileWorkIsOpenEachLinkIsReadOnceAndNothingElse() {
+        val (queue, lifecycle) = process()
+        queue.add("""{"kind":"share","text":"a"}""")
+        queue.add("""{"kind":"link","url":"one"}""")
+        queue.add("""{"kind":"link","url":"two"}""")
+        val first = lifecycle.next(blocked = false, workOpen = true)!!
+        assertEquals("""{"kind":"link","url":"one"}""", first.input)
+        // Core said it is no automation link: it waits, and is not read again while the work stays open.
+        lifecycle.deferred(first)
+        val second = lifecycle.next(blocked = false, workOpen = true)!!
+        assertEquals("""{"kind":"link","url":"two"}""", second.input)
+        // An automation link ran: it leaves, the share stays first.
+        lifecycle.opened(second)
+        assertNull(lifecycle.next(blocked = false, workOpen = true))
+        // A command running or a retry owed holds even links.
+        queue.add("""{"kind":"link","url":"three"}""")
+        assertNull(lifecycle.next(blocked = true, workOpen = true))
+        // The work ended: the queue opens in order again, the first link included.
+        assertEquals("""{"kind":"share","text":"a"}""", lifecycle.next(blocked = false)?.input)
+        assertEquals(listOf("""{"kind":"share","text":"a"}""", """{"kind":"link","url":"one"}""", """{"kind":"link","url":"three"}"""), queue.all().map { it.input })
+    }
+
     @Test fun aFailedReadKeepsTheEntryAndTriesAgainAfterAGrowingWait() {
         val (queue, lifecycle) = process()
         queue.add("""{"n":1}""")

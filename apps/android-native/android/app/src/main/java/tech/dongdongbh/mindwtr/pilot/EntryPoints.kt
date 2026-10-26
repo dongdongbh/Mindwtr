@@ -136,6 +136,8 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         if (!queue.add(input.toString())) Log.w(CoreHost.TAG, "Native Android entry point dropped: the queue is full")
         else if (input.optString("kind") == "files") queue.all().lastOrNull()?.let { stage(it) }
         head = lifecycle.head
+        // A link behind a waiting entry leaves the head as it was: read it now, as it may run over open work.
+        pump()
     }
 
     /** Stages [entry]'s files off the main thread, then reads the queue again. */
@@ -164,12 +166,18 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         threads.close()
     }
 
+    /** The app takes entries: its store is ready, no command runs, and no retry is owed. */
+    private val ready: Boolean get() = with(shell) { writable && !busy && failedAction == null }
+
+    /** Something keeps the entry from opening now: the app is not ready, or the user's work is open ([workOpen]). */
+    val blocked: Boolean get() = !ready || workOpen
+
     /**
-     * Something keeps the entry from opening now: the app is not ready, a command runs or is owed, or the user's work is open. An
-     * editor with nothing to save is no work (#1410): an entry that goes somewhere closes it, as RN's editor closes on navigation.
+     * The user's work is open; only a context automation link runs over it (RN's runs at once). An editor with nothing in it is no
+     * work (#1410, editorClean): an entry that goes somewhere closes it, as RN's editor closes on navigation.
      */
-    val blocked: Boolean get() = with(shell) {
-        !writable || busy || failedAction != null || !editorClean || processing?.hidden == false || capture != null || captureModal.open != null
+    val workOpen: Boolean get() = with(shell) {
+        !editorClean || processing?.hidden == false || capture != null || captureModal.open != null
             || menu.dialog != null || menu.focusControls.dialog != null || menu.calendar.composer != null || search?.saveName != null
             || menu.screen == MenuScreen.MindSweep
             // Typed text not yet sent: a Settings field before its commit, and the Add new project field while the list shows it
@@ -181,7 +189,8 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
 
     /** Reads the oldest entry once the app is free, then opens it once no action runs; MainActivity calls it whenever that may change. */
     fun pump(): Unit = with(shell) {
-        val entry = lifecycle.next(blocked) ?: return
+        val entry = lifecycle.next(!ready, workOpen) ?: return
+        if (workOpen) return peek(entry)
         val input = JSONObject(entry.input)
         // A file share opens once its files are staged (a process death mid-copy stages it again; a grant gone by then reads as
         // unreadable files, and core says so).
@@ -231,6 +240,21 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         head = lifecycle.head
     }
 
+    /**
+     * A link read over open work: core's entry read only (it writes nothing; a capture's popup reads wait for its turn), off the
+     * busy path so the open work's controls stay enabled. A context automation link runs; any other link waits for the work.
+     */
+    private fun peek(entry: EntryQueue.Entry) {
+        if (shell.coreHost() == null) return lifecycle.deferred(entry)
+        shell.background(emptyList(), { runtime -> runCatching { runtime.menuRead("entryPoint", entry.input) }.getOrNull() }) { reply, _ ->
+            threads.guarded {
+                val automation = reply?.takeIf { it.optInt("version") == 1 }?.takeIf { it.optJSONObject("contextAutomation") != null }
+                if (automation == null) lifecycle.deferred(entry) else opened(entry, automation, null)
+                pump()
+            }()
+        }
+    }
+
     /** Opens core's answer, then (only then) the entry leaves the queue. Work opened meanwhile keeps it for a later read. */
     private fun opened(entry: EntryQueue.Entry, reply: JSONObject, view: JSONObject?) {
         // A context automation link opens nothing, so work opened meanwhile never holds it.
@@ -250,6 +274,9 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         // RN's quiet context automation link: the broadcast's job (its notification), then the app leaves, as RN's exitApp.
         reply.optJSONObject("contextAutomation")?.let { trigger ->
             val outcome = queueTrigger(trigger.getString("action"), trigger.getString("context")) { CoreWork.enqueue(getApplication(), CoreJob.CONTEXT, it) }
+            // The tester's line: queued, or why it dropped (too-long, failed), and whether it ran over open work; never the context.
+            val fields = JSONObject().put("releaseCheck", "v1.3.8/native-context-link").put("outcome", outcome).put("action", trigger.getString("action")).put("overWork", workOpen)
+            anyTime({ it.logLine("Native Android context link ran releaseCheck=v1.3.8/native-context-link", fields) }, {})
             if (outcome != "queued") Log.w(CoreHost.TAG, "Native Android context link dropped reason=$outcome")
             leaveApp = true
             return

@@ -1155,8 +1155,8 @@ const notificationEntry = (input: { data?: unknown }): Reply => {
 };
 /** What an entry point opened, by kind only: never its URL, route text, or shared text. */
 const logEntryPoint = (input: { kind?: unknown }, result: Reply): Reply => {
-    const entry = result.ok ? result.value as { route: string | null; taskId: string | null; projectId: string | null; search: unknown; capture: unknown; captureModal: unknown; notice: unknown } : null;
-    const outcome = !entry ? 'refused' : entry.captureModal ? 'captureModal' : entry.capture ? 'capture' : entry.notice ? 'notice' : entry.taskId ? 'task' : entry.projectId ? 'project'
+    const entry = result.ok ? result.value as { route: string | null; taskId: string | null; projectId: string | null; search: unknown; capture: unknown; captureModal: unknown; notice: unknown; contextAutomation?: unknown } : null;
+    const outcome = !entry ? 'refused' : entry.contextAutomation ? 'contextAutomation' : entry.captureModal ? 'captureModal' : entry.capture ? 'capture' : entry.notice ? 'notice' : entry.taskId ? 'task' : entry.projectId ? 'project'
         : entry.search ? 'search' : entry.route ? 'screen' : 'nothing';
     const kind = ['link', 'share', 'createNote', 'notification'].includes(input?.kind as string) ? input.kind as string : 'other';
     try {

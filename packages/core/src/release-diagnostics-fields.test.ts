@@ -306,6 +306,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'taxonomyKind',
     // ios-background-sync-hold reuses releaseCheck, source and outcome; heldMs is how long iOS kept the app running.
     'heldMs',
+    // native-context-link reuses releaseCheck, outcome and action; overWork is true when the link ran over open work.
+    'overWork',
 ];
 
 describe('release diagnostics field names', () => {
