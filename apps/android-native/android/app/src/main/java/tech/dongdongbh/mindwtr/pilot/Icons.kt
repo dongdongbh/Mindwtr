@@ -194,6 +194,9 @@ object Lucide {
     /** Focus's View options, its filter sheet's Save, and the Today's Focus reorder handle. */
     val Settings2 = lucide("Settings2", "M14 17H5", "M19 7h-9", circle(17, 17, 3), circle(7, 7, 3))
     val BookmarkPlus = lucide("BookmarkPlus", "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z", "M12 7L12 13", "M15 10L9 10")
+    /** RN's reorder mode's section arrows (task-list.tsx: ArrowUp, ArrowDown). */
+    val ArrowUp = lucide("ArrowUp", "m5 12 7-7 7 7", "M12 19V5")
+    val ArrowDown = lucide("ArrowDown", "M12 5v14", "m19 12-7 7-7-7")
     val GripVertical = lucide("GripVertical", circle(9, 12, 1), circle(9, 5, 1), circle(9, 19, 1), circle(15, 12, 1), circle(15, 5, 1), circle(15, 19, 1))
 }
 

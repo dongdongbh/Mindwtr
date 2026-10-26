@@ -2370,9 +2370,10 @@ assert.deepEqual([.../val ATTACHMENT_COMMANDS = setOf\(([^)]*)\)/.exec(coreHost)
     // (review PD 3; ProjectDetailsTest's ReplyGuard).
     {
         const details = code(source('ProjectDetails.kt'));
-        // Seven reads: the five Details reads, Convert to section's (readConvert, its kind passed in) and the view options' sort.
-        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 7, 'every Details read takes a ticket');
-        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 7, 'every Details reply checks its ticket');
+        // Eight reads: the five Details reads, Convert to section's (readConvert, its kind passed in), the view options' sort and
+        // the reorder mode's order.
+        assert.equal((details.match(/replies\.ticket\(/g) ?? []).length, 8, 'every Details read takes a ticket');
+        assert.equal((details.match(/replies\.current\(ticket\)/g) ?? []).length, 8, 'every Details reply checks its ticket');
         assert.match(details, /shell\.fresh\(mine, InboxViewModel\.Part\.ProjectDetails\)/);
         assert.match(details, /fun closeOverlays\(\) \{\s*replies\.close\(\)/);
     }
@@ -9798,7 +9799,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /if \(message\.startsWith\("STALE_REVISION"\)\) \{\s+answers\.remove\(action\.id\)\s+refusals\.remove\(action\.id\)\?\.let \{ refused -> shell\.ui \{ refused\(message\.substringAfter\(": "\)\) \} \}/);
     assert.match(details, /put\("destinationProjectId", destination\)\.put\("title", title\)\.put\("expected", expected\)/);
     // RN resets the detail list for each project and shows Getting Started's actions at the top again after Reactivate.
-    assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,1400}LazyColumn\([^\n]*state = listState/);
+    assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,2200}LazyColumn\([^\n]*state = listState/);
     // A toast with an action (Undo) honors Android's "Time to take action" (TalkBack and switch users), never below RN's time.
     assert.match(source('InboxViewModel.kt'), /if \(action != null\) actionTimeout\(shown\) else shown/);
     assert.match(source('InboxViewModel.kt'), /getRecommendedTimeoutMillis\(shown\.toInt\(\),\s+android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_TEXT or android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_CONTROLS\)/);
@@ -9840,5 +9841,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /fun resetFilters\(\) \{ listFilterState = JSONObject\(\); listFilterSheet = null;/);
     assert.match(header, /testTag\("project-task-filter-button"\)/);
     assert.match(details, /"project-view-filter-option"[\s\S]{0,800}"project-view-sort-option"/);
+}
+// Pass O2f-parity b4c: RN's reorder mode on core's project order view; a drop or TalkBack's move sends core's prepared move
+// (runProjectEdit taskOrder) with the order token the view showed; real sections keep RN's arrows; Reorder is the last row.
+{
+    const details = source('ProjectDetails.kt'), header = source('ProjectsScreen.kt');
+    assert.match(details, /runtime\.menuRead\("projectTaskOrderView", /);
+    assert.match(details, /edit\(projectId, "taskOrder", refused = \{ readOrder\(\) \}, answer = \{ readOrder\(\) \}\) \{\s+put\("taskId", taskId\)\.put\("after", after \?: JSONObject\.NULL\)[\s\S]{0,200}\.put\("expectedOrder", token\)/);
+    assert.match(details, /"project-view-completed-option"[\s\S]{0,1200}"project-view-reorder-option"/);
+    assert.match(header, /if \(projectDetails\.reorderMode\) \{\s+LazyColumn\([^\n]*userScrollEnabled = false\) \{\s+openProjectId\?\.let \{ id -> projectDetailsItems\(model, id, detail\) \}\s+\}\s+ProjectReorderList\(model, Modifier\.weight\(1f\)\)\s+return@Column/);
+    assert.match(details, /customActions = moves/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

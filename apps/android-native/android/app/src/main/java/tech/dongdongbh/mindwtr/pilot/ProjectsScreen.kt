@@ -430,7 +430,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             // RN's view options "..." (More options): washed in the tint while the project's sort or Show completed is on.
             LaunchedEffect(openProjectId) { projectDetails.readSort() }
             val optionsLabel = t("taskEdit.moreOptions")
-            val active = projectShowCompleted || projectDetails.customSort
+            val active = projectShowCompleted || projectDetails.customSort || projectDetails.reorderMode
             val optionsShape = RoundedCornerShape(12.dp)
             Box(Modifier.size(44.dp).clip(optionsShape).background(if (active) c.tint.copy(alpha = 0x20 / 255f) else c.filterBg)
                 .rnBorder(1.dp, if (active) c.tint else c.border, optionsShape)
@@ -467,6 +467,14 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             // The rows come after the header items; the More row, when shown, after them.
             val after = items.size - entry + (if (items.size < detail.total) 1 else 0)
             listState.animateScrollToItem(maxOf(0, listState.layoutInfo.totalItemsCount - after))
+        }
+        // RN's reorder mode: the list's header rows (Getting Started's actions, Details) pinned above its own reorder list.
+        if (projectDetails.reorderMode) {
+            LazyColumn(Modifier.fillMaxWidth().background(c.bg), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp), userScrollEnabled = false) {
+                openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
+            }
+            ProjectReorderList(model, Modifier.weight(1f))
+            return@Column
         }
         LazyColumn(Modifier.weight(1f).background(c.bg).imePadding(), state = listState, contentPadding = PaddingValues(12.dp)) {
             // RN's Details toggle and panel (its Attachments card inside), scrolling away with the rows as RN's list header.

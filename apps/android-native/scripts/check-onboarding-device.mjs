@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { button, check, connect, evidenced, fail, hasText, isOn, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, hasText, isOn, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, seedApk, shotsArg] = process.argv.slice(2);
 if (!serial || !seedApk) {
@@ -217,6 +217,23 @@ try {
     nodes = await tapExpecting(button(nodes, en['filters.clear']) ?? fail('no Clear'), (current) => !button(current, en['filters.clear']), 'the filters cleared');
     nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => !sheetUp(current) && !tagged(current, 'project-task-filter-button'), 'the chip gone');
     check(true, '(c) Clear removes the filter and its chip');
+    // b4c: Reorder opens RN's reorder list (its bar, a handle per task); a drag on the first task's handle moves it one row down
+    // (core's prepared move), and Done returns to the list.
+    nodes = await openView();
+    nodes = await tapExpecting(tagged(nodes, 'project-view-reorder-option') ?? fail('no Reorder row'),
+        (current) => Boolean(tagged(current, 'project-reorder-list')) && Boolean(tagged(current, 'project-task-drag-handle')), 'the reorder list', 15_000);
+    shot('project-reorder');
+    const reorderTitles = (current) => current.filter((node) => (node['resource-id'] ?? '').endsWith('project-task-reorder-row'))
+        .sort((a, b) => centerY(a) - centerY(b)).map((row) => current.find((node) => node.text && box(node)[1] >= box(row)[1] && box(node)[3] <= box(row)[3])?.text);
+    const before = reorderTitles(nodes);
+    const handle = nodes.filter((node) => (node['resource-id'] ?? '').endsWith('project-task-drag-handle')).sort((a, b) => centerY(a) - centerY(b))[0];
+    const [hx1, hy1, hx2, hy2] = box(handle);
+    const rowPx = Math.round((hy2 - hy1) * 80 / 72);
+    sh(`input swipe ${Math.round((hx1 + hx2) / 2)} ${Math.round((hy1 + hy2) / 2)} ${Math.round((hx1 + hx2) / 2)} ${Math.round((hy1 + hy2) / 2 + rowPx * 1.3)} 900`);
+    nodes = await waitFor('the first task one row down', (current) => { const now = reorderTitles(current); return now[1] === before[0] && now[0] === before[1]; }, 20_000);
+    check(true, '(c) a drag on the first task\'s handle moves it one row down, as core orders it');
+    nodes = await tapExpecting(tagged(nodes, 'project-task-reorder-toggle') ?? fail('no Done'), (current) => !tagged(current, 'project-reorder-list'), 'the list again');
+    check(true, '(c) Done leaves reorder mode');
     // The pinned "+" (RN's openProjectQuickAdd): the popup opens with Getting Started chosen, and the task saves as Next in it.
     nodes = await tapExpecting(tagged(nodes, 'project-add-task-button') ?? fail('no project "+"'),
         (current) => Boolean(tagged(current, 'quick-capture')) && hasText(current, STARTER_TITLE), 'the capture popup with Getting Started chosen', 15_000);

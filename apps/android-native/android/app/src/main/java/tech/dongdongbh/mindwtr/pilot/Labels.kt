@@ -22,6 +22,8 @@ val LABEL_KEYS = listOf(
     "projects.actionsLabel", "projects.duplicate", "projects.complete", "projects.reactivate", "projects.cancel", "projects.archiveHelp",
     "projects.cancelConfirmTitle", "projects.cancelConfirmBody", "projects.deleteConfirm", "common.notice",
     "projects.cancelFailed", "projects.duplicateFailed", "projects.deleteFailed", "projects.restoreFailed",
+    // The project view options' Reorder (RN's reorder mode): its bar, the handle, the section arrows and TalkBack's moves.
+    "projects.reorderTasks", "projects.reorderNeedsDefaultSort", "projects.projectOrder", "projects.taskOrder", "board.dragTask", "projects.moveSectionUp", "projects.moveSectionDown",
     // RN's capture screen's failure line (its other words are core's view).
     "task.addFailed",
     "common.none", "common.notSet", "taskEdit.titleLabel", "taskEdit.descriptionLabel", "taskEdit.statusLabel",

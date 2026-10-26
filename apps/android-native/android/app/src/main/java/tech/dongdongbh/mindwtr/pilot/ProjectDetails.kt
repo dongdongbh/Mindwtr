@@ -53,6 +53,21 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import kotlin.math.roundToInt
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.platform.LocalConfiguration
@@ -259,6 +274,55 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         return total to items
     }
 
+    // ---- RN's reorder mode (the view options' Reorder): core's project order view and its prepared move ----
+
+    var reorderMode by mutableStateOf(false); private set
+    /** Core's project order view (getProjectTaskOrderView): its words, orderToken, and every row (all windows) in core's order. */
+    var orderView by mutableStateOf<JSONObject?>(null); private set
+
+    /** Reorder on (core's order read) or Done (back to the list, read again). */
+    fun toggleReorder() {
+        viewOptionsOpen = false
+        reorderMode = !reorderMode
+        if (reorderMode) readOrder() else { orderView = null; shell.refreshProjects() }
+    }
+
+    fun readOrder() {
+        val id = projectId ?: return
+        val ticket = replies.ticket("order")
+        val base = input(id).put("showCompleted", shell.projectShowCompleted).put("filters", listFilterState)
+        shell.background(emptyList(), { runtime ->
+            val items = JSONArray()
+            var first: JSONObject? = null
+            var revision: String? = null
+            var total: Int
+            do {
+                val window = runtime.menuRead("projectTaskOrderView", JSONObject(base.toString()).put("offset", items.length()).put("limit", 100)
+                    .apply { revision?.let { put("revision", it) } }.toString())
+                if (first == null) first = window
+                revision = window.getString("revision")
+                total = window.getInt("total")
+                val next = window.getJSONArray("items")
+                for (index in 0 until next.length()) items.put(next.get(index))
+            } while (next.length() > 0 && items.length() < total)
+            JSONObject(checkNotNull(first).toString()).put("items", items)
+        }) { reply, _ -> if (replies.current(ticket)) orderView = reply }
+    }
+
+    /** A drop, or TalkBack's move: [taskId] after [after] (a row, or null for the top) on the order shown; the order reads again. */
+    fun moveTask(taskId: String, after: JSONObject?) {
+        val token = orderView?.optString("orderToken")?.takeIf { it.isNotEmpty() } ?: return
+        edit(projectId, "taskOrder", refused = { readOrder() }, answer = { readOrder() }) {
+            put("taskId", taskId).put("after", after ?: JSONObject.NULL).put("showCompleted", shell.projectShowCompleted)
+                .put("filters", listFilterState).put("expectedOrder", token)
+        }
+    }
+
+    /** RN's section arrows in reorder mode: the section one step up or down on the order shown (Details' own section move). */
+    fun moveOrderSection(sectionId: String, direction: String, order: List<String>) {
+        edit(projectId, "sectionMove", answer = { readOrder() }) { put("sectionId", sectionId).put("direction", direction).put("order", JSONArray(order)) }
+    }
+
     /** RN's view options sheet (the pinned row's "..."), and its sort modal on core's sort choices for this project. */
     var viewOptionsOpen by mutableStateOf(false)
     var sortOpen by mutableStateOf(false)
@@ -305,6 +369,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         convertRow = null; convert = null; convertConfirm = false
         viewOptionsOpen = false; sortOpen = false; sort = null
         resetFilters()
+        reorderMode = false; orderView = null
     }
 
     /** RN's TaskList starts each project with no filters and its sheet shut. */
@@ -1291,6 +1356,119 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
                     val on = controls.getBoolean("showCompleted")
                     ProjectOptionRow(if (on) SettingsIonicons.EyeOutline else SettingsIonicons.EyeOffOutline, controls.getString("label"), "project-view-completed-option",
                         idle, selected = on) { viewOptionsOpen = false; model.showProjectCompleted(!on) }
+                    // RN's Reorder (Done while on): kept but off under a custom sort, with core's "Available when Sort is Default".
+                    if (controls.optBoolean("hasReorderTargets") || reorderMode) {
+                        val off = customSort && !reorderMode
+                        ProjectOptionRow(if (reorderMode) Ionicons.CheckmarkCircleOutline else Ionicons.ListOutline,
+                            t(if (reorderMode) "common.done" else "projects.reorderTasks"), "project-view-reorder-option", idle && !off,
+                            if (off) t("projects.reorderNeedsDefaultSort") else null, selected = reorderMode) { toggleReorder() }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * RN's reorder mode (TaskList's project reorder list): the bar (Project order, or Task order without sections, and Done), then one
+ * flat list in core's order where section headings are fixed rows, so a task dragged past a heading lands in that section. A task's
+ * handle drags it at once (RN's onPressIn); TalkBack moves it one row up or down. Real sections keep RN's up and down arrows.
+ */
+@Composable
+internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = with(model.projectDetails) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val view = orderView
+    val items = view?.menuObjects("items").orEmpty()
+    val sectionIds = items.mapNotNull { item -> item.takeIf { it.getString("type") == "section" }?.menuText("sectionId") }
+    val enabled = view?.optBoolean("canReorder") == true && !model.busy && model.failedAction == null
+    Column(modifier.background(c.bg).testTag("project-reorder-list")) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(t(if (sectionIds.size > 1) "projects.projectOrder" else "projects.taskOrder"), style = rnText(13, 700), color = c.text,
+                modifier = Modifier.weight(1f).semantics { heading() })
+            val done = t("common.done")
+            val shape = RoundedCornerShape(8.dp)
+            Box(Modifier.heightIn(min = 36.dp).clip(shape).background(c.tint).border(1.dp, c.tint, shape).clickable(role = Role.Button) { toggleReorder() }
+                .semantics { contentDescription = done }.testTag("project-task-reorder-toggle").padding(horizontal = 12.dp, vertical = 7.dp),
+                contentAlignment = Alignment.Center) { Text(done, style = rnText(13, 700), color = c.onTint) }
+        }
+        val rowHeight = with(LocalDensity.current) { 80.dp.toPx() }
+        var dragged by remember { mutableStateOf<String?>(null) }
+        var shift by remember { mutableFloatStateOf(0f) }
+        // The row a task lands after when it sits at [to] in [order] with itself taken out: the row before it, or the top.
+        val afterAt = { order: List<JSONObject>, to: Int ->
+            order.getOrNull(to - 1)?.let { prev ->
+                if (prev.getString("type") == "section") JSONObject().put("type", "section").put("id", prev.getString("id"))
+                else JSONObject().put("type", "task").put("id", prev.getJSONObject("row").getString("id"))
+            }
+        }
+        val dropAt = { from: Int, to: Int ->
+            val moved = items[from]
+            val rest = items.toMutableList().apply { removeAt(from) }
+            val target = to.coerceIn(0, rest.size)
+            if (target != from) moveTask(moved.getJSONObject("row").getString("id"), afterAt(rest, target))
+        }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 24.dp)) {
+            itemsIndexed(items, key = { _, item -> if (item.getString("type") == "section") "section:${item.getString("id")}" else "task:${item.getJSONObject("row").getString("id")}" }) { index, item ->
+                if (item.getString("type") == "section") {
+                    val title = item.getString("title")
+                    val sectionId = item.menuText("sectionId")
+                    Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (item.optBoolean("muted")) c.secondaryText else c.text,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })
+                        // RN's arrows only on a real section (a string sectionId), never on the No section row.
+                        val real = sectionId
+                        val position = real?.let(sectionIds::indexOf) ?: -1
+                        if (real != null && position >= 0 && sectionIds.size > 1) {
+                            for ((direction, icon, key) in listOf(Triple("up", Lucide.ArrowUp, "projects.moveSectionUp"), Triple("down", Lucide.ArrowDown, "projects.moveSectionDown"))) {
+                                val can = enabled && (if (direction == "up") position > 0 else position < sectionIds.size - 1)
+                                val label = "${t(key)}: $title"
+                                val shape = RoundedCornerShape(8.dp)
+                                Box(Modifier.size(32.dp).fade(if (can) 1f else 0.4f).clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                                    .clickable(enabled = can, role = Role.Button) { moveOrderSection(real, direction, sectionIds) }
+                                    .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+                                    Icon(icon, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val row = item.getJSONObject("row")
+                    val id = row.getString("id")
+                    val title = row.getString("title")
+                    val active = dragged == id
+                    val moves = listOfNotNull(
+                        CustomAccessibilityAction(t("projects.moveUp")) { if (enabled && index > 0) dropAt(index, index - 1); enabled }.takeIf { index > 0 },
+                        CustomAccessibilityAction(t("projects.moveDown")) { if (enabled) dropAt(index, index + 1); enabled }.takeIf { index < items.size - 1 },
+                    )
+                    Row(Modifier.fillMaxWidth().height(80.dp).then(if (active) Modifier.offset { IntOffset(0, shift.roundToInt()) }.fade(0.92f) else Modifier)
+                        .testTag("project-task-reorder-row"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        val shape = RoundedCornerShape(8.dp)
+                        Column(Modifier.weight(1f).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.taskItemBg).border(1.dp, if (active) c.tint else c.border, shape)
+                            .padding(horizontal = 12.dp, vertical = 9.dp), verticalArrangement = Arrangement.Center) {
+                            Text(title, style = rnText(15, 700, 19), color = c.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(t("status.${row.optString("status")}"), style = rnText(12, 600, 15), color = c.secondaryText, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
+                        }
+                        val handle = "${t("board.dragTask")}: $title"
+                        Box(Modifier.width(44.dp).padding(bottom = 8.dp).fillMaxHeight().clip(shape).background(c.filterBg).border(1.dp, c.border, shape)
+                            .semantics { contentDescription = handle; role = Role.Button; if (enabled) customActions = moves else disabled() }
+                            .pointerInput(id, enabled, items) {
+                                if (!enabled) return@pointerInput
+                                detectDragGestures(
+                                    onDragStart = { dragged = id; shift = 0f },
+                                    onDragEnd = {
+                                        val to = (index + (shift / rowHeight).roundToInt()).coerceIn(0, items.size - 1)
+                                        dragged = null; shift = 0f
+                                        dropAt(index, to)
+                                    },
+                                    onDragCancel = { dragged = null; shift = 0f },
+                                ) { change, amount -> change.consume(); shift += amount.y }
+                            }.testTag("project-task-drag-handle"), contentAlignment = Alignment.Center) {
+                            Icon(Lucide.GripVertical, null, tint = if (active) c.tint else c.secondaryText, modifier = Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
         }
