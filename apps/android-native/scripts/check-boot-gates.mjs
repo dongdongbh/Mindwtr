@@ -730,6 +730,9 @@ assert.match(activity, /LaunchedEffect\(c\.bg, theme\.isDark\) \{ window\.applyS
 assert.match(source('AppLock.kt'), /LaunchedEffect\(c\.bg, theme\.isDark\) \{ activity\?\.window\?\.applySystemBars\(c\.bg\.toArgb\(\), theme\.isDark\) \}/);
 assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
+// RN's quick capture TextInputs (title and notes) keep RN's default autoCapitalize ("sentences"): the keyboard opens with Shift on.
+assert.match(captureUi, /private fun InboxViewModel\.TitleField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences, imeAction = ImeAction\.Done\)/);
+assert.match(captureUi, /private fun NoteField\([\s\S]{0,1200}keyboardOptions = KeyboardOptions\(capitalization = KeyboardCapitalization\.Sentences\)/);
 const captureModalUi = source('CaptureModal.kt');
 const captureModalModel = source('CaptureModalModel.kt');
 // RN's capture TextInputs keep RN's default autoCapitalize ("sentences"): the keyboard opens with Shift on for the title and the

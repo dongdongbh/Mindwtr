@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -416,7 +417,8 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
     val shape = RoundedCornerShape(12.dp)
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled,
         textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint),
-        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+        // RN's TextInput default autoCapitalize "sentences": the keyboard opens with Shift on.
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
         keyboardActions = KeyboardActions(onDone = { saveCapture(openAfterSave = false) }),
         // A hardware Enter saves too, with no line added, as RN's multi-line field with submitBehavior blurAndSubmit does
         // (an adb Enter in RN's popup saved it, 10-25); a pasted text keeps its lines (core's several-captures question).
@@ -445,6 +447,7 @@ private fun NoteField(draft: CaptureDraft, placeholder: String, label: String, e
     val shape = RoundedCornerShape(12.dp)
     BasicTextField(field, { typed -> val changed = typed.text != field.text; field = typed; if (changed) send(typed.text) }, enabled = enabled,
         textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint), minLines = 2,
+        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
         modifier = Modifier.padding(top = 6.dp).fillMaxWidth().heightIn(min = 64.dp, max = 120.dp).clip(shape).background(c.inputBg)
             .rnBorder(1.dp, c.border, shape).semantics { contentDescription = label },
         decorationBox = { inner ->
