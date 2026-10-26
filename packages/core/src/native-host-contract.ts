@@ -655,7 +655,7 @@ export type NativeProjectTaskOrderView = {
     orderToken: string | null;
     total: number;
     items: (
-        | { type: 'section'; id: string; sectionId: string | null; title: string; muted: boolean }
+        | { type: 'section'; id: string; sectionId: string | null; title: string; count: number; muted: boolean }
         | { type: 'task'; row: NativeTaskRow; sectionId: string | null; sequenceCue: ProjectSequenceTaskCue | null }
     )[];
 };
@@ -2524,7 +2524,7 @@ export function createNativeHostContract(options: {
                 items: model.items.slice(input.offset, input.offset + input.limit).map((item) => {
                     if (item.type === 'header') return {
                         type: 'section' as const, id: item.group.id, sectionId: item.group.sectionId ?? null,
-                        title: item.group.title!, muted: item.group.muted === true,
+                        title: item.group.title!, count: item.group.tasks.length, muted: item.group.muted === true,
                     };
                     const cue = cues.get(item.task.id) ?? null;
                     return {

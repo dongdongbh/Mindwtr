@@ -1498,8 +1498,12 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                         val sectionId = item.menuText("sectionId")
                         Row(placed.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (item.optBoolean("muted")) c.secondaryText else c.text,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })
+                            // RN's title block: the title, then its task count.
+                            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (item.optBoolean("muted")) c.secondaryText else c.text,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { heading() })
+                                Text(item.optInt("count").toString(), style = rnText(11, 600), color = c.secondaryText)
+                            }
                             // RN's arrows only on a real section (a string sectionId), never on the No section row.
                             val real = sectionId
                             val position = real?.let(sectionIds::indexOf) ?: -1

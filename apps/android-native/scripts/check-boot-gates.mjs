@@ -9866,6 +9866,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /val threshold = with\(LocalDensity\.current\) \{ 80\.dp\.toPx\(\) \}\s+val speed = with\(LocalDensity\.current\) \{ 120\.dp\.toPx\(\) \}/);
     // A drag a list update or a busy change restarts lets go of its row; TalkBack's Move up only past a task or a later header.
     assert.match(details, /\} finally \{\s+dragFrom = -1\s+\}/);
+    // RN's reorder headers: the title, then core's task count.
+    assert.match(details, /Text\(item\.optInt\("count"\)\.toString\(\), style = rnText\(11, 600\), color = c\.secondaryText\)/);
     assert.match(details, /val canUp = index > 0 && \(shown\[index - 1\]\.getString\("type"\) == "task" \|\| index - 1 > 0\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

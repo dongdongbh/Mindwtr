@@ -47,6 +47,9 @@ describe('native Project task order read', () => {
                 ...Array.from({ length: 26 }, (_, i) => `t${i + 27}`)]);
         expect(all.find((item) => item.type === 'task' && item.row.id === 't27'))
             .toMatchObject({ type: 'task', sectionId: null });
+        // RN's reorder headers show each section's task count beside its title.
+        expect(all.filter((item) => item.type === 'section').map((item) => [item.id, item.count]))
+            .toEqual([['s1', 27], ['empty', 0], ['no-section', 26]]);
         expect(saveData).not.toHaveBeenCalled();
     });
 
