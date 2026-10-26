@@ -22,7 +22,7 @@ export type TaskRowFeatures = {
     /** Time spent shows only while Pomodoro is on and linked to tasks. */
     timeSpent: boolean;
     taskAge: boolean;
-    /** False while the editor layout hides Status: the row has no status control (#1405, as RN's and desktop's rows). */
+    /** False while the editor layout hides Status: the row flags its status control hidden (#1405, as RN's and desktop's rows). */
     status?: boolean;
 };
 
@@ -71,8 +71,13 @@ export type TaskRowMeta = {
     descriptionPreview: string | null;
     /** The priority strip; null when priorities are off or for Reference. */
     priority: TaskPriority | null;
-    /** The status control's label; null for Reference, which has no status control, and while the editor layout hides Status. */
+    /** The status control's label; null for Reference, which has no status control. */
     statusLabel: string | null;
+    /**
+     * True while the editor layout hides Status: RN's and desktop's rows show no status control then (#1405). A separate flag, so
+     * a host whose row actions live in its status menu (iOS native's row Done) keeps the label.
+     */
+    statusHidden: boolean;
     /** Whether the Focus star can show (the view decides whether it offers one). */
     canFocus: boolean;
     swipe: { target: TaskStatus; label: string; icon: 'restore' | 'done' | 'next' };
@@ -255,7 +260,8 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
         ageLabel,
         descriptionPreview: getInlineMarkdownPreview(task.description ?? '') || null,
         priority: !isReference && features.priorities ? task.priority ?? null : null,
-        statusLabel: isReference || features.status === false ? null : t(`status.${task.status}`),
+        statusLabel: isReference ? null : t(`status.${task.status}`),
+        statusHidden: features.status === false,
         canFocus: isTaskActionable(task),
         swipe: swipeFor(task.status, t),
         textDirection: resolveTaskTextDirection(task),

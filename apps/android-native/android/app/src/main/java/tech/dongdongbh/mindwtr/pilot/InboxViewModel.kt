@@ -41,7 +41,12 @@ data class RowSwipe(val target: String, val label: String, val icon: String)
 data class RowMeta(
     val parts: List<MetaPart>, val priority: String?, val statusLabel: String?, val canFocus: Boolean,
     val swipe: RowSwipe, val rtl: Boolean, val accessibilityLabel: String, val hasDescription: Boolean = false,
-)
+    /** Core's statusHidden: the editor layout hides Status, so RN's row shows no status control (#1405); the swipe stays. */
+    val statusHidden: Boolean = false,
+) {
+    /** The status control's label, or null when the row shows none (Reference, or Status hidden). */
+    val statusControl: String? get() = statusLabel?.takeUnless { statusHidden }
+}
 /**
  * One task row as core sent it (NativeTaskRow). Kotlin never parses or formats a date:
  * the meta line is core's text. [revealLabel] (Upcoming, in the user's date format) and [laterToday] are core's.
@@ -119,7 +124,7 @@ fun JSONObject.taskRow() = getJSONObject("meta").let { meta ->
             meta.text("priority"), meta.text("statusLabel"), meta.getBoolean("canFocus"),
             meta.getJSONObject("swipe").let { RowSwipe(it.getString("target"), it.getString("label"), it.getString("icon")) },
             meta.getString("textDirection") == "rtl", meta.getString("accessibilityLabel"),
-            !meta.text("descriptionPreview").isNullOrEmpty()),
+            !meta.text("descriptionPreview").isNullOrEmpty(), meta.optBoolean("statusHidden")),
         text("revealLabel"), getBoolean("laterToday"), optString("taskRevision"))
 }
 

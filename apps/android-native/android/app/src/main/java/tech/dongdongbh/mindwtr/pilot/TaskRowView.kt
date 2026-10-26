@@ -117,7 +117,7 @@ fun TaskRowItem(
     val shape = RoundedCornerShape(theme.rowRadius)
     val strip = theme.priority(meta.priority)
     val showStar = star != RowStar.Hidden && meta.canFocus
-    val showStatus = status != RowStatus.Hidden && meta.statusLabel != null
+    val showStatus = status != RowStatus.Hidden && meta.statusControl != null
     // RN outlines a starred row outside Today's Focus, and a task opened from search on the task list it opened on (not on Contexts
     // or the Review screens, whose rows RN draws without it), both in the tint.
     val highlighted = (focusHighlight && showStar && task.isFocusedToday || listed == null && isHighlighted(task.id)) && !selecting
@@ -280,7 +280,7 @@ fun FocusStar(focused: Boolean, disabled: Boolean, size: Int, modifier: Modifier
 private fun StatusControl(model: InboxViewModel, task: TaskRow, icon: Boolean, editable: Boolean) = with(model) {
     val theme = LocalTheme.current
     val colors = theme.status(task.status)
-    val label = task.meta.statusLabel ?: return
+    val label = task.meta.statusControl ?: return
     val owed = failedAction
     val enabled = editable && writable && !busy && (owed == null || (owed.kind == "update" && owed.id == task.id && owed.base == mapOf("status" to task.status)))
     val spoken = t("task.aria.changeStatus").replace("{{status}}", label)

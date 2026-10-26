@@ -247,12 +247,16 @@ describe('buildTaskRowMeta', () => {
         expect(label('later')).toBe('Task. Status: status.next');
     });
 
-    it('gives no status control while the editor layout hides Status, as React Native and desktop rows do (#1405)', () => {
+    it('flags the status control hidden while the editor layout hides Status, as React Native and desktop rows do (#1405)', () => {
         const hidden = resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: ['status'] } } });
         expect(hidden.status).toBe(false);
-        expect(buildTaskRowMeta({ ...base, features: hidden, task: task({}) }).statusLabel).toBeNull();
-        expect(buildTaskRowMeta({ ...base, features: resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: [] } } }), task: task({}) }).statusLabel)
-            .toBe('status.next');
+        const meta = buildTaskRowMeta({ ...base, features: hidden, task: task({}) });
+        expect(meta.statusHidden).toBe(true);
+        // The label stays: iOS's row Done lives in its status menu and needs it (review of 859f9202f).
+        expect(meta.statusLabel).toBe('status.next');
+        const shown = buildTaskRowMeta({ ...base, features: resolveTaskRowFeatures({ gtd: { taskEditor: { hidden: [] } } }), task: task({}) });
+        expect(shown.statusHidden).toBe(false);
+        expect(shown.statusLabel).toBe('status.next');
     });
 });
 
