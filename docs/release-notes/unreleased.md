@@ -43,3 +43,4 @@ Changes collected since the latest stable release.
 - Mobile and desktop: each Saved Search has its own Sort control and remembers its sort. "Use global setting" keeps following your global task sort, which is what existing saved searches do (#1453).
 - Desktop on Linux: typing in a task's description no longer lags, most of all for a task in Today's Focus, where each letter could take up to a second to appear (#1454).
 - Undo after completing a repeating task no longer deletes its next occurrence when that occurrence was edited after it was made (for example on another device during the Undo toast). Both tasks stay, and you can delete the extra one. An unedited next occurrence is still removed.
+- Android: a message with Undo (for example after completing or deleting a task) now stays on screen for the "Time to take action" you set in Android's accessibility settings, and never shorter than before (5.2 seconds).

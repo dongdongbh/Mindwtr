@@ -3,6 +3,9 @@ import { act, create, type ReactTestRenderer } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 import { ToastProvider, ToastViewport, useToast, useToastBottomOffset, type ToastOptions } from './toast-context';
 
+// Android's "Time to take action" (AccessibilityManager.getRecommendedTimeoutMillis); iOS answers the time it was given.
+const recommendedTimeout = vi.hoisted(() => vi.fn(async (original: number) => original));
+
 vi.mock('react-native-safe-area-context', () => ({
     useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
@@ -48,6 +51,7 @@ vi.mock('react-native', async () => {
     });
     return {
         ...actual,
+        AccessibilityInfo: { ...actual.AccessibilityInfo, getRecommendedTimeoutMillis: recommendedTimeout },
         Animated: {
             ...actual.Animated,
             Value: MockAnimatedValue,
@@ -85,6 +89,42 @@ function ToastHarness({ onReady }: { onReady: (controls: ToastControls) => void 
 describe('ToastProvider', () => {
     beforeEach(() => {
         vi.useFakeTimers();
+        recommendedTimeout.mockReset();
+        recommendedTimeout.mockImplementation(async (original: number) => original);
+    });
+
+    const mount = () => {
+        let controls: ToastControls | null = null;
+        let tree: ReactTestRenderer | null = null;
+        act(() => {
+            tree = create(<ToastProvider><ToastHarness onReady={(value) => { controls = value; }} /></ToastProvider>);
+        });
+        return { controls: controls as unknown as ToastControls, tree: tree as unknown as ReactTestRenderer };
+    };
+
+    // Native Android (o2f) keeps an action toast for the user's "Time to take action", never below RN's 5.2 s; RN used 5.2 s always.
+    it('keeps a toast with Undo for the accessibility time to take action, never below 5.2 s', async () => {
+        recommendedTimeout.mockResolvedValue(20_000);
+        const { controls, tree } = mount();
+        await act(async () => { controls.showToast({ message: 'Task marked Done', actionLabel: 'Undo', onAction: () => undefined }); });
+        expect(recommendedTimeout).toHaveBeenCalledWith(5200);
+        act(() => { vi.advanceTimersByTime(6_000); });
+        expect(getRenderedText(tree)).toContain('Task marked Done');
+        act(() => { vi.advanceTimersByTime(14_000); });
+        expect(getRenderedText(tree)).not.toContain('Task marked Done');
+
+        recommendedTimeout.mockResolvedValue(1_000);
+        await act(async () => { controls.showToast({ message: 'Moved to Trash', actionLabel: 'Undo', onAction: () => undefined }); });
+        act(() => { vi.advanceTimersByTime(5_000); });
+        expect(getRenderedText(tree)).toContain('Moved to Trash');
+        act(() => { vi.advanceTimersByTime(200); });
+        expect(getRenderedText(tree)).not.toContain('Moved to Trash');
+    });
+
+    it('asks nothing for a toast with no action', async () => {
+        const { controls } = mount();
+        await act(async () => { controls.showToast({ message: 'Saved' }); });
+        expect(recommendedTimeout).not.toHaveBeenCalled();
     });
 
     it('queues new toasts instead of replacing the current toast', () => {

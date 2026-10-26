@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+    AccessibilityInfo,
     Animated,
     Easing,
     PanResponder,
@@ -229,11 +230,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             }),
         ]).start();
 
-        timerRef.current = setTimeout(() => {
-            dismissToast();
-        }, toast.durationMs ?? TOAST_DEFAULT_DURATION_MS);
+        const shown = toast.durationMs ?? TOAST_DEFAULT_DURATION_MS;
+        let current = true;
+        const dismissAfter = (ms: number) => {
+            if (current) timerRef.current = setTimeout(dismissToast, ms);
+        };
+        // A toast with an action (Undo) stays for Android's "Time to take action" (TalkBack and switch users), never below its own
+        // time, as the native app does; iOS answers the time it was given.
+        if (toast.actionLabel) {
+            AccessibilityInfo.getRecommendedTimeoutMillis(shown)
+                .then((recommended) => dismissAfter(Math.max(shown, recommended)), () => dismissAfter(shown));
+        } else {
+            dismissAfter(shown);
+        }
 
-        return clearTimer;
+        return () => {
+            current = false;
+            clearTimer();
+        };
     }, [clearTimer, dismissToast, opacity, toast, translateX, translateY]);
 
     useEffect(() => () => {
