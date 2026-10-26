@@ -72,16 +72,41 @@ export function getGmailReceiptStore(): GmailReceiptStore {
         const directory = new Directory(`${Paths.document.uri.replace(/\/$/, '')}/GmailCapture`);
         if (!directory.exists) directory.create({ intermediates: true });
         stage = 'file';
-        const file = new File(`${directory.uri.replace(/\/$/, '')}/receipts.sqlite`);
-        const newlyCreated = !file.exists;
+        const folder = directory.uri.replace(/\/$/, '');
+        const file = new File(`${folder}/receipts.sqlite`);
+        // A file left empty (a crash before its schema) or one that fails the schema check would stop capture for good, with
+        // nothing in Settings to recover it. It is moved aside with its journal files, never deleted, and a fresh file starts
+        // with capture off: the user starts it again, and the deterministic task IDs keep mail captured before from duplicating.
+        const moveAside = (failedStage: string) => {
+            const suffix = `corrupt-${Date.now()}`;
+            for (const extension of ['', '-wal', '-shm', '-journal']) {
+                const part = new File(`${folder}/receipts.sqlite${extension}`);
+                if (part.exists) part.rename(`receipts.${suffix}.sqlite${extension}`);
+            }
+            void import('./app-log').then(({ logWarn }) => logWarn('Gmail receipt storage recovered', {
+                force: true, scope: 'gmail-capture', extra: { releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage: failedStage },
+            })).catch(() => {});
+            new File(`${folder}/receipts.sqlite`).create({ overwrite: false });
+        };
+        let newlyCreated = !file.exists;
         if (newlyCreated) file.create({ overwrite: false });
-        else if (file.size < 100) throw storageFailure();
+        else if (file.size < 100) { moveAside('file'); newlyCreated = true; }
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { open } = require('@op-engineering/op-sqlite') as typeof import('@op-engineering/op-sqlite');
         stage = 'open';
-        database = open({ name: 'receipts.sqlite', location: directory.uri.replace(/^file:\/\//, '') });
+        const location = directory.uri.replace(/^file:\/\//, '');
+        database = open({ name: 'receipts.sqlite', location });
         stage = 'schema';
-        store = createGmailReceiptStore(database, newlyCreated);
+        try {
+            store = createGmailReceiptStore(database, newlyCreated);
+        } catch (error) {
+            if (newlyCreated) throw error;
+            database.close();
+            database = undefined;
+            moveAside('schema');
+            database = open({ name: 'receipts.sqlite', location });
+            store = createGmailReceiptStore(database, true);
+        }
         return store;
     } catch (error) {
         initializationFailed = true;

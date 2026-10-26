@@ -1,5 +1,5 @@
 import {
-    existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync,
+    existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -44,7 +44,7 @@ function openerHarness(fileCreationError?: Error) {
     const createdDirectories: string[] = [];
     const createdFiles: string[] = [];
     const databases: DatabaseSync[] = [];
-    const closeDatabases = () => databases.splice(0).forEach((database) => database.close());
+    const closeDatabases = () => databases.splice(0).forEach((database) => { if (database.isOpen) database.close(); });
     cleanUp = () => { closeDatabases(); rmSync(root, { recursive: true, force: true }); };
 
     class NativeDirectory {
@@ -62,7 +62,7 @@ function openerHarness(fileCreationError?: Error) {
         }
     }
     class NativeFile {
-        constructor(readonly uri: string) {}
+        constructor(public uri: string) {}
         validatePath() {
             if (existsSync(fileURLToPath(this.uri)) && statSync(fileURLToPath(this.uri)).isDirectory()) {
                 throw new Error('File path is a directory');
@@ -74,6 +74,12 @@ function openerHarness(fileCreationError?: Error) {
             if (fileCreationError) throw fileCreationError;
             writeFileSync(fileURLToPath(this.uri), '', { flag: 'wx' });
             createdFiles.push(this.uri);
+        }
+        rename(name: string) {
+            const target = join(dirname(fileURLToPath(this.uri)), name);
+            if (existsSync(target)) throw new Error('Destination exists');
+            renameSync(fileURLToPath(this.uri), target);
+            this.uri = pathToFileURL(target).href;
         }
     }
 
@@ -101,7 +107,8 @@ function openerHarness(fileCreationError?: Error) {
                 statement.run(...params);
                 return { rows: [] };
             },
-        } satisfies GmailReceiptDatabase;
+            close() { if (database.isOpen) database.close(); },
+        } satisfies GmailReceiptDatabase & { close: () => void };
     });
     const logWarn = vi.fn();
     const reload = () => evaluate<{ getGmailReceiptStore: () => GmailReceiptStore }>(join(mobile, 'lib/gmail-capture-storage.ts'), {
@@ -109,7 +116,7 @@ function openerHarness(fileCreationError?: Error) {
         '@op-engineering/op-sqlite': { open },
         './app-log': { logWarn },
     }, fallback.URL);
-    return { reload, document, createdDirectories, createdFiles, open, closeDatabases, logWarn };
+    return { reload, document, createdDirectories, createdFiles, open, closeDatabases, logWarn, databases };
 }
 
 describe('Gmail receipt storage opening under the RN URL shim', () => {
@@ -148,5 +155,37 @@ describe('Gmail receipt storage opening under the RN URL shim', () => {
             } },
         ));
         expect(harness.open).not.toHaveBeenCalled();
+    });
+
+    // A crash between creating the file and writing its schema left a 0-byte file, and a damaged file failed the schema check:
+    // either stopped capture for good, with no button left to recover (13a Gmail design review P3-11). The file is moved aside,
+    // never deleted, and a fresh one starts with capture off until the user starts it again.
+    it.each([
+        ['an empty file', (path: string) => writeFileSync(path, ''), 'file'],
+        ['a file whose schema fails the check', (path: string) => {
+            const damaged = new DatabaseSync(path);
+            damaged.exec("CREATE TABLE receipts (account TEXT, message TEXT); INSERT INTO receipts VALUES ('a', 'kept')");
+            damaged.close();
+        }, 'schema'],
+    ])('moves %s aside and starts a fresh store with capture off', async (_name, damage, stage) => {
+        const harness = openerHarness();
+        const receiptDirectory = join(harness.document, 'GmailCapture');
+        mkdirSync(receiptDirectory);
+        damage(join(receiptDirectory, 'receipts.sqlite'));
+
+        const store = harness.reload().getGmailReceiptStore();
+        expect(store.config()).toEqual({ account: null, label: null, enabled: false, blocked: true });
+        expect(store.seen('a', 'kept')).toBe(false);
+        const aside = readdirSync(receiptDirectory).filter((name) => /^receipts\.corrupt-\d+\.sqlite$/.test(name));
+        expect(aside).toHaveLength(1);
+        if (stage === 'schema') {
+            harness.closeDatabases();
+            const kept = new DatabaseSync(join(receiptDirectory, aside[0]));
+            expect(kept.prepare('SELECT message FROM receipts').all()).toEqual([{ message: 'kept' }]);
+            kept.close();
+        }
+        await vi.waitFor(() => expect(harness.logWarn).toHaveBeenCalledExactlyOnceWith('Gmail receipt storage recovered', {
+            force: true, scope: 'gmail-capture', extra: { releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage },
+        }));
     });
 });
