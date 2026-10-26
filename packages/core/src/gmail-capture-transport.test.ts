@@ -134,8 +134,10 @@ describe('bounded Gmail MIME parsing', () => {
 describe('core Gmail transport imports', () => {
     it('imports no XML parser; each host passes its own', async () => {
         const { readdirSync, readFileSync } = await import('node:fs');
-        const sources = readdirSync(__dirname).filter((name) => name.endsWith('.ts') && !name.includes('.test.'));
-        expect(sources.length).toBeGreaterThan(100);
-        expect(sources.filter((name) => /from ['"]@xmldom\//.test(readFileSync(`${__dirname}/${name}`, 'utf8')))).toEqual([]);
+        const sources = readdirSync(__dirname, { recursive: true, encoding: 'utf8' })
+            .filter((name) => /\.tsx?$/.test(name) && !name.includes('.test.'));
+        expect(sources.filter((name) => name.includes('/')).length).toBeGreaterThan(10);
+        // Any import form: from, require( and import( all name the module in quotes.
+        expect(sources.filter((name) => /['"`]@xmldom\//.test(readFileSync(`${__dirname}/${name}`, 'utf8')))).toEqual([]);
     });
 });
