@@ -270,7 +270,8 @@ class CaptureModalModel(private val shell: InboxViewModel, private val saved: Sa
     private fun end(close: JSONObject, leave: Boolean = true) {
         keep(null)
         inFlight = null
-        close.menuText("returnToProjectId")?.let(shell::openProject)
+        // openProject's read refuses to start while the save's action still runs: open the project once it ends.
+        close.menuText("returnToProjectId")?.let { id -> shell.menu.whenIdle { shell.openProject(id) } }
         if (leave && close.getBoolean("returnToPreviousApp")) shell.leaveApp = true
     }
 }
