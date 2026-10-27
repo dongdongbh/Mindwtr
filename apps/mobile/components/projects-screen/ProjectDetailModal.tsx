@@ -1829,7 +1829,10 @@ export function ProjectDetailModal({
                                 {projectTaskPinnedToolbar}
                                 {projectTaskSelectionBulkBar}
                                 <ProjectDetailScrollFrame backgroundColor={tc.bg}>
-                                {projectTaskReorderMode ? projectDetailListHeader : null}
+                                {/* Pinned outside the list's padded content: it keeps the list's padding (listContent). */}
+                                {projectTaskReorderMode ? (
+                                    <View style={styles.projectReorderHeader} testID="project-reorder-header">{projectDetailListHeader}</View>
+                                ) : null}
 
                                 <View style={styles.projectReorderListFill}>
                                     <ProjectTaskList

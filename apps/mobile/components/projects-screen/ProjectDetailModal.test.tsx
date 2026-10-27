@@ -1181,6 +1181,21 @@ describe('ProjectDetailModal project task scrolling', () => {
     });
 
 
+    // Reorder mode pins the list header above the reorder list, outside the list's padded content: it keeps the
+    // list's 12 on the sides and top instead of running edge to edge (native draws it so).
+    it('keeps the pinned header in the list padding in reorder mode', () => {
+        let tree!: ReturnType<typeof create>;
+        act(() => {
+            tree = create(<ProjectDetailModal {...createProjectDetailModalProps()} />);
+        });
+        act(() => {
+            taskListPropsSpy.mock.calls.at(-1)?.[0].project.onReorderModeChange(true);
+        });
+        const pinned = tree.root.findByProps({ testID: 'project-reorder-header' });
+        expect(Object.assign({}, ...[pinned.props.style].flat())).toMatchObject({ paddingHorizontal: 12, paddingTop: 12 });
+        expect(pinned.findAllByProps({ testID: 'project-details-toggle' }).length).toBeGreaterThan(0);
+    });
+
     // #784: exiting reorder mode must NOT restore the pre-reorder offset —
     // TaskList scrolls to the region the reorder view was showing instead, and
     // a restore here would yank the viewport away from the dropped task. The

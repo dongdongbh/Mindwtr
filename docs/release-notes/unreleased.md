@@ -64,3 +64,4 @@ Changes collected since the latest stable release.
 - Windows: the desktop Local API (for scripts and tools that talk to Mindwtr over HTTP) no longer fails a request now and then with "Invalid HTTP request" or a dropped connection when the request arrived a moment after the connection opened.
 - Mobile: in the task editor, the screen reader names the date on each clear button ("Clear Start Date", "Clear Due Date", "Clear Review Date"). Before, all three said only "Clear".
 - Mobile: the screen reader names the Markdown toolbar's Quote, Numbered list and Task list buttons in your app language. Before, these three were always read in English.
+- Mobile: in a project's Reorder mode, the project's description, buttons and Details card keep their side margins. Before, they ran to the screen edges.
