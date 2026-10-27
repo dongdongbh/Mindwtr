@@ -3,6 +3,7 @@ import {
     buildNativePomodoroPanel,
     readNativePomodoroPresentation,
     NativeReceiptSqliteAdapter,
+    warmTaskRowEntries,
     PENDING_CAPTURES_DIRECTORY,
     PENDING_CAPTURE_LAST_APPLIED_STORAGE_KEY,
     NATIVE_HOST_CONTRACT_VERSION,
@@ -1458,6 +1459,9 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
 };
 
 let bootAdapter: ValidatedSqliteAdapter | null = null;
+// saveWarm's place in the store's task list (a new list starts over).
+let saveWarmTasks: readonly Task[] | null = null;
+let saveWarmFrom = 0;
 /** Host receipt maintenance on the booted adapter's connection, inside its lock; a write voids earlier read tokens. */
 const withHostConnection = <T,>(work: () => Promise<T>): Promise<T> => (bootAdapter ? bootAdapter.withConnection(work, { write: true }) : work());
 /** A current, settled Settings-only read for device-key reconciliation; null never authorizes a mirror. */
@@ -2389,6 +2393,21 @@ globalThis.MindwtrHost = {
      */
     widgetsRefresh(mode = ''): string {
         return submit(async () => ({ published: (mode === 'leave' ? widgets?.flush() : widgets?.publish()) ?? false }));
+    },
+    /**
+     * Idle work ahead of the first save after the boot (Kotlin calls it in slices while the engine is quiet): the store tasks' save
+     * rows, [count] at a time, through the same row cache the save uses (warmTaskRowEntries). `{ done }`. It writes nothing.
+     */
+    saveWarm(count: number): string {
+        return submit(async () => {
+            const adapter = bootAdapter;
+            if (!adapter) return { done: true };
+            const slice = Math.max(1, Math.min(2_000, Number(count) || 0));
+            const tasks = useTaskStore.getState()._allTasks;
+            if (saveWarmTasks !== tasks) { saveWarmTasks = tasks; saveWarmFrom = 0; }
+            saveWarmFrom = warmTaskRowEntries(tasks, saveWarmFrom, slice);
+            return { done: saveWarmFrom >= tasks.length };
+        });
     },
     /** iOS and Android (after boot and each finished sync): a settled synced language wins; the device-key route above is unchanged. */
     languageSaved(stored: string, system: string): string {

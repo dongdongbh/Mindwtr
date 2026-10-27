@@ -168,8 +168,16 @@ internal object ProcessCoreHost {
     fun contentShown() {
         startDeferredSync()
         val task = synchronized(this) { boot } ?: return
-        if (task.isDone) runCatching { task.get() }.getOrNull()?.cacheBytecode()
+        val runtime = if (task.isDone) runCatching { task.get() }.getOrNull() else null
+        runtime?.cacheBytecode()
+        // Once per process: the first save's one-time work, done while the engine is idle (CoreHost.warmFirstSave).
+        if (runtime != null && saveWarmStarted.compareAndSet(false, true)) Thread({
+            runCatching { runtime.warmFirstSave() }.onFailure { Log.w(CoreHost.TAG, "Native Android save warm failed ${failureForLog(it)}") }
+        }, "mindwtr-save-warm").also { it.priority = Thread.MIN_PRIORITY }.start()
     }
+
+    /** Whether this process started the first save's warm ([contentShown]). */
+    private val saveWarmStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** Whether this process sent its first screen's About work ([aboutStartup]). */
     private val aboutStarted = java.util.concurrent.atomic.AtomicBoolean(false)

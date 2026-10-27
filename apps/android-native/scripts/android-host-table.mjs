@@ -111,6 +111,7 @@ export const ANDROID_HOST_METHODS = [
     'theme',
     'update',
     'widgetsRefresh',
+    'saveWarm',
     'window',
 ];
 

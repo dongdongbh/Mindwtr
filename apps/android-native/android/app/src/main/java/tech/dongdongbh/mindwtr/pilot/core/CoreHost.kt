@@ -91,6 +91,9 @@ class CoreHost(
 
     companion object {
         const val TAG = "MindwtrNativeDev"
+        /** Rows per saveWarm slice: about 10 ms of engine time on the S23, the longest a call waits behind the warm. */
+        const val SAVE_WARM_SLICE = 500
+        const val SAVE_WARM_MAX_MS = 30_000L
         /** Must match NATIVE_ERROR in bundle/host-entry.ts. */
         private const val NATIVE_ERROR = "!MindwtrNativeError:"
 
@@ -822,7 +825,26 @@ class CoreHost(
         widgets?.settle()
     }
 
-    /** When a call other than the widget refresh last went to the engine (uptime ms), for [WidgetRefreshGate]. */
+    /**
+     * The first save's one-time work done ahead (core's saveWarm: the store tasks' save rows, about 108 ms at 5,000 tasks on the
+     * S23), in slices of [SAVE_WARM_SLICE] while the engine is quiet: no call queued and none
+     * for [WidgetRefreshGate.QUIET_MS]. A call that comes waits at most one slice, and the next slice waits for quiet again. Off the
+     * engine thread; it gives up after [SAVE_WARM_MAX_MS] (a save then does the rest itself, as before).
+     */
+    fun warmFirstSave() {
+        if (Thread.currentThread() === engineThread) return
+        val startedAt = SystemClock.uptimeMillis()
+        while (SystemClock.uptimeMillis() - startedAt < SAVE_WARM_MAX_MS) {
+            val quietFor = SystemClock.uptimeMillis() - lastCallAt
+            if (engineBusy() || quietFor < WidgetRefreshGate.QUIET_MS) {
+                Thread.sleep(if (engineBusy()) 50 else WidgetRefreshGate.QUIET_MS - quietFor)
+                continue
+            }
+            if (callAsync("saveWarm", SAVE_WARM_SLICE).optBoolean("done", true)) return
+        }
+    }
+
+    /** When a call other than the widget refresh and the save warm last went to the engine (uptime ms), for [WidgetRefreshGate]. */
     @Volatile private var lastCallAt = 0L
 
     /** A task is waiting to run on the engine now (a delayed one, the idle pump or a deadline check, does not count). */
@@ -1083,7 +1105,7 @@ class CoreHost(
      * host calls queued meanwhile run between them. A caller on the engine thread (a nested call) pumps until its answer.
      */
     private fun callAsync(method: String, vararg args: Any?, deadlineMs: Long = deadline(method, args.toList())): JSONObject {
-        if (method != "widgetsRefresh") lastCallAt = SystemClock.uptimeMillis()
+        if (method != "widgetsRefresh" && method != "saveWarm") lastCallAt = SystemClock.uptimeMillis()
         val done = CompletableFuture<JSONObject>()
         val wait = {
             try { done.get() } catch (failure: ExecutionException) { throw failure.cause ?: failure }

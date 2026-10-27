@@ -262,6 +262,17 @@ const getTaskRowEntry = (task: Task): TaskRowEntry => {
     return entry;
 };
 
+/**
+ * Fills the task-row cache the next save reads, for tasks[from, from + count): the same rows and the same cache (getTaskRowEntry),
+ * so a save after it builds no row for these tasks. Native hosts call it in slices while the engine is idle (the first save after a
+ * cold start otherwise built every row, about 108 ms at 5,000 tasks on the S23). Returns where the next slice starts.
+ */
+export const warmTaskRowEntries = (tasks: readonly Task[], from: number, count: number): number => {
+    const end = Math.min(tasks.length, Math.max(0, from) + Math.max(0, count));
+    for (let index = Math.max(0, from); index < end; index += 1) getTaskRowEntry(tasks[index]);
+    return end;
+};
+
 /** A save's entity rows and their fingerprints (each row as JSON), per table, in saveData's write order. */
 type SqliteSaveRows = Record<'areas' | 'projects' | 'people' | 'sections' | 'tasks', { rows: unknown[][]; fingerprints: string[] }>;
 

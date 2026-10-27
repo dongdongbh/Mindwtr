@@ -4274,6 +4274,8 @@ export function countSqliteCopyRepairs(counts) { return Object.values(counts ?? 
 // Core compares every persisted field; the fake compares the whole snapshot.
 export function legacyImportMismatch(merged, saved) { return JSON.stringify(merged) === JSON.stringify(saved) ? null : 'tasks'; }
 export function splitSqlStatements(sql) { return [sql]; }
+// The save warm only fills caches: the fake has none, so a slice just moves on.
+export function warmTaskRowEntries(tasks, from, count) { return Math.min(tasks.length, from + count); }
 export class NativeReceiptSqliteAdapter extends SqliteAdapter {
   async readPomodoroSession() {
     globalThis.events.push('pomodoro-read');
@@ -9929,5 +9931,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(activity, /else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)\s+(?:\/\/[^\n]*\s+)*ToastCard\(model, /);
     assert.match(menuKt, /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
     assert.match(menuKt, /if \(editor\.patch\.keys\.any \{ it in RECURRENCE_FIELDS \}\) editor\.model\.recurrenceBase/);
+}
+// The first save's one-time work (the store tasks' save rows, the boot read's fingerprints) is done once per process after first
+// content, in slices while the engine is quiet; its own calls never count as activity for the quiet rule.
+{
+    const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
+    const processKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
+    assert.match(coreHostKt, /if \(method != "widgetsRefresh" && method != "saveWarm"\) lastCallAt = SystemClock\.uptimeMillis\(\)/);
+    assert.match(coreHostKt, /if \(callAsync\("saveWarm", SAVE_WARM_SLICE\)\.optBoolean\("done", true\)\) return/);
+    assert.match(processKt, /if \(runtime != null && saveWarmStarted\.compareAndSet\(false, true\)\) Thread\(\{\s+runCatching \{ runtime\.warmFirstSave\(\) \}/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
