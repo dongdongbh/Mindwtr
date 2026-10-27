@@ -70,6 +70,9 @@ describe('app.config APP_VARIANT', () => {
     expect(config.name).toBe('Mindwtr Benchmark');
     expect(config.android?.package).toBe('tech.dongdongbh.mindwtr.benchmark');
     expect(config.scheme).toBe('mindwtr-benchmark');
+    // expo-share-intent refuses prebuild unless the first URL type with schemes lists the app's own scheme.
+    const urlTypes = (config.ios?.infoPlist?.CFBundleURLTypes ?? []) as { CFBundleURLSchemes?: string[] }[];
+    expect(urlTypes.find((type) => type.CFBundleURLSchemes)?.CFBundleURLSchemes).toContain('mindwtr-benchmark');
     expect(config.platforms).toEqual(['android']);
     expect(config.extra?.analyticsHeartbeatUrl).toBe('');
     expect(widgetLabels(config)).toEqual(['Mindwtr Benchmark']);

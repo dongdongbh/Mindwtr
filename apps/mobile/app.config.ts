@@ -44,6 +44,7 @@ const promptTestControlsEnabled = process.env.PROMPT_TEST_CONTROLS_ENABLED === '
 // hits CloudKit's Development environment anyway, only widget payloads collide.
 const isDevVariant = (process.env.APP_VARIANT ?? '').trim() === 'development';
 const isBenchmarkVariant = (process.env.APP_VARIANT ?? '').trim() === 'benchmark';
+const BENCHMARK_SCHEME = 'mindwtr-benchmark';
 const gmailEnabled = !isFossBuild && !isBenchmarkVariant && (isDevVariant
   ? process.env.MINDWTR_GMAIL_DEV_ENABLED === '1'
   : process.env.MINDWTR_GMAIL_PRODUCTION_VERIFIED === '1');
@@ -100,7 +101,7 @@ const withAppVariant = (base: ExpoConfig): ExpoConfig => {
   return {
     ...base,
     name: `${base.name}${nameSuffix}`,
-    ...(isBenchmarkVariant ? { platforms: ['android' as const], scheme: 'mindwtr-benchmark' } : {}),
+    ...(isBenchmarkVariant ? { platforms: ['android' as const], scheme: BENCHMARK_SCHEME } : {}),
     android: { ...base.android, package: `${base.android?.package}${idSuffix}` },
     ios: { ...base.ios, bundleIdentifier: `${base.ios?.bundleIdentifier}${idSuffix}` },
     plugins,
@@ -121,7 +122,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ...entry,
     CFBundleURLSchemes: (entry.CFBundleURLSchemes ?? []).filter((scheme) => scheme !== previousGmailScheme),
   })).filter((entry) => entry.CFBundleURLSchemes.length > 0);
-  const appSchemes = typeof base.scheme === 'string' ? [base.scheme] : (base.scheme ?? []);
+  // The benchmark variant's own scheme (withAppVariant) must be in the first URL type too, or expo-share-intent refuses prebuild.
+  const appSchemes = [...(isBenchmarkVariant ? [BENCHMARK_SCHEME] : []), ...(typeof base.scheme === 'string' ? [base.scheme] : (base.scheme ?? []))];
   const firstSchemes = [...appSchemes, ...(gmailUrlTypes[0]?.CFBundleURLSchemes ?? [])];
   if (gmailIosEnabled) firstSchemes.push(gmailIosClientId.split('.').reverse().join('.'));
   if (firstSchemes.length > 0) {
