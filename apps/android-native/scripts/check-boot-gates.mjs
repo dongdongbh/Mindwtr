@@ -9963,4 +9963,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(projectsUi + source('ProjectDetails.kt'), /MarkdownInput\(draft, store, raw != null[\s\S]*?MarkdownToolbar\(model, draft, store\)/);
     assert.match(hostEntry, /markdownToolbarActions: \(\) => contract\.getMarkdownToolbarActions\(\),\s+markdownToolbarApply: \(input\) => contract\.applyMarkdownToolbar\(input\),/);
 }
+// Item 3: Create project's Expand checklist switch (RN's TaskProjectConversionModal): core's block reason for the draft, the
+// expandChecklist kind with its Undo toast, the project opened once the action ended, and the tester's line.
+{
+    const menuKt = source('EditorMenu.kt');
+    assert.match(menuKt, /runtime\.menuRead\("taskChecklistProjectBlock", input\.toString\(\)\)/);
+    assert.match(menuKt, /afterSaving\(it, if \(expand\) "expandChecklist" else "promote", title\.trim\(\)\)/);
+    assert.match(menuKt, /JSONObject\(\)\.put\("kind", "expandChecklistUndo"\)\.put\("expandRequestId", input\.getString\("requestId"\)\)/);
+    assert.match(menuKt, /logLine\("Native checklist expanded into a project releaseCheck=v1\.3\.8\/native-checklist-to-project"/);
+    assert.match(menuKt, /RnSwitch\(editorMenu\.expand, /);
+    assert.match(hostEntry, /taskChecklistProjectBlock: \(input\) => contract\.getTaskChecklistProjectBlock\(input\),/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

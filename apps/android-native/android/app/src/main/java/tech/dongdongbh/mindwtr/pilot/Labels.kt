@@ -93,7 +93,8 @@ val LABEL_KEYS = listOf(
     // The task editor's "..." menu (RN's TaskEditHeader and use-task-edit-actions.ts), its toasts and Create project's dialog.
     "task.copyTaskLink", "task.copyTaskId", "list.taskCopied", "list.taskCopyFailed", "taskEdit.duplicateTask", "task.duplicateFailed",
     "task.createProjectFromTask", "task.promoteToProjectCreated", "task.promoteToProjectMoved", "task.promoteToProjectFailed",
-    "projects.projectName", "task.keepChecklistDescription", "reference.convertToAction", "task.convertToSection",
+    "projects.projectName", "task.keepChecklistDescription", "task.expandChecklist", "task.expandChecklistDescription",
+    "reference.convertToAction", "task.convertToSection",
     "task.convertToSectionCreated", "task.skipOccurrence", "task.cancelledWithRestore", "list.taskDeleted", "common.undo", "common.success",
 )
 

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -82,6 +83,10 @@ class EditorMenuModel(private val shell: InboxViewModel) {
     var open by mutableStateOf(false)
     /** RN's TaskProjectConversionModal for a task with a checklist: the project title being typed, while it shows. */
     var promoteTitle by mutableStateOf<String?>(null)
+    /** The dialog's Expand checklist switch. */
+    var expand by mutableStateOf(false)
+    /** Why Expand is off for the draft (core's checklistProjectBlockReason, translated), "" when it is allowed, null until read. */
+    var expandBlocked by mutableStateOf<String?>(null)
     /** Create project or Convert to section held for the editor's own Save (RN saves the draft first): the task, kind and title. */
     private var afterSave: Triple<String, String, String?>? = null
 
@@ -96,7 +101,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
             EditorMenuAction.Duplicate -> { shell.closeEditor(); shell.menu.board.duplicate(editor.id) }
             // RN asks first only for a task with a checklist (its TaskProjectConversionModal); otherwise the draft's title goes at once.
             EditorMenuAction.Promote ->
-                if (JSONArray(editor.checklistNow).length() > 0) promoteTitle = editor.text("title") else promote(editor.text("title"))
+                if (JSONArray(editor.checklistNow).length() > 0) openPromote(editor) else promote(editor.text("title"))
             // RN's requestStatusChange('next'): the draft's status, saved with the editor's Save.
             EditorMenuAction.ConvertToAction -> shell.editFields(mapOf("status" to "next"))
             EditorMenuAction.ConvertToSection -> afterSaving(editor, "convertToSection", null)
@@ -122,16 +127,30 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         EditorMenuAction.Delete -> t("common.delete")
     }
 
-    /** Create project with [title] (its dialog's, or the draft's own). */
+    /** RN's dialog, its switch off, and core's reason Expand is off for the unsaved draft (RN reads it from the draft too). */
+    private fun openPromote(editor: TaskEditor) {
+        promoteTitle = editor.text("title")
+        expand = false
+        expandBlocked = null
+        val input = JSONObject().put("id", editor.id).put("taskRevision", editor.model.taskRevision)
+            .put("draft", JSONObject(draftJson(editor.fullDraft()))).put("checklist", JSONArray(editor.checklistNow))
+        shell.background(emptyList(), { runtime -> runtime.menuRead("taskChecklistProjectBlock", input.toString()) }) { reply, _ ->
+            if (promoteTitle != null) expandBlocked = reply.menuText("blocked").orEmpty()
+        }
+    }
+
+    /** Create project with [title] (its dialog's, or the draft's own); with Expand on, the checklist becomes the project's tasks. */
     fun promote(title: String) {
         promoteTitle = null
-        shell.editor?.let { afterSaving(it, "promote", title.trim()) }
+        shell.editor?.let { afterSaving(it, if (expand) "expandChecklist" else "promote", title.trim()) }
+        expand = false
     }
 
     /** The editor closed: its menu and dialog go (an action held for a Save already left through [saved]). */
     fun closed() {
         open = false
         promoteTitle = null
+        expand = false
         afterSave = null
     }
 
@@ -185,6 +204,20 @@ class EditorMenuModel(private val shell: InboxViewModel) {
                 val projectId = reply.getString("projectId")
                 shell.menu.whenIdle { shell.menu.openProjects(projectId) }
             }
+            // RN's convert(): its success toast with Undo, and the new project opens.
+            "expandChecklist" -> {
+                // The tester's line: the expansion landed (or a replay found it landed); never the task's or project's text.
+                val fields = JSONObject().put("releaseCheck", "v1.3.8/native-checklist-to-project").put("outcome", reply.optString("outcome"))
+                shell.anyTime({ it.logLine("Native checklist expanded into a project releaseCheck=v1.3.8/native-checklist-to-project", fields) }, {})
+                shell.closeEditor()
+                shell.showToast(t("common.success"), t("task.promoteToProjectCreated"), "success", t("common.undo"), 5200) {
+                    send(taskId, revision, JSONObject().put("kind", "expandChecklistUndo").put("expandRequestId", input.getString("requestId")))
+                }
+                val projectId = reply.getString("projectId")
+                shell.menu.whenIdle { shell.menu.openProjects(projectId) }
+            }
+            // RN's undo(): the task is back, and it opens.
+            "expandChecklistUndo" -> shell.menu.whenIdle { shell.openEditor(taskId) }
             "convertToSection" -> {
                 // The tester's line: the conversion landed (or a replay found it landed); never the task's or section's text.
                 val fields = JSONObject().put("releaseCheck", "v1.3.8/native-convert-to-section").put("outcome", reply.optString("outcome"))
@@ -289,13 +322,14 @@ private fun EditorMenuCard(model: InboxViewModel, editor: TaskEditor) = with(mod
 }
 
 /**
- * RN's TaskProjectConversionModal for a task with a checklist: the project's name (the draft's title to start), the note that the
- * task and its checklist move into the project, then Cancel and Create project from task. RN's Expand checklist switch is not built.
+ * RN's TaskProjectConversionModal for a task with a checklist: the project's name (the draft's title to start), the Expand checklist
+ * switch and the note for its choice, core's reason it is off, then Cancel and Create project from task.
  */
 @Composable
 private fun PromoteDialog(model: InboxViewModel) = with(model) {
     val title = editorMenu.promoteTitle ?: return
-    val c = LocalTheme.current.colors
+    val theme = LocalTheme.current
+    val c = theme.colors
     MenuOverlay({ editorMenu.promoteTitle = null }) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.padding(20.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).clickable(enabled = false) {}
@@ -307,11 +341,24 @@ private fun PromoteDialog(model: InboxViewModel) = with(model) {
             BasicTextField(title, { editorMenu.promoteTitle = it }, enabled = !busy, singleLine = true, textStyle = rnText(16, 400).copy(color = c.text),
                 cursorBrush = SolidColor(c.tint), modifier = Modifier.padding(top = 8.dp).fillMaxWidth().clip(inputShape).background(c.inputBg)
                     .rnBorder(1.dp, c.border, inputShape).padding(12.dp).semantics { contentDescription = name }.testTag("promote-title"))
-            Text(t("task.keepChecklistDescription"), style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.padding(vertical = 12.dp))
+            val blocked = editorMenu.expandBlocked
+            val expandLabel = t("task.expandChecklist")
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(expandLabel, style = rnText(14, 400), color = c.text, modifier = Modifier.weight(1f))
+                // RN's Switch with no colors: AppCompat's own track (the foreground, or the active color, at 30%) and thumb.
+                val dark = isSystemInDarkTheme()
+                val props = RnSwitchProps((if (dark) Color.White else Color.Black).copy(alpha = 0.3f), theme.switchThumb(true, true, dark).copy(alpha = 0.3f))
+                Box(Modifier.testTag("promote-expand")) {
+                    RnSwitch(editorMenu.expand, !busy && blocked != null && (blocked.isEmpty() || editorMenu.expand), expandLabel, props) { editorMenu.expand = !editorMenu.expand }
+                }
+            }
+            Text(t(if (editorMenu.expand) "task.expandChecklistDescription" else "task.keepChecklistDescription"), style = rnText(14, 400), color = c.secondaryText,
+                modifier = Modifier.padding(vertical = 12.dp))
+            if (!blocked.isNullOrEmpty()) Text(blocked, style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.testTag("promote-expand-blocked"))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 Box(Modifier.heightIn(min = 44.dp).clickable(enabled = !busy, role = Role.Button) { editorMenu.promoteTitle = null }.padding(horizontal = 12.dp),
                     contentAlignment = Alignment.Center) { Text(t("common.cancel"), style = rnText(14, 400), color = c.secondaryText) }
-                val ready = !busy && title.isNotBlank()
+                val ready = !busy && title.isNotBlank() && !(editorMenu.expand && blocked != "")
                 Box(Modifier.heightIn(min = 44.dp).clickable(enabled = ready, role = Role.Button) { editorMenu.promote(title) }.padding(horizontal = 12.dp)
                     .testTag("promote-confirm"), contentAlignment = Alignment.Center) {
                     Text(t("task.createProjectFromTask"), style = rnText(14, 400), color = c.tint.copy(alpha = if (ready) 1f else 0.5f))
