@@ -2396,7 +2396,8 @@ globalThis.MindwtrHost = {
     },
     /**
      * Idle work ahead of the first save after the boot (Kotlin calls it in slices while the engine is quiet): the store tasks' save
-     * rows, [count] at a time, through the same row cache the save uses (warmTaskRowEntries). `{ done }`. It writes nothing.
+     * rows, then the boot read's fingerprints, [count] at a time, through the same cache and values the save uses
+     * (warmTaskRowEntries, warmReadFingerprints). `{ done }`. It writes nothing.
      */
     saveWarm(count: number): string {
         return submit(async () => {
@@ -2405,8 +2406,11 @@ globalThis.MindwtrHost = {
             const slice = Math.max(1, Math.min(2_000, Number(count) || 0));
             const tasks = useTaskStore.getState()._allTasks;
             if (saveWarmTasks !== tasks) { saveWarmTasks = tasks; saveWarmFrom = 0; }
-            saveWarmFrom = warmTaskRowEntries(tasks, saveWarmFrom, slice);
-            return { done: saveWarmFrom >= tasks.length };
+            if (saveWarmFrom < tasks.length) {
+                saveWarmFrom = warmTaskRowEntries(tasks, saveWarmFrom, slice);
+                return { done: false };
+            }
+            return { done: adapter.warmReadFingerprints(slice) };
         });
     },
     /** iOS and Android (after boot and each finished sync): a settled synced language wins; the device-key route above is unchanged. */

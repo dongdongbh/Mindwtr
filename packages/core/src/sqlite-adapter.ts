@@ -319,6 +319,13 @@ const SEARCH_PROJECT_SELECT = [
 
 let tempIdTableCounter = 0;
 
+// A read row's fingerprint: its upsert columns as JSON, the form a save compares its own rows with.
+const READ_ROW_COLUMNS: Record<string, readonly string[]> = {
+    tasks: TASK_UPSERT_COLUMNS, projects: PROJECT_UPSERT_COLUMNS, sections: SECTION_UPSERT_COLUMNS,
+    areas: AREA_UPSERT_COLUMNS, people: PERSON_UPSERT_COLUMNS, saved_filters: SAVED_FILTER_UPSERT_COLUMNS,
+};
+const readRowFingerprint = (columns: readonly string[], row: Record<string, unknown>): string => JSON.stringify(columns.map((column) => row[column]));
+
 type SqliteEntityTable = 'tasks' | 'projects' | 'sections' | 'areas' | 'people' | 'saved_filters';
 
 type SqliteKnownRowVersion = {
@@ -492,6 +499,8 @@ export class SqliteAdapter {
     // fingerprints of its own (the first after a cold start) compares its rows with these instead of rewriting every row.
     // Only with rejectConcurrentWrites: that save checks inside its transaction that no other connection committed since.
     private lastReadRows: { tables: Map<string, Record<string, unknown>[]>; settingsJson: string | null; writesStarted: number } | null = null;
+    // lastReadRows' fingerprints built ahead of the first save (warmReadFingerprints), for that same read object only.
+    private warmedRead: { read: NonNullable<SqliteAdapter['lastReadRows']>; tables: Map<string, Map<string, string>>; table: number; row: number; done: boolean } | null = null;
     // Every write transaction this adapter has started (entity, receipt, calendar and host writes). Unlike writesStarted it
     // voids a read token without voiding the cold-start fingerprint shortcut, which only entity writes can stale.
     private generation = 0;
@@ -1499,17 +1508,44 @@ export class SqliteAdapter {
     private fingerprintsFromLastRead(): { tables: Map<string, Map<string, string>>; settingsJson: string | null } | null {
         const read = this.lastReadRows;
         this.lastReadRows = null;
+        const warmed = this.warmedRead;
+        this.warmedRead = null;
         if (!read || read.writesStarted !== this.writesStarted) return null;
-        const columnsByTable: Record<string, readonly string[]> = {
-            tasks: TASK_UPSERT_COLUMNS, projects: PROJECT_UPSERT_COLUMNS, sections: SECTION_UPSERT_COLUMNS,
-            areas: AREA_UPSERT_COLUMNS, people: PERSON_UPSERT_COLUMNS, saved_filters: SAVED_FILTER_UPSERT_COLUMNS,
-        };
+        if (warmed?.read === read && warmed.done) return { tables: warmed.tables, settingsJson: read.settingsJson };
         const tables = new Map<string, Map<string, string>>();
         for (const [table, rows] of read.tables) {
-            const columns = columnsByTable[table];
-            tables.set(table, new Map(rows.map((row) => [String(row.id), JSON.stringify(columns.map((column) => row[column]))])));
+            const columns = READ_ROW_COLUMNS[table];
+            tables.set(table, new Map(rows.map((row) => [String(row.id), readRowFingerprint(columns, row)])));
         }
         return { tables, settingsJson: read.settingsJson };
+    }
+
+    /**
+     * The last read's fingerprints (fingerprintsFromLastRead) built ahead of the first save after it, [count] rows per call, while
+     * the native engine is idle: about 72 ms at 5,000 tasks on the S23, otherwise paid by that save. A write since the read, or a
+     * newer read, makes them unused (the save checks the read object and writesStarted first). True once there is nothing left.
+     */
+    warmReadFingerprints(count: number): boolean {
+        const read = this.lastReadRows;
+        if (!read || read.writesStarted !== this.writesStarted) return true;
+        if (this.warmedRead?.read !== read) this.warmedRead = { read, tables: new Map(), table: 0, row: 0, done: false };
+        const warm = this.warmedRead;
+        if (warm.done) return true;
+        const entries = [...read.tables];
+        let left = Math.max(1, count);
+        while (left > 0 && warm.table < entries.length) {
+            const [table, rows] = entries[warm.table];
+            const columns = READ_ROW_COLUMNS[table];
+            let fingerprints = warm.tables.get(table);
+            if (!fingerprints) warm.tables.set(table, fingerprints = new Map());
+            const end = Math.min(rows.length, warm.row + left);
+            for (let index = warm.row; index < end; index += 1) fingerprints.set(String(rows[index].id), readRowFingerprint(columns, rows[index]));
+            left -= end - warm.row;
+            warm.row = end;
+            if (warm.row >= rows.length) { warm.table += 1; warm.row = 0; }
+        }
+        warm.done = warm.table >= entries.length;
+        return warm.done;
     }
 
     async saveTask(task: Task): Promise<void> {

@@ -826,8 +826,8 @@ class CoreHost(
     }
 
     /**
-     * The first save's one-time work done ahead (core's saveWarm: the store tasks' save rows, about 108 ms at 5,000 tasks on the
-     * S23), in slices of [SAVE_WARM_SLICE] while the engine is quiet: no call queued and none
+     * The first save's one-time work done ahead (core's saveWarm: the store tasks' save rows, then the boot read's fingerprints,
+     * about 108 + 72 ms at 5,000 tasks on the S23), in slices of [SAVE_WARM_SLICE] while the engine is quiet: no call queued and none
      * for [WidgetRefreshGate.QUIET_MS]. A call that comes waits at most one slice, and the next slice waits for quiet again. Off the
      * engine thread; it gives up after [SAVE_WARM_MAX_MS] (a save then does the rest itself, as before).
      */
