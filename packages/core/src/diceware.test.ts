@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { DICEWARE_WORDLIST, generateDicewarePassphrase } from './diceware';
+import { dicewareWordlist, generateDicewarePassphrase } from './diceware';
+
+const DICEWARE_WORDLIST = dicewareWordlist();
 
 // A randomBytes stub that replays a fixed queue of 32-bit values, so the tests
 // can steer which word each draw lands on (and force a rejected draw).
@@ -20,6 +22,21 @@ const bytesFrom = (values: number[]) => {
 };
 
 describe('diceware wordlist', () => {
+    it('is split on first use, not when the module loads (about 12 ms of the native start)', async () => {
+        vi.resetModules();
+        const split = vi.spyOn(String.prototype, 'split');
+        const splitsOfTheList = () => split.mock.contexts.filter((text) => String(text).includes('abacus abdomen')).length;
+        try {
+            const fresh = await import('./diceware');
+            expect(splitsOfTheList()).toBe(0);
+            fresh.generateDicewarePassphrase(2, bytesFrom([0, 1]));
+            fresh.generateDicewarePassphrase(2, bytesFrom([0, 1]));
+            expect(splitsOfTheList()).toBe(1);
+        } finally {
+            split.mockRestore();
+        }
+    }, 30_000);
+
     it('is the EFF long list: 7776 unique lowercase words', () => {
         expect(DICEWARE_WORDLIST).toHaveLength(7776);
         expect(new Set(DICEWARE_WORDLIST).size).toBe(7776);

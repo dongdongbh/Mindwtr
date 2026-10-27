@@ -676,28 +676,33 @@ const WORDS = `
     zippy zips zit zodiac zombie zone zoning zookeeper zoologist zoology zoom
 `;
 
-export const DICEWARE_WORDLIST: readonly string[] = WORDS.trim().split(/\s+/);
+let wordlist: readonly string[] | null = null;
+
+/** The 7776 words, split on first use: split at module load, they cost every native app start about 12 ms. */
+export function dicewareWordlist(): readonly string[] {
+    return wordlist ??= WORDS.trim().split(/\s+/);
+}
 
 /** Six words out of 7776 is ~77 bits, the EFF's own recommendation for a
  *  passphrase a human still has to be able to write down and retype. */
 export const DICEWARE_DEFAULT_WORD_COUNT = 6;
 
-// Whole 32-bit draws at or above this value are discarded and redrawn. `value %
+// Whole 32-bit draws at or above `limit` are discarded and redrawn. `value %
 // 7776` on its own would over-represent the first 2560 words, because 2^32 is
 // not a multiple of 7776 — small, but this is the one number the passphrase's
 // strength claim rests on.
-const UNIFORM_DRAW_LIMIT = Math.floor(0x1_0000_0000 / DICEWARE_WORDLIST.length) * DICEWARE_WORDLIST.length;
 
 // Rejection runs at p ≈ 6e-7 per draw against a real CSPRNG; the bound only
 // exists so a stuck or misconfigured RNG surfaces as an error instead of a hang.
 const MAX_DRAWS_PER_WORD = 128;
 
-function drawWordIndex(randomBytes: (n: number) => Uint8Array): number {
+function drawWordIndex(randomBytes: (n: number) => Uint8Array, count: number): number {
+    const limit = Math.floor(0x1_0000_0000 / count) * count;
     for (let attempt = 0; attempt < MAX_DRAWS_PER_WORD; attempt += 1) {
         const bytes = randomBytes(4);
         if (bytes.length < 4) throw new Error(`randomBytes(4) returned ${bytes.length} bytes`);
         const value = (bytes[0] * 0x100_0000) + (bytes[1] * 0x1_0000) + (bytes[2] * 0x100) + bytes[3];
-        if (value < UNIFORM_DRAW_LIMIT) return value % DICEWARE_WORDLIST.length;
+        if (value < limit) return value % count;
     }
     throw new Error('Diceware: the random source never produced an unbiased draw');
 }
@@ -712,9 +717,10 @@ export function generateDicewarePassphrase(
     randomBytes: (n: number) => Uint8Array = defaultSyncCryptoPrimitives.randomBytes,
 ): string {
     if (!Number.isInteger(words) || words < 1) throw new Error(`Diceware: invalid word count ${words}`);
+    const list = dicewareWordlist();
     const picked: string[] = [];
     for (let index = 0; index < words; index += 1) {
-        picked.push(DICEWARE_WORDLIST[drawWordIndex(randomBytes)]);
+        picked.push(list[drawWordIndex(randomBytes, list.length)]);
     }
     return picked.join(' ');
 }
