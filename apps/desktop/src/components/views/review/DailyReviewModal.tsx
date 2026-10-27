@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Calendar, Check, CheckSquare, ChevronLeft, X, type LucideIcon } from 'lucide-react';
 import {
     buildReviewSteps,
@@ -236,6 +236,11 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
             setCurrentStep(activeStep);
         }
     }, [activeStep, currentStep, setCurrentStep]);
+    const stepScrollRef = useRef<HTMLDivElement>(null);
+    // Each step opens at its top, not at the previous step's scroll position (#1471).
+    useLayoutEffect(() => {
+        if (stepScrollRef.current) stepScrollRef.current.scrollTop = 0;
+    }, [activeStep]);
 
     const finishReview = () => {
         getWorkspaceCache()?.removeItem(DAILY_REVIEW_STEP_STORAGE_KEY);
@@ -596,7 +601,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
                     {renderStepRail()}
                 </div>
 
-                <div className="flex-1 overflow-y-auto pr-2">
+                <div ref={stepScrollRef} className="flex-1 overflow-y-auto pr-2">
                     {renderStepContent()}
                 </div>
 

@@ -212,6 +212,17 @@ describe('WeeklyReviewGuideModal', () => {
         expect(navigated).toEqual(['projects']);
     });
 
+    it('opens the next step at its top (#1471)', () => {
+        useTaskStore.setState({
+            _allTasks: [makeTask({ id: 'inbox-1', title: 'Inbox task', status: 'inbox' })],
+        });
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        const scroller = document.querySelector<HTMLElement>('.flex-1.overflow-y-auto')!;
+        Object.defineProperty(scroller, 'scrollTop', { value: 480, writable: true, configurable: true });
+        fireEvent.click(screen.getByRole('button', { name: 'review.nextStepBtn' }));
+        expect(scroller.scrollTop).toBe(0);
+    });
+
     it('keeps the projects step after the final project is completed until the reviewer advances', async () => {
         seedProjects();
         useTaskStore.setState({ _allProjects: [useTaskStore.getState()._allProjects[0]] });

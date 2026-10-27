@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     buildQuickAddParseOptions,
     buildReviewSteps,
@@ -313,6 +313,11 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
             setCurrentStep(displayedStep);
         }
     }, [currentStep, displayedStep, setCurrentStep]);
+    const stepScrollRef = useRef<HTMLDivElement>(null);
+    // Each step opens at its top, not at the previous step's scroll position (#1471).
+    useLayoutEffect(() => {
+        if (stepScrollRef.current) stepScrollRef.current.scrollTop = 0;
+    }, [displayedStep]);
 
     useEffect(() => {
         getWorkspaceCache()?.setItem(WEEKLY_REVIEW_STEP_STORAGE_KEY, JSON.stringify(reviewSession));
@@ -1252,7 +1257,7 @@ export function WeeklyReviewGuideModal({ onClose }: WeeklyReviewGuideModalProps)
                     {renderStepRail()}
                 </div>
 
-                <div className="flex-1 overflow-y-auto pr-2">
+                <div ref={stepScrollRef} className="flex-1 overflow-y-auto pr-2">
                     {renderStepContent()}
                 </div>
 

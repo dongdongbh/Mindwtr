@@ -94,6 +94,20 @@ describe('DailyReviewGuideModal', () => {
         vi.useRealTimers();
     });
 
+    it('opens the next step at its top (#1471)', () => {
+        useTaskStore.setState({
+            _allTasks: [
+                makeTask({ id: 'waiting-1', title: 'Waiting for invoice', status: 'waiting' }),
+                makeTask({ id: 'next-1', title: 'Write report', status: 'next' }),
+            ],
+        });
+        render(<DailyReviewGuideModal onClose={vi.fn()} />);
+        const scroller = document.querySelector<HTMLElement>('.flex-1.overflow-y-auto')!;
+        Object.defineProperty(scroller, 'scrollTop', { value: 480, writable: true, configurable: true });
+        fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+        expect(scroller.scrollTop).toBe(0);
+    });
+
     it('shows skipped empty steps as checked and lands on all clear when nothing needs review', () => {
         render(<DailyReviewGuideModal onClose={vi.fn()} />);
 
