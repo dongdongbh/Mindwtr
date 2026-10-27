@@ -219,6 +219,14 @@ describe('normalizeTaskForLoad in one pass', () => {
         }
     });
 
+    it('keeps an unknown text direction as stored, as the two-pass form did', () => {
+        // textDirection is only written when valid; an unknown value stays in the record untouched (not a normalized field).
+        const stored = normalizeTaskForLoad(base({ textDirection: 'up', rev: 1, revBy: 'dev', pushCount: 0 }), NOW);
+        expect(stored.textDirection).toBe('up');
+        expect(normalizeTaskForLoad(stored, NOW)).toBe(stored);
+        same(base({ textDirection: 'up' }), NOW);
+    });
+
     it('loads byte-identical store state as the two-pass form did', async () => {
         const { fixture } = await import('../../../scripts/performance/fixture.mjs');
         const library = (fixture(500) as { data: AppData }).data;

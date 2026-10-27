@@ -132,13 +132,9 @@ export function normalizeTaskStatus(value: unknown): TaskStatus {
 }
 
 /**
- * Canonical status/timestamp/focus shape shared by loaders and every write path.
- * The fallback for legacy completed archives is stable entity data, never the
- * current clock, so loading an already-normalized task is idempotent.
- */
-/**
  * The lifecycle fields for a task in [status]: a valid cancellation only on an archived task, a completion time on a finished one
- * (its own, else its last update, else its creation), and no Focus on a finished one. The one rule for both normalizers below.
+ * (its own, else its last update, else its creation), and no Focus on a finished one ([focus], spread last). The one rule for both
+ * normalizers below.
  */
 function lifecycleFields(status: TaskStatus, cancelledAt: unknown, completedAt: string | undefined, updatedAt: string, createdAt: string) {
     const cancelled = status === 'archived' ? normalizeCancellationTimestamp(cancelledAt) : undefined;
@@ -146,17 +142,22 @@ function lifecycleFields(status: TaskStatus, cancelledAt: unknown, completedAt: 
     return {
         cancelledAt: cancelled,
         completedAt: cancelled ? undefined : terminal ? (completedAt || updatedAt || createdAt) : undefined,
-        terminal,
+        focus: terminal ? { isFocusedToday: false, focusOrder: undefined } : {},
     };
 }
 
+/**
+ * Canonical status/timestamp/focus shape shared by loaders and every write path.
+ * The fallback for legacy completed archives is stable entity data, never the
+ * current clock, so loading an already-normalized task is idempotent.
+ */
 export function normalizeTaskLifecycleFields(task: Task): Task {
-    const { cancelledAt, completedAt, terminal } = lifecycleFields(task.status, task.cancelledAt, task.completedAt, task.updatedAt, task.createdAt);
+    const { cancelledAt, completedAt, focus } = lifecycleFields(task.status, task.cancelledAt, task.completedAt, task.updatedAt, task.createdAt);
     const next: Task = {
         ...task,
         cancelledAt,
         completedAt,
-        ...(terminal ? { isFocusedToday: false, focusOrder: undefined } : {}),
+        ...focus,
     };
     return sameShallowRecord(task, next) ? task : next;
 }
@@ -210,7 +211,7 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
     const relativeStartOffset = task.dueDate
         ? preserveShallowIdentity(task.relativeStartOffset, normalizeRelativeStartOffset(task.relativeStartOffset))
         : undefined;
-    const lifecycle = lifecycleFields(normalizedStatus, task.cancelledAt, task.completedAt, updatedAtIso, createdAtIso);
+    const lifecycle = lifecycleFields(normalizedStatus, rest.cancelledAt, rest.completedAt, updatedAtIso, createdAtIso);
     // One object, in the key order the two steps (fields, then lifecycle) gave: at 5,000 tasks the second copy and its second
     // comparison were most of the native boot's 230 ms here on the S23's QuickJS.
     const next: Task = {
@@ -239,7 +240,7 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
         ...(hasValidPushCount || task.purgedAt ? {} : { pushCount: 0 }),
         cancelledAt: lifecycle.cancelledAt,
         completedAt: lifecycle.completedAt,
-        ...(lifecycle.terminal ? { isFocusedToday: false, focusOrder: undefined } : {}),
+        ...lifecycle.focus,
     };
 
     // A future-start Next action keeps its queued star across load and sync.
