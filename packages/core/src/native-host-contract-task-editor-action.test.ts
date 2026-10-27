@@ -324,6 +324,32 @@ describe('runTaskEditorAction', () => {
         expect(data().projects.find((row) => row.id === requestRowId(uuid(48), 'checklist-project'))?.deletedAt).toBeTruthy();
     });
 
+    it('refuses an expansion Undo after the task was restored and the project deleted by hand, as RN\'s conflict', async () => {
+        const { host, data, saves } = await open();
+        expect(await host.runTaskEditorAction(action(52, 'expandChecklist', { title: 'Kitchen' }))).toMatchObject({ ok: true });
+        const projectId = requestRowId(uuid(52), 'checklist-project');
+        expect(await useTaskStore.getState().restoreTask('task')).toMatchObject({ success: true });
+        expect(await useTaskStore.getState().deleteProject(projectId)).toMatchObject({ success: true });
+        await flushPendingSave();
+        const count = saves();
+        expect(await host.runTaskEditorAction(action(53, 'expandChecklistUndo', { expandRequestId: uuid(52) }))).toEqual({ ok: false, error: {
+            code: 'STALE_REVISION', message: 'The conversion could not proceed because its tasks or project changed. Your changes have been kept.' } });
+        expect(saves()).toBe(count);
+        expect(data().tasks.find((row) => row.id === 'task')?.deletedAt).toBeUndefined();
+    });
+
+    it('refuses a replayed expansion request ID whose landed project has another title, and writes nothing', async () => {
+        const { host, data, saves } = await open();
+        expect(await host.runTaskEditorAction(action(54, 'expandChecklist', { title: 'Kitchen' }))).toMatchObject({ ok: true });
+        const count = saves();
+        expect(await host.runTaskEditorAction(action(54, 'expandChecklist', { title: ' Kitchen ' })))
+            .toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(await host.runTaskEditorAction(action(54, 'expandChecklist', { title: 'Hall' })))
+            .toEqual({ ok: false, error: { code: 'INVALID_INPUT', message: 'Request ID already belongs to another action' } });
+        expect(saves()).toBe(count);
+        expect(data().projects).toHaveLength(2);
+    });
+
     it('refuses an expansion Undo this process did not confirm (after a restart), and writes nothing', async () => {
         const { host, data } = await open();
         expect(await host.runTaskEditorAction(action(50, 'expandChecklist', { title: 'Kitchen' }))).toMatchObject({ ok: true });

@@ -191,13 +191,16 @@ export function createTaskEditorActionMethods(deps: {
                 // A checklist is never empty here, so an expansion of this task made its first task.
                 const ours = Boolean(made) && state._tasksById.has(expandedTaskId(expandRequestId, taskId, 0));
                 if (action.kind === 'expandChecklist') {
-                    if (made && !ours) return { refused: fail('INVALID_INPUT', 'Request ID already belongs to another action') };
+                    // Another task's expansion, or this request with another title (as Convert to section refuses a reused ID).
+                    if (made && (!ours || made.title !== action.title.trim())) return { refused: fail('INVALID_INPUT', 'Request ID already belongs to another action') };
                     if (made) return !made.deletedAt && !live ? { outcome: 'unchanged', extra: { projectId } }
                         : { refused: fail('STALE_REVISION', 'Task changed since it was opened') };
                     const request = { requestId, taskId, taskRevision, title: action.title };
                     return { prepare: () => prepareExpansion(request), commit: expandWrite(false), request, extra: () => ({ projectId }) };
                 }
-                if (ours && made!.deletedAt && live) return { outcome: 'unchanged' };
+                // Landed: the task back, the project and its first task in Trash. A task restored and a project deleted by hand leave
+                // that task live, so the store's Undo refuses it as RN's conflict.
+                if (ours && made!.deletedAt && live && state._tasksById.get(expandedTaskId(expandRequestId, taskId, 0))?.deletedAt) return { outcome: 'unchanged' };
                 const command = expansions.get(expandRequestId);
                 if (!command || command.source.id !== taskId) return { refused: fail('STALE_REVISION', 'The project can no longer be undone') };
                 return { prepare: () => ({ ok: true, value: { kind: 'prepared', prepared: command } }), commit: expandWrite(true),
