@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import android.app.Application
+import android.os.SystemClock
 import android.util.Log
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.androidwidget.CheckoffStore
@@ -418,10 +419,20 @@ internal object ProcessCoreHost {
     /** MainActivity resumed ("active") or paused ("background"): core's triggers sync on resume and on leaving. */
     fun appState(state: String) {
         // RN plans the reminder alarms again on every resume (its start runs one more cycle), so a permission that changed counts;
-        // a start that failed starts again.
+        // a start that failed starts again. The state is set first: the cycle's wait reads it.
+        val changed = state != appState
+        appState = state
+        val resumedAt = SystemClock.uptimeMillis()
         if (state == "active") syncThread.execute {
-            // The new screen's reads first: at 5,000 tasks the cycle (37 ms) held core while a warm start's Focus read waited.
-            resumedRuntime()?.awaitQuiet()
+            // The new screen's reads first: at 5,000 tasks the cycle (37 ms) held core while a warm start's Focus read waited. The
+            // wait ends 2 s after the resume, or at once when the app leaves the front, so every resume runs its cycle and the sync
+            // trigger behind it never waits longer; alarms stay as planned until it does.
+            resumedRuntime()?.let { runtime ->
+                val ended = runtime.awaitQuiet(resumedAt) { appState != "active" }
+                val context = JSONObject().put("releaseCheck", "v1.3.8/native-resume-cycle-quiet").put("stage", ended)
+                    .put("durationMs", SystemClock.uptimeMillis() - resumedAt)
+                runtime.logLine("Native Android resume reminder cycle after its quiet wait releaseCheck=v1.3.8/native-resume-cycle-quiet", context)
+            }
             runCatching { reminders.resume() }
                 .onSuccess { if (reminders.reply != null) remindersStarted.complete(Unit) }
                 .onFailure { Log.w(CoreHost.TAG, "Native Android reminders cycle failed", it) }
@@ -437,8 +448,7 @@ internal object ProcessCoreHost {
                     .onFailure { Log.w(CoreHost.TAG, "Native Android system search debug read failed ${failureForLog(it)}") }
             }
         }
-        if (state == appState) return
-        appState = state
+        if (!changed) return
         // RN republishes the widgets when the app comes to the front (a new day, a changed theme) and flushes a change still
         // waiting when it leaves; a boot still running publishes once it finished. Coming to the front, the publication reads
         // the whole store on core's one thread, so it waits for the screen's first content, as the boot's does (warm starts at

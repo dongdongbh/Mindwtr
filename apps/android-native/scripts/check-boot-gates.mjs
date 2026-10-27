@@ -4037,7 +4037,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // Coming to the front publishes (RN's resume refresh); leaving flushes only a change still waiting (RN's flush on leaving:
     // host-widgets.ts flush builds nothing otherwise, host-widgets.test.ts). Coming to the front, it
     // waits for the screen's first content (startDeferredSync runs it) or the fallback, so a warm start draws first.
-    assert.match(ownerKt, /if \(state == appState\) return\s+appState = state\s+(?:\/\/[^\n]*\s+)*boot\?\.takeIf \{ it\.isDone \}\?\.let \{ task -> runCatching \{ task\.get\(\) \}\.getOrNull\(\) \}\?\.let \{ runtime ->\s+if \(state == "active"\) \{\s+(?:\/\/[^\n]*\s+)*val generation = deferredWidgets\.hold\(runtime\)\s+widgetThread\.schedule\(\{ deferredWidgets\.takeIf\(generation\)\?\.let \{ publishHeldWidgets\(it, "resume-fallback"\) \} \},\s+WIDGET_FALLBACK_MS, TimeUnit\.MILLISECONDS\)\s+\} else \{\s+(?:\/\/[^\n]*\s+)*refreshWidgets\(runtime, leave = !deferredWidgets\.leave\(\)\)\s+\}\s+\}/, 'a resume\'s fallback publishes only its own hold (HeldPublicationTest)');
+    assert.match(ownerKt, /if \(!changed\) return\s+(?:\/\/[^\n]*\s+)*boot\?\.takeIf \{ it\.isDone \}\?\.let \{ task -> runCatching \{ task\.get\(\) \}\.getOrNull\(\) \}\?\.let \{ runtime ->\s+if \(state == "active"\) \{\s+(?:\/\/[^\n]*\s+)*val generation = deferredWidgets\.hold\(runtime\)\s+widgetThread\.schedule\(\{ deferredWidgets\.takeIf\(generation\)\?\.let \{ publishHeldWidgets\(it, "resume-fallback"\) \} \},\s+WIDGET_FALLBACK_MS, TimeUnit\.MILLISECONDS\)\s+\} else \{\s+(?:\/\/[^\n]*\s+)*refreshWidgets\(runtime, leave = !deferredWidgets\.leave\(\)\)\s+\}\s+\}/, 'a resume\'s fallback publishes only its own hold (HeldPublicationTest)');
     // Kotlin says when a publication did not reach the widgets (its store or redraw failed), so the publisher sends it again.
     const hostWidgetsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt'), 'utf8');
     assert.match(hostWidgetsKt, /\.put\("stale", stale\)/);
@@ -9982,7 +9982,13 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 {
     const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
     const processKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
-    assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+(?:\/\/[^\n]*\n\s+)*resumedRuntime\(\)\?\.awaitQuiet\(\)\s+runCatching \{ reminders\.resume\(\) \}/);
+    assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+(?:\/\/[^\n]*\n\s+)*resumedRuntime\(\)\?\.let \{ runtime ->\s+val ended = runtime\.awaitQuiet\(resumedAt\) \{ appState != "active" \}[\s\S]{0,400}?\}\s+runCatching \{ reminders\.resume\(\) \}/);
+    // Leaving the front ends the wait, so the state is set before the cycle is posted.
+    assert.match(processKt, /val changed = state != appState\s+appState = state\s+val resumedAt = SystemClock\.uptimeMillis\(\)\s+if \(state == "active"\) syncThread\.execute \{/);
+    // The sync thread carries only sync's start, network and app-state triggers and the resume cycle; a local change's upload is
+    // core's own trigger on the engine (host-sync.ts), so it never queues behind the cycle's wait.
+    assert.equal(processKt.match(/syncThread\.execute/g)?.length, 5);
+    assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /useTaskStore\.subscribe\(nameNotifyListener\('auto-sync-trigger'/);
     assert.match(coreHostKt, /if \(leave\) callAsync\("widgetsRefresh", "leave"\) else \{\s+(?:\/\/[^\n]*\n\s+)*awaitQuiet\(\)\s+callAsync\("widgetsRefresh"\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
