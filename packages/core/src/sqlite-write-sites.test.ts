@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 // readRowBaseline reuses its last rows while no write transaction started since (SqliteAdapter.generation): a same-connection
-// write outside the adapter is invisible to PRAGMA data_version. So every SQL write in core and the native Android bundle is
+// write outside the adapter is invisible to PRAGMA data_version. So every SQL write in core and the native Android and iOS bundles is
 // listed here by its enclosing method, with why it is safe. A new raw run/exec, or a get/all of INSERT/UPDATE/DELETE, fails
 // this test until it is listed (and goes through noteWrite, withConnection(write: true), withHostConnection, or
 // invalidateWriteBaselineAfterDirectSQL). readRowBaseline also compares total_changes() before a reuse.
@@ -12,6 +12,9 @@ import { describe, expect, it } from 'vitest';
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(srcDir, '..', '..', '..');
 const bundleDir = join(repoRoot, 'apps', 'android-native', 'bundle');
+// iOS runs the same host-entry.ts; its own bundle files are scanned too. Its Swift bridge writes only calendar_sync on the
+// connection (SQLiteBridge.compareAndSetCalendarPushMapping), which readRowBaseline does not read and total_changes() still counts.
+const iosBundleDir = join(repoRoot, 'apps', 'ios-native', 'bundle');
 
 const WRITE = /\b(?:this\.client|this\.receiptClient|client|receiptClient|sqlite|db)\.(?:run|exec!?)\(|\.(?:get|all)\s*(?:<[^>]*>)?\(\s*[`'"]\s*(?:INSERT|UPDATE|DELETE|REPLACE)/g;
 const METHOD = /^ {4}(?:(?:private|protected|public|async|static|override|readonly) )*(?:async )?\*?([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
@@ -73,9 +76,9 @@ const writeSites = (text: string): Record<string, number> => {
 };
 
 describe('same-connection SQL writes', () => {
-    it('are only the listed ones in core and the native Android bundle', () => {
+    it('are only the listed ones in core and the native Android and iOS bundles', () => {
         const found: Record<string, Record<string, number>> = {};
-        for (const file of [...sources(srcDir), ...sources(bundleDir)]) {
+        for (const file of [...sources(srcDir), ...sources(bundleDir), ...sources(iosBundleDir)]) {
             const sites = writeSites(readFileSync(file, 'utf8'));
             if (Object.keys(sites).length) found[relative(repoRoot, file).split('\\').join('/')] = sites;
         }

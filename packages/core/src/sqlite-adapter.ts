@@ -1401,11 +1401,16 @@ export class SqliteAdapter {
         const accepted = this.lastObservedExternalChangeEpoch;
         if (!this.rejectConcurrentWrites || accepted === undefined) return null;
         if (await this.readExternalChangeEpoch() !== accepted) return null;
-        // Nothing changed the rows since the last read (same accepted epoch, no write transaction since): its rows again, mapped
-        // to new objects and checked by the subclass under this hold, as a read is.
+        // Read before the rows: a same-connection change landing after them then counts as newer than this read.
+        const changes = await this.readTotalChanges();
+        // Nothing changed the rows since the last read (same accepted epoch, no write transaction, no change on this connection,
+        // no full read since): its rows again, mapped to new objects and checked by the subclass under this hold, as a read is.
+        // ponytail: a transaction open at the last read that rolled back after it is not seen: that read took its uncommitted rows,
+        // and the rollback moves no count. It needs a raw BEGIN outside the adapter (sqlite-write-sites.test.ts forbids one) or a
+        // save whose COMMIT and ROLLBACK both failed; the next full read clears it.
         const reused = this.rowBaseline;
         const reuse = reused !== null && reused.epoch === accepted && reused.generation === this.generation && this.lastKnownRowVersions !== null
-            && await this.readTotalChanges() === reused.changes;
+            && changes === reused.changes;
         const read = reuse ? reused.rows : await Promise.all([
             Promise.all(SQLITE_ENTITY_TABLES.map((table) => this.client.all<Record<string, unknown>>(
                 `SELECT rowid AS _rowid, id, rev, updatedAt FROM ${table}`,
@@ -1414,7 +1419,6 @@ export class SqliteAdapter {
             this.client.all<Record<string, unknown>>('SELECT rowid as _rowid, * FROM saved_filters ORDER BY createdAt, name'),
         ]);
         if (!reuse && await this.readExternalChangeEpoch() !== accepted) return null;
-        const changes = reuse ? reused.changes : await this.readTotalChanges();
         const [entityRows, settingsRow, savedFilterRows] = read;
         const light = {
             ids: Object.fromEntries(SQLITE_ENTITY_TABLES.map((table, index) => [table, entityRows[index].map((row) => String(row.id))])) as Record<SqliteTombstoneTable, string[]>,

@@ -197,6 +197,33 @@ describe('SqliteAdapter.readRowBaseline', () => {
             expect(light?.settings.theme).toBe('dark');
         });
 
+        it('(h) a same-connection change landing after the row reads is not taken as read (total_changes() read before them)', async () => {
+            const path = file();
+            const { client, counter } = counting(path);
+            let inject = false;
+            const racing = new Proxy(client, { get: (target, name, receiver) => {
+                const value = Reflect.get(target, name, receiver);
+                if (name !== 'all' || typeof value !== 'function') return typeof value === 'function' ? value.bind(target) : value;
+                return async (sql: string, ...rest: unknown[]) => {
+                    const rows = await value.call(target, sql, ...rest);
+                    // A raw write right after the last row read of this readRowBaseline, before it returns.
+                    if (inject && sql.startsWith('SELECT rowid as _rowid, * FROM saved_filters')) {
+                        inject = false;
+                        await target.run("UPDATE settings SET data = '{\"theme\":\"dark\"}' WHERE id = 1");
+                    }
+                    return rows;
+                };
+            } });
+            const adapter = new SqliteAdapter(racing, { rejectConcurrentWrites: true });
+            await adapter.getData();
+            await adapter.saveData({ ...empty, tasks: [task('t1')] });
+            inject = true;
+            await adapter.readRowBaseline();
+            const light = await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+            expect(light?.settings.theme).toBe('dark');
+        });
+
         it("a reuse still runs the subclass's check of the read", async () => {
             const path = file();
             const checks: number[] = [];
