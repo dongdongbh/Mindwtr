@@ -414,7 +414,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         }
         // RN's pinned row under the header (projectTaskPinnedToolbar): its "+" adds a task in this project, as Next (a filed project
         // takes none).
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             // RN's filter chip before the "..." while any filter is on: core's "Filters · N", opening the sheet.
             detail?.listFilters?.let { view ->

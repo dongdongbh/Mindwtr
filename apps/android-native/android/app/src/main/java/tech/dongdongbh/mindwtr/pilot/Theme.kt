@@ -1,5 +1,8 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.padding
@@ -335,6 +338,16 @@ fun MindwtrTheme(reply: ThemeChoice.Reply?, content: @Composable () -> Unit) {
  * button, a preset chip).
  */
 fun Modifier.rnBorder(width: Dp, color: Color, shape: Shape): Modifier = border(width, color, shape).padding(width)
+
+/** RN's borderBottomWidth: 1: a 1 dp line along the bottom that takes its own space, as RN's border does (the box grows by it). */
+fun Modifier.rnBorderBottom(color: Color): Modifier = drawBehind {
+    drawRect(color, Offset(0f, size.height - 1.dp.toPx()), Size(size.width, 1.dp.toPx()))
+}.padding(bottom = 1.dp)
+
+/** RN's borderTopWidth: 1: a 1 dp line along the top that takes its own space. */
+fun Modifier.rnBorderTop(color: Color): Modifier = drawBehind {
+    drawRect(color, Offset.Zero, Size(size.width, 1.dp.toPx()))
+}.padding(top = 1.dp)
 
 /** RN's COMPACT_TEXT_MAX_SCALE (constants/text-scale.ts): a control label's text grows with the font scale up to 1.2x. */
 const val COMPACT_TEXT_MAX_SCALE = 1.2f

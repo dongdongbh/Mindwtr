@@ -10020,4 +10020,12 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     for (const kt of [activity, more]) assert.match(kt, /fade\(if \((active|open)\) 1f else RN_TAB_ICON_IDLE\)/);
     assert.match(activity, /fun Modifier\.hairline\(color: Color, top: Boolean\) = drawBehind \{\s+(?:\/\/[^\n]*\s+)*drawRect\(color, Offset\(0f, if \(top\) 0f else size\.height - 1f\), Size\(size\.width, 1f\)\)/);
 }
+// Borders (tabbar-borders-20261027-06): RN's borderBottomWidth/borderTopWidth 1 is 1 dp that takes layout space, so native's
+// rnBorderBottom/rnBorderTop draw the 1 dp line and pad by it. The project's pinned toolbar (projectTaskPinnedToolbar) first.
+{
+    const theme = source('Theme.kt');
+    assert.match(theme, /fun Modifier\.rnBorderBottom\(color: Color\): Modifier = drawBehind \{[\s\S]{0,200}\}\.padding\(bottom = 1\.dp\)/);
+    assert.match(theme, /fun Modifier\.rnBorderTop\(color: Color\): Modifier = drawBehind \{[\s\S]{0,200}\}\.padding\(top = 1\.dp\)/);
+    assert.match(source('ProjectsScreen.kt'), /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 56\.dp\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\.padding\(horizontal = 12\.dp, vertical = 8\.dp\)/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
