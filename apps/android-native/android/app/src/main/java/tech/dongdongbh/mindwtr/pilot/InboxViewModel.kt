@@ -1668,9 +1668,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * Core's searchTasks for the query and filters on screen, in the background. An answer for another
      * query (core echoes the trimmed query) or an older read is dropped.
      */
-    private fun readSearch() {
-        val request = search?.request() ?: return
-        background(listOf(Part.Search), { runtime -> SearchView.parse(runtime.searchTasks(request)) }) { view, mine ->
+    private fun readSearch(done: (() -> Unit)? = null) {
+        val request = search?.request() ?: return run { done?.invoke() }
+        background(listOf(Part.Search), { runtime -> SearchView.parse(runtime.searchTasks(request)) }, done) { view, mine ->
             if (fresh(mine, Part.Search) && view.query == search?.query?.trim()) searchView = view
         }
     }
@@ -1962,12 +1962,28 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     /** Every list from offset 0, as deep as it is shown, in the background: after every command. */
-    /** Every list and the open screen read again; after a finished sync cycle ([synced]) its language and theme first. */
+    /**
+     * Every list and the open screen read again; after a finished sync cycle ([synced]) its language and theme first. After a
+     * command, what is on screen is read first and every other list once it answered (AfterCommandReads).
+     */
     private fun refreshAll(synced: Boolean = false) {
         val at = depth()
-        background(Part.entries, { runtime -> if (synced) applySyncedChoices(runtime, prefs); read(runtime, at) }, ::showLists)
-        menu.refresh()
-        if (search != null) readSearch()
+        if (synced) {
+            background(Part.entries, { runtime -> applySyncedChoices(runtime, prefs); read(runtime, at) }, apply = ::showLists)
+            menu.refresh()
+            if (search != null) readSearch()
+            return
+        }
+        AfterCommandReads.run(AfterCommandReads.order(screen, menu.screen != null, search != null)) { step, done ->
+            when (step) {
+                AfterCommandReads.Read.Search -> readSearch(done)
+                AfterCommandReads.Read.Menu -> menu.refresh(done)
+                AfterCommandReads.Read.Focus -> background(listOf(Part.Focus, Part.Areas), { runtime -> read(runtime, at, Screen.Focus) }, done, ::showLists)
+                AfterCommandReads.Read.Projects ->
+                    background(listOf(Part.Projects, Part.Project, Part.Areas), { runtime -> read(runtime, at, Screen.Projects) }, done, ::showLists)
+                AfterCommandReads.Read.AllLists -> background(Part.entries, { runtime -> read(runtime, at) }, done, ::showLists)
+            }
+        }
     }
 
     /** The open project from offset 0 as deep as it is shown. A project core no longer has reads as null. */
@@ -2136,30 +2152,36 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * a user action that starts meanwhile runs, and the engine thread queues both.
      * It starts only while no user action runs and no retry is owed.
      */
-    internal fun <T> background(parts: List<Part>, read: (CoreHost) -> T, apply: (T, Long) -> Unit) {
+    internal fun <T> background(parts: List<Part>, read: (CoreHost) -> T, always: (() -> Unit)? = null, apply: (T, Long) -> Unit) {
         val runtime = host
-        if (runtime == null || busy || failedAction != null) return
+        // [always]: once the read answered or failed (on the main thread), or at once when it does not start.
+        if (runtime == null || busy || failedAction != null) return run { always?.invoke() }
         val mine = ++issued
         Thread({
             val result = runCatching { read(runtime) }
             result.exceptionOrNull()?.let { Log.e(CoreHost.TAG, "Core action failed action=background ${failureForLog(it)}") }
             ui {
-                // A failure is shown only if it is still the newest read of one of its lists.
-                if (result.isFailure && parts.map { fresh(mine, it) }.none { it }) return@ui
-                result.onSuccess { apply(it, mine) }.onFailure { failure ->
-                    // A user action running now reports its own outcome; an owed retry is never replaced.
-                    if (busy || failedAction != null) return@onFailure
-                    val message = failure.message ?: failure.javaClass.simpleName
-                    error = message
-                    if (message.startsWith("SAVE_FAILED")) {
-                        val failed = FailedAction("storage", "")
-                        Log.w(CoreHost.TAG, "Core background read failed lock=storage")
-                        ProcessCoreHost.recordFailure(ProcessCoreHost.PendingFailure(failed, message, menu.page, editor, screen, focus, projects, project, areaFilter))
-                        failedAction = failed
-                    }
-                }
+                try { show(parts, mine, result, apply) } finally { always?.invoke() }
             }
         }, "mindwtr-read").start()
+    }
+
+    /** A background read's answer on the main thread. */
+    private fun <T> show(parts: List<Part>, mine: Long, result: Result<T>, apply: (T, Long) -> Unit) {
+        // A failure is shown only if it is still the newest read of one of its lists.
+        if (result.isFailure && parts.map { fresh(mine, it) }.none { it }) return
+        result.onSuccess { apply(it, mine) }.onFailure { failure ->
+            // A user action running now reports its own outcome; an owed retry is never replaced.
+            if (busy || failedAction != null) return@onFailure
+            val message = failure.message ?: failure.javaClass.simpleName
+            error = message
+            if (message.startsWith("SAVE_FAILED")) {
+                val failed = FailedAction("storage", "")
+                Log.w(CoreHost.TAG, "Core background read failed lock=storage")
+                ProcessCoreHost.recordFailure(ProcessCoreHost.PendingFailure(failed, message, menu.page, editor, screen, focus, projects, project, areaFilter))
+                failedAction = failed
+            }
+        }
     }
 
     /**

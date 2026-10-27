@@ -842,7 +842,11 @@ assert.equal(code(model).match(/\bperform\s*\{/g).length, 11, 'editor, reload, T
 // Background reads (resume, each minute, after a command) never take busy, so they disable no control and never
 // turn a user's tap away: only perform sets busy, and its guard knows nothing of reads in flight.
 const backgroundFn = code(model.slice(model.indexOf('internal fun <T> background('), model.indexOf('internal fun perform(')));
-assert.match(backgroundFn, /if \(runtime == null \|\| busy \|\| failedAction != null\) return\s+val mine = \+\+issued/);
+assert.match(backgroundFn, /if \(runtime == null \|\| busy \|\| failedAction != null\) return run \{ always\?\.invoke\(\) \}\s+val mine = \+\+issued/);
+// After a command, what is on screen is read first and every other list once it answered (AfterCommandReads); a read that
+// answers, fails or never starts lets the next ones go.
+assert.match(backgroundFn, /try \{ show\(parts, mine, result, apply\) \} finally \{ always\?\.invoke\(\) \}/);
+assert.match(model, /AfterCommandReads\.run\(AfterCommandReads\.order\(screen, menu\.screen != null, search != null\)\)/);
 assert.doesNotMatch(backgroundFn, /busy = /);
 assert.equal(code(model).match(/\bbusy = true\b/g).length, 1, 'only a user action takes busy');
 // A list the boot left for later (still null) waits for a running action to end instead of being dropped (startup review 1).
@@ -850,7 +854,9 @@ assert.match(model, /fun refreshFocus\(\) \{\s+\/\/[^\n]*\s+if \(focus == null &
 // Projects waits even when already read: a list older than a write made outside a command (the welcome sheet's Getting Started)
 // would keep the project's header title blank (O2f phone check).
 assert.match(model, /fun refreshProjects\(\) \{\s+(?:\/\/[^\n]*\s+)+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
-assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+background\(Part\.entries, \{ runtime -> if \(synced\) applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)/);
+assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)/);
+// After a command every list is still read: the full read is the step after what is on screen.
+assert.match(model, /AfterCommandReads\.Read\.AllLists -> background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, done, ::showLists\)/);
 // A command's lists are read again only after it succeeds (or was refused as stale), in the background, once busy is released.
 assert.match(model, /try \{\s+\/\/[^\n]*\s+debugProperty\("delay_action_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+work\(runtime\); done = true\s+\}/);
 assert.match(model, /ui \{\s+busy = false\s+if \(\(done \|\| stale\) && action != null\) refreshAll\(\)\s+finished\?\.invoke\(\)\s+\}/);
@@ -866,7 +872,7 @@ assert.match(model, /internal enum class Part \{ Focus, Projects, Project, Proje
     for (const part of ['Focus', 'Projects', 'Project', 'Areas']) assert.match(show, new RegExp(`if \\(fresh\\(mine, Part\\.${part}\\)\\)`), `a full read applies ${part} on its own`);
     assert.doesNotMatch(code(model), /\bfresh\(mine\)/, 'every freshness check names its list');
 }
-assert.match(backgroundFn, /if \(result\.isFailure && parts\.map \{ fresh\(mine, it\) \}\.none \{ it \}\) return@ui\s+result\.onSuccess \{ apply\(it, mine\) \}\.onFailure/);
+assert.match(backgroundFn, /if \(result\.isFailure && parts\.map \{ fresh\(mine, it\) \}.none \{ it \}\) return\s+result\.onSuccess \{ apply\(it, mine\) \}\.onFailure/);
 assert.match(backgroundFn, /if \(busy \|\| failedAction != null\) return@onFailure/, 'a background failure never replaces an owed retry or a running action');
 for (const read of ['fun refresh()', 'fun loadMoreFocus(', 'fun openProject(', 'fun loadMoreProject(']) {
     const body = code(model.slice(model.indexOf(read), model.indexOf('\n    }\n', model.indexOf(read))));
@@ -1070,7 +1076,8 @@ assert.match(model, /readOpen\(runtime, at\) else null,\s+AreaFilter\.parse\(run
 // Startup (phase 2 #2): the boot reads only the tab on screen; Focus and Projects follow first content (or their tab opening, or a
 // tab chosen while the boot ran). Every other full read (refreshAll) reads every list.
 assert.match(model, /private fun read\(runtime: CoreHost, at: Depth, shown: Screen\? = null\) = Lists\(\s+if \(shown == null \|\| shown == Screen\.Focus\) readFocus\(runtime, null, at\.focus, at\.controls\) else null,\s+if \(shown == null \|\| shown == Screen\.Projects\) ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s+at\.project,\s+if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
-assert.equal(code(model).match(/\bread\(runtime, at\b[^)]*\)/g).join(' | '), 'read(runtime, at, screen) | read(runtime, at) | read(runtime, at)', 'the boot reads the tab on screen; a read\'s Try again and refreshAll read all');
+assert.equal(code(model).match(/\bread\(runtime, at\b[^)]*\)/g).join(' | '), 'read(runtime, at, screen) | read(runtime, at) | read(runtime, at) | read(runtime, at, Screen.Focus) | read(runtime, at, Screen.Projects) | read(runtime, at)',
+    'the boot reads the tab on screen; a read\'s Try again and a sync\'s refreshAll read all; a command\'s refreshAll reads the tab on screen, then all (AfterCommandReads)');
 assert.match(model, /fun contentShown\(\) \{\s+if \(focus == null\) refreshFocus\(\)\s+if \(projects == null\) refreshProjects\(\)\s+ProcessCoreHost\.contentShown\(\)\s+\}/);
 assert.match(model, /loading = false\s+\/\/[^\n]*\s+if \(screen == Screen\.Focus && lists\.focus == null\) refreshFocus\(\)\s+if \(screen == Screen\.Projects && lists\.projects == null\) refreshProjects\(\)/);
 // A list the boot did not read never closes the open project.
@@ -2173,7 +2180,7 @@ assert.match(processUi, /capture\.getString\("notePreview"\)/);
 assert.doesNotMatch(code(searchUi + processUi), /Pending core field/);
 assert.doesNotMatch(searchUi + processUi, /Pending core field/, 'the pending-core comments are gone with the copies');
 assert.match(hostEntry, /saveSearch\(json: string\): string \{\s*return submit\(async \(\) => taskResult\('saveSearch', await contract\.saveSearch\(JSON\.parse\(json\)\)\)\);/);
-assert.match(model, /background\(listOf\(Part\.Search\), \{ runtime -> SearchView\.parse\(runtime\.searchTasks\(request\)\) \}\) \{ view, mine ->\s+if \(fresh\(mine, Part\.Search\) && view\.query == search\?\.query\?\.trim\(\)\) searchView = view/);
+assert.match(model, /background\(listOf\(Part\.Search\), \{ runtime -> SearchView\.parse\(runtime\.searchTasks\(request\)\) \}, done\) \{ view, mine ->\s+if \(fresh\(mine, Part\.Search\) && view\.query == search\?\.query\?\.trim\(\)\) searchView = view/);
 assert.equal(model.match(/runtime\.searchTasks\(/g).length, 1);
 assert.match(model, /FailedAction\("saveSearch", current\.saveRequestId, current\.query\.trim\(\), patch = mapOf\("name" to name\.trim\(\)\)\)/);
 assert.match(model, /private fun sendSaveSearch\(action: FailedAction\) = perform\(action\) \{ runtime ->\s+try \{\s+runtime\.saveSearch\([^\n]*\.put\("requestId", action\.id\)\.toString\(\)\)[\s\S]{0,400}?acknowledged\(action\)/);
@@ -2185,7 +2192,8 @@ assert.match(model, /if \(action\.kind == "saveSearch"\) keepSearch\(SearchState
     'a new screen reopens the save dialog on an owed save, never re-sends it');
 assert.match(searchUi, /failedAction == null \|\| failedAction == saveSearchAction\(state, sent\)/);
 assert.match(searchUi, /failedAction == null \|\| failedAction == completeAction\(task\.id, task\.taskRevision\)/, 'Mark Done from search is the lists\' Done with its exact retry');
-assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{[\s\S]*?if \(search != null\) readSearch\(\)\s+\}/, 'search is read again after every command');
+assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{[\s\S]*?if \(search != null\) readSearch\(\)\s+return\s+\}/, 'search is read again after every sync');
+assert.match(model, /AfterCommandReads\.Read\.Search -> readSearch\(done\)/, 'search is read again after every command, first when open');
 // Search results are core's: core's highlight segments, date line and tone, and tap target; Kotlin never sorts or filters them.
 assert.doesNotMatch(code(searchUi), /\.(sort\w*|sorted\w*|groupBy|reversed|shuffled|distinct\w*)\b/);
 assert.match(searchUi, /row\.getJSONArray\("titleSegments"\)\.segments\(\)/);
@@ -2450,7 +2458,7 @@ assert.equal(code(menuModel).match(/store\.delete\(\)/g).length, 2, 'only an ans
 assert.match(menuModel, /"addTask" -> FailedAction\("somedayTask", open\.getString\("captureId"\), text,/, 'Add task sends its capture UUID, kept with its dialog');
 // Reads: background refreshes and user reads, with the shell's per-list freshness; paging stays under one revision and a stale
 // window reads the list again from its first window (not an error).
-assert.match(menuModel, /shell\.background\(listOf\(Part\.Menu\), \{ runtime -> read\(runtime, list, params, depth, deep, bulk = bulk\) \}\) \{ next, mine ->\s+if \(shell\.fresh\(mine, Part\.Menu\)\) show\(list, next\)/);
+assert.match(menuModel, /shell\.background\(listOf\(Part\.Menu\), \{ runtime -> read\(runtime, list, params, depth, deep, bulk = bulk\) \}, done\) \{ next, mine ->\s+if \(shell\.fresh\(mine, Part\.Menu\)\) show\(list, next\)/);
 assert.match(menuModel, /shell\.ui \{ if \(shell\.fresh\(mine, Part\.Menu\)\) show\(list, next\) \}/);
 assert.match(menuModel, /\.put\("offset", page\.items\.size\)\.put\("limit", PAGE\)\.put\("revision", page\.revision\)/, 'later windows carry the view\'s revision');
 assert.match(menuModel, /runtime\.menuRead\("collection", JSONObject\(\)\.put\("view", list\)\.put\("collection", name\)\.put\("params", page\.params\)/, 'collections page through getMenuViewCollection with the accepted params');
@@ -2462,7 +2470,8 @@ assert.equal(code(menuModel).match(/if \(failure\.message\?\.startsWith\("STALE_
 assert.match(menuModel, /private fun readMoveChoices\(depth: Int = WINDOW\) \{[\s\S]*?\.put\("offset", 0\)[\s\S]*?\.put\("revision", first\.getString\("revision"\)\)[\s\S]*?if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/,
     'the move dialog pages its choices under the first window\'s revision and rereads from the first window');
 assert.match(menuModel, /fun moreMoveChoices\(\) \{ moveChoices\?\.getJSONObject\("choices"\)\?\.getJSONArray\("items"\)\?\.length\(\)\?\.let \{ readMoveChoices\(it \+ WINDOW\) \} \}/);
-assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+background\(Part\.entries, \{ runtime -> if \(synced\) applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every command');
+assert.match(model, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every sync');
+assert.match(model, /AfterCommandReads\.Read\.Menu -> menu\.refresh\(done\)/, 'the open Menu list is read again after every command, first when on screen');
 // Filters, sorts and groups: every choice sends the exact edit or value core put on it; only typed text builds an edit.
 {
     // Kotlin names only core's Archive and bulk actions (NativeArchiveAction, NativeBulkAction), the typed text's edits (a filter's
@@ -2666,7 +2675,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(boardModel, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure\s+if \(again\) return read\(runtime, view\.getJSONObject\("filters"\), null, depth, again = false\)/);
     // A calendar changes with the clock: read again each minute while it shows, and on resume (the screen hosts' refresh).
     assert.match(calendarUi, /owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ while \(true\) \{ delay\(60_000\); refresh\(\) \} \}/);
-    assert.match(menuModel, /if \(list == "calendar"\) return calendar\.refresh\(\)\s+if \(list == "board"\) return board\.refresh\(\)/);
+    assert.match(menuModel, /if \(list == "calendar"\) return calendar\.refresh\(\)\.also \{ done\(\) \}\s+if \(list == "board"\) return board\.refresh\(\)\.also \{ done\(\) \}/);
     // Navigation state rides the Bundle: the Calendar's place, search, sheet and composer draft; the Board's filters, search and sheet.
     for (const key of ['calendarState', 'calendarQuery', 'calendarSheet', 'calendarComposer']) assert.match(calendarModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
     for (const key of ['boardFilters', 'boardSearch', 'boardSheet']) assert.match(boardModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
@@ -2979,7 +2988,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // Navigation: the Settings tile opens, RN's settings stack pops on Back, and the stack, search and screen state ride the Bundle.
     assert.match(menuModel, /"settings" -> open\(MenuScreen\.Settings\)/);
     assert.match(menuModel, /if \(screen == MenuScreen\.Settings && settings\.back\(\)\) return/);
-    assert.match(menuModel, /if \(list == "settings"\) return settings\.refresh\(\)/);
+    assert.match(menuModel, /if \(list == "settings"\) return settings\.refresh\(\)\.also \{ done\(\) \}/);
     for (const key of ['settingsStack', 'settingsQuery', 'settingsLocal']) assert.match(settingsModel, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
     assert.match(menuUi, /"settings" -> SettingsList\(model\)/);
     // Manage's lists page under Manage's revision; a list that changed between windows keeps what it read (the next read starts over).
@@ -8744,7 +8753,7 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     assert.match(settingsKt, /fun applySyncedChoices\(runtime: CoreHost, prefs: SharedPreferences\) \{[\s\S]*?runtime\.languageSaved\([\s\S]*?ThemeChoice\.load\(runtime\.theme\(/);
     assert.match(viewModelKt, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)/, 'boot applies synced choices after the device ones');
     assert.match(viewModelKt, /if \(cycles != syncCycles\) \{[\s\S]{0,400}?refreshAll\(synced = true\)/, 'a finished sync cycle applies synced choices');
-    assert.match(viewModelKt, /if \(synced\) applySyncedChoices\(runtime, prefs\)/);
+    assert.match(viewModelKt, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\);/);
     // The labels follow core's language, not only a device key write: languageSaved can switch core's language with none.
     assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
     assert.match(coreHost, /fun languageSaved\(stored: String, system: String\): JSONObject = callAsync\("languageSaved", stored, system\)/);

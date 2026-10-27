@@ -644,19 +644,20 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     fun retryRead() = reload()
 
     /** After every command, on resume, and after boot: the open sheet and list from their first window, as deep as shown. */
-    fun refresh() {
+    fun refresh(done: () -> Unit = {}) {
         if (sheet) readMore()
-        val list = list ?: return
-        if (list == "calendar") return calendar.refresh()
-        if (list == "board") return board.refresh()
-        if (list == "settings") return settings.refresh()
-        if (list == "mindSweep") return sweep.refresh()
+        // [done]: once the open list's read answered (AfterCommandReads); the other screens here have no list read to wait for.
+        val list = list ?: return done()
+        if (list == "calendar") return calendar.refresh().also { done() }
+        if (list == "board") return board.refresh().also { done() }
+        if (list == "settings") return settings.refresh().also { done() }
+        if (list == "mindSweep") return sweep.refresh().also { done() }
         val params = params(list)
         val bulk = bulkInput(list)
         val shown = page
         val depth = maxOf(PAGE, shown?.items?.size ?: 0)
         val deep = shown?.deep.orEmpty()
-        shell.background(listOf(Part.Menu), { runtime -> read(runtime, list, params, depth, deep, bulk = bulk) }) { next, mine ->
+        shell.background(listOf(Part.Menu), { runtime -> read(runtime, list, params, depth, deep, bulk = bulk) }, done) { next, mine ->
             if (shell.fresh(mine, Part.Menu)) show(list, next)
         }
         if (screen == MenuScreen.History && history == null) readHistory()
