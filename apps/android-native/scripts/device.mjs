@@ -104,10 +104,14 @@ export const button = (nodes, label) => {
     if (!labelNode) return undefined;
     const [x1, y1, x2, y2] = box(labelNode);
     const [cx, cy] = [(x1 + x2) / 2, (y1 + y2) / 2];
-    return nodes.filter((node) => node.clickable === 'true').filter((node) => {
+    const around = nodes.filter((node) => node.clickable === 'true').filter((node) => {
         const [left, top, right, bottom] = box(node);
         return left <= cx && top <= cy && right >= cx && bottom >= cy;
-    }).sort((a, b) => {
+    });
+    // A control under an overlay still lists its touch box: the capture popup's Save sits over the Menu tab, whose box holds
+    // Save's label center and is smaller (10-27). A box that holds the whole label comes first; a clipped one is the fallback.
+    const whole = around.filter((node) => { const [l, t, r, b] = box(node); return l <= x1 && t <= y1 && r >= x2 && b >= y2; });
+    return (whole.length ? whole : around).sort((a, b) => {
         const area = (node) => { const [l, t, r, bt] = box(node); return (r - l) * (bt - t); };
         return area(a) - area(b);
     })[0];
