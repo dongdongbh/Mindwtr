@@ -536,7 +536,7 @@ private fun AttachmentList(rows: List<AttachmentRowView>, enabled: Boolean, open
     val shape = RoundedCornerShape(10.dp)
     Column(Modifier.padding(top = top.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)) {
         for (row in rows) {
-            Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 10.dp).testTag("attachment-row"),
+            Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 10.dp).testTag("attachment-row"),
                 verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).padding(end = 10.dp).clickable(enabled = !row.downloading, role = Role.Button) { open(row.id) }
                     .semantics { contentDescription = row.title; if (row.downloading) disabled() }) {
@@ -581,7 +581,7 @@ fun ProjectAttachments(model: InboxViewModel, projectId: String) = with(model.at
     LaunchedEffect(projectId, downloading) { while (downloading.isNotEmpty()) { delay(500); readProject(projectId) } }
     val rows = if (this.projectId == projectId) projectRows else emptyList()
     val canEdit = this.projectId == projectId && projectCanEdit && !model.busy
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).testTag("project-details-attachments")
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).testTag("project-details-attachments")
         .padding(horizontal = 16.dp, vertical = 12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(t("attachments.title"), style = rnText(14, 700), color = c.text, modifier = Modifier.weight(1f).semantics { heading() })

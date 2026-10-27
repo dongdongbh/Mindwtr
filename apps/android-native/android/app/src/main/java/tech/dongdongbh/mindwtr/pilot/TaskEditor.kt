@@ -519,7 +519,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("task-editor")) {
         // RN's TaskEditHeader: Close and More at the left, Save at the right (More and Close when read-only).
         // 12 above and below its 44 controls, and RN's 1 bottom border, which takes room as borderBottomWidth does (69 tall).
-        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).background(c.cardBg).hairline(c.border, top = false).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 13.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).background(c.cardBg).rnBorderBottom(c.border).padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically) {
             if (!editor.readOnly) {
                 val closeLabel = t("common.close")
@@ -1161,7 +1161,7 @@ private fun CollapsibleSection(editorId: String, section: EditorSection, content
     var open by rememberSaveable(editorId, section.id) { mutableStateOf(section.open) }
     var helpOpen by rememberSaveable(editorId, section.id, "help") { mutableStateOf(false) }
     val title = t(section.titleKey!!)
-    Column(Modifier.padding(top = 8.dp).hairline(c.border, top = true)) {
+    Column(Modifier.padding(top = 8.dp).rnBorderTop(c.border)) {
         Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = t(if (open) "markdown.collapse" else "markdown.expand")) { open = !open }
             .semantics { contentDescription = title; heading() }.heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (open) Lucide.ChevronDown else Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
@@ -1412,7 +1412,7 @@ private fun SuggestionMenu(matches: List<Pair<String, String>>, enabled: Boolean
         matches.forEachIndexed { index, (value, text) ->
             Text(value, style = rnText(14, 500), color = c.text, modifier = Modifier.fillMaxWidth()
                 .clickable(enabled = enabled, role = Role.Button) { choose(text) }
-                .then(if (index < matches.size - 1) Modifier.hairline(theme.divider, top = false) else Modifier)
+                .then(if (index < matches.size - 1) Modifier.rnBorderBottom(theme.divider) else Modifier)
                 .padding(horizontal = 12.dp, vertical = 10.dp))
         }
     }

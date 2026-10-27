@@ -83,7 +83,7 @@ import org.json.JSONObject
 fun EditorTabs(model: InboxViewModel, editor: TaskEditor) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(12.dp)
-    Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 10.dp)) {
+    Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(Modifier.weight(1f).clip(shape).background(c.filterBg).rnBorder(1.dp, c.border, shape)) {
             for ((tab, icon, key) in listOf(Triple("task", SettingsLucide.Pencil, "markdown.edit"), Triple("view", Lucide.Eye, "markdown.preview"))) {
                 val open = editor.tab == tab
@@ -373,7 +373,7 @@ fun ChecklistField(model: InboxViewModel, editor: TaskEditor, locked: Boolean) =
         Column(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(8.dp)) {
             val items = field.menuObjects("items")
             if (ordering && reorder) {
-                for (item in items) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = false).padding(horizontal = 4.dp, vertical = 8.dp),
+                for (item in items) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderBottom(c.border).padding(horizontal = 4.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(item.getString("orderTitle"), style = rnText(16, 500), color = if (item.getBoolean("struck")) c.secondaryText else c.text, maxLines = 1,
                         modifier = Modifier.weight(1f))
@@ -441,7 +441,7 @@ private fun ChecklistItemRow(model: InboxViewModel, editor: TaskEditor, field: J
     val focus = remember { FocusRequester() }
     LaunchedEffect(checklistFocus) { if (checklistFocus == id) { runCatching { focus.requestFocus() }; checklistFocused() } }
     val struck = item.getBoolean("struck")
-    Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         val done = item.getBoolean("completed")
         val label = item.getString("checkboxLabel")
         Box(Modifier.size(44.dp).clearAndSetSemantics {

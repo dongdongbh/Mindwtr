@@ -9897,7 +9897,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(editorUi, /CompactRow/, 'RN draws no compact date row: every date field is its heading over its box');
     assert.match(editorUi, /"dueDate", "startTime", "reviewAt" -> FormGroup \{[\s\S]{0,600}FieldHeading\(icon, label\)\s+\/\/[^\n]*\n\s+Row\(verticalAlignment = Alignment\.CenterVertically\) \{\s+DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
     // (2) RN's header: 12 above and below its 44 controls, and its 1 bottom border, which takes room as RN's borderBottomWidth does.
-    assert.match(editorUi, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 60\.dp\)\.background\(c\.cardBg\)\.hairline\(c\.border, top = false\)\.padding\(start = 16\.dp, end = 16\.dp, top = 12\.dp, bottom = 13\.dp\)/);
+    assert.match(editorUi, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 60\.dp\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\.padding\(start = 16\.dp, end = 16\.dp, top = 12\.dp, bottom = 12\.dp\)/);
     // (3) RN's Description: the preview switch (Eye, then Pencil while previewing) and Expand beside its heading; the preview is
     // core's rendered draft (the View tab's read), and Expand opens RN's ExpandedMarkdownEditor, an overlay as RN's descriptionExpanded.
     assert.match(editorUi, /val previewLabel = t\(if \(previewing\) "markdown\.edit" else "markdown\.preview"\)/);
