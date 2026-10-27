@@ -51,6 +51,7 @@ const tc = {
 };
 
 const t = (key: string) => ({
+    'common.clear': 'Clear',
     'common.notSet': 'Not set',
     'common.done': 'Done',
     'taskEdit.dueDateLabel': 'Due Date',
@@ -940,6 +941,26 @@ describe('TaskEditScheduleField', () => {
         expect(setDraftField).toHaveBeenCalledWith('recurrenceRRule', 'FREQ=YEARLY;INTERVAL=2');
     });
 
+    it.each([
+        ['startTime', { startTime: '2026-04-28' }, 'Clear Start Date'],
+        ['dueDate', { dueDate: '2026-04-28' }, 'Clear Due Date'],
+        ['reviewAt', { reviewAt: '2026-04-28' }, 'Clear taskEdit.reviewDateLabel'],
+    ] as const)('names the field on the %s clear button for screen readers, as native does', (fieldId, dates, label) => {
+        const props = {
+            customWeekdays: [], dailyInterval: 1, draft: makeDraft(dates), fieldId,
+            formatDate: (value?: string) => value ?? '', formatDueDate: (value?: string) => value ?? '',
+            getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'), monthlyPattern: 'date', onDateChange: vi.fn(),
+            openCustomRecurrence: vi.fn(), pendingDueDate: null, pendingStartDate: null, recurrenceOptions: [],
+            recurrenceRRuleValue: '', recurrenceRuleValue: '', recurrenceStrategyValue: 'strict', recurrenceWeekdayButtons: [],
+            setCustomWeekdays: vi.fn(), setDraftField: vi.fn(), setShowDatePicker: vi.fn(), showDatePicker: null, styles, t, task: null, tc,
+        } as unknown as ComponentProps<typeof TaskEditScheduleField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditScheduleField {...props} />);
+        });
+        expect(tree.root.findByProps({ accessibilityLabel: label }).props.accessibilityRole).toBe('button');
+    });
+
     it('turns the due-date time and clear chips into labelled icon buttons', () => {
         const props = {
             customWeekdays: [],
@@ -978,7 +999,7 @@ describe('TaskEditScheduleField', () => {
         expect(timeChip.findAllByType(Text)).toHaveLength(0);
         expect(timeChip.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
 
-        const clearChip = tree.root.findByProps({ accessibilityLabel: 'common.clear' });
+        const clearChip = tree.root.findByProps({ accessibilityLabel: 'Clear Due Date' });
         expect(clearChip.props.accessibilityRole).toBe('button');
         expect(clearChip.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
     });

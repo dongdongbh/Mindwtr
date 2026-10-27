@@ -591,7 +591,7 @@ export function TaskEditScheduleField({
                                         setDraftField('relativeStartOffset', undefined);
                                     }}
                                     accessibilityRole="button"
-                                    accessibilityLabel={t('common.clear')}
+                                    accessibilityLabel={`${t('common.clear')} ${t('taskEdit.startDateLabel')}`}
                                 >
                                     <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
@@ -715,7 +715,7 @@ export function TaskEditScheduleField({
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => updateDueDate(undefined)}
                                     accessibilityRole="button"
-                                    accessibilityLabel={t('common.clear')}
+                                    accessibilityLabel={`${t('common.clear')} ${t('taskEdit.dueDateLabel')}`}
                                 >
                                     <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
@@ -776,7 +776,7 @@ export function TaskEditScheduleField({
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
                                     onPress={() => setDraftField('reviewAt', '')}
                                     accessibilityRole="button"
-                                    accessibilityLabel={t('common.clear')}
+                                    accessibilityLabel={`${t('common.clear')} ${t('taskEdit.reviewDateLabel')}`}
                                 >
                                     <CalendarX size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
                                 </TouchableOpacity>
