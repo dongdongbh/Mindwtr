@@ -2,7 +2,6 @@ import { Swipeable } from 'react-native-gesture-handler';
 import {
     formatTaskMarkedDoneMessage,
     getFocusStarBlockedText,
-    formatI18nTemplate,
     getProjectNextActionPromptData,
     isTaskFinished,
     isTaskActionable,
@@ -10,6 +9,7 @@ import {
     buildQuickAddParseOptions,
     buildTaskMovePatch,
     buildTaskRowMeta,
+    buildTaskRowSwipeActions,
     flushPendingSave,
     getDateFormattingConfig,
     parseProjectNextActionInput,
@@ -20,24 +20,22 @@ import {
     undoTaskCompletion,
     useTaskStore,
 } from '@mindwtr/core';
-import type { Area, Project, ProjectSequenceTaskCue, Section, Task, TaskMoveDestination, TaskStatus } from '@mindwtr/core';
+import type { Area, Project, ProjectSequenceTaskCue, Section, Task, TaskMoveDestination, TaskRowSwipeAction, TaskStatus } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform } from 'react-native';
-import { ArrowRight, Check, RotateCcw, Trash2 } from 'lucide-react-native';
+import { Platform, useWindowDimensions } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { ThemeColors } from '../hooks/use-theme-colors';
 import { useStatusColors } from '../hooks/use-status-colors';
 import { useTaskDisplayClock } from '../hooks/use-task-display-clock';
 import { useToast } from '../contexts/toast-context';
-import { AppPressable } from './app-pressable';
 import { logNextActionSavedForEditing, presentProjectNextActionPrompt, ProjectNextActionEditor } from './project-next-action-prompt';
 import { SwipeableTaskItemContent } from './swipeable-task-item/SwipeableTaskItemContent';
 import { ProjectNextActionPromptModal } from './swipeable-task-item/ProjectNextActionPromptModal';
 import { SwipeableTaskItemStatusMenu } from './swipeable-task-item/SwipeableTaskItemStatusMenu';
+import { SwipeableTaskItemTray } from './swipeable-task-item/SwipeableTaskItemTray';
+import { SwipeableTaskItemDatesSheet } from './swipeable-task-item/SwipeableTaskItemDatesSheet';
 import { CompletedAtPicker } from './completed-at-picker';
-import { styles } from './swipeable-task-item/swipeable-task-item.styles';
-import { CompactText } from '@/components/compact-text';
 import { useSwipeableChecklist } from './swipeable-task-item/useSwipeableChecklist';
 import { settleStoreAction } from './store-action-result';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
@@ -137,6 +135,7 @@ export type SwipeableTaskItemRowContext = {
 const TASK_SWIPE_FRICTION = 1.25;
 const TASK_SWIPE_OPEN_THRESHOLD = 72;
 const TASK_SWIPE_DRAG_OFFSET = 28;
+const TRAY_LABEL_MAX_FONT_SCALE = 1.2;
 
 type ResolvedRowCallbacks = {
     onPress: () => void;
@@ -226,13 +225,9 @@ function StoreBackedSwipeableTaskItem(props: Omit<SwipeableTaskItemInnerProps, '
 }
 
 /**
- * A swipeable task item with context-aware left swipe actions:
- * - Inbox: swipe to Next
- * - Next: swipe to Done
- * - Waiting/Someday: swipe to Next
- * - Done: swipe to restore to Inbox
- * 
- * Right swipe always shows Delete action.
+ * A task row whose swipes reveal a fixed tray of actions (#1464), from core's buildTaskRowSwipeActions:
+ * swipe right shows Done and Focus, swipe left shows Organize, Dates and Delete. A done task keeps
+ * Restore; Reference keeps Next (plus Organize) and Archived keeps Done. Nothing runs until a button is tapped.
  */
 function SwipeableTaskItemInner({
     task,
@@ -270,6 +265,7 @@ function SwipeableTaskItemInner({
     rowContext,
 }: SwipeableTaskItemInnerProps) {
     const swipeableRef = useRef<Swipeable>(null);
+    const { fontScale } = useWindowDimensions();
     const ignorePressUntil = useRef<number>(0);
     const { t, language } = useLanguage();
     const { showToast } = useToast();
@@ -351,7 +347,14 @@ function SwipeableTaskItemInner({
     const canShowFocusToggle = !interactionDisabled
         && showFocusToggle
         && meta.canFocus;
+    const swipeActions = useMemo(() => buildTaskRowSwipeActions({
+        task: { status: task.status, isFocusedToday: task.isFocusedToday },
+        t,
+        selectionMode,
+        interactionDisabled,
+    }), [interactionDisabled, selectionMode, t, task.isFocusedToday, task.status]);
     const [showStatusMenu, setShowStatusMenu] = useState(false);
+    const [showDatesSheet, setShowDatesSheet] = useState(false);
     const [showDestinationPicker, setShowDestinationPicker] = useState(false);
     const [projectNextActionPrompt, setProjectNextActionPrompt] = useState<ProjectNextActionPromptState | null>(null);
     const [projectNextActionTitle, setProjectNextActionTitle] = useState('');
@@ -462,6 +465,7 @@ function SwipeableTaskItemInner({
     useEffect(() => {
         if (!interactionDisabled) return;
         setShowStatusMenu(false);
+        setShowDatesSheet(false);
         setCompletedAtPicker(null);
         closeProjectNextActionPrompt();
     }, [closeProjectNextActionPrompt, interactionDisabled]);
@@ -581,11 +585,11 @@ function SwipeableTaskItemInner({
         showActionFailure,
     ]);
 
-    const toggleFocus = () => {
+    // promoteInbox is the swipe tray's Focus only (#1464): an Inbox task is judged as Next and the
+    // patch makes it Next; a refusal writes nothing. The row star keeps the plain rule (Inbox refuses).
+    const toggleFocus = (promoteInbox: boolean) => {
         if (interactionDisabled || selectionMode) return;
-        // Core focus-star module decides eligibility, cap, and the patch;
-        // status promotion happens in the store's star↔status rules.
-        const action = useTaskStore.getState().getFocusStarAction(task);
+        const action = useTaskStore.getState().getFocusStarAction(task, { promoteInbox });
         if (!action.canToggle) {
             const blockedText = getFocusStarBlockedText(t, action, focusTaskLimit);
             if (blockedText) {
@@ -605,8 +609,6 @@ function SwipeableTaskItemInner({
             });
     };
 
-    const leftAction = meta.swipe;
-    const leftActionColor = statusColors[leftAction.target].text;
     const swipeAccessibilityHint = interactionDisabled
         ? (allowInspectionWhenDisabled
             ? tFallback(t, 'projects.archivedTaskInspectionHint', 'Double-tap to inspect this task. Reactivate the project to edit it.')
@@ -619,53 +621,74 @@ function SwipeableTaskItemInner({
                 'Double-tap to edit task details. More actions are available in the accessibility actions menu.',
             );
 
-    const renderLeftActions = () => {
-        const LeftIcon = leftAction.icon === 'restore' ? RotateCcw : leftAction.icon === 'done' ? Check : ArrowRight;
-        return (
-            <AppPressable
-                style={[styles.swipeActionLeft, { backgroundColor: leftActionColor }]}
-                pressedColor="rgba(0, 0, 0, 0.18)"
-                onPress={() => {
-                    swipeableRef.current?.close();
-                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
-                    handleStatusChange(leftAction.target);
-                }}
-                onLongPress={() => {
-                    swipeableRef.current?.close();
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
-                    setShowStatusMenu(true);
-                }}
-                accessibilityLabel={formatI18nTemplate(
-                    tFallback(t, 'task.aria.action', '{action} action'),
-                    { action: leftAction.label },
-                )}
-                accessibilityRole="button"
-                accessibilityHint={t('taskStatus.changeStatus')}
-            >
-                <LeftIcon size={20} color="#FFFFFF" />
-                <CompactText style={styles.swipeActionText} numberOfLines={1}>
-                    {leftAction.label}
-                </CompactText>
-            </AppPressable>
-        );
+    const handleDatesSave = (patch: Partial<Task>) => {
+        setShowDatesSheet(false);
+        if (interactionDisabled) return;
+        void settleStoreAction(() => updateTask(task.id, patch)).then((outcome) => {
+            if (!outcome.ok) showActionFailure(outcome.message);
+        });
     };
 
-    const renderRightActions = () => (
-        <AppPressable
-            style={styles.swipeActionRight}
-            pressedColor="rgba(0, 0, 0, 0.18)"
-            onPress={() => {
-                swipeableRef.current?.close();
+    // One handler for a tray button and its accessibility action.
+    const runSwipeAction = (action: TaskRowSwipeAction) => {
+        if (interactionDisabled || selectionMode || !action.enabled) return;
+        switch (action.id) {
+            case 'focus':
+                toggleFocus(true);
+                return;
+            case 'organize':
+                setShowStatusMenu(true);
+                return;
+            case 'dates':
+                setShowDatesSheet(true);
+                return;
+            case 'delete':
                 handleDelete();
-            }}
-            accessibilityLabel={tFallback(t, 'task.aria.delete', 'Delete task')}
-            accessibilityRole="button"
-        >
-            <Trash2 size={20} color="#FFFFFF" />
-            <CompactText style={styles.swipeActionText} numberOfLines={1}>
-                {t('common.delete')}
-            </CompactText>
-        </AppPressable>
+                return;
+            default:
+                if (action.status) handleStatusChange(action.status);
+        }
+    };
+
+    const pressTrayAction = (action: TaskRowSwipeAction) => {
+        swipeableRef.current?.close();
+        if (action.id === 'done' || action.id === 'restore' || action.id === 'next') {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+        }
+        runSwipeAction(action);
+    };
+
+    const canBackdateCompletion = !interactionDisabled && !selectionMode && task.status !== 'done';
+    // Long-press on the revealed Done opens the completion-time picker, as the status menu's Done does.
+    const longPressTrayDone = canBackdateCompletion ? () => {
+        swipeableRef.current?.close();
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+        setCompletedAtPicker('complete');
+    } : undefined;
+    // Past this text scale a tray label no longer fits its button, so the buttons show icons only.
+    const showTrayLabels = fontScale <= TRAY_LABEL_MAX_FONT_SCALE;
+
+    const renderLeftActions = () => (
+        <SwipeableTaskItemTray
+            actions={swipeActions.swipeRight}
+            side="left"
+            showLabels={showTrayLabels}
+            statusColors={statusColors}
+            t={t}
+            onAction={pressTrayAction}
+            onLongPressDone={longPressTrayDone}
+        />
+    );
+
+    const renderRightActions = () => (
+        <SwipeableTaskItemTray
+            actions={swipeActions.swipeLeft}
+            side="right"
+            showLabels={showTrayLabels}
+            statusColors={statusColors}
+            t={t}
+            onAction={pressTrayAction}
+        />
     );
 
     const handlePress = () => {
@@ -737,11 +760,10 @@ function SwipeableTaskItemInner({
         },
         ...(!selectionMode
             ? [
-                { name: 'changeStatus', label: leftAction.label },
+                ...[...swipeActions.swipeRight, ...swipeActions.swipeLeft].map((action) => ({ name: action.id, label: action.label })),
                 ...(onLongPressAction && onLongPressActionLabel
                     ? [{ name: 'longPressAction', label: onLongPressActionLabel }]
                     : []),
-                { name: 'delete', label: tFallback(t, 'common.delete', 'Delete') },
             ]
             : []),
     ];
@@ -757,17 +779,12 @@ function SwipeableTaskItemInner({
             return;
         }
         if (selectionMode) return;
-        if (actionName === 'changeStatus') {
-            handleStatusChange(leftAction.target);
-            return;
-        }
         if (actionName === 'longPressAction' && onLongPressAction) {
             onLongPressAction(task);
             return;
         }
-        if (actionName === 'delete') {
-            handleDelete();
-        }
+        const action = [...swipeActions.swipeRight, ...swipeActions.swipeLeft].find((item) => item.id === actionName);
+        if (action) runSwipeAction(action);
     };
 
     const content = (
@@ -802,7 +819,7 @@ function SwipeableTaskItemInner({
             footerContent={footerContent}
             onToggleChecklist={toggleChecklist}
             onToggleChecklistItem={toggleChecklistItem}
-            onToggleFocus={toggleFocus}
+            onToggleFocus={() => toggleFocus(false)}
             focusToggleDisabledLabel={task.isFocusedToday ? undefined : focusToggleDisabledLabel}
             selectionMode={selectionMode}
             sequenceCue={sequenceCue}
@@ -841,14 +858,21 @@ function SwipeableTaskItemInner({
                 onStatusChange={handleStatusChange}
                 onMoveToDestination={() => setShowDestinationPicker(true)}
                 onMoveToSection={onMoveToSection}
-                onBackdatedComplete={interactionDisabled || task.status === 'done'
-                    ? undefined
-                    : () => setCompletedAtPicker('complete')}
+                onBackdatedComplete={canBackdateCompletion ? () => setCompletedAtPicker('complete') : undefined}
                 taskId={task.id}
                 taskStatus={task.status}
                 tc={tc}
                 t={t}
             />
+            {!interactionDisabled && showDatesSheet ? (
+                <SwipeableTaskItemDatesSheet
+                    task={task}
+                    tc={tc}
+                    t={t}
+                    onClose={() => setShowDatesSheet(false)}
+                    onSave={handleDatesSave}
+                />
+            ) : null}
             {!interactionDisabled && showDestinationPicker ? (
                 <TaskEditDestinationPicker
                     visible

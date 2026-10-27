@@ -84,29 +84,12 @@ export function SwipeableTaskItemStatusMenu({
                             );
                         })}
                     </View>
-                    <View style={styles.menuMoveActions}>
-                        {(['link', 'id'] as const).map((kind) => {
-                            const label = kind === 'link'
-                                ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
-                                : tFallback(t, 'task.copyTaskId', 'Copy task ID');
-                            return (
-                                <Pressable
-                                    key={`copy-${kind}`}
-                                    style={[styles.menuMoveItem, { borderColor: tc.border }]}
-                                    onPress={() => {
-                                        void copyTaskReference(taskId, kind, t, showToast);
-                                        onClose();
-                                    }}
-                                    accessibilityRole="button"
-                                    accessibilityLabel={label}
-                                >
-                                    <Text style={[styles.menuMoveText, { color: tc.text }]}>{label}</Text>
-                                </Pressable>
-                            );
-                        })}
-                    </View>
                     {onMoveToDestination || onMoveToSection ? (
                         <View style={styles.menuMoveActions}>
+                            {/* Organize (#1464) sets Status above and Destination here: two headed groups. */}
+                            <Text style={[styles.menuSectionTitle, { color: tc.secondaryText }]} accessibilityRole="header">
+                                {tFallback(t, 'task.destination', 'Destination')}
+                            </Text>
                             {onMoveToDestination ? (
                                 <Pressable
                                     style={[styles.menuMoveItem, { borderColor: tc.border }]}
@@ -135,6 +118,27 @@ export function SwipeableTaskItemStatusMenu({
                             ) : null}
                         </View>
                     ) : null}
+                    <View style={styles.menuMoveActions}>
+                        {(['link', 'id'] as const).map((kind) => {
+                            const label = kind === 'link'
+                                ? tFallback(t, 'task.copyTaskLink', 'Copy task link')
+                                : tFallback(t, 'task.copyTaskId', 'Copy task ID');
+                            return (
+                                <Pressable
+                                    key={`copy-${kind}`}
+                                    style={[styles.menuMoveItem, { borderColor: tc.border }]}
+                                    onPress={() => {
+                                        void copyTaskReference(taskId, kind, t, showToast);
+                                        onClose();
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={label}
+                                >
+                                    <Text style={[styles.menuMoveText, { color: tc.text }]}>{label}</Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
                 </View>
             </Pressable>
         </Modal>

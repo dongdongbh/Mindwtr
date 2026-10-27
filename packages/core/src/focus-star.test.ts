@@ -5,6 +5,7 @@ import {
     canStarNewCapture,
     getFocusStarBlockedText,
     resolveFocusStarAction,
+    resolveRowFocusStarAction,
     resolveTaskEditorFocusStar,
     resolveTaskFocusCreation,
     resolveTaskFocusUpdate,
@@ -75,6 +76,28 @@ describe('resolveFocusStarAction', () => {
         expect(action).toMatchObject({ canToggle: true, blockedReason: null });
         const recurring = makeTask({ recurrence: { rule: 'daily' }, dueDate: '2099-01-01' });
         expect(resolveFocusStarAction(recurring, baseContext()).blockedReason).toBe('deferred');
+    });
+});
+
+describe('resolveRowFocusStarAction', () => {
+    it('stars an Inbox task as Next, with status next in the same patch (#1464)', () => {
+        const action = resolveRowFocusStarAction(makeTask({ status: 'inbox' }), baseContext());
+        expect(action).toMatchObject({ canToggle: true, blockedReason: null, patch: { isFocusedToday: true, status: 'next' } });
+    });
+
+    it('refuses an Inbox task the Next rules refuse', () => {
+        // The plain resolver refuses every Inbox task; the row judges it as Next instead.
+        expect(resolveFocusStarAction(makeTask({ status: 'inbox' }), baseContext()).blockedReason).toBe('clarify');
+        const refused = resolveRowFocusStarAction(makeTask({ status: 'inbox' }), baseContext({ focusedCount: 3 }));
+        expect(refused).toMatchObject({ canToggle: false, blockedReason: 'limit' });
+        // A refused star carries no status: nothing in its patch may move the task out of Inbox.
+        expect(refused.patch).toEqual({ isFocusedToday: true });
+    });
+
+    it('leaves other statuses and star removal to resolveFocusStarAction', () => {
+        for (const task of [makeTask({ status: 'waiting' }), makeTask({ status: 'someday' }), makeTask({ status: 'inbox', isFocusedToday: true })]) {
+            expect(resolveRowFocusStarAction(task, baseContext())).toEqual(resolveFocusStarAction(task, baseContext()));
+        }
     });
 });
 

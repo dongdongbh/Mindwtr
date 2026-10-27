@@ -4,10 +4,20 @@ import renderer from 'react-test-renderer';
 import { AccessibilityInfo, Alert, AppState, Platform, Text } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 
-import { configureDateFormatting, getDateFormattingConfig, getTaskAgeLabel, safeFormatDate } from '@mindwtr/core';
+import {
+  configureDateFormatting,
+  getDateFormattingConfig,
+  getQuickDate,
+  getTaskAgeLabel,
+  resolveFocusStarAction,
+  resolveRowFocusStarAction,
+  safeFormatDate,
+} from '@mindwtr/core';
 import type { AppSettings, TaskEditorFieldId } from '@mindwtr/core';
 import { SwipeableTaskItem, readTaskRowRenderCount, type TaskRowActions } from './swipeable-task-item';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
+import { SwipeableTaskItemStatusMenu } from './swipeable-task-item/SwipeableTaskItemStatusMenu';
+import { SwipeableTaskItemTray } from './swipeable-task-item/SwipeableTaskItemTray';
 import { TaskEditModal } from './task-edit-modal';
 
 vi.mock('./task-edit-modal', () => ({ TaskEditModal: vi.fn(() => null) }));
@@ -204,8 +214,10 @@ vi.mock('../hooks/use-theme-tokens', () => ({
 vi.mock('lucide-react-native', () => ({
   AlignLeft: (props: any) => React.createElement('AlignLeft', props),
   ArrowRight: (props: any) => React.createElement('ArrowRight', props),
+  CalendarDays: (props: any) => React.createElement('CalendarDays', props),
   Check: (props: any) => React.createElement('Check', props),
   CircleDot: (props: any) => React.createElement('CircleDot', props),
+  FolderOpen: (props: any) => React.createElement('FolderOpen', props),
   History: (props: any) => React.createElement('History', props),
   Hourglass: (props: any) => React.createElement('Hourglass', props),
   ListChecks: (props: any) => React.createElement('ListChecks', props),
@@ -499,7 +511,7 @@ it('uses the shared rounded star treatment for focused tasks', () => {
   expect(focusButtonStyle).not.toHaveProperty('backgroundColor');
   expect(hasText(tree, '★')).toBe(false);
 
-  const star = tree.root.find((node) => (node.type as unknown) === 'Star');
+  const star = focusButton.find((node) => (node.type as unknown) === 'Star');
   expect(star.props.color).toBe('#F59E0B');
   expect(star.props.fill).toBe('#F59E0B');
   expect(star.props.strokeWidth).toBe(2);
@@ -1398,10 +1410,10 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Edit completion time' })).toHaveLength(0);
   });
 
-  // #1164: Waiting For completes from the quick action; Someday still promotes to Next.
+  // #1164: Waiting For completes from the quick action; #1464: Someday does too.
   it.each([
     ['waiting', 'Done action', 'done'],
-    ['someday', 'Next action', 'next'],
+    ['someday', 'Done action', 'done'],
   ] as const)('quick status action on a %s task is %s', (status, actionLabel, expectedStatus) => {
     const onStatusChange = vi.fn();
 
@@ -1471,18 +1483,19 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     });
 
     const taskButton = tree.root.find((node) => node.props.accessibilityRole === 'button' && node.props.accessibilityLabel?.includes('Status: Inbox'));
-    const nextAction = tree.root.find((node) => node.props.accessibilityLabel === 'Next action' && typeof node.props.onPress === 'function');
+    const doneAction = tree.root.find((node) => node.props.accessibilityLabel === 'Done action' && typeof node.props.onPress === 'function');
 
     expect(taskButton.props.accessibilityHint).toBe(
       'Double-tap to edit task details. More actions are available in the accessibility actions menu.'
     );
     expect(taskButton.props.accessibilityHint).not.toContain('Swipe right');
 
+    // #1464: an Inbox row completes straight from Done, no detour through Next.
     renderer.act(() => {
-      nextAction.props.onPress();
+      doneAction.props.onPress();
     });
 
-    expect(onStatusChange).toHaveBeenCalledWith('next');
+    expect(onStatusChange).toHaveBeenCalledWith('done');
     expect(hapticsMocks.notificationAsync).toHaveBeenCalledWith('success');
   });
 
@@ -1542,6 +1555,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       'task.aria.changeStatusHint': 'Touchez deux fois pour ouvrir le menu des statuts',
       'status.inbox': 'Boite de reception',
       'status.next': 'Suivante',
+      'common.done': 'Terminer',
     };
     storeState.projects = [{ id: 'project-1', title: 'Mindwtr' }];
 
@@ -1581,7 +1595,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(tree.root.findByProps({ accessibilityLabel: 'Ouvrir le projet Mindwtr' })).toBeDefined();
     expect(tree.root.findByProps({ accessibilityLabel: 'Ouvrir le contexte @travail' })).toBeDefined();
     expect(tree.root.findByProps({ accessibilityLabel: 'Ouvrir le tag #urgent' })).toBeDefined();
-    expect(tree.root.findByProps({ accessibilityLabel: 'Action : Suivante' })).toBeDefined();
+    expect(tree.root.findByProps({ accessibilityLabel: 'Action : Terminer' })).toBeDefined();
     const statusButton = tree.root.findByProps({
       accessibilityLabel: 'Changer le statut. Statut actuel : Boite de reception',
     });
@@ -1692,24 +1706,15 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       );
     });
 
+    // Long-press on the swipe-revealed Done opens the completion-time picker directly.
     const doneAction = tree.root.find((node) => (
       node.props.accessibilityLabel === 'Done action' && typeof node.props.onLongPress === 'function'
     ));
-
+    expect(doneAction.props.accessibilityHint).toBe('Long-press to complete with a different time');
     renderer.act(() => {
       doneAction.props.onLongPress();
     });
-
     expect(hapticsMocks.impactAsync).toHaveBeenCalledWith('medium');
-    expect(doneAction.props.accessibilityHint).toBe('Change Status');
-
-    const menuDoneAction = tree.root.find((node) => (
-      node.props.accessibilityLabel === 'Done' && typeof node.props.onLongPress === 'function'
-    ));
-    expect(menuDoneAction.props.accessibilityHint).toBe('Long-press to complete with a different time');
-    renderer.act(() => {
-      menuDoneAction.props.onLongPress();
-    });
 
     const picker = tree.root.findByType('CompletedAtPicker' as any);
     expect(picker.props.showTimeSpent).toBe(true);
@@ -3011,5 +3016,257 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(addEventListener).not.toHaveBeenCalled();
     renderer.act(() => tree.unmount());
     addEventListener.mockRestore();
+  });
+
+  describe('swipe tray (#1464)', () => {
+    const trayTc = {
+      taskItemBg: '#111111',
+      cardBg: '#111111',
+      border: '#222222',
+      text: '#ffffff',
+      secondaryText: '#999999',
+      tint: '#3b82f6',
+      onTint: '#ffffff',
+      filterBg: '#000000',
+      warning: '#f59e0b',
+    } as any;
+    const rowElement = (task: Record<string, unknown>, props: Record<string, unknown> = {}) => (
+      <SwipeableTaskItem
+        task={{
+          id: 'task-1',
+          title: 'Call the bank',
+          status: 'inbox',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          ...task,
+        } as any}
+        isDark={false}
+        tc={trayTc}
+        onPress={vi.fn()}
+        onStatusChange={vi.fn()}
+        onDelete={vi.fn()}
+        {...props}
+      />
+    );
+    const renderRow = (task: Record<string, unknown>, props: Record<string, unknown> = {}) => {
+      let tree!: renderer.ReactTestRenderer;
+      renderer.act(() => {
+        tree = renderer.create(
+          <SwipeableTaskItem
+            task={{
+              id: 'task-1',
+              title: 'Call the bank',
+              status: 'inbox',
+              createdAt: '2026-01-01T00:00:00.000Z',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+              ...task,
+            } as any}
+            isDark={false}
+            tc={trayTc}
+            onPress={vi.fn()}
+            onStatusChange={vi.fn()}
+            onDelete={vi.fn()}
+            {...props}
+          />
+        );
+      });
+      return tree;
+    };
+    const button = (tree: renderer.ReactTestRenderer, label: string) => tree.root.find((node) => (
+      node.props.accessibilityLabel === label && typeof node.props.onPress === 'function'
+    ));
+    const rowButton = (tree: renderer.ReactTestRenderer) => tree.root.find((node) => (
+      Array.isArray(node.props.accessibilityActions) && typeof node.props.onAccessibilityAction === 'function'
+    ));
+    // The store's getFocusStarAction, over an empty store with a limit of 1.
+    const withFocusStore = async (focusedCount: number, run: () => Promise<void>) => {
+      const original = storeState.getFocusStarAction;
+      const context = { tasks: [], projects: [], sections: [], focusedCount, focusTaskLimit: 1 };
+      storeState.getFocusStarAction = (task: any, options?: { promoteInbox?: boolean }) => (
+        options?.promoteInbox ? resolveRowFocusStarAction(task, context) : resolveFocusStarAction(task, context)
+      ) as any;
+      try {
+        await run();
+      } finally {
+        storeState.getFocusStarAction = original;
+      }
+    };
+
+    it('reveals Done and Focus on a right swipe, Organize, Dates and Delete on a left swipe', () => {
+      const tree = renderRow({});
+      const labels = (side: 'left' | 'right') => {
+        const tray = tree.root.findAllByType(SwipeableTaskItemTray).find((node) => node.props.side === side)!;
+        return [...new Set(tray.findAll((node) => typeof node.props.onPress === 'function' && node.props.accessibilityRole === 'button')
+          .map((node) => node.props.accessibilityLabel))];
+      };
+      expect(labels('left')).toEqual(['Done action', 'Focus action']);
+      expect(labels('right')).toEqual(['Organize action', 'Dates… action', 'Delete task']);
+    });
+
+    it('lists every tray action as an accessibility action', () => {
+      const tree = renderRow({});
+      expect(rowButton(tree).props.accessibilityActions.map((action: { name: string }) => action.name))
+        .toEqual(['activate', 'done', 'focus', 'organize', 'dates', 'delete']);
+    });
+
+    it('turns Focus on an Inbox task into Next + Focus in one update', async () => {
+      await withFocusStore(0, async () => {
+        const tree = renderRow({});
+        await renderer.act(async () => {
+          button(tree, 'Focus action').props.onPress();
+          await Promise.resolve();
+        });
+        expect(updateTask).toHaveBeenCalledTimes(1);
+        expect(updateTask).toHaveBeenCalledWith('task-1', { isFocusedToday: true, status: 'next' });
+      });
+    });
+
+    it('leaves the Inbox task untouched when Focus is refused', async () => {
+      await withFocusStore(1, async () => {
+        const tree = renderRow({});
+        await renderer.act(async () => {
+          rowButton(tree).props.onAccessibilityAction({ nativeEvent: { actionName: 'focus' } });
+          await Promise.resolve();
+        });
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Focus', tone: 'warning' }));
+      });
+    });
+
+    it('opens the status menu from Organize', () => {
+      const tree = renderRow({});
+      const menu = () => tree.root.findByType(SwipeableTaskItemStatusMenu);
+      expect(menu().props.visible).toBe(false);
+      renderer.act(() => {
+        button(tree, 'Organize action').props.onPress();
+      });
+      expect(menu().props.visible).toBe(true);
+      // Status and Destination are two headed groups.
+      expect(hasText(tree, 'Destination')).toBe(true);
+    });
+
+    it('saves start and due from the Dates sheet, and changes nothing until Save', async () => {
+      const tree = renderRow({});
+      expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'Start: Tomorrow')).toHaveLength(0);
+      renderer.act(() => {
+        button(tree, 'Dates… action').props.onPress();
+      });
+      renderer.act(() => {
+        button(tree, 'Start: Tomorrow').props.onPress();
+      });
+      renderer.act(() => {
+        button(tree, 'Due: Next week').props.onPress();
+      });
+      expect(updateTask).not.toHaveBeenCalled();
+      await renderer.act(async () => {
+        button(tree, 'Save').props.onPress();
+        await Promise.resolve();
+      });
+      expect(updateTask).toHaveBeenCalledWith('task-1', {
+        startTime: safeFormatDate(getQuickDate('tomorrow')!, 'yyyy-MM-dd'),
+        dueDate: safeFormatDate(getQuickDate('next_week')!, 'yyyy-MM-dd'),
+      });
+      expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'Save')).toHaveLength(0);
+    });
+
+    it('clears a date with No date, and Cancel writes nothing', async () => {
+      const tree = renderRow({ status: 'next', dueDate: '2026-03-01' });
+      renderer.act(() => {
+        button(tree, 'Dates… action').props.onPress();
+      });
+      renderer.act(() => {
+        button(tree, 'Due: No date').props.onPress();
+      });
+      renderer.act(() => {
+        button(tree, 'Cancel').props.onPress();
+      });
+      expect(updateTask).not.toHaveBeenCalled();
+      renderer.act(() => {
+        rowButton(tree).props.onAccessibilityAction({ nativeEvent: { actionName: 'dates' } });
+      });
+      renderer.act(() => {
+        button(tree, 'Due: No date').props.onPress();
+      });
+      await renderer.act(async () => {
+        button(tree, 'Save').props.onPress();
+        await Promise.resolve();
+      });
+      expect(updateTask).toHaveBeenCalledWith('task-1', { dueDate: undefined });
+    });
+
+    it('runs no tray action in selection mode', () => {
+      const onStatusChange = vi.fn();
+      const tree = renderRow({}, { selectionMode: true, onToggleSelect: vi.fn(), onStatusChange });
+      expect(tree.root.find((node) => (node.type as unknown) === 'Swipeable').props.enabled).toBe(false);
+      renderer.act(() => {
+        button(tree, 'Done action').props.onPress();
+        button(tree, 'Organize action').props.onPress();
+      });
+      expect(onStatusChange).not.toHaveBeenCalled();
+      expect(tree.root.findByType(SwipeableTaskItemStatusMenu).props.visible).toBe(false);
+    });
+
+    it('saves only the dates when the task changes elsewhere while the sheet is open', async () => {
+      const tree = renderRow({ status: 'next' });
+      renderer.act(() => {
+        button(tree, 'Dates… action').props.onPress();
+      });
+      // A sync renames the task and moves it back to Inbox while the sheet is open.
+      renderer.act(() => {
+        tree.update(rowElement({ title: 'Call the bank today', status: 'inbox', updatedAt: '2026-01-03T00:00:00.000Z' }));
+      });
+      renderer.act(() => {
+        button(tree, 'Due: Tomorrow').props.onPress();
+      });
+      await renderer.act(async () => {
+        button(tree, 'Save').props.onPress();
+        await Promise.resolve();
+      });
+      expect(updateTask).toHaveBeenCalledTimes(1);
+      expect(updateTask).toHaveBeenCalledWith('task-1', { dueDate: safeFormatDate(getQuickDate('tomorrow')!, 'yyyy-MM-dd') });
+    });
+
+    it('keeps the plain Focus rule on the row star: an Inbox task is refused', async () => {
+      await withFocusStore(0, async () => {
+        const tree = renderRow({}, { showFocusToggle: true });
+        await renderer.act(async () => {
+          button(tree, 'Add to focus').props.onPress({ stopPropagation: vi.fn() });
+          await Promise.resolve();
+        });
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+          tone: 'warning',
+          message: 'Clarify this task before adding it to Focus.',
+        }));
+      });
+    });
+
+    it('also opens the completion-time picker from the Organize menu', () => {
+      const tree = renderRow({ status: 'next' });
+      renderer.act(() => {
+        button(tree, 'Organize action').props.onPress();
+      });
+      renderer.act(() => {
+        tree.root.find((node) => node.props.accessibilityLabel === 'Done' && typeof node.props.onLongPress === 'function')
+          .props.onLongPress();
+      });
+      expect(tree.root.findAllByType('CompletedAtPicker' as any)).toHaveLength(1);
+    });
+
+    it('gives a Reference row Organize, its only way to the status menu', () => {
+      const tree = renderRow({ status: 'reference' });
+      expect(rowButton(tree).props.accessibilityActions.map((action: { name: string }) => action.name))
+        .toEqual(['activate', 'next', 'organize', 'delete']);
+      renderer.act(() => {
+        rowButton(tree).props.onAccessibilityAction({ nativeEvent: { actionName: 'organize' } });
+      });
+      expect(tree.root.findByType(SwipeableTaskItemStatusMenu).props.visible).toBe(true);
+    });
+
+    it('keeps Restore, Organize and Delete on a done task', () => {
+      const tree = renderRow({ status: 'done', completedAt: '2026-01-02T00:00:00.000Z' });
+      expect(rowButton(tree).props.accessibilityActions.map((action: { name: string }) => action.name))
+        .toEqual(['activate', 'restore', 'organize', 'delete']);
+    });
   });
 });

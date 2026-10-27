@@ -11,6 +11,7 @@ import { sectionToSqliteRow } from './section-sync-schema';
 import {
     collectFocusEligibilityTasks,
     resolveFocusStarAction,
+    resolveRowFocusStarAction,
     resolveTaskFocusUpdate,
     type FocusStarAction,
 } from './focus-star';
@@ -3325,10 +3326,11 @@ export function createTaskActions({ set, get, getStorage, debouncedSave, flushPe
         });
     },
 
-    getFocusStarAction: (task: Task, options?: { allowUnclarified?: boolean }): FocusStarAction => {
+    getFocusStarAction: (task: Task, options?: { allowUnclarified?: boolean; promoteInbox?: boolean }): FocusStarAction => {
         const state = get();
         const derived = state.getDerivedState();
-        return resolveFocusStarAction(task, {
+        const resolve = options?.promoteInbox ? resolveRowFocusStarAction : resolveFocusStarAction;
+        return resolve(task, {
             tasks: collectFocusEligibilityTasks(derived.activeTasksByStatus),
             projects: derived.projectMap,
             sections: state.sections,

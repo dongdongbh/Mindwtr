@@ -80,6 +80,7 @@ export type TaskRowMeta = {
     statusHidden: boolean;
     /** Whether the Focus star can show (the view decides whether it offers one). */
     canFocus: boolean;
+    /** The native apps' single swipe action. RN's row renders buildTaskRowSwipeActions (#1464); the native apps move to it next. */
     swipe: { target: TaskStatus; label: string; icon: 'restore' | 'done' | 'next' };
     textDirection: 'ltr' | 'rtl';
     accessibilityLabel: string;

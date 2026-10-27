@@ -161,30 +161,33 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    swipeActionLeft: {
-        backgroundColor: '#10B981',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 90,
-        borderRadius: 14,
+    // The row card keeps marginBottom 6; the tray matches it so buttons line up with the card.
+    swipeTrayLeft: {
+        flexDirection: 'row',
         marginBottom: 6,
         marginRight: 8,
-        gap: 4,
+        gap: 6,
     },
-    swipeActionRight: {
-        backgroundColor: '#EF4444',
-        justifyContent: 'center',
-        alignItems: 'center',
-        width: 90,
-        borderRadius: 14,
+    swipeTrayRight: {
+        flexDirection: 'row',
         marginBottom: 6,
         marginLeft: 8,
+        gap: 6,
+    },
+    swipeTrayButton: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        width: 76,
+        minHeight: 48,
+        borderRadius: 14,
+        paddingHorizontal: 4,
         gap: 4,
     },
     swipeActionText: {
         color: '#FFFFFF',
         fontWeight: '600',
         fontSize: 12,
+        textAlign: 'center',
     },
     modalOverlay: {
         flex: 1,
@@ -330,6 +333,11 @@ export const styles = StyleSheet.create({
     menuMoveActions: {
         marginTop: 16,
         gap: 8,
+    },
+    menuSectionTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        textAlign: 'center',
     },
     menuMoveItem: {
         minHeight: 44,

@@ -16,8 +16,10 @@ import { taskDraftToUpdatePatch, type TaskDraft } from './task-draft';
  * The Today's Focus star as one module: every surface that toggles a task's
  * star (row star, quick-action menu, editor, review modals, mobile swipe)
  * resolves the same action here, so eligibility, the cap, labels, and the
- * update patch cannot drift per surface. Status promotion on starring is NOT
- * part of the patch — the store's star↔status rules own it at the write path.
+ * update patch cannot drift per surface. Status promotion on starring is
+ * normally NOT part of the patch — the store's star↔status rules own it at the
+ * write path. The one exception is resolveRowFocusStarAction (a row's swipe
+ * Focus): an allowed star on an Inbox task carries status next in its patch.
  */
 export type FocusStarBlockedReason = 'deferred' | 'sequential' | 'clarify' | 'limit' | null;
 
@@ -44,8 +46,8 @@ export type FocusStarAction = {
     blockedReason: FocusStarBlockedReason;
     /** i18n key for the control label. */
     labelKey: 'agenda.addToFocus' | 'agenda.removeFromFocus';
-    /** Patch to apply when toggling; store rules handle status promotion. */
-    patch: Pick<Task, 'isFocusedToday'>;
+    /** Patch to apply when toggling; store rules handle status promotion. Only the row's Inbox star carries a status. */
+    patch: Pick<Task, 'isFocusedToday'> & Partial<Pick<Task, 'status'>>;
 };
 
 export type TaskFocusCreationOutcome =
@@ -105,6 +107,24 @@ export function resolveFocusStarAction(task: Task, context: FocusStarContext): F
     };
 }
 
+const withCandidate = (tasks: Task[], candidate: Task): Task[] => (
+    tasks.some((item) => item.id === candidate.id)
+        ? tasks.map((item) => item.id === candidate.id ? candidate : item)
+        : [...tasks, candidate]
+);
+
+/**
+ * A task row's swipe Focus action (#1464), not the row star. An unstarred Inbox task is judged as Next, the editor's rule
+ * (resolveTaskEditorFocusStar), and an allowed star writes status next in the same patch. A refused one
+ * writes nothing, so the task stays in Inbox. Every other task gets resolveFocusStarAction unchanged.
+ */
+export function resolveRowFocusStarAction(task: Task, context: FocusStarContext): FocusStarAction {
+    if (task.status !== 'inbox' || task.isFocusedToday === true) return resolveFocusStarAction(task, context);
+    const candidate: Task = { ...task, status: 'next' };
+    const action = resolveFocusStarAction(candidate, { ...context, tasks: withCandidate(context.tasks, candidate) });
+    return action.canToggle ? { ...action, patch: { ...action.patch, status: 'next' } } : action;
+}
+
 /** Resolve an editor's unsaved values against the same Focus rules as a task row. */
 export function resolveTaskEditorFocusStar(
     task: Task,
@@ -119,9 +139,7 @@ export function resolveTaskEditorFocusStar(
     };
     const add = resolveFocusStarAction(candidate, {
         ...context,
-        tasks: context.tasks.some((item) => item.id === task.id)
-            ? context.tasks.map((item) => item.id === task.id ? candidate : item)
-            : [...context.tasks, candidate],
+        tasks: withCandidate(context.tasks, candidate),
         focusedCount: Math.max(0, context.focusedCount - (task.isFocusedToday && !isTaskFutureFocusCandidate(task, context.now) ? 1 : 0)),
     });
     const available = !task.deletedAt && isTaskActionable(draft.status);

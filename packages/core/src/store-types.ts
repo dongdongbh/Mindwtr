@@ -793,8 +793,11 @@ export interface TaskStore {
     reorderFocusedTasks: (orderedIds: string[]) => Promise<StoreActionResult>;
     /** Query tasks using storage adapter when available */
     queryTasks: (options: TaskQueryOptions) => Promise<Task[]>;
-    /** Resolve the Today's Focus star action for a task: eligibility, cap, label key, patch */
-    getFocusStarAction: (task: Task, options?: { allowUnclarified?: boolean }) => FocusStarAction;
+    /**
+     * Resolve the Today's Focus star action for a task: eligibility, cap, label key, patch.
+     * `promoteInbox` is a task row's swipe Focus: an Inbox task is judged as Next (resolveRowFocusStarAction).
+     */
+    getFocusStarAction: (task: Task, options?: { allowUnclarified?: boolean; promoteInbox?: boolean }) => FocusStarAction;
     /** Set or clear global error state */
     setError: (error: string | null) => void;
     /** Re-enqueue the authoritative in-memory snapshot and wait for a durable save. */

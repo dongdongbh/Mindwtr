@@ -1346,6 +1346,11 @@ describe('TaskStore', () => {
         const inboxTask = useTaskStore.getState()._tasksById.get(inbox.id!)!;
         expect(useTaskStore.getState().getFocusStarAction(inboxTask).blockedReason).toBe('clarify');
         expect(useTaskStore.getState().getFocusStarAction(inboxTask, { allowUnclarified: true }).canToggle).toBe(true);
+        // A row's Focus on an Inbox task is Next + Focus in one patch (#1464).
+        const rowAction = useTaskStore.getState().getFocusStarAction(inboxTask, { promoteInbox: true });
+        expect(rowAction).toMatchObject({ canToggle: true, patch: { isFocusedToday: true, status: 'next' } });
+        await useTaskStore.getState().updateTask(inboxTask.id, rowAction.patch);
+        expect(useTaskStore.getState()._tasksById.get(inboxTask.id)).toMatchObject({ status: 'next', isFocusedToday: true });
     });
 
     it('uses the configured today focus limit when promoting tasks', async () => {
