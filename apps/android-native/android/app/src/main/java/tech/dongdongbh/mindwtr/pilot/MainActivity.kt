@@ -1,5 +1,15 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.getValue
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
@@ -32,7 +42,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -181,7 +190,9 @@ class MainActivity : FragmentActivity() {
                 else if (searching != null && writable) SearchScreen(model, searching)
                 else if (listed != null && writable) MenuScreenHost(model, listed)
                 else Column(
-                    Modifier.fillMaxSize().background(c.cardBg).systemBarsPadding().semantics { testTagsAsResourceId = true },
+                    // The tab bar reaches the screen's bottom edge as RN's does (it pads the navigation inset itself, TabBar).
+                    Modifier.fillMaxSize().background(c.cardBg).windowInsetsPadding(WindowInsets.systemBars.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                        .semantics { testTagsAsResourceId = true },
                 ) {
                     if (loading) {
                         // The start screen covers the boot; only a start past its cap shows RN's spinner here.
@@ -217,14 +228,17 @@ class MainActivity : FragmentActivity() {
                                 }
                                 TabBar(model)
                             }
-                            // The capture popup shows its own toasts above its keyboard, as RN's sheet does.
-                            if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 78.dp))
-                            capture?.let { CapturePopup(model, it) }
-                            if (areaSheet) AreaSheet(model)
-                            // The Inbox's and the quick-access tab's sheets and dialogs (MenuModel), and Focus's (FocusModel), over the tabs.
-                            if (quick || screen == Screen.Inbox) MenuDialogs(model)
-                            if (screen == Screen.Focus) FocusDialogs(model)
-                            StatusMenu(model)
+                            // The overlays keep their place above the navigation bar, where the column's padding put them.
+                            Box(Modifier.fillMaxSize().navigationBarsPadding()) {
+                                // The capture popup shows its own toasts above its keyboard, as RN's sheet does.
+                                if (capture == null) ToastCard(model, Modifier.align(Alignment.BottomCenter).padding(bottom = 78.dp))
+                                capture?.let { CapturePopup(model, it) }
+                                if (areaSheet) AreaSheet(model)
+                                // The Inbox's and the quick-access tab's sheets and dialogs (MenuModel), and Focus's (FocusModel), over the tabs.
+                                if (quick || screen == Screen.Inbox) MenuDialogs(model)
+                                if (screen == Screen.Focus) FocusDialogs(model)
+                                StatusMenu(model)
+                            }
                         }
                     }
                 }
@@ -262,8 +276,8 @@ class MainActivity : FragmentActivity() {
 
 /** A 1 px rule, as RN's StyleSheet.hairlineWidth, along the top or bottom edge. */
 fun Modifier.hairline(color: Color, top: Boolean) = drawBehind {
-    val y = if (top) 0f else size.height - 1f
-    drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+    // A whole pixel row, RN's StyleSheet.hairlineWidth: a 1-pixel stroke centered on the edge drew half of it, at half color.
+    drawRect(color, Offset(0f, if (top) 0f else size.height - 1f), Size(size.width, 1f))
 }
 
 /** RN's borderBottomWidth: 1, a 1 dp line inside the bottom edge. */
@@ -332,7 +346,11 @@ fun OwedRetry(model: InboxViewModel) {
 private fun TabBar(model: InboxViewModel) {
     val c = LocalTheme.current.colors
     val quick = model.menu.quickView
-    Row(Modifier.fillMaxWidth().height(66.dp).background(c.cardBg).hairline(c.border, top = true), verticalAlignment = Alignment.CenterVertically) {
+    // RN's tabBarBottomInset on Android: a navigation inset of 20 dp or more (three buttons), less 12; a gesture bar's is drawn over.
+    val navigation = with(LocalDensity.current) { WindowInsets.navigationBars.getBottom(this).toDp() }
+    val inset = if (navigation >= 20.dp) navigation - 12.dp else 0.dp
+    Row(Modifier.fillMaxWidth().height(66.dp + inset).background(c.cardBg).hairline(c.border, top = true).padding(bottom = inset),
+        verticalAlignment = Alignment.CenterVertically) {
         TabItem(model, Screen.Focus, Lucide.Target)
         TabItem(model, Screen.Inbox, Lucide.Inbox)
         CaptureButton(model)
@@ -341,21 +359,34 @@ private fun TabBar(model: InboxViewModel) {
     }
 }
 
-/** RN's tab: icon 26 when active (24 and 80% opacity when not), label 10 below, tint when active. */
+/** RN's tab: icon 26 when active (24, drawn at 64%, when not), label 10 below, tint when active. */
 @Composable
 private fun RowScope.TabItem(model: InboxViewModel, tab: Screen, icon: ImageVector, label: String = tab.label) = with(model) {
     val c = LocalTheme.current.colors
     val active = screen == tab
     val color = if (active) c.tabIconSelected else c.tabIconDefault
     Column(
-        Modifier.weight(1f).fillMaxHeight().selectable(selected = active, role = Role.Tab, onClick = { menu.closeSheet(); show(tab) }),
+        Modifier.weight(1f).fillMaxHeight().rnTabPress(active) { menu.closeSheet(); show(tab) },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Icon(icon, null, tint = color, modifier = Modifier.size(if (active) 26.dp else 24.dp).fade(if (active) 1f else 0.8f))
+        Icon(icon, null, tint = color, modifier = Modifier.size(if (active) 26.dp else 24.dp).fade(if (active) 1f else RN_TAB_ICON_IDLE))
         Text(t(label), style = rnText(10, if (active) 700 else 600, 12), color = color, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
     }
 }
+
+/**
+ * RN's tab item press (TouchableOpacity): 0.2 opacity while held, no ripple; lifted 2 dp, RN's tabItemTopOffset on Android.
+ */
+@Composable
+internal fun Modifier.rnTabPress(selected: Boolean, onClick: () -> Unit): Modifier {
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    return offset(y = (-2).dp).fade(if (pressed) 0.2f else 1f).selectable(selected, press, null, role = Role.Tab, onClick = onClick)
+}
+
+/** An idle tab icon: RN gives it opacity 0.8 and the glyph draws it at 0.8 again, so it shows at 64% (S23, both themes). */
+internal const val RN_TAB_ICON_IDLE = 0.64f
 
 /** RN's center capture button: a 48x38 tint tile, lifted above the tab labels. It opens the quick capture sheet. */
 @Composable

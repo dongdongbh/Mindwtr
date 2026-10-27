@@ -70,11 +70,11 @@ fun RowScope.MenuTab(model: InboxViewModel) {
     val open = model.menu.sheet
     val color = if (open) c.tabIconSelected else c.tabIconDefault
     Column(
-        Modifier.weight(1f).fillMaxHeight().selectable(selected = open, role = Role.Tab, onClick = { model.menu.toggleSheet() }),
+        Modifier.weight(1f).fillMaxHeight().rnTabPress(open) { model.menu.toggleSheet() },
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Box {
-            Icon(Lucide.Menu, null, tint = color, modifier = Modifier.size(if (open) 26.dp else 24.dp).fade(if (open) 1f else 0.8f))
+            Icon(Lucide.Menu, null, tint = color, modifier = Modifier.size(if (open) 26.dp else 24.dp).fade(if (open) 1f else RN_TAB_ICON_IDLE))
             // RN's menuSyncDot: the sync badge's color, top right of the glyph; hidden from TalkBack, as RN's is. Its opacity goes
             // after the offset: a layer placed before it drew nothing on the phone.
             coreColorOrNull(model.syncBadge.color)?.let { dot ->

@@ -10007,4 +10007,17 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const projects = source('ProjectsScreen.kt');
     assert.match(projects, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 64\.3\.dp\)\.background\(c\.cardBg\)\.bottomBorder\(c\.border\)\.padding\(horizontal = 8\.dp\),/);
 }
+// Tab bar (tabbar-borders-20261027-06), measured against RN on the S23 in both themes: RN's bar reaches the screen bottom and
+// pads only a navigation inset of 20 dp or more, less 12 (tabBarBottomInset); its items sit 2 dp up (tabItemTopOffset) and press
+// with TouchableOpacity's 0.2 fade; an idle icon draws at 64% (0.8 twice); the top line is a whole pixel of the border color.
+{
+    const activity = source('MainActivity.kt');
+    const more = source('MoreSheet.kt');
+    assert.match(activity, /val inset = if \(navigation >= 20\.dp\) navigation - 12\.dp else 0\.dp/);
+    assert.match(activity, /Row\(Modifier\.fillMaxWidth\(\)\.height\(66\.dp \+ inset\)\.background\(c\.cardBg\)\.hairline\(c\.border, top = true\)\.padding\(bottom = inset\)/);
+    assert.match(activity, /windowInsetsPadding\(WindowInsets\.systemBars\.only\(WindowInsetsSides\.Top \+ WindowInsetsSides\.Horizontal\)\)/);
+    assert.match(activity, /internal fun Modifier\.rnTabPress\(selected: Boolean, onClick: \(\) -> Unit\): Modifier/);
+    for (const kt of [activity, more]) assert.match(kt, /fade\(if \((active|open)\) 1f else RN_TAB_ICON_IDLE\)/);
+    assert.match(activity, /fun Modifier\.hairline\(color: Color, top: Boolean\) = drawBehind \{\s+(?:\/\/[^\n]*\s+)*drawRect\(color, Offset\(0f, if \(top\) 0f else size\.height - 1f\), Size\(size\.width, 1f\)\)/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
