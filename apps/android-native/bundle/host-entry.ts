@@ -2410,7 +2410,10 @@ globalThis.MindwtrHost = {
                 saveWarmFrom = warmTaskRowEntries(tasks, saveWarmFrom, slice);
                 return { done: false };
             }
-            return { done: adapter.warmReadFingerprints(slice) };
+            const done = adapter.warmReadFingerprints(slice);
+            // Done: let go of the task list, which the store may since have replaced.
+            if (done) saveWarmTasks = null;
+            return { done };
         });
     },
     /** iOS and Android (after boot and each finished sync): a settled synced language wins; the device-key route above is unchanged. */
