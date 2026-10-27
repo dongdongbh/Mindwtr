@@ -55,6 +55,17 @@ describe('the task editor menu through host-entry', () => {
         expect(shared.value.message).toContain('Unsaved title');
     });
 
+    it('Create project\'s Expand checklist block reads core\'s getTaskChecklistProjectBlock for the editor draft', async () => {
+        const { contract, MENU_READS } = await open();
+        const task = useTaskStore.getState()._tasksById.get('task')!;
+        const input = { id: 'task', taskRevision: taskRevisionOf(task), draft: { ...createTaskDraft(task), timeEstimate: '30min' },
+            checklist: [{ id: 'c1', title: 'Wrap the glasses', isCompleted: false }] };
+        const read = MENU_READS.taskChecklistProjectBlock(input) as { ok: boolean; value: { blocked: string | null } };
+        expect(read).toEqual(contract.getTaskChecklistProjectBlock(input as never));
+        expect(read.value.blocked).toContain('time estimate');
+        expect(MENU_READS.taskChecklistProjectBlock({ ...input, draft: createTaskDraft(task) })).toEqual({ ok: true, value: { blocked: null } });
+    });
+
     it('a menu write is core\'s runTaskEditorAction', async () => {
         const { MENU_COMMANDS } = await open();
         const requestId = '00000000-0000-4000-8000-000000000401';

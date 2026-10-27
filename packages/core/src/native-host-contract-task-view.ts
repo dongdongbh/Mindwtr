@@ -10,6 +10,7 @@
  * replay after a restart never undoes a later edit (STALE_REVISION).
  */
 import { isNativeJsonWithinBytes } from './native-json';
+import { checklistProjectBlockReason } from './checklist-project-conversion';
 export { isNativeJsonWithinBytes } from './native-json';
 import { formatTimeEstimateLabel } from './calendar-scheduling';
 import { createDateFormatter, type DateFormatter, type DateFormattingConfig } from './date';
@@ -165,31 +166,35 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
     };
     const isTask = (value: Task | NativeHostResult<never>): value is Task => !('ok' in value);
 
+    /** The saved task the editor showed with its unsaved draft and checklist over it, as RN's `{ ...task, ...mergedTask }`. */
+    type EditorForm = { id: string; taskRevision: string; draft: TaskDraft; checklist: ChecklistItem[] };
+    const readEditorForm = (input: EditorForm, notFound: string): { task: Task; shown: Task; draft: TaskDraft } | NativeHostResult<never> => {
+        const ready = deps.readiness();
+        if (!ready.ok) return ready;
+        if (!isRecord(input) || Object.keys(input).length !== 4
+                || !['id', 'taskRevision', 'draft', 'checklist'].every((key) => Object.prototype.hasOwnProperty.call(input, key))
+            || !isNativeJsonWithinBytes(input)
+            || typeof input.id !== 'string' || !input.id || input.id.length > 200
+            || typeof input.taskRevision !== 'string' || !input.taskRevision || input.taskRevision.length > 200) {
+            return fail('INVALID_INPUT', 'A bounded task, revision, draft, and checklist are required');
+        }
+        const draft = deps.readDraft(input.draft);
+        const checklist = readChecklist(input.checklist, true);
+        if (!draft || !checklist) return fail('INVALID_INPUT', 'A whole draft and checklist are required');
+        const task = useTaskStore.getState()._tasksById.get(input.id);
+        if (!task || task.deletedAt || task.purgedAt || isProjectedRecurringTaskId(input.id)
+            || deps.isReadOnly(task)) return fail('TASK_NOT_FOUND', notFound);
+        if (taskRevisionOf(task) !== input.taskRevision) return fail('STALE_REVISION', 'Task changed since the editor opened');
+        return { task, draft, shown: { ...task, ...(taskDraftToUpdatePatch(draft, task, { attachments: task.attachments }) ?? {}), checklist } };
+    };
+
     return {
         /** Plain-text Share preview of the current unsaved editor form; no task write or receipt. */
-        getTaskShare(input: { id: string; taskRevision: string; draft: TaskDraft; checklist: ChecklistItem[] }): NativeHostResult<{ title: string | null; message: string }> {
-            const ready = deps.readiness();
-            if (!ready.ok) return ready;
-            if (!isRecord(input) || Object.keys(input).length !== 4
-                || !['id', 'taskRevision', 'draft', 'checklist'].every((key) => Object.prototype.hasOwnProperty.call(input, key))
-                || !isNativeJsonWithinBytes(input)
-                || typeof input.id !== 'string' || !input.id || input.id.length > 200
-                || typeof input.taskRevision !== 'string' || !input.taskRevision || input.taskRevision.length > 200) {
-                return fail('INVALID_INPUT', 'A bounded task, revision, draft, and checklist are required');
-            }
-            const draft = deps.readDraft(input.draft);
-            const checklist = readChecklist(input.checklist, true);
-            if (!draft || !checklist) return fail('INVALID_INPUT', 'A whole draft and checklist are required');
+        getTaskShare(input: EditorForm): NativeHostResult<{ title: string | null; message: string }> {
+            const form = readEditorForm(input, 'Task is not shareable');
+            if ('ok' in form) return form;
+            const { task, shown, draft } = form;
             const state = useTaskStore.getState();
-            const task = state._tasksById.get(input.id);
-            if (!task || task.deletedAt || task.purgedAt || isProjectedRecurringTaskId(input.id)
-                || deps.isReadOnly(task)) return fail('TASK_NOT_FOUND', 'Task is not shareable');
-            if (taskRevisionOf(task) !== input.taskRevision) return fail('STALE_REVISION', 'Task changed since the editor opened');
-            const shown: Task = {
-                ...task,
-                ...(taskDraftToUpdatePatch(draft, task, { attachments: task.attachments }) ?? {}),
-                checklist,
-            };
             const t = deps.t();
             const format = createDateFormatter(deps.dateFormatting());
             const notSet = t('common.notSet');
@@ -204,6 +209,13 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             const result = { title: content.title ?? null, message: content.message };
             return isNativeJsonWithinBytes(result) ? { ok: true, value: result }
                 : fail('INVALID_INPUT', 'Task Share exceeds the native response bound');
+        },
+        /** Why Create project's "Expand checklist" is off for the editor form (RN's checklistProjectBlockReason), translated; null when allowed. */
+        getTaskChecklistProjectBlock(input: EditorForm): NativeHostResult<{ blocked: string | null }> {
+            const form = readEditorForm(input, 'Task not found');
+            if ('ok' in form) return form;
+            const reason = checklistProjectBlockReason(form.shown, useTaskStore.getState().settings);
+            return { ok: true, value: { blocked: reason ? deps.t()(reason) : null } };
         },
 
         /**

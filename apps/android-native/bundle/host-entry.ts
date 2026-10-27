@@ -1304,6 +1304,9 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     projectToSectionOptions: (input) => contract.getProjectToSectionOptions(input),
     // The task editor's Share (RN's Share.share text) for the editor's unsaved draft and checklist: a read, nothing written.
     taskShare: (input) => contract.getTaskShare(input),
+    // Create project's "Expand checklist" switch: why it is off for the editor's unsaved draft and checklist (RN's
+    // checklistProjectBlockReason under the switch), translated, or null. A read; the write is taskEditorAction's expandChecklist.
+    taskChecklistProjectBlock: (input) => contract.getTaskChecklistProjectBlock(input),
 };
 /**
  * The attachments' long calls (native-host-contract-attachments.ts): Download and Open wait on the network (a synced file's bytes),

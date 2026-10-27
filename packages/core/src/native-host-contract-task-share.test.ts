@@ -99,3 +99,17 @@ it('rejects malformed input and Unicode byte overflow before formatting', async 
     expect(host.getTaskShare(oversized)).toMatchObject(invalid);
     expect(saveData).not.toHaveBeenCalled();
 });
+
+it('says why Create project cannot expand the editor draft\'s checklist (RN\'s checklistProjectBlockReason), writing nothing', async () => {
+    const { host, saveData } = await open();
+    const input = copy(request());
+    expect(value(host.getTaskChecklistProjectBlock(input))).toEqual({ blocked:
+        'Keep the checklist together, or clear the assignee, location, time estimate and recorded time before expanding. These task details cannot be transferred to a project.' });
+    input.draft.timeEstimate = '';
+    expect(value(host.getTaskChecklistProjectBlock(input))).toEqual({ blocked: null });
+    input.checklist = [{ id: 'blank', title: ' ', isCompleted: false }];
+    expect(value(host.getTaskChecklistProjectBlock(input))).toEqual({ blocked: 'Expansion needs a checklist with a title on every item.' });
+    expect(host.getTaskChecklistProjectBlock({ ...input, taskRevision: 'old' })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    expect(host.getTaskChecklistProjectBlock({ ...input, extra: 1 } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    expect(saveData).not.toHaveBeenCalled();
+});
