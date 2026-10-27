@@ -178,6 +178,25 @@ describe('SqliteAdapter.readRowBaseline', () => {
             expect(counter.rowReads).toBe(2);
         });
 
+        it('(f) never reuses rows older than a full read since (a same-connection change outside the adapter, then getData)', async () => {
+            const { adapter, client, counter } = await ready(file());
+            await adapter.readRowBaseline();
+            await client.run("UPDATE settings SET data = '{\"theme\":\"dark\"}' WHERE id = 1");
+            expect((await adapter.getData()).settings.theme).toBe('dark');
+            const light = await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+            expect(light?.settings.theme).toBe('dark');
+        });
+
+        it('(g) a same-connection change outside the adapter with no full read since: total_changes() makes it read again', async () => {
+            const { adapter, client, counter } = await ready(file());
+            await adapter.readRowBaseline();
+            await client.run("UPDATE settings SET data = '{\"theme\":\"dark\"}' WHERE id = 1");
+            const light = await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+            expect(light?.settings.theme).toBe('dark');
+        });
+
         it("a reuse still runs the subclass's check of the read", async () => {
             const path = file();
             const checks: number[] = [];
