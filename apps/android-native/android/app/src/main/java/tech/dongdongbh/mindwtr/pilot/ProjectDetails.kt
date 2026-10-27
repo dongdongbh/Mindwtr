@@ -765,7 +765,7 @@ private fun statusPalette(status: String?): Triple<Color, Color, Color> {
 @Composable
 private fun DetailsBlock(vertical: Int = 12, tag: String? = null, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).then(if (tag != null) Modifier.testTag(tag) else Modifier)
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).then(if (tag != null) Modifier.testTag(tag) else Modifier)
         .padding(horizontal = 16.dp, vertical = vertical.dp)) { content() }
 }
 
@@ -1107,7 +1107,7 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
 @Composable
 private fun AreaRow(model: InboxViewModel, label: String, area: JSONObject?) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().hairline(c.border, top = false).clickable(role = Role.Button) { model.projectDetails.setArea(area) }.padding(vertical = 10.dp),
+    Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).clickable(role = Role.Button) { model.projectDetails.setArea(area) }.padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         if (area != null) Box(Modifier.padding(end = 8.dp).size(10.dp).clip(CircleShape).background(coreColorOrNull(area.menuText("color")) ?: c.tint))
         Text(label, style = rnText(14, 600), color = c.text)
@@ -1409,7 +1409,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
     val sectionIds = items.mapNotNull { item -> item.takeIf { it.getString("type") == "section" }?.menuText("sectionId") }
     val enabled = view?.optBoolean("canReorder") == true && !model.busy && model.failedAction == null
     Column(modifier.background(c.bg).testTag("project-reorder-list")) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(t(if (sectionIds.size > 1) "projects.projectOrder" else "projects.taskOrder"), style = rnText(13, 700), color = c.text,
                 modifier = Modifier.weight(1f).semantics { heading() })
@@ -1695,7 +1695,7 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
                     for (section in rows) {
                         val id = section.getString("id")
                         val name = section.getString("title")
-                        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 10.dp, vertical = 9.dp).testTag("project-section-row-$id"),
+                        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 10.dp, vertical = 9.dp).testTag("project-section-row-$id"),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(name, style = rnText(14, 700), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 10.dp))
                             if (canManage) {

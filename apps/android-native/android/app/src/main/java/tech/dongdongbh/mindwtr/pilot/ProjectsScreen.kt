@@ -218,7 +218,7 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
                 val title = t(heading)
                 // RN's section toggle: 12/700 capitals and a chevron, a rule above all but the first.
                 Row(
-                    Modifier.fillMaxWidth().then(if (ruled) Modifier.hairline(c.border, top = true) else Modifier)
+                    Modifier.fillMaxWidth().then(if (ruled) Modifier.rnBorderTop(c.border) else Modifier)
                         .clearAndSetSemantics {
                             text = AnnotatedString(title)
                             heading()
