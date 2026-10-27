@@ -45,39 +45,17 @@ describe('native host contract: the capture popup', () => {
     const writes = (log: unknown[]) => log.map((entry) => (entry as unknown[])[0]);
     const chip = (view: NativeQuickCaptureView, kind: string) => view.preview.find((entry) => entry.kind === kind)?.value;
 
-    // RN's project "+" (openProjectQuickAdd): the popup opens with initialProps { projectId, status: 'next' }; the native host
-    // sends that preset with every call, so the project is chosen and the task saves as Next in it (O2f-parity b3).
-    it('keeps an opener preset: the project chosen, and the saved task Next in it', async () => {
+    // The opener preset is gone: Android's project "+" opens the capture screen (its route params), and iOS never sent one. A
+    // stray `preset` key is not read, so a capture saves as RN's tab-bar popup does.
+    it('does not read an opener preset: the capture saves as the tab-bar popup does', async () => {
         const { host } = await openHost();
         const preset = { projectId: 'p-home', status: 'next' } as const;
         const opened = value(host.openQuickCapture());
         const chosen = value(host.editQuickCapture({ text: '', options: opened.options, edit: { type: 'selectProject', projectId: 'p-home' }, preset } as never));
-        expect(chosen.view.options.projectId).toBe('p-home');
         const saved = value(await host.submitQuickCapture({ text: 'Fix the gate', options: chosen.view.options, captureId: generateUUID(), preset } as never));
-        expect(saved).toMatchObject({ kind: 'saved', projectId: 'p-home' });
-        expect(useTaskStore.getState()._allTasks.find((task) => task.id === (saved as { taskId: string }).taskId)).toMatchObject({ projectId: 'p-home', status: 'next' });
-        // Without the preset the same capture is an Inbox task, as RN's tab-bar popup saves it.
-        const plain = value(await host.submitQuickCapture({ text: 'Fix the gate', options: chosen.view.options, captureId: generateUUID() }));
-        expect(useTaskStore.getState()._allTasks.find((task) => task.id === (plain as { taskId: string }).taskId)?.status).toBe('inbox');
+        expect(useTaskStore.getState()._allTasks.find((task) => task.id === (saved as { taskId: string }).taskId)?.status).toBe('inbox');
         expect(await host.submitQuickCapture({ text: 'x', options: chosen.view.options, captureId: generateUUID(), preset: { status: 'done' } } as never))
-            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-    });
-
-    it('keeps the preset on a retry after a failed save: the task saves once, Next in its project, never in the Inbox', async () => {
-        let failing = false;
-        const { host } = await openHost('base', async () => { if (failing) throw new Error('disk unavailable'); });
-        const preset = { projectId: 'p-home', status: 'next' } as const;
-        const opened = value(host.openQuickCapture());
-        const chosen = value(host.editQuickCapture({ text: '', options: opened.options, edit: { type: 'selectProject', projectId: 'p-home' }, preset } as never));
-        // The exact request the popup saved with the draft (Try again sends it again).
-        const request = { text: 'Oil the hinge', options: chosen.view.options, captureId: generateUUID(), preset } as never;
-        failing = true;
-        expect(await host.submitQuickCapture(request)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
-        failing = false;
-        expect(await host.submitQuickCapture(request)).toMatchObject({ ok: true, value: { kind: 'saved', projectId: 'p-home' } });
-        const saved = useTaskStore.getState()._allTasks.filter((task) => task.title === 'Oil the hinge');
-        expect(saved).toHaveLength(1);
-        expect(saved[0]).toMatchObject({ projectId: 'p-home', status: 'next' });
+            .toMatchObject({ ok: true });
     });
 
     it('offers saved unused contexts and invalidates retained context choices when only settings changes', async () => {
