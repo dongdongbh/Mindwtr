@@ -427,16 +427,13 @@ describe('TaskItemEditor', () => {
         expect(getAllByRole('option').map((option) => option.textContent))
             .toEqual(['None', 'Zebra', 'Apple', 'Azure', 'Alpha unset', 'Zed unset']);
 
+        // While searching, the create rows and None follow the matches (#1461); read the area matches alone.
+        const areaMatches = () => within(getByRole('group', { name: 'areas.manage' })).getAllByRole('option')
+            .map((option) => option.textContent);
         fireEvent.change(getByRole('textbox', { name: 'Search' }), { target: { value: 'a' } });
-        expect(getAllByRole('option')
-            .filter((option) => option.getAttribute('data-destination-option') === 'true' && option.textContent !== 'None')
-            .map((option) => option.textContent))
-            .toEqual(['Zebra', 'Apple', 'Azure', 'Alpha unset']);
+        expect(areaMatches()).toEqual(['Zebra', 'Apple', 'Azure', 'Alpha unset']);
         fireEvent.change(getByRole('textbox', { name: 'Search' }), { target: { value: 'az' } });
-        expect(getAllByRole('option')
-            .filter((option) => option.getAttribute('data-destination-option') === 'true' && option.textContent !== 'None')
-            .map((option) => option.textContent))
-            .toEqual(['Azure']);
+        expect(areaMatches()).toEqual(['Azure']);
         expect(queryByRole('option', { name: 'Archived area' })).not.toBeInTheDocument();
         expect(areas.map((area) => area.id)).toEqual(originalIds);
     });

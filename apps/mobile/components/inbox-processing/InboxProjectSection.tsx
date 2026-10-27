@@ -10,6 +10,7 @@ import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
 type Area = { id: string; name: string; color?: string };
 type Project = { id: string; title: string; areaId?: string; color?: string; colorOverride?: string | null };
+type Section = { id: string; title: string };
 
 type Props = {
   t: (key: string) => string;
@@ -35,6 +36,10 @@ type Props = {
   handleCreateProjectEarly: () => void;
   handleConvertToProject: () => void;
   selectProjectEarly: (id: string | null) => void;
+  /** The chosen project's sections; the picker shows only when there are some (#1461). */
+  projectSections?: Section[];
+  selectedSectionId?: string | null;
+  selectSection?: (id: string | null) => void;
 };
 
 export function InboxProjectSection({
@@ -61,6 +66,9 @@ export function InboxProjectSection({
   handleCreateProjectEarly,
   handleConvertToProject,
   selectProjectEarly,
+  projectSections = [],
+  selectedSectionId = null,
+  selectSection,
 }: Props) {
   const filledButton = useFilledButtonColors();
   if (!show) return null;
@@ -137,6 +145,41 @@ export function InboxProjectSection({
     );
   };
 
+  const renderSectionPicker = () => {
+    if (!showProjectField || !selectedProjectId || projectSections.length === 0 || !selectSection) return null;
+    const sectionLabel = t('taskEdit.sectionLabel');
+    const options = [{ id: null, title: t('taskEdit.noSectionOption') }, ...projectSections];
+    return (
+      <View style={styles.projectFieldGroup}>
+        <Text style={[styles.projectFieldLabel, { color: tc.secondaryText }]}>{sectionLabel}</Text>
+        <View style={styles.projectListContainer}>
+          {options.map((section) => {
+            const isSelected = (selectedSectionId ?? null) === section.id;
+            return (
+              <TouchableOpacity
+                key={section.id ?? 'none'}
+                accessibilityRole="button"
+                accessibilityLabel={optionLabel(sectionLabel, section.title)}
+                style={[
+                  styles.projectChip,
+                  isSelected
+                    ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
+                    : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
+                ]}
+                onPress={() => selectSection(section.id)}
+                accessibilityState={{ selected: isSelected }}
+              >
+                <Text style={[styles.projectChipText, { color: tc.text }]}>
+                  {isSelected && section.id === null ? '✓ ' : ''}{section.title}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
   const renderProjectPicker = () => {
     const noProjectSelected = !selectedProjectId;
     return (
@@ -155,6 +198,7 @@ export function InboxProjectSection({
           <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {currentProject.title}</Text>
         </TouchableOpacity>
       )}
+      {renderSectionPicker()}
       {renderAreaPicker()}
       {showProjectField && (
         <>

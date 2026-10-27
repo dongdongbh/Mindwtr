@@ -157,6 +157,11 @@ function resolveSelectionFields(
     const includeContainers = plan.visibleFields.project || plan.visibleFields.area;
     return {
         ...(includeContainers ? resolveProcessInboxContainerFields(projectId, areaId) : {}),
+        // A project section rides with its project: written only with the project
+        // field, and never without a project (#1461).
+        ...(plan.visibleFields.project && Object.prototype.hasOwnProperty.call(fields, 'sectionId')
+            ? { sectionId: projectId ? fields.sectionId || undefined : undefined }
+            : {}),
         ...(plan.visibleFields.contexts ? { contexts: fields.contexts ?? [] } : {}),
         ...(plan.visibleFields.tags ? { tags: fields.tags ?? [] } : {}),
         // Someday sections are destination metadata, not a generic editor

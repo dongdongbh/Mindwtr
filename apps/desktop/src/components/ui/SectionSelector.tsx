@@ -14,7 +14,9 @@ interface SectionSelectorProps {
     searchPlaceholder?: string;
     noMatchesLabel?: string;
     createSectionLabel?: string;
+    ariaLabel?: string;
     className?: string;
+    controlClassName?: string;
 }
 
 export function SectionSelector({
@@ -27,7 +29,9 @@ export function SectionSelector({
     searchPlaceholder = 'Search sections',
     noMatchesLabel = 'No matches',
     createSectionLabel = 'Create section',
+    ariaLabel,
     className,
+    controlClassName,
 }: SectionSelectorProps) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
@@ -144,7 +148,8 @@ export function SectionSelector({
                         closeDropdown();
                     }
                 }}
-                className="w-full flex items-center justify-between text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground"
+                aria-label={ariaLabel}
+                className={cn('w-full flex items-center justify-between text-xs bg-muted/50 border border-border rounded px-2 py-1 text-foreground', controlClassName)}
                 aria-haspopup="listbox"
                 aria-expanded={open}
             >

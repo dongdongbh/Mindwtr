@@ -401,3 +401,35 @@ describe('Process Inbox public Undo', () => {
         } finally { await sqlite.close(); }
     });
 });
+
+// #1461: the native step view offers the chosen project's sections; the host
+// refuses a section from another project, and File it writes the picked one.
+describe('Process Inbox project section on the native host', () => {
+    it('offers, checks and writes the chosen project section', async () => {
+        const project = (id: string, title: string, order: number) => ({ id, title, status: 'active' as const, color: '#000', order,
+            tagIds: [], createdAt: BEFORE, updatedAt: BEFORE });
+        const section = (id: string, projectId: string, title: string) => ({ id, projectId, title, order: 0, createdAt: BEFORE, updatedAt: BEFORE });
+        const sqlite = await openSqliteHost({ ...seed(), projects: [project('p-work', 'Work', 0), project('p-home', 'Home', 1)],
+            sections: [section('s-design', 'p-work', 'Design'), section('s-garden', 'p-home', 'Garden')] });
+        try {
+            let view = value(sqlite.host.startInboxProcessing({ mode: 'quick' })).view!;
+            const answer = value(sqlite.host.inboxCommitPrepare({ sessionId: view.sessionId, taskId: ID, step: view.step,
+                decision: { choice: 'next' }, requestId: generateUUID() }));
+            if (answer.kind !== 'flow') throw new Error('Expected the file step');
+            view = answer.result.view!;
+            const edit = (next: unknown) => sqlite.host.getInboxProcessingStep({ sessionId: view.sessionId, taskId: ID, step: view.step,
+                edit: next as never });
+            expect(view.project).not.toHaveProperty('sections');
+            view = value(edit({ type: 'selectProject', value: 'p-work' }));
+            expect(view.project?.sections?.options.map((option) => option.label)).toEqual(['✓ No Section', 'Design']);
+            expect(edit({ type: 'setSection', value: 's-garden' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+            view = value(edit({ type: 'setSection', value: 's-design' }));
+            expect(view.draft.sectionId).toBe('s-design');
+            const request = { sessionId: view.sessionId, taskId: ID, step: view.step, decision: { choice: 'fileIt' }, requestId: generateUUID() };
+            const filed = value(sqlite.host.inboxCommitPrepare(request));
+            if (filed.kind !== 'prepared') throw new Error('Expected a prepared decision');
+            value(await sqlite.host.inboxPreparedCommit({ request, prepared: filed.prepared }));
+            expect(useTaskStore.getState()._tasksById.get(ID)).toMatchObject({ status: 'next', projectId: 'p-work', sectionId: 's-design' });
+        } finally { await sqlite.close(); }
+    });
+});

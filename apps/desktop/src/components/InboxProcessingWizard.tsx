@@ -35,6 +35,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
+import { InboxProcessingSectionField } from './InboxProcessingSectionField';
 import { PriorityFlag } from './Task/PriorityFlag';
 import { InboxSimilarTasks } from './InboxSimilarTasks';
 
@@ -82,6 +83,8 @@ export type InboxProcessingWizardProps = {
     handleConfirmSomeday: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
     onCreateSomedaySection: (title: string) => Promise<string | null>;
+    /** Adds a section to the chosen project (#1461). */
+    onCreateSection: (title: string) => Promise<string | null>;
     customContext: string;
     setCustomContext: (value: string) => void;
     addCustomContext: (value?: string) => void;
@@ -157,6 +160,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     handleConfirmSomeday,
     onCreatePerson,
     onCreateSomedaySection,
+    onCreateSection,
     customContext,
     setCustomContext,
     addCustomContext,
@@ -194,6 +198,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         areas,
         personOptions,
         projects,
+        sections,
         suggestedContexts,
         suggestedTags,
         timeEstimateOptions,
@@ -293,6 +298,31 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const currentProject = selectedProjectId
         ? projects.find((project) => project.id === selectedProjectId) ?? null
         : null;
+    const sectionField = (labelClassName?: string, controlClassName?: string) => (showProjectField ? (
+        <InboxProcessingSectionField
+            t={t}
+            project={currentProject}
+            sections={sections}
+            value={draft.sectionId}
+            onChange={(sectionId) => setField('sectionId', sectionId)}
+            onCreateSection={onCreateSection}
+            labelClassName={labelClassName}
+            controlClassName={controlClassName}
+        />
+    ) : null);
+    const projectHasSections = (projectId: string) => sections.some((section) => (
+        section.projectId === projectId && !section.deletedAt
+    ));
+    // In the project step a pick files the task at once, unless the project has
+    // sections: then it is selected, so its Section picker can show (#1461).
+    const chooseStepProject = (projectId: string) => {
+        if (!projectHasSections(projectId)) {
+            handleSetProject(projectId);
+            return;
+        }
+        setSelectedProjectId(projectId);
+        setSelectedAreaId(null);
+    };
     const laterLabel = tFallback(t, 'process.later', 'Start later');
     const laterHint = tFallback(t, 'process.laterHint', 'Set a start date and move this to Next Actions.');
     const incubateLabel = tFallback(t, 'process.incubate', 'Incubate');
@@ -353,6 +383,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     />
                 </div>
             ) : null}
+            {sectionField()}
         </div>
     ) : null;
 
@@ -539,6 +570,10 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     menuClassName="text-sm"
                                 />
                             </div>
+                        )}
+                        {showProjectInRefine && sectionField(
+                            'text-[11px] text-muted-foreground font-medium',
+                            'rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none',
                         )}
                         {ai.aiEnabled && (
                             <div className="flex flex-col gap-2 text-xs">
@@ -1124,6 +1159,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                         {t('process.projectDesc')}
                     </p>
 
+                    {!convertToProject && currentProject && sectionField()}
                     {!convertToProject && currentProject && (
                         <button
                             type="button"
@@ -1220,7 +1256,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                                 const title = projectSearch.trim();
                                                 const existing = filteredProjects.find((project) => project.title.toLowerCase() === title.toLowerCase());
                                                 if (existing) {
-                                                    handleSetProject(existing.id);
+                                                    chooseStepProject(existing.id);
+                                                    setProjectSearch('');
                                                     return;
                                                 }
                                                 const created = await addProject(
@@ -1269,7 +1306,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                             {filteredProjects.map(project => (
                                                 <button
                                                     key={project.id}
-                                                    onClick={() => handleSetProject(project.id)}
+                                                    onClick={() => chooseStepProject(project.id)}
                                                     className={cn(
                                                         "w-full flex items-center gap-3 p-3 rounded-lg text-left border",
                                                         selectedProjectId === project.id

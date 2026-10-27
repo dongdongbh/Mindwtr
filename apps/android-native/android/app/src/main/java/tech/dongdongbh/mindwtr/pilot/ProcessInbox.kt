@@ -621,6 +621,12 @@ private fun InboxViewModel.ProjectSection(flow: InboxProcessing, project: JSONOb
     val conversion = project.child("conversion")
     val projectLabel = t("taskEdit.projectLabel")
     if (conversion == null) project.child("current")?.let { OptionChip(it, projectLabel, locked, send) }
+    // RN's section picker under the chosen project, when it has sections (#1461).
+    project.child("sections")?.let { sections ->
+        val sectionLabel = sections.getString("label")
+        Text(sectionLabel, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(bottom = 6.dp))
+        for (option in sections.items("options")) OptionChip(option, sectionLabel, locked, send)
+    }
     project.text("areaLabel")?.let { areaLabel ->
         Text(areaLabel, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(bottom = 6.dp))
         for (area in project.items("areas")) OptionChip(area, areaLabel, locked, send)

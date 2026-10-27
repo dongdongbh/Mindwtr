@@ -120,6 +120,7 @@ const storeState = {
   tasks: [{ ...baseInboxTask }] as any[],
   _allTasks: [{ ...baseInboxTask }] as any[],
   projects: [] as any[],
+  sections: [] as any[],
   areas: [] as any[],
   settings: mockSettings,
   updateTask,

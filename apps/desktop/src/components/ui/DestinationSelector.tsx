@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
     compareAreasByOrder,
     isSelectableProjectForTaskAssignment,
@@ -68,6 +68,8 @@ export function DestinationSelector({
     const restoreFocusRef = useRef(false);
     const mountedRef = useRef(true);
     const attemptRef = useRef(0);
+    const [searchFocused, setSearchFocused] = useState(false);
+    const optionIdPrefix = useId();
     const { fixedDropdownStyle, listMaxHeight } = useDropdownPosition({
         open,
         containerRef,
@@ -222,6 +224,25 @@ export function DestinationSelector({
         void handleCreate(canCreateProject ? 'project' : 'area');
     };
 
+    // While searching, the list runs matches (projects, then areas), the create
+    // rows, then None, and the row Enter picks is highlighted (#1461).
+    const searching = Boolean(normalizedQuery);
+    const enterTargetKey = !searching
+        ? undefined
+        : filteredProjects[0]
+            ? `project-${filteredProjects[0].id}`
+            : filteredAreas[0]
+                ? `area-${filteredAreas[0].id}`
+                : canCreateProject !== canCreateArea
+                    ? (canCreateProject ? 'create-project' : 'create-area')
+                    : undefined;
+    const optionId = (key: string) => `${optionIdPrefix}-${key}`;
+    const optionClassName = (key: string, selected: boolean) => cn(
+        'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted focus:outline-none focus:bg-muted disabled:opacity-50',
+        selected && 'bg-muted font-medium',
+        searchFocused && key === enterTargetKey && 'bg-primary/10 text-primary',
+    );
+
     const renderOption = (
         key: string,
         label: string,
@@ -234,22 +255,40 @@ export function DestinationSelector({
         return (
             <button
                 key={key}
+                id={optionId(key)}
                 type="button"
                 role="option"
                 aria-selected={selected}
                 data-destination-option="true"
                 disabled={Boolean(creating)}
                 onClick={() => choose(selection)}
-                className={cn(
-                    'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted focus:outline-none focus:bg-muted',
-                    selected && 'bg-muted font-medium',
-                )}
+                className={optionClassName(key, selected)}
             >
                 <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="truncate">{label}</span>
             </button>
         );
     };
+    const renderCreate = (kind: 'project' | 'area') => {
+        const key = `create-${kind}`;
+        return (
+            <button
+                key={key}
+                id={optionId(key)}
+                type="button"
+                role="option"
+                aria-selected={false}
+                data-destination-option="true"
+                disabled={Boolean(creating)}
+                onClick={() => void handleCreate(kind)}
+                className={optionClassName(key, false)}
+            >
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                {kind === 'project' ? createProjectLabel : createAreaLabel}: “{query.trim()}”
+            </button>
+        );
+    };
+    const noneOption = renderOption('none', noneLabel, { kind: 'none' }, MapPin);
 
     return (
         <div ref={containerRef} className={cn('relative', className)} aria-busy={Boolean(creating) || undefined}>
@@ -311,66 +350,52 @@ export function DestinationSelector({
                             aria-label={searchPlaceholder}
                             onChange={(event) => setQuery(event.target.value)}
                             onKeyDown={handleSearchKeyDown}
+                            onFocus={() => setSearchFocused(true)}
+                            onBlur={() => setSearchFocused(false)}
+                            aria-activedescendant={searchFocused && enterTargetKey ? optionId(enterTargetKey) : undefined}
                             className="mb-1 w-full rounded border border-border bg-muted/40 px-2 py-1 text-[inherit]"
                         />
-                        <div role="listbox" aria-label={destinationLabel} className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
-                            {renderOption('none', noneLabel, { kind: 'none' }, MapPin)}
-                            {filteredProjects.length > 0 && (
-                                <div role="group" aria-label={projectsLabel}>
-                                    <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                        {projectsLabel}
+                        <div role="listbox" aria-label={destinationLabel}>
+                            <div className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
+                                {!searching && noneOption}
+                                {filteredProjects.length > 0 && (
+                                    <div role="group" aria-label={projectsLabel}>
+                                        <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                            {projectsLabel}
+                                        </div>
+                                        {filteredProjects.map((project) => renderOption(
+                                            `project-${project.id}`,
+                                            project.title,
+                                            { kind: 'project', id: project.id },
+                                            Folder,
+                                        ))}
                                     </div>
-                                    {filteredProjects.map((project) => renderOption(
-                                        `project-${project.id}`,
-                                        project.title,
-                                        { kind: 'project', id: project.id },
-                                        Folder,
-                                    ))}
-                                </div>
-                            )}
-                            {filteredAreas.length > 0 && (
-                                <div role="group" aria-label={areasLabel}>
-                                    <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                        {areasLabel}
-                                    </div>
-                                    {filteredAreas.map((area) => renderOption(
-                                        `area-${area.id}`,
-                                        area.name,
-                                        { kind: 'area', id: area.id },
-                                        MapPin,
-                                    ))}
-                                </div>
-                            )}
-                            {!hasMatches && (
-                                <div className="px-2 py-2 text-muted-foreground">{noMatchesLabel}</div>
-                            )}
-                        </div>
-                        {(canCreateProject || canCreateArea) && (
-                            <div className="mt-1 border-t border-border pt-1">
-                                {canCreateProject && (
-                                    <button
-                                        type="button"
-                                        disabled={Boolean(creating)}
-                                        onClick={() => void handleCreate('project')}
-                                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted focus:outline-none focus:bg-muted disabled:opacity-50"
-                                    >
-                                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                                        {createProjectLabel}: “{query.trim()}”
-                                    </button>
                                 )}
-                                {canCreateArea && (
-                                    <button
-                                        type="button"
-                                        disabled={Boolean(creating)}
-                                        onClick={() => void handleCreate('area')}
-                                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-muted focus:outline-none focus:bg-muted disabled:opacity-50"
-                                    >
-                                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                                        {createAreaLabel}: “{query.trim()}”
-                                    </button>
+                                {filteredAreas.length > 0 && (
+                                    <div role="group" aria-label={areasLabel}>
+                                        <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                            {areasLabel}
+                                        </div>
+                                        {filteredAreas.map((area) => renderOption(
+                                            `area-${area.id}`,
+                                            area.name,
+                                            { kind: 'area', id: area.id },
+                                            MapPin,
+                                        ))}
+                                    </div>
+                                )}
+                                {!hasMatches && (
+                                    <div className="px-2 py-2 text-muted-foreground">{noMatchesLabel}</div>
                                 )}
                             </div>
-                        )}
+                            {searching && (
+                                <div className="mt-1 border-t border-border pt-1">
+                                    {canCreateProject && renderCreate('project')}
+                                    {canCreateArea && renderCreate('area')}
+                                    {noneOption}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </ModalPortal>
             )}

@@ -3659,6 +3659,9 @@ function isValidInboxEdit(edit: unknown): edit is ProcessInboxDraftEdit {
                 && (state.settings.gtd?.viewSections?.someday ?? []).some((section) => section.id === value));
         case 'setArea':
             return value === null || state.areas.some((area) => area.id === value && !area.deletedAt);
+        case 'setSection':
+            // That the section sits in the draft's project is checked against the session.
+            return value === null || state.sections.some((section) => section.id === value && !section.deletedAt);
         case 'selectProject': {
             if (value === null) return true;
             const project = typeof value === 'string' ? state._projectsById.get(value) : undefined;
@@ -3763,6 +3766,7 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 settings: state.settings,
                 tasks: state.tasks,
                 projects: state.projects,
+                sections: state.sections,
                 areas: state.areas,
                 people: state.people,
                 similarityIndex: similarity.index,
@@ -4061,6 +4065,11 @@ function createInboxProcessingMethods(deps: InboxProcessingDeps) {
                 void logInfo('Inbox processing reloaded the edited task', {
                     scope: 'inbox', force: true, context: { releaseCheck: 'v1.3.8/inbox-processing-editor-reload' },
                 });
+            }
+            const sectionEdit = input.edit?.type === 'setSection' ? input.edit.value : null;
+            if (sectionEdit !== null
+                && useTaskStore.getState().sections.find((section) => section.id === sectionEdit)?.projectId !== entry.draft.projectId) {
+                return fail('INVALID_INPUT', 'The section is not in the chosen project');
             }
             if (input.edit) entry.draft = applyProcessInboxDraftEdit(entry.draft, input.edit, context().plan);
             if (input.mode) entry.mode = input.mode;

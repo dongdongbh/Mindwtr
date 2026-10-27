@@ -160,15 +160,17 @@ export function useInboxProcessingState({
     /**
      * The one write path into the processing draft: the core reducer applies
      * the field descriptor cascades, and the inbox adds its own container rule
-     * on top — picking an area drops a project that lives outside it.
+     * on top — picking an area drops a project that lives outside it, and a
+     * section belongs to its project, so another project drops it (#1461).
      */
     const setField = useCallback<TaskDraftSetter>((field, value) => {
         setDraft((current) => {
-            const next = setTaskDraftField(current, field, value);
-            if (field !== 'areaId' || !next.areaId || !next.projectId) return next;
-            return projectMap.get(next.projectId)?.areaId === next.areaId
-                ? next
-                : setTaskDraftField(next, 'projectId', '');
+            let next = setTaskDraftField(current, field, value);
+            if (field === 'areaId' && next.areaId && next.projectId
+                && projectMap.get(next.projectId)?.areaId !== next.areaId) {
+                next = setTaskDraftField(next, 'projectId', '');
+            }
+            return next.projectId === current.projectId ? next : setTaskDraftField(next, 'sectionId', '');
         });
     }, [projectMap]);
     const processingStep = processingSession.currentStep ?? 'actionable';

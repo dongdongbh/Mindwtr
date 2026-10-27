@@ -57,6 +57,7 @@ const visibility: InboxProcessingVisibility = {
 
 const options: InboxProcessingOptionLists = {
     projects: [],
+    sections: [],
     areas: [],
     allContexts: [],
     allTags: [],
@@ -101,8 +102,10 @@ const useLiveDraft = (initial: Partial<TaskDraft> = {}) => {
     };
 };
 
-function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = {}) {
-    const { draft, setField } = useLiveDraft();
+type HarnessDraft = { initialDraft?: Partial<TaskDraft> };
+
+function QuickPanelHarness({ initialDraft, ...overrides }: Partial<InboxProcessingQuickPanelProps> & HarnessDraft = {}) {
+    const { draft, setField } = useLiveDraft(initialDraft);
 
     return (
         <LanguageProvider>
@@ -135,6 +138,7 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
             onSendDelegateRequest={noop}
             onCreatePerson={noop}
             onCreateSomedaySection={noop as InboxProcessingQuickPanelProps['onCreateSomedaySection']}
+            onCreateSection={noop as InboxProcessingQuickPanelProps['onCreateSection']}
             toggleContext={noop}
             toggleTag={noop}
             convertToProject={false}
@@ -151,8 +155,8 @@ function QuickPanelHarness(overrides: Partial<InboxProcessingQuickPanelProps> = 
     );
 }
 
-function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrides }: Partial<InboxProcessingWizardProps> = {}) {
-    const { draft, setField } = useLiveDraft();
+function WizardHarness({ processingStep = 'refine' as ProcessingStep, initialDraft, ...overrides }: Partial<InboxProcessingWizardProps> & HarnessDraft = {}) {
+    const { draft, setField } = useLiveDraft(initialDraft);
 
     return (
         <LanguageProvider>
@@ -196,6 +200,7 @@ function WizardHarness({ processingStep = 'refine' as ProcessingStep, ...overrid
             handleConfirmSomeday={noop}
             onCreatePerson={noop}
             onCreateSomedaySection={noop as InboxProcessingWizardProps['onCreateSomedaySection']}
+            onCreateSection={noop as InboxProcessingWizardProps['onCreateSection']}
             customContext=""
             setCustomContext={noop}
             addCustomContext={noop}
@@ -505,3 +510,64 @@ describe('Incubate requires a review date (#1338)', () => {
         expect(view.getByRole('button', { name: 'No date' })).toBeInTheDocument();
     });
 });
+
+// #1461: once the chosen project has sections, processing offers the task
+// editor's Section picker under Project.
+describe('Inbox processing project section picker', () => {
+    afterEach(() => {
+        cleanup();
+    });
+
+    const workProject: Project = { ...similarProject, id: 'p-work', title: 'Work' };
+    const homeProject: Project = { ...similarProject, id: 'p-home', title: 'Home' };
+    const sectionOptions: InboxProcessingOptionLists = {
+        ...options,
+        projects: [workProject, homeProject],
+        sections: [
+            { id: 's-design', projectId: 'p-work', title: 'Design', order: 0, createdAt: '', updatedAt: '' },
+            { id: 's-review', projectId: 'p-work', title: 'Review', order: 1, createdAt: '', updatedAt: '' },
+        ],
+    };
+
+    it('shows no Section picker without a project or for a project with no sections', () => {
+        const none = render(<WizardHarness processingStep="someday" options={sectionOptions} />);
+        expect(none.queryByText('taskEdit.sectionLabel')).toBeNull();
+        none.unmount();
+        const home = render(<WizardHarness processingStep="someday" options={sectionOptions} initialDraft={{ projectId: 'p-home' }} />);
+        expect(home.queryByText('taskEdit.sectionLabel')).toBeNull();
+    });
+
+    it.each([
+        ['guided', () => render(<WizardHarness processingStep="someday" options={sectionOptions} initialDraft={{ projectId: 'p-work' }} />)],
+        ['quick', () => render(<QuickPanelHarness actionabilityChoice="someday" options={sectionOptions} initialDraft={{ projectId: 'p-work' }} />)],
+    ] as const)('offers the chosen project\'s sections in %s mode and writes the pick to the draft', (_mode, renderPanel) => {
+        const { getByRole, getByText } = renderPanel();
+
+        expect(getByText('taskEdit.sectionLabel')).toBeInTheDocument();
+        const trigger = getByRole('button', { name: 'taskEdit.sectionLabel' });
+        expect(trigger).toHaveTextContent('taskEdit.noSectionOption');
+        fireEvent.click(trigger);
+        fireEvent.click(getByRole('option', { name: 'Review' }));
+        expect(getByRole('button', { name: 'taskEdit.sectionLabel' })).toHaveTextContent('Review');
+    });
+
+    it('selects a project with sections in the project step instead of filing at once', () => {
+        const handleSetProject = vi.fn();
+        const { getByRole, getByText } = render(
+            <WizardHarness
+                processingStep="project"
+                options={sectionOptions}
+                filteredProjects={[workProject, homeProject]}
+                handleSetProject={handleSetProject}
+            />,
+        );
+
+        fireEvent.click(getByRole('button', { name: 'Work' }));
+        expect(handleSetProject).not.toHaveBeenCalled();
+        expect(getByText('taskEdit.sectionLabel')).toBeInTheDocument();
+
+        fireEvent.click(getByRole('button', { name: 'Home' }));
+        expect(handleSetProject).toHaveBeenCalledExactlyOnceWith('p-home');
+    });
+});
+

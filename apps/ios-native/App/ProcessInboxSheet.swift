@@ -303,6 +303,12 @@ struct ProcessInboxSheet: View {
                     if !project.object("current").isEmpty {
                         option(project.object("current"), id: "process-inbox-project-current")
                     }
+                    // RN's section picker under the chosen project, when it has sections (#1461).
+                    let sections = project.object("sections")
+                    if !sections.isEmpty {
+                        Text(sections.text("label")).rnFont(13, .semibold).foregroundStyle(palette.secondary)
+                        options(sections.objects("options"), prefix: "process-inbox-section")
+                    }
                     let search = project.object("search")
                     if !search.isEmpty {
                         let searchLayout = dynamicTypeSize.isAccessibilitySize

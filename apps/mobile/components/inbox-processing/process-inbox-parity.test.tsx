@@ -1024,4 +1024,46 @@ describe('React Native Process Inbox parity fixture', () => {
     await act(async () => { renderer.unmount(); });
     await flushPendingSave();
   }, 60_000);
+
+  // #1461: once the chosen project has sections, the file step offers them as
+  // chips under the project, and File it writes the picked one.
+  it('offers the chosen project\'s sections, drops the pick on a project change, and files the task in it', async () => {
+    await seedStore(settingsVariants.base, scenarioTasks(['inbox-a', 'inbox-c']));
+    const design = await useTaskStore.getState().addSection('p-launch', 'Design');
+    if (!design) throw new Error('Expected a section');
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<Root onClose={() => undefined} />); });
+    await flush();
+    const harness: Harness = { renderer, closed: () => 0 };
+    const sectionChip = (title: string) => pressables(renderer.root)
+      .find((node) => node.props.accessibilityLabel === `${t('taskEdit.sectionLabel')}: ${title}`);
+    const pressChip = async (title: string) => {
+      const chip = sectionChip(title);
+      if (!chip) throw new Error(`No section chip ${title}`);
+      await act(async () => { chip.props.onPress(); });
+      await flush();
+    };
+    for (const action of guidedToFile) await perform(harness, action);
+
+    expect(sectionChip('Design')).toBeUndefined();
+    await perform(harness, ['chip', 'project', 'p-launch']);
+    await pressChip('Design');
+    expect(sectionChip('Design')?.props.accessibilityState).toEqual({ selected: true });
+
+    // Another project has no sections, so the picker goes; coming back starts with No section.
+    await perform(harness, ['chip', 'project', 'p-home']);
+    expect(sectionChip('Design')).toBeUndefined();
+    await perform(harness, ['chip', 'project', 'p-launch']);
+    expect(sectionChip(t('taskEdit.noSectionOption'))?.props.accessibilityState).toEqual({ selected: true });
+
+    await pressChip('Design');
+    await perform(harness, ['press', 'fileIt']);
+    await flush();
+    expect(useTaskStore.getState()._tasksById.get('inbox-a')).toMatchObject({
+      status: 'next', projectId: 'p-launch', sectionId: design.id,
+    });
+    await act(async () => { renderer.unmount(); });
+    await flushPendingSave();
+  }, 60_000);
 });
+

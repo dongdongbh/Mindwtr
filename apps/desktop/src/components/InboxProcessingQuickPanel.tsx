@@ -32,6 +32,7 @@ import { ProjectSelector } from './ui/ProjectSelector';
 import { DateField } from './ui/DateField';
 import { QuickDateChips } from './QuickDateChips';
 import { SomedaySectionSelector } from './ui/SomedaySectionSelector';
+import { InboxProcessingSectionField } from './InboxProcessingSectionField';
 import { PriorityFlag } from './Task/PriorityFlag';
 import { InboxSimilarTasks } from './InboxSimilarTasks';
 
@@ -71,6 +72,8 @@ export type InboxProcessingQuickPanelProps = {
     onSendDelegateRequest: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
     onCreateSomedaySection: (title: string) => Promise<string | null>;
+    /** Adds a section to the chosen project (#1461). */
+    onCreateSection: (title: string) => Promise<string | null>;
     toggleContext: (ctx: string) => void;
     toggleTag: (tag: string) => void;
     convertToProject: boolean;
@@ -143,6 +146,7 @@ export function InboxProcessingQuickPanel({
     onSendDelegateRequest,
     onCreatePerson,
     onCreateSomedaySection,
+    onCreateSection,
     toggleContext,
     toggleTag,
     convertToProject,
@@ -161,6 +165,7 @@ export function InboxProcessingQuickPanel({
         areas,
         personOptions,
         projects,
+        sections,
         suggestedContexts,
         suggestedTags,
         timeEstimateOptions,
@@ -288,6 +293,18 @@ export function InboxProcessingQuickPanel({
                         menuClassName="text-sm"
                     />
                 </div>
+            ) : null}
+            {showProjectField ? (
+                <InboxProcessingSectionField
+                    t={t}
+                    project={selectedProjectId ? projects.find((project) => project.id === selectedProjectId) : null}
+                    sections={sections}
+                    value={draft.sectionId}
+                    onChange={(sectionId) => setField('sectionId', sectionId)}
+                    onCreateSection={onCreateSection}
+                    labelClassName="text-[11px] text-muted-foreground font-medium"
+                    controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"
+                />
             ) : null}
         </div>
     ) : null;

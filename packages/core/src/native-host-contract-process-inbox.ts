@@ -519,6 +519,8 @@ export function prepareNativeInboxWrite(input: {
     const relevantSections = new Set<string>([
         ...planned.effect.sections.flatMap((row) => [row.before?.id, row.after.id].filter((id): id is string => Boolean(id))),
         ...planned.effect.guards.reactivation?.sectionIds ?? [],
+        // The project section the task leaves or is filed in (#1461).
+        ...[source.sectionId, input.draft.sectionId].filter((id): id is string => Boolean(id)),
     ]);
     witness.lists = {
         tasks: state._allTasks.filter((task) => relevantTasks.has(task.id)),

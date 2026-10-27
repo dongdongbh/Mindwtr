@@ -26,6 +26,7 @@ import {
   getProcessInboxDefaultScheduleTime,
   getProcessInboxPersonSuggestions,
   getProcessInboxProjectChoices,
+  getProjectSectionsForView,
   getProcessInboxRemainingCandidates,
   getProcessInboxSections,
   getProcessInboxSimilarTasks,
@@ -131,6 +132,7 @@ export function useInboxProcessingController({
     tasks,
     _allTasks: allTasks,
     projects,
+    sections,
     areas,
     people,
     settings,
@@ -167,6 +169,7 @@ export function useInboxProcessingController({
   const [processingDescription, setProcessingDescription] = useState('');
   const [processingTitleFocused, setProcessingTitleFocused] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(null);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
   const [selectedEnergyLevel, setSelectedEnergyLevel] = useState<Task['energyLevel']>(undefined);
   const [selectedAssignedTo, setSelectedAssignedTo] = useState('');
@@ -387,6 +390,15 @@ export function useInboxProcessingController({
     () => (selectedProjectId ? projects.find((project) => project.id === selectedProjectId) ?? null : null),
     [projects, selectedProjectId],
   );
+  // The chosen project's sections (#1461). A picked section counts only while it
+  // sits in the chosen project, so changing the project can never carry it along.
+  const projectSections = useMemo(
+    () => getProjectSectionsForView(currentProject, sections),
+    [currentProject, sections],
+  );
+  const effectiveSectionId = selectedSectionId && projectSections.some((section) => section.id === selectedSectionId)
+    ? selectedSectionId
+    : null;
   const currentArea = useMemo(
     () => (selectedAreaId ? areas.find((area) => area.id === selectedAreaId) ?? null : null),
     [areas, selectedAreaId],
@@ -462,6 +474,7 @@ export function useInboxProcessingController({
     setNewContext('');
     setProjectSearch('');
     setSelectedProjectId(defaults.projectId);
+    setSelectedSectionId(defaults.sectionId);
     setSelectedAreaId(defaults.areaId);
     resetTitleFocus();
     setProcessingTitle(defaults.title);
@@ -645,6 +658,7 @@ export function useInboxProcessingController({
       title: processingTitle,
       description: processingDescription,
       projectId: selectedProjectId,
+      ...(effectiveSectionId ? { sectionId: effectiveSectionId } : {}),
       areaId: selectedAreaId,
       projectSearch,
       contexts: selectedContexts,
@@ -671,6 +685,7 @@ export function useInboxProcessingController({
     delegateFollowUpDate,
     delegateFollowUpDateOnly,
     delegateWho,
+    effectiveSectionId,
     extraActionDrafts,
     newContext,
     nextActionDraft,
@@ -717,6 +732,7 @@ export function useInboxProcessingController({
     setNextActionDraft(outcome.draft.nextAction);
     setExtraActionDrafts(outcome.draft.extraActions);
     setSelectedProjectId(outcome.draft.projectId);
+    setSelectedSectionId(outcome.draft.sectionId ?? null);
     setProjectSearch(outcome.draft.projectSearch);
     scrollProcessingToTop(true);
     return outcome;
@@ -895,9 +911,10 @@ export function useInboxProcessingController({
     const next = selectProcessInboxProject(projectId);
     setConvertToProject(next.convertToProject);
     setSelectedProjectId(next.projectId);
+    if (next.projectId !== selectedProjectId) setSelectedSectionId(null);
     if (next.areaId === null) setSelectedAreaId(null);
     setProjectSearch(next.projectSearch);
-  }, []);
+  }, [selectedProjectId]);
 
   const handleCreateProjectEarly = useCallback(async () => {
     const submit = resolveProcessInboxProjectSearchSubmit(projectSearch, exactProjectMatch, selectedAreaId);
@@ -1323,6 +1340,9 @@ export function useInboxProcessingController({
     selectedEnergyLevel,
     selectedPriority,
     selectedProjectId,
+    selectedSectionId: effectiveSectionId,
+    setSelectedSectionId,
+    projectSections,
     selectedSomedaySectionId,
     selectedTags,
     selectedTimeEstimate,

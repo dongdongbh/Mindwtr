@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Inbox processing: after you choose a project that has sections, you can also choose its section, on desktop and mobile. On desktop, while you type in a project picker, matching projects come first, then Create project, then No project, and the row Enter will pick is highlighted. The task editor's destination picker follows the same order (#1461).
 - Mobile calendar: all-day items are chips like on desktop, and completed ones are crossed out and dimmed. The Day view shows four all-day items and a "+N more" button that opens the rest, and each Week column shows "+N more" when a day has more than three (#1462).
 - Desktop: when processing the Inbox, Start later now offers only dated choices, as on mobile. Before, it also showed No date, and choosing it made Start later stop with "Choose a start date for Start later." To move a task to Next with no start date, answer Yes, it's actionable instead (#768).
 - Weekly Review: tap a stale project to see its tasks, edit them, add a task, or open the project. Projects in the Projects step can also be opened from the review (#1459).

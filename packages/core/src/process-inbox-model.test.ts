@@ -403,3 +403,82 @@ describe('typed single-value tokens with hidden controls', () => {
         expect(written).toMatchObject({ energyLevel: 'low', assignedTo: 'Alice' });
     });
 });
+
+// #1461: processing offers the chosen project's sections, and the write carries
+// the picked section only with its own project.
+describe('project section in Inbox processing', () => {
+    const plan = resolveProcessInboxPlan({});
+    const selection = (projectId: string | null, sectionId?: string | null) => ({
+        projectId, ...(sectionId !== undefined ? { sectionId } : {}), areaId: null, contexts: [], tags: [],
+        priority: undefined, energyLevel: undefined, assignedTo: '', timeEstimate: undefined,
+    });
+    const commit = (task: Task, sel: ReturnType<typeof selection>, options = {}, title = task.title) => {
+        const prepared = prepareProcessInboxCommit({ task, plan, decision: { type: 'next' }, title, description: '',
+            parseTitle: (input) => (input.includes('+Other')
+                ? { title: task.title, props: { projectId: 'p-other' } }
+                : { title: input, props: {} }),
+            selection: sel, scheduleUpdates: {}, dirtyScheduleFields: new Set(), options });
+        if (!prepared.ok || prepared.event.type === 'discard') throw new Error('Expected an update');
+        return prepared.event.fields;
+    };
+    const inbox = { id: 'inbox', title: 'Draft the brief', status: 'inbox' } as Task;
+
+    it('writes the picked section with its project', () => {
+        expect(commit(inbox, selection('p-work', 's-design'))).toMatchObject({ projectId: 'p-work', sectionId: 's-design' });
+    });
+
+    it('drops the section when the decision or a typed +Project files the task elsewhere', () => {
+        const moved = commit(inbox, selection('p-work', 's-design'), { fields: { projectId: 'p-other' } });
+        expect(moved.projectId).toBe('p-other');
+        expect(Object.hasOwn(moved, 'sectionId') && moved.sectionId).toBeUndefined();
+        const typed = commit(inbox, selection('p-work', 's-design'), {}, 'Draft the brief +Other');
+        expect(typed.projectId).toBe('p-other');
+        expect(typed.sectionId).toBeUndefined();
+    });
+
+    it('clears a section the task had when No section is picked, and writes nothing when there is no section either way', () => {
+        const sectioned = { ...inbox, projectId: 'p-work', sectionId: 's-design' } as Task;
+        const cleared = commit(sectioned, selection('p-work', null));
+        expect(Object.hasOwn(cleared, 'sectionId')).toBe(true);
+        expect(cleared.sectionId).toBeUndefined();
+        expect(Object.hasOwn(commit(inbox, selection('p-work', null)), 'sectionId')).toBe(false);
+        // A caller that does not offer sections leaves the task's section alone.
+        expect(Object.hasOwn(commit(sectioned, selection('p-work')), 'sectionId')).toBe(false);
+    });
+
+    it('keeps the section in the draft only inside its project', () => {
+        const draft = createProcessInboxDraft({ ...inbox, projectId: 'p-work', sectionId: 's-design' } as Task);
+        expect(draft.sectionId).toBe('s-design');
+        expect(createProcessInboxDraft(inbox)).not.toHaveProperty('sectionId');
+        expect(applyProcessInboxDraftEdit(draft, { type: 'selectProject', value: 'p-work' }, plan).sectionId).toBe('s-design');
+        expect(applyProcessInboxDraftEdit(draft, { type: 'selectProject', value: 'p-other' }, plan).sectionId).toBeNull();
+        const noProject = createProcessInboxDraft(inbox);
+        expect(applyProcessInboxDraftEdit(noProject, { type: 'setSection', value: 's-design' }, plan)).toBe(noProject);
+        expect(prepareProcessInboxDraftDecision({ task: inbox, draft: { ...draft, sectionId: 's-review' }, plan,
+            settings: undefined, parseTitle: (title) => ({ title, props: {} }) }, { type: 'next' }))
+            .toMatchObject({ ok: true, event: { fields: { projectId: 'p-work', sectionId: 's-review' } } });
+    });
+
+    it("offers the chosen project's sections in the step view, No section first", () => {
+        const task = { ...inbox, projectId: 'p-work' } as Task;
+        const projects = [{ id: 'p-work', title: 'Work', status: 'active', color: '#000', order: 0, tagIds: [], createdAt: '', updatedAt: '' }] as never[];
+        const sections = [
+            { id: 's-review', projectId: 'p-work', title: 'Review', order: 1, createdAt: '', updatedAt: '' },
+            { id: 's-design', projectId: 'p-work', title: 'Design', order: 0, createdAt: '', updatedAt: '' },
+            { id: 's-elsewhere', projectId: 'p-home', title: 'Garden', order: 0, createdAt: '', updatedAt: '' },
+        ] as never[];
+        const view = (draft: ReturnType<typeof createProcessInboxDraft>, sectionList = sections) => buildProcessInboxStepView({
+            task, draft, answers: { actionability: 'actionable', twoMinute: 'no', execution: 'defer', oneActionAnswered: true },
+            mode: 'guided', plan, settings: undefined, tasks: [task], projects, sections: sectionList, areas: [], people: [],
+            similarityIndex: null, t: (key) => key, formatDate: ((value: unknown) => String(value)) as never, now: new Date(2026, 9, 26),
+        });
+        const draft = { ...createProcessInboxDraft(task), sectionId: 's-review' };
+        const offered = view(draft).project?.sections;
+        expect(offered?.label).toBe('taskEdit.sectionLabel');
+        expect(offered?.options.map((option) => [option.label, option.selected])).toEqual([
+            ['taskEdit.noSectionOption', false], ['Design', false], ['Review', true],
+        ]);
+        expect(offered?.options[1].edit).toEqual({ type: 'setSection', value: 's-design' });
+        expect(view(draft, []).project).not.toHaveProperty('sections');
+    });
+});

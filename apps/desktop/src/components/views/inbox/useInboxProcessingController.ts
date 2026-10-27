@@ -93,6 +93,8 @@ export function useInboxProcessingController({
     const allTasks = useTaskStore((state) => state._allTasks);
     const people = useTaskStore((state) => state.people);
     const addPerson = useTaskStore((state) => state.addPerson);
+    const sections = useTaskStore((state) => state.sections);
+    const addSection = useTaskStore((state) => state.addSection);
     const personOptions = useMemo(() => getPersonOptionNames(people, tasks), [people, tasks]);
     const {
         processInboxPlan,
@@ -300,6 +302,7 @@ export function useInboxProcessingController({
             parseTitle: (input) => (input === draft.title ? parsedTitle : parseProcessingTitle(input)),
             selection: {
                 projectId: draft.projectId || null,
+                sectionId: draft.sectionId || null,
                 areaId: draft.areaId || null,
                 contexts: selectedContexts,
                 tags: selectedTags,
@@ -796,6 +799,23 @@ export function useInboxProcessingController({
         if (!person) showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error');
     }, [addPerson, showToast, t]);
 
+    // The task editor's Add section, inside the project being chosen (#1461).
+    const handleCreateSection = useCallback(async (title: string) => {
+        const trimmed = title.trim();
+        if (!trimmed || !draft.projectId) return null;
+        const existing = sections.find((section) => (
+            section.projectId === draft.projectId && !section.deletedAt
+            && section.title.toLowerCase() === trimmed.toLowerCase()
+        ));
+        if (existing) return existing.id;
+        try {
+            return (await addSection(draft.projectId, trimmed))?.id ?? null;
+        } catch (error) {
+            reportError('Failed to create a project section during Inbox Processing', error);
+            return null;
+        }
+    }, [addSection, draft.projectId, sections]);
+
     const handleCreateSomedaySection = useCallback(async (title: string) => {
         try {
             return await createSomedaySection(title);
@@ -857,6 +877,7 @@ export function useInboxProcessingController({
 
     const options = useMemo<InboxProcessingOptionLists>(() => ({
         projects,
+        sections,
         areas: activeAreas,
         allContexts,
         allTags,
@@ -870,6 +891,7 @@ export function useInboxProcessingController({
         allTags,
         personOptions,
         projects,
+        sections,
         suggestedContexts,
         suggestedTags,
         timeEstimateOptions,
@@ -906,6 +928,7 @@ export function useInboxProcessingController({
             onSendDelegateRequest: handleSendDelegateRequest,
             onCreatePerson: handleCreatePerson,
             onCreateSomedaySection: handleCreateSomedaySection,
+            onCreateSection: handleCreateSection,
             toggleContext,
             toggleTag,
             convertToProject,
@@ -959,6 +982,7 @@ export function useInboxProcessingController({
         handleConfirmSomeday,
         onCreatePerson: handleCreatePerson,
         onCreateSomedaySection: handleCreateSomedaySection,
+        onCreateSection: handleCreateSection,
         customContext,
         setCustomContext,
         addCustomContext,

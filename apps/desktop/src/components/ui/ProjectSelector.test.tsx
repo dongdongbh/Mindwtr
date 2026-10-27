@@ -333,11 +333,11 @@ describe('ProjectSelector', () => {
         setInputValue(getByLabelText('Search projects') as HTMLInputElement, 'Work');
 
         await user.tab();
-        expect(getByRole('option', { name: 'No project' })).toHaveFocus();
+        expect(getByRole('option', { name: 'Work Project' })).toHaveFocus();
         await user.tab();
         expect(getByRole('option', { name: 'Create project "Work"' })).toHaveFocus();
         await user.tab();
-        expect(getByRole('option', { name: 'Work Project' })).toHaveFocus();
+        expect(getByRole('option', { name: 'No project' })).toHaveFocus();
     });
 
     it('prefers the empty label and falls back to the no-matches label', () => {
@@ -372,5 +372,105 @@ describe('ProjectSelector', () => {
 
         fireEvent.click(second.getByRole('button', { name: 'Select project' }));
         second.getByText('No matches');
+    });
+
+    describe('while searching (#1461)', () => {
+        const fooBarBaz: Project[] = [
+            { ...projects[0], id: 'p-foo', title: 'foo' },
+            { ...projects[0], id: 'p-bar', title: 'bar' },
+            { ...projects[0], id: 'p-baz', title: 'baz' },
+        ];
+        const renderSearching = (onChange = vi.fn(), onCreateProject = vi.fn(async () => 'p-new')) => {
+            const view = render(
+                <ProjectSelector
+                    projects={fooBarBaz}
+                    value=""
+                    onChange={onChange}
+                    onCreateProject={onCreateProject}
+                    placeholder="Select project"
+                    noProjectLabel="No project"
+                    searchPlaceholder="Search projects"
+                    createProjectLabel="Create project"
+                />
+            );
+            fireEvent.click(view.getByRole('button', { name: 'Select project' }));
+            const input = view.getByLabelText('Search projects') as HTMLInputElement;
+            const names = () => view.getAllByRole('option').map((option) => option.textContent);
+            const highlighted = () => view.getAllByRole('option')
+                .filter((option) => option.className.includes('bg-primary/10'))
+                .map((option) => option.textContent);
+            return { ...view, input, names, highlighted, onChange, onCreateProject };
+        };
+
+        it('keeps No project first with an empty search', () => {
+            const { names, highlighted } = renderSearching();
+            expect(names()).toEqual(['No project', 'foo', 'bar', 'baz']);
+            expect(highlighted()).toEqual([]);
+        });
+
+        it('lists matches, then Create, then No project last, and highlights the Enter target', () => {
+            const { input, names, highlighted, getByRole } = renderSearching();
+
+            setInputValue(input, 'f');
+            expect(names()).toEqual(['foo', 'Create project "f"', 'No project']);
+            expect(highlighted()).toEqual(['foo']);
+            expect(input).toHaveAttribute('aria-activedescendant', getByRole('option', { name: 'foo' }).id);
+
+            setInputValue(input, 'ba');
+            expect(names()).toEqual(['bar', 'baz', 'Create project "ba"', 'No project']);
+            expect(highlighted()).toEqual(['bar']);
+
+            setInputValue(input, 'barb');
+            expect(names()).toEqual(['Create project "barb"', 'No project']);
+            expect(highlighted()).toEqual(['Create project "barb"']);
+        });
+
+        it('shows No matches only when no Create row is offered', () => {
+            const withCreate = renderSearching();
+            setInputValue(withCreate.input, 'barb');
+            expect(withCreate.queryByText('No matches')).toBeNull();
+            withCreate.unmount();
+
+            const { getByRole, getByLabelText, getByText } = render(
+                <ProjectSelector projects={fooBarBaz} value="" onChange={vi.fn()}
+                    placeholder="Select project" searchPlaceholder="Search projects" />
+            );
+            fireEvent.click(getByRole('button', { name: 'Select project' }));
+            setInputValue(getByLabelText('Search projects') as HTMLInputElement, 'barb');
+            expect(getByText('No matches')).toBeInTheDocument();
+        });
+
+        it('Enter picks the highlighted first match', () => {
+            const { input, onChange } = renderSearching();
+
+            setInputValue(input, 'ba');
+            fireEvent.keyDown(input, { key: 'Enter' });
+            expect(onChange).toHaveBeenCalledExactlyOnceWith('p-bar');
+        });
+
+        it('Enter creates when Create is the highlighted row', async () => {
+            const { input, onChange, onCreateProject } = renderSearching();
+
+            setInputValue(input, 'barb');
+            fireEvent.keyDown(input, { key: 'Enter' });
+            await waitFor(() => expect(onCreateProject).toHaveBeenCalledWith('barb'));
+            await waitFor(() => expect(onChange).toHaveBeenCalledWith('p-new'));
+        });
+
+        it('moves through the new order with the arrow keys', () => {
+            const { input, getByRole } = renderSearching();
+
+            setInputValue(input, 'ba');
+            fireEvent.keyDown(input, { key: 'ArrowDown' });
+            expect(getByRole('option', { name: 'bar' })).toHaveFocus();
+            fireEvent.keyDown(getByRole('option', { name: 'bar' }), { key: 'ArrowDown' });
+            expect(getByRole('option', { name: 'baz' })).toHaveFocus();
+            fireEvent.keyDown(getByRole('option', { name: 'baz' }), { key: 'ArrowDown' });
+            expect(getByRole('option', { name: 'Create project "ba"' })).toHaveFocus();
+            fireEvent.keyDown(getByRole('option', { name: 'Create project "ba"' }), { key: 'ArrowDown' });
+            expect(getByRole('option', { name: 'No project' })).toHaveFocus();
+            // The highlight follows focus: it leaves the Enter target once focus leaves the search box.
+            expect(getByRole('option', { name: 'bar' }).className).not.toContain('bg-primary/10');
+        });
     });
 });

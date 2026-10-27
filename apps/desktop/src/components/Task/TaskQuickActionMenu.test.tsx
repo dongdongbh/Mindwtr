@@ -871,7 +871,7 @@ describe('TaskQuickActionMenu', () => {
         fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
             target: { value: 'Garden redesign' },
         });
-        const createOption = screen.getByRole('button', { name: 'New project: “Garden redesign”' });
+        const createOption = screen.getByRole('option', { name: 'New project: “Garden redesign”' });
         fireEvent.click(createOption);
         fireEvent.click(createOption);
 
@@ -918,7 +918,7 @@ describe('TaskQuickActionMenu', () => {
         fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
             target: { value: 'Garden redesign' },
         });
-        fireEvent.click(screen.getByRole('button', { name: 'New project: “Garden redesign”' }));
+        fireEvent.click(screen.getByRole('option', { name: 'New project: “Garden redesign”' }));
         await waitFor(() => expect(within(panel).getByRole('button', { name: 'Save' })).toBeEnabled());
         fireEvent.click(within(panel).getByRole('button', { name: 'Cancel' }));
 
@@ -936,10 +936,10 @@ describe('TaskQuickActionMenu', () => {
         fireEvent.click(within(panel).getByRole('button', { name: 'Destination' }));
         const search = screen.getByRole('textbox', { name: 'Search' });
         fireEvent.change(search, { target: { value: 'Garden redesign' } });
-        fireEvent.click(screen.getByRole('button', { name: 'New project: “Garden redesign”' }));
+        fireEvent.click(screen.getByRole('option', { name: 'New project: “Garden redesign”' }));
 
         await waitFor(() => expect(search).toHaveValue('Garden redesign'));
-        const retryOption = screen.getByRole('button', { name: 'New project: “Garden redesign”' });
+        const retryOption = screen.getByRole('option', { name: 'New project: “Garden redesign”' });
         expect(retryOption).toBeEnabled();
         fireEvent.click(retryOption);
 

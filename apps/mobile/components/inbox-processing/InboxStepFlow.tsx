@@ -353,6 +353,9 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       handleCreateProjectEarly={controller.handleCreateProjectEarly}
       handleConvertToProject={controller.handleConvertToProject}
       selectProjectEarly={controller.selectProjectEarly}
+      projectSections={controller.projectSections}
+      selectedSectionId={controller.selectedSectionId}
+      selectSection={controller.setSelectedSectionId}
     />
   );
 

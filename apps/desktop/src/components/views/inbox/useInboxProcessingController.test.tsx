@@ -928,3 +928,67 @@ describe('useInboxProcessingController inline person create', () => {
         expect(useUiStore.getState().toasts.map((toast) => toast.message)).toContain('Failed to add task');
     });
 });
+
+// #1461: the processing draft carries a project section, drops it when the
+// project changes, and the decision writes it with its project.
+describe('useInboxProcessingController project section', () => {
+    afterEach(() => {
+        useTaskStore.setState({ sections: [], _allSections: [] } as never);
+    });
+
+    it('writes the picked section and clears it when the project changes', async () => {
+        const sections = [
+            { id: 's-design', projectId: 'p-work', title: 'Design', order: 0, createdAt: '', updatedAt: '' },
+        ];
+        useTaskStore.setState({ sections, _allSections: sections } as never);
+        const projects = [
+            { id: 'p-work', title: 'Work', status: 'active', color: '#000', order: 0, tagIds: [], createdAt: '', updatedAt: '' },
+            { id: 'p-home', title: 'Home', status: 'active', color: '#000', order: 1, tagIds: [], createdAt: '', updatedAt: '' },
+        ] as Project[];
+        const updateTask = vi.fn(async () => ({ success: true }));
+        const { result } = renderHook(() => {
+            const [isProcessing, setIsProcessing] = useState(true);
+            return useInboxProcessingController({
+                t: (key) => key,
+                tasks: [makeTask('one')],
+                projects,
+                areas: [],
+                settings: {},
+                addProject: async () => null,
+                addTask: async () => ({ success: true }),
+                updateTask,
+                deleteTask: async () => ({ success: true }),
+                allContexts: [],
+                allTags: [],
+                isProcessing,
+                setIsProcessing,
+            });
+        });
+        await waitFor(() => {
+            expect(result.current.wizardProps.processingTask?.id).toBe('one');
+        });
+        expect(result.current.wizardProps.options.sections).toEqual(sections);
+
+        act(() => {
+            result.current.wizardProps.setField('projectId', 'p-work');
+            result.current.wizardProps.setField('sectionId', 's-design');
+        });
+        act(() => {
+            result.current.wizardProps.setField('projectId', 'p-home');
+        });
+        expect(result.current.wizardProps.draft.sectionId).toBe('');
+
+        act(() => {
+            result.current.wizardProps.setField('projectId', 'p-work');
+            result.current.wizardProps.setField('sectionId', 's-design');
+        });
+        await act(async () => {
+            await result.current.wizardProps.handleSetProject('p-work');
+        });
+        expect(updateTask).toHaveBeenCalledWith('one', expect.objectContaining({
+            status: 'next',
+            projectId: 'p-work',
+            sectionId: 's-design',
+        }));
+    });
+});

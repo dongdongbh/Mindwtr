@@ -34,7 +34,7 @@ import {
     type ProcessInboxWorkflowEvent,
     type ProcessInboxWorkflowFields,
 } from './process-inbox-workflow';
-import { filterProjectsBySelectedArea, getProjectChoiceState, isSelectableProjectForTaskAssignment } from './project-utils';
+import { filterProjectsBySelectedArea, getProjectChoiceState, getProjectSectionsForView, isSelectableProjectForTaskAssignment } from './project-utils';
 import type { StoreActionResult } from './store-types';
 import { findSimilarTasks, type TaskSimilarityIndex } from './task-similarity';
 import { collectTaskTokenUsage } from './task-token-usage';
@@ -46,6 +46,7 @@ import type {
     Area,
     Person,
     Project,
+    Section,
     Task,
     TaskEnergyLevel,
     TaskPriority,
@@ -262,6 +263,8 @@ export type ProcessInboxTaskDefaults = {
     title: string;
     description: string;
     projectId: string | null;
+    /** The project section; only with a project (#1461). */
+    sectionId: string | null;
     areaId: string | null;
     contexts: string[];
     tags: string[];
@@ -285,6 +288,7 @@ export function getProcessInboxTaskDefaults(task: Task | null | undefined, defau
         title: task?.title ?? '',
         description: task?.description ?? '',
         projectId: task?.projectId ?? null,
+        sectionId: task?.projectId ? (task.sectionId ?? null) : null,
         // Keep an area assigned while the task sat in the Inbox; a project home
         // outranks the direct area (container exclusivity).
         areaId: task?.projectId ? null : (task?.areaId ?? defaultAreaId ?? null),
@@ -374,6 +378,8 @@ export type ProcessInboxParsedTitle = { title: string; props: Partial<Task>; inv
 
 export type ProcessInboxSelection = {
     projectId: string | null;
+    /** The section picked inside `projectId`. Omit it to leave the task's section to the store's project-change rule. */
+    sectionId?: string | null;
     areaId: string | null;
     contexts: string[];
     tags: string[];
@@ -446,6 +452,13 @@ export function prepareProcessInboxCommit(input: {
     }
     const dirty = input.dirtyScheduleFields;
     const clearStaleReviewAt = options.clearStaleReviewAt && !edits?.explicitDateFields.reviewAt && !dirty.has('reviewAt');
+    // The picked section belongs to the picked project. It is written only when
+    // there is a section to set or one to clear, and dropped when the decision or
+    // a typed +Project files the task under another project (#1461).
+    const sectionId = selection.sectionId || undefined;
+    const writesSection = Object.prototype.hasOwnProperty.call(selection, 'sectionId')
+        && Boolean(sectionId || task.sectionId)
+        && !Object.prototype.hasOwnProperty.call(options.fields ?? {}, 'sectionId');
     const fields = mergeParsedProcessInboxFields({
         projectId: selection.projectId ?? undefined,
         areaId: selection.areaId ?? undefined,
@@ -458,6 +471,9 @@ export function prepareProcessInboxCommit(input: {
         ...input.scheduleUpdates,
         ...options.fields,
     }, edits?.parsedFields ?? {});
+    if (writesSection) {
+        fields.sectionId = fields.projectId && fields.projectId === (selection.projectId ?? undefined) ? sectionId : undefined;
+    }
     const prepared = prepareProcessInboxDecision({
         task,
         draft: {
@@ -1020,6 +1036,8 @@ export type ProcessInboxDraft = {
     title: string;
     description: string;
     projectId: string | null;
+    /** The project section; present once one is picked or the task has one (#1461). */
+    sectionId?: string | null;
     areaId: string | null;
     projectSearch: string;
     contexts: string[];
@@ -1054,6 +1072,7 @@ export function createProcessInboxDraft(task: Task, defaultAreaId?: string | nul
         title: defaults.title,
         description: defaults.description,
         projectId: defaults.projectId,
+        ...(defaults.sectionId ? { sectionId: defaults.sectionId } : {}),
         areaId: defaults.areaId,
         projectSearch: '',
         contexts: defaults.contexts,
@@ -1118,6 +1137,8 @@ export type ProcessInboxDraftEdit =
     | { type: 'setEnergyLevel'; value: TaskEnergyLevel | null }
     | { type: 'setTimeEstimate'; value: TimeEstimate | null }
     | { type: 'setSomedaySection'; value: string | null }
+    /** A section of the draft's project; ignored without a project. */
+    | { type: 'setSection'; value: string | null }
     | { type: 'setArea'; value: string | null }
     | { type: 'selectProject'; value: string | null }
     | { type: 'toggleContext'; value: string }
@@ -1161,11 +1182,15 @@ export function applyProcessInboxDraftEdit(
             return { ...draft, timeEstimate: edit.value };
         case 'setSomedaySection':
             return { ...draft, somedaySectionId: edit.value };
+        case 'setSection':
+            return draft.projectId ? { ...draft, sectionId: edit.value } : draft;
         case 'setArea':
             return { ...draft, areaId: edit.value };
         case 'selectProject': {
             const { convertToProject, projectId, areaId, projectSearch } = selectProcessInboxProject(edit.value);
-            return { ...draft, convertToProject, projectId, projectSearch, ...(areaId === null ? { areaId } : {}) };
+            return { ...draft, convertToProject, projectId, projectSearch, ...(areaId === null ? { areaId } : {}),
+                // A section belongs to its project: another project starts without one.
+                ...(draft.sectionId && projectId !== draft.projectId ? { sectionId: null } : {}) };
         }
         case 'toggleContext':
             return { ...draft, contexts: toggleProcessInboxToken(draft.contexts, edit.value) };
@@ -1276,6 +1301,7 @@ export function prepareProcessInboxDraftDecision(
         parseTitle: ctx.parseTitle,
         selection: {
             projectId: draft.projectId,
+            sectionId: draft.sectionId ?? null,
             areaId: draft.areaId,
             contexts: draft.contexts,
             tags: draft.tags,
@@ -1517,6 +1543,8 @@ export type ProcessInboxStepView = {
         areas: ProcessInboxViewOption[];
         search: { label: string; placeholder: string; value: string; createLabel: string | null } | null;
         projects: ProcessInboxViewOption[];
+        /** The chosen project's sections, "No section" first; absent when it has none (#1461). */
+        sections?: { label: string; options: ProcessInboxViewOption[] };
     } | null;
     somedaySections: { label: string; options: ProcessInboxViewOption[] } | null;
     delegate: {
@@ -1651,6 +1679,8 @@ export type ProcessInboxViewInput = {
     settings: AppSettings | undefined;
     tasks: Task[];
     projects: Project[];
+    /** Live sections; the file step offers the chosen project's sections. */
+    sections?: readonly Section[];
     areas: Area[];
     people: readonly Person[];
     similarityIndex: TaskSimilarityIndex | null;
@@ -1769,6 +1799,19 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
         const areaLabel = t('taskEdit.areaLabel');
         const showAreas = fields.area && !draft.projectId;
         const { filteredProjects, exactMatch } = getProcessInboxProjectChoices(input.projects, draft.areaId, draft.projectSearch);
+        const projectSections = !conversion && fields.project && currentProject
+            ? getProjectSectionsForView(currentProject, input.sections ?? [])
+            : [];
+        const sectionOptions: ProcessInboxViewOption[] = projectSections.length === 0 ? [] : [
+            { label: `${!draft.sectionId ? '✓ ' : ''}${t('taskEdit.noSectionOption')}`, selected: !draft.sectionId, color: null,
+                edit: { type: 'setSection', value: null } },
+            ...projectSections.map((section) => ({
+                label: section.title,
+                selected: draft.sectionId === section.id,
+                color: null,
+                edit: { type: 'setSection' as const, value: section.id },
+            })),
+        ];
         const areaOptions: ProcessInboxViewOption[] = showAreas ? [
             ...(currentArea ? [{ label: `✓ ${currentArea.name}`, selected: true, color: currentArea.color ?? null, edit: { type: 'setArea' as const, value: currentArea.id } }] : []),
             { label: `${!draft.areaId ? '✓ ' : ''}${t('projects.noArea')}`, selected: !draft.areaId, color: null, edit: { type: 'setArea', value: null } },
@@ -1816,6 +1859,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                     edit: { type: 'selectProject' as const, value: project.id },
                 })),
             ] : [],
+            ...(sectionOptions.length > 0 ? { sections: { label: t('taskEdit.sectionLabel'), options: sectionOptions } } : {}),
         };
     };
 
@@ -1985,7 +2029,8 @@ export function answerProcessInboxStep(input: {
             taskTitle: input.task.title,
             nextActionDraft: draft.nextAction,
         });
-        return { ...draft, convertToProject: true, nextAction: started.nextActionDraft, projectId: null, projectSearch: '' };
+        return { ...draft, convertToProject: true, nextAction: started.nextActionDraft, projectId: null, projectSearch: '',
+            ...(draft.sectionId ? { sectionId: null } : {}) };
     };
     if (choice === 'back') {
         if (step === getProcessInboxEntryStep(mode, plan)) return { type: 'invalid' };

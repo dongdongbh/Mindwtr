@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { normalizeClockTimeInput, type Area, type Person, type Project, type TimeEstimate } from '@mindwtr/core';
+import { normalizeClockTimeInput, type Area, type Person, type Project, type Section, type TimeEstimate } from '@mindwtr/core';
 import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 
 /**
@@ -107,6 +107,8 @@ export type InboxProcessingVisibility = {
 /** The lists both panels choose values from. */
 export type InboxProcessingOptionLists = {
     projects: Project[];
+    /** Live project sections, for the Section picker under Project (#1461). */
+    sections: Section[];
     areas: Area[];
     allContexts: string[];
     allTags: string[];

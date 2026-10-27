@@ -11,6 +11,7 @@ import type { Task } from './types';
 export type ProcessInboxWorkflowFields = Partial<Pick<
     Task,
     | 'projectId'
+    | 'sectionId'
     | 'areaId'
     | 'contexts'
     | 'tags'

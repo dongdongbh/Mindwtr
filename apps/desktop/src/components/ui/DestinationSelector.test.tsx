@@ -83,7 +83,7 @@ describe('DestinationSelector', () => {
         const search = getByLabelText('Search') as HTMLInputElement;
         setInputValue(search, 'Work');
 
-        expect(queryByRole('button', { name: /New project:/ })).not.toBeInTheDocument();
+        expect(queryByRole('option', { name: /New project:/ })).not.toBeInTheDocument();
         fireEvent.keyDown(search, { key: 'Enter' });
         expect(onChange).toHaveBeenCalledExactlyOnceWith({ kind: 'project', id: 'project-work' });
     });
@@ -100,7 +100,7 @@ describe('DestinationSelector', () => {
         fireEvent.click(getByRole('button', { name: 'Destination' }));
         setInputValue(getByLabelText('Search') as HTMLInputElement, 'Garden');
 
-        expect(getByRole('button', { name: 'New area: “Garden”' })).toBeInTheDocument();
+        expect(getByRole('option', { name: 'New area: “Garden”' })).toBeInTheDocument();
     });
 
     it('ignores Enter on an empty search instead of picking the first project', () => {
@@ -142,7 +142,7 @@ describe('DestinationSelector', () => {
         const trigger = getByRole('button', { name: 'Destination' });
         fireEvent.click(trigger);
         setInputValue(getByLabelText('Search') as HTMLInputElement, 'Garden');
-        fireEvent.click(getByRole('button', { name: 'New project: “Garden”' }));
+        fireEvent.click(getByRole('option', { name: 'New project: “Garden”' }));
 
         fireEvent.click(trigger);
         fireEvent.click(trigger);
@@ -158,8 +158,52 @@ describe('DestinationSelector', () => {
 
         fireEvent.click(getByRole('button', { name: 'Destination' }));
         setInputValue(getByLabelText('Search') as HTMLInputElement, 'Garden');
-        fireEvent.click(getByRole('button', { name: 'New project: “Garden”' }));
+        fireEvent.click(getByRole('option', { name: 'New project: “Garden”' }));
 
-        await waitFor(() => expect(getByRole('button', { name: 'New project: “Garden”' })).toBeEnabled());
+        await waitFor(() => expect(getByRole('option', { name: 'New project: “Garden”' })).toBeEnabled());
+    });
+
+    it('lists matches, then the create rows, then None while searching, and highlights the Enter target (#1461)', () => {
+        const onChange = vi.fn();
+        const { getByRole, getByLabelText, getAllByRole } = renderSelector({
+            onChange,
+            projects: [
+                { ...projects[0], id: 'p-foo', title: 'foo' },
+                { ...projects[0], id: 'p-bar', title: 'bar' },
+                { ...projects[0], id: 'p-baz', title: 'baz' },
+            ],
+            areas: [],
+            onCreateArea: undefined,
+        });
+
+        fireEvent.click(getByRole('button', { name: 'Destination' }));
+        const search = getByLabelText('Search') as HTMLInputElement;
+        const names = () => getAllByRole('option').map((option) => option.textContent);
+        const highlighted = () => getAllByRole('option').filter((option) => option.className.includes('bg-primary/10'));
+
+        // With no search the order stays as it was: None first.
+        expect(names()[0]).toBe('None');
+
+        setInputValue(search, 'ba');
+        expect(names()).toEqual(['bar', 'baz', 'New project: “ba”', 'None']);
+        expect(highlighted().map((option) => option.textContent)).toEqual(['bar']);
+        expect(search).toHaveAttribute('aria-activedescendant', getByRole('option', { name: 'bar' }).id);
+
+        setInputValue(search, 'barb');
+        expect(names()).toEqual(['New project: “barb”', 'None']);
+        expect(highlighted().map((option) => option.textContent)).toEqual(['New project: “barb”']);
+
+        setInputValue(search, 'ba');
+        fireEvent.keyDown(search, { key: 'ArrowDown' });
+        expect(getByRole('option', { name: 'bar' })).toHaveFocus();
+        fireEvent.keyDown(getByRole('option', { name: 'bar' }), { key: 'ArrowDown' });
+        fireEvent.keyDown(getByRole('option', { name: 'baz' }), { key: 'ArrowDown' });
+        expect(getByRole('option', { name: 'New project: “ba”' })).toHaveFocus();
+        fireEvent.keyDown(getByRole('option', { name: 'New project: “ba”' }), { key: 'ArrowDown' });
+        expect(getByRole('option', { name: 'None' })).toHaveFocus();
+
+        search.focus();
+        fireEvent.keyDown(search, { key: 'Enter' });
+        expect(onChange).toHaveBeenCalledExactlyOnceWith({ kind: 'project', id: 'p-bar' });
     });
 });
