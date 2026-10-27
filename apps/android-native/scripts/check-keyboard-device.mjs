@@ -127,7 +127,10 @@ try {
     // RN's Add notes field (#1406): right under the title with More closed, the task's description, labelled for TalkBack.
     const note = tagged(nodes, 'capture-note');
     const moreClosed = withDescription(nodes, en['common.more']);
-    check(Boolean(note) && note['content-desc'] === en['taskEdit.descriptionLabel'] && box(note)[1] >= box(tagged(nodes, 'capture-title'))[3]
+    // The label is its own node inside the tagged one on this phone (as the editor's fields are).
+    const noteLabel = withDescription(nodes, en['taskEdit.descriptionLabel']);
+    const inside = (inner, outer) => { const [l, t, r, b] = box(inner); const [ol, ot, or, ob] = box(outer); return (l + r) / 2 >= ol && (l + r) / 2 <= or && (t + b) / 2 >= ot && (t + b) / 2 <= ob; };
+    check(Boolean(note) && Boolean(noteLabel) && inside(noteLabel, note) && box(note)[1] >= box(tagged(nodes, 'capture-title'))[3]
         && Boolean(moreClosed) && box(note)[3] <= box(moreClosed)[1],
         `(a) the popup shows RN's Add notes field under the title with More closed (note ${note?.bounds}, More ${moreClosed?.bounds})`);
     nodes = await back(atTabs, 'the popup to close');

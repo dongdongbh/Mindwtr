@@ -43,7 +43,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { besideRow, bootFailure, box, button, check, connect, evidenced, fail, field, hasText, inEditor, isOn, owedRetry, projectTitled, readRetry, Stopped, tab, tabSelected, taskRows, withDescription } from './device.mjs';
+import { besideRow, bootFailure, box, button, check, connect, evidenced, fail, field, hasText, inEditor, isOn, owedRetry, projectTitled, readRetry, Stopped, tab, tagged, tabSelected, taskRows, withDescription } from './device.mjs';
 
 const cliArgs = process.argv.slice(2);
 const prune = cliArgs.includes('--prune-old');
@@ -540,7 +540,9 @@ try {
     setProp('fail_commit', '1');
     await completeUntil(editTask, 'the failed Done', hasError);
     const failedProject = async (description, label) => {
-        const current = await waitFor(description, (screenNodes) => inProject(screenNodes, names.sequential) && hasError(screenNodes));
+        let current = await waitFor(description, (screenNodes) => inProject(screenNodes, names.sequential) && hasError(screenNodes));
+        // In landscape RN's header, toolbar and Details fill the screen: the list scrolls to the row (it is kept, only lower).
+        if (label === ' landscape' && !textNode(current, editTask)) current = await reveal(editTask, 10);
         check(Boolean(textNode(current, editTask)), `(g${label}) the row with the owed retry is still shown`);
         // Every row locks with the owed retry; only the failed row's swipe stays on (the same rule, check-boot-gates.mjs).
         const rows = taskRows(current);
@@ -619,6 +621,23 @@ try {
     check(detail.total > 50 && !hasText(nodes, last), `(j) core lists ${detail.total} items; the last is not loaded yet`);
     nodes = await reveal(last, 80);
     check(hasText(nodes, last) && !button(nodes, 'More'), `(j) More loaded the rest: ${last} shows and More is gone`);
+    // (j2) RN #765: Task order opens on the task the list shows first (at least 10% of it, RN's viewability rule), not the top.
+    const listRows = (current) => current.filter((node) => (node['resource-id'] ?? '').endsWith('task-row') && node.text).sort((a, b) => box(a)[1] - box(b)[1]);
+    const fullRow = Math.max(...listRows(nodes).map((row) => box(row)[3] - box(row)[1]));
+    const viewed = listRows(nodes).find((row) => (box(row)[3] - box(row)[1]) * 10 >= fullRow)?.text ?? fail('(j2) no task row shown');
+    check(viewed !== detail.items.find((item) => item.text)?.text, `(j2) the list is scrolled: "${viewed}" is the first task shown`);
+    nodes = await waitFor('the view options button', (current) => Boolean(tagged(current, 'project-task-view-options-button')));
+    await tap(tagged(nodes, 'project-task-view-options-button'));
+    nodes = await waitFor('the Reorder row', (current) => Boolean(tagged(current, 'project-view-reorder-option')), 15_000);
+    await tap(tagged(nodes, 'project-view-reorder-option'));
+    const firstReorderTitle = (current) => {
+        const row = current.filter((node) => (node['resource-id'] ?? '').endsWith('project-task-reorder-row')).sort((a, b) => box(a)[1] - box(b)[1])[0];
+        return row && current.find((node) => node.text && box(node)[1] >= box(row)[1] && box(node)[3] <= box(row)[3])?.text;
+    };
+    nodes = await waitFor(`Task order on "${viewed}"`, (current) => firstReorderTitle(current) === viewed, 20_000);
+    check(true, `(j2) Task order opened on "${viewed}", the task the list showed first (RN #765)`);
+    await tap(tagged(nodes, 'project-task-reorder-toggle'));
+    await waitFor('the project list again', (current) => !tagged(current, 'project-reorder-list') && listRows(current).length > 0, 15_000);
     sh('input keyevent KEYCODE_BACK');
     await waitFor('the Projects list', (current) => tabSelected(current, 'Projects') && !button(current, 'Back'));
 
