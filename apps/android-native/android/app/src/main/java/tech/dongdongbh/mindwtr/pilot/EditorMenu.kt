@@ -338,13 +338,15 @@ private fun PromoteDialog(model: InboxViewModel) = with(model) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.padding(20.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).clickable(enabled = false) {}
             .padding(16.dp).testTag("promote-dialog")) {
-            Text(t("task.createProjectFromTask"), style = rnText(18, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
+            // RN's modalTitle (16/700, 12 below), modalInput (radius 10, 12 by 10, right under its label) and modalButtons (14 above,
+            // 12 apart, each 10 by 10) from task-edit-modal.styles.ts (phone pair).
+            Text(t("task.createProjectFromTask"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Text(t("projects.projectName"), style = rnText(14, 400), color = c.text)
-            val inputShape = RoundedCornerShape(8.dp)
+            val inputShape = RoundedCornerShape(10.dp)
             val name = t("projects.projectName")
             BasicTextField(title, { editorMenu.promoteTitle = it }, enabled = !busy, singleLine = true, textStyle = rnText(16, 400).copy(color = c.text),
-                cursorBrush = SolidColor(c.tint), modifier = Modifier.padding(top = 8.dp).fillMaxWidth().clip(inputShape).background(c.inputBg)
-                    .rnBorder(1.dp, c.border, inputShape).padding(12.dp).semantics { contentDescription = name }.testTag("promote-title"))
+                cursorBrush = SolidColor(c.tint), modifier = Modifier.fillMaxWidth().clip(inputShape).background(c.inputBg)
+                    .rnBorder(1.dp, c.border, inputShape).padding(horizontal = 12.dp, vertical = 10.dp).semantics { contentDescription = name }.testTag("promote-title"))
             val blocked = editorMenu.expandBlocked
             val expandLabel = t("task.expandChecklist")
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -359,11 +361,11 @@ private fun PromoteDialog(model: InboxViewModel) = with(model) {
             Text(t(if (editorMenu.expand) "task.expandChecklistDescription" else "task.keepChecklistDescription"), style = rnText(14, 400), color = c.secondaryText,
                 modifier = Modifier.padding(vertical = 12.dp))
             if (!blocked.isNullOrEmpty()) Text(blocked, style = rnText(14, 400), color = c.secondaryText, modifier = Modifier.testTag("promote-expand-blocked"))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                Box(Modifier.heightIn(min = 44.dp).clickable(enabled = !busy, role = Role.Button) { editorMenu.promoteTitle = null }.padding(horizontal = 12.dp),
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
+                Box(Modifier.heightIn(min = 44.dp).clickable(enabled = !busy, role = Role.Button) { editorMenu.promoteTitle = null }.padding(horizontal = 10.dp),
                     contentAlignment = Alignment.Center) { Text(t("common.cancel"), style = rnText(14, 400), color = c.secondaryText) }
                 val ready = !busy && title.isNotBlank() && !(editorMenu.expand && blocked != "")
-                Box(Modifier.heightIn(min = 44.dp).clickable(enabled = ready, role = Role.Button) { editorMenu.promote(title) }.padding(horizontal = 12.dp)
+                Box(Modifier.heightIn(min = 44.dp).clickable(enabled = ready, role = Role.Button) { editorMenu.promote(title) }.padding(horizontal = 10.dp)
                     .testTag("promote-confirm"), contentAlignment = Alignment.Center) {
                     Text(t("task.createProjectFromTask"), style = rnText(14, 400), color = c.tint.copy(alpha = if (ready) 1f else 0.5f))
                 }
