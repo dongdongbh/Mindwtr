@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Desktop: a picker opened from a small button, such as Destination in the bulk actions toolbar, now opens a menu wide enough to read project and area names (#1470).
 - Desktop: email capture and Gmail capture read mail in Japanese, Chinese and Korean legacy encodings such as ISO-2022-JP, Shift_JIS, EUC-JP, GBK, Big5 and EUC-KR. Before, those subjects and bodies came in as garbled text (#1466).
 - Mobile: a task's Review date can have a time, as on desktop. Once a review date is set, tap the clock button next to it to add a time; Date only removes it (#1465).
 - Mobile: swiping a task now shows a small set of fixed actions. Swipe right for Done and Focus; swipe left for Organize (status and destination), Dates (Start and Due) and Delete. Done now completes an Inbox or Someday task directly; before, swiping right on those moved them to Next, which is now under Organize. Focus on an Inbox task moves it to Next and stars it in one step, or leaves it untouched if Focus is full. Completed tasks keep Restore. The same actions are in the screen reader's actions menu (#1464).

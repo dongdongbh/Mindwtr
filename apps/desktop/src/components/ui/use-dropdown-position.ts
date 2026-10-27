@@ -10,6 +10,9 @@ const MIN_LIST_HEIGHT = 120;
 const MAX_LIST_HEIGHT = 320;
 const VIEWPORT_MARGIN_PX = 8;
 const DROPDOWN_GAP_PX = 4;
+// A small trigger (the bulk toolbar's Destination button) still gets a menu wide
+// enough for project and area names (#1470).
+const MIN_DROPDOWN_WIDTH_PX = 240;
 const DROPDOWN_CHROME_PX = 84;
 const MIN_DROPDOWN_SPACE = MIN_LIST_HEIGHT + DROPDOWN_CHROME_PX;
 
@@ -32,7 +35,10 @@ export function useDropdownPosition({ open, containerRef, dropdownRef }: UseDrop
             if (!trigger || !dropdown) return;
 
             const triggerRect = trigger.getBoundingClientRect();
-            const dropdownWidth = dropdown.getBoundingClientRect().width;
+            const dropdownWidth = Math.min(
+                Math.max(triggerRect.width, MIN_DROPDOWN_WIDTH_PX),
+                window.innerWidth - VIEWPORT_MARGIN_PX * 2,
+            );
             const maxLeft = Math.max(VIEWPORT_MARGIN_PX, window.innerWidth - dropdownWidth - VIEWPORT_MARGIN_PX);
             const spaceAbove = triggerRect.top - VIEWPORT_MARGIN_PX;
             const spaceBelow = window.innerHeight - triggerRect.bottom - VIEWPORT_MARGIN_PX;
@@ -43,7 +49,7 @@ export function useDropdownPosition({ open, containerRef, dropdownRef }: UseDrop
                 left: Math.min(Math.max(VIEWPORT_MARGIN_PX, triggerRect.left), maxLeft),
                 top: shouldOpenUp ? 'auto' : triggerRect.bottom + DROPDOWN_GAP_PX,
                 bottom: shouldOpenUp ? window.innerHeight - triggerRect.top + DROPDOWN_GAP_PX : 'auto',
-                width: triggerRect.width,
+                width: dropdownWidth,
             });
 
             const availableSpace = shouldOpenUp ? spaceAbove : spaceBelow;
