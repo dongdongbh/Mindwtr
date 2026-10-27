@@ -15,12 +15,16 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
+  CALENDAR_DAY_ALL_DAY_ITEMS,
+  CALENDAR_WEEK_ALL_DAY_ITEMS,
   CALENDAR_WEEK_DENSITY_VALUES,
   CALENDAR_WEEK_VISIBLE_DAYS_MAX,
   CALENDAR_WEEK_VISIBLE_DAYS_MIN,
   calendarDateKey,
+  formatCalendarAllDayMore,
   formatCalendarDurationChip,
   formatCalendarScheduleDayTitle,
+  getCalendarAllDayLane,
   getCalendarComposerPlaceholders,
   getCalendarDayAllDayTones,
   getCalendarDetailsTaskLists,
@@ -46,13 +50,12 @@ import {
   getCalendarScheduleItemText,
   getCalendarScheduleItemTones,
   getCalendarScreenText,
-  getCalendarWeekAllDayItems,
   getCalendarWeekAllDayTones,
   getCalendarWeekdayLabel,
   getCalendarWeekTimedEntries,
-  isCalendarAllDayItem,
   safeFormatDate,
   snapCalendarTimelineMinutes,
+  type CalendarDayItem,
   type CalendarTimedLayout,
   type Task,
 } from '@mindwtr/core';
@@ -460,6 +463,8 @@ export function CalendarView() {
   const scheduleScrollRef = useRef<any>(null);
   const lastWeekAutoScrollKeyRef = useRef<string | null>(null);
   const [weekDensityTrackWidth, setWeekDensityTrackWidth] = useState(0);
+  // The day view's all-day card past its "+N more" chip, kept across days as on desktop.
+  const [allDayExpanded, setAllDayExpanded] = useState(false);
   const weekScrollX = useSharedValue(0);
   const weekHorizontalScrollHandler = useAnimatedScrollHandler((event) => {
     weekScrollX.value = event.contentOffset.x;
@@ -761,6 +766,20 @@ export function CalendarView() {
   const formatDurationLabel = formatCalendarDurationChip;
   const navigationLabels = getCalendarNavigationLabels(viewMode, t);
   const text = getCalendarScreenText(t);
+  const calendarToneColor = (tone: string) => (
+    tone === 'tint' ? tc.tint : tone === 'danger' ? tc.danger : tone === 'secondary' ? tc.secondaryText : tc.text
+  );
+  // An all-day chip, in the week lane and the day card: core's fill, left edge
+  // and title tones; a completed item is crossed out and muted.
+  const allDayChipColors = (item: CalendarDayItem, tones: ReturnType<typeof getCalendarWeekAllDayTones>) => ({
+    backgroundColor: tones.fill === 'secondary' ? toRgba(tc.secondaryText, isDark ? 0.28 : 0.14) : tc.inputBg,
+    borderLeftColor: item.kind === 'event' ? sourceColorForId(item.event.sourceId) : calendarToneColor(tones.accent),
+    borderStyle: tones.dashed ? 'dashed' as const : 'solid' as const,
+  });
+  const allDayTextColors = (tones: ReturnType<typeof getCalendarWeekAllDayTones>) => ({
+    color: calendarToneColor(tones.text),
+    textDecorationLine: tones.struck ? 'line-through' as const : 'none' as const,
+  });
   const detailTaskLists = getCalendarDetailsTaskLists({ deadlines: selectedDateDeadlines, scheduled: selectedDateScheduled });
 
   const renderModeToggle = () => (
@@ -837,7 +856,8 @@ export function CalendarView() {
   );
 
   if (viewMode === 'day' && selectedDate && selectedDayStart && selectedDayEnd) {
-    const allDayItems = getCalendarItemsForDate(selectedDate).filter(isCalendarAllDayItem);
+    const allDayLane = getCalendarAllDayLane(getCalendarItemsForDate(selectedDate), CALENDAR_DAY_ALL_DAY_ITEMS, allDayExpanded);
+    const allDayItems = allDayLane.items;
     const handleDayTimelinePress = (event: GestureResponderEvent) => {
       const clampedMinutes = snapCalendarTimelineMinutes(event.nativeEvent.locationY / PIXELS_PER_MINUTE);
       openQuickAddAtDateTime(getCalendarMovedStart(selectedDayStart.getTime(), clampedMinutes));
@@ -870,23 +890,41 @@ export function CalendarView() {
             {allDayItems.length > 0 && (
               <View style={[styles.allDayCard, styles.allDayPinned, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                 <Text style={[styles.sectionLabel, { color: tc.secondaryText }]}>{text.allDay}</Text>
-                <ScrollView style={styles.allDayList}>
-                {allDayItems.map((item) => (
+                <ScrollView style={styles.allDayList} contentContainerStyle={styles.allDayListContent}>
+                {allDayItems.map((item) => {
+                  const tones = getCalendarDayAllDayTones(item);
+                  return (
+                    <Pressable
+                      key={item.id}
+                      disabled={tones.disabled}
+                      onPress={() => {
+                        if (item.kind === 'event') openExternalEvent(item.event);
+                        else openTaskActions(item.task.id);
+                      }}
+                      style={[styles.allDayChip, allDayChipColors(item, tones)]}
+                    >
+                      <Text style={[styles.allDayItem, allDayTextColors(tones)]} numberOfLines={1}>
+                        {getCalendarItemTitle(item, projectedLabel, safeFormatDate)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+                </ScrollView>
+                {/* Outside the scroll so the toggle never hides: "+N more" says
+                    items are hidden, and "Less" folds them back. */}
+                {allDayLane.hiddenCount > 0 && (
                   <Pressable
-                    key={item.id}
-                    disabled={getCalendarDayAllDayTones(item).disabled}
-                    onPress={() => {
-                      if (item.kind === 'event') openExternalEvent(item.event);
-                      else openTaskActions(item.task.id);
-                    }}
-                    style={styles.allDayPressable}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: allDayExpanded }}
+                    onPress={() => setAllDayExpanded((expanded) => !expanded)}
+                    style={styles.allDayMore}
+                    testID="calendar-all-day-more"
                   >
-                    <Text style={[styles.allDayItem, { color: getCalendarDayAllDayTones(item).text === 'tint' ? tc.tint : tc.text }]} numberOfLines={1}>
-                      {getCalendarItemTitle(item, projectedLabel, safeFormatDate)}
+                    <Text style={[styles.allDayMoreText, { color: tc.secondaryText }]}>
+                      {allDayExpanded ? text.allDayLess : formatCalendarAllDayMore(allDayLane.hiddenCount, t)}
                     </Text>
                   </Pressable>
-                ))}
-                </ScrollView>
+                )}
               </View>
             )}
 
@@ -1114,10 +1152,10 @@ export function CalendarView() {
                 <Text style={[styles.weekAllDayLabel, { color: tc.secondaryText }]}>{text.allDay}</Text>
               </Animated.View>
               {weekDays.map((day) => {
-                const allDayItems = getCalendarWeekAllDayItems(getCalendarItemsForDate(day));
+                const allDayLane = getCalendarAllDayLane(getCalendarItemsForDate(day), CALENDAR_WEEK_ALL_DAY_ITEMS);
                 return (
                   <View key={`all-${day.toISOString()}`} style={[styles.weekAllDayCell, compactWeekColumns && styles.weekAllDayCellCompact, { width: weekColumnWidth, borderLeftColor: tc.border }]}>
-                    {allDayItems.map((item) => {
+                    {allDayLane.items.map((item) => {
                       const tones = getCalendarWeekAllDayTones(item);
                       return (
                         <Pressable
@@ -1131,23 +1169,30 @@ export function CalendarView() {
                           style={[
                             styles.weekAllDayItem,
                             compactWeekColumns && styles.weekAllDayItemCompact,
-                            {
-                              backgroundColor: tones.fill === 'secondary' ? toRgba(tc.secondaryText, isDark ? 0.28 : 0.14) : tc.inputBg,
-                              borderLeftColor: item.kind === 'event'
-                                ? sourceColorForId(item.event.sourceId)
-                                : tones.accent === 'tint'
-                                  ? tc.tint
-                                  : tc.danger,
-                              borderStyle: tones.dashed ? 'dashed' : 'solid',
-                            },
+                            allDayChipColors(item, tones),
                           ]}
                         >
-                          <Text style={[styles.weekAllDayText, compactWeekColumns && styles.weekAllDayTextCompact, { color: tc.text }]} numberOfLines={1}>
+                          <Text style={[styles.weekAllDayText, compactWeekColumns && styles.weekAllDayTextCompact, allDayTextColors(tones)]} numberOfLines={1}>
                             {getCalendarItemTitle(item, projectedLabel, safeFormatDate)}
                           </Text>
                         </Pressable>
                       );
                     })}
+                    {allDayLane.hiddenCount > 0 && (
+                      // Hidden items live in this day's own view, where its card expands.
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={(pressEvent) => {
+                          pressEvent.stopPropagation();
+                          setSelectedDate(day);
+                          setViewMode('day');
+                        }}
+                      >
+                        <Text style={[styles.weekAllDayMore, compactWeekColumns && styles.weekAllDayTextCompact, { color: tc.secondaryText }]} numberOfLines={1}>
+                          {formatCalendarAllDayMore(allDayLane.hiddenCount, t)}
+                        </Text>
+                      </Pressable>
+                    )}
                   </View>
                 );
               })}

@@ -76,8 +76,11 @@ import {
     getCalendarComposerErrorText,
     getCalendarComposerPlaceholders,
     getCalendarComposerText,
+    CALENDAR_DAY_ALL_DAY_ITEMS,
+    CALENDAR_WEEK_ALL_DAY_ITEMS,
+    formatCalendarAllDayMore,
+    getCalendarAllDayLane,
     getCalendarDayAllDayTones,
-    isCalendarAllDayItem,
     getCalendarDayBounds,
     getCalendarDayItems,
     getCalendarDayLists,
@@ -116,7 +119,6 @@ import {
     getCalendarTaskSheet,
     getCalendarToasts,
     getCalendarVisibleRange,
-    getCalendarWeekAllDayItems,
     getCalendarWeekAllDayTones,
     getCalendarWeekDays,
     getCalendarWeekStart,
@@ -256,6 +258,8 @@ export type NativeCalendarEntry =
         preview: NativeCalendarItem[];
         /** Pressing a week column header opens this day in the day view. */
         opens: NativeCalendarState | null;
+        /** A week column's "+2 more" chip under its all-day lane, when items are hidden; pressing it goes to `opens`. */
+        allDayMore: string | null;
     }
     /** An item in a lane of a day: the week's all-day lane or timeline, the day view's, a schedule day, or the month details' lists. */
     | { type: 'item'; dayKey: string; lane: 'allDay' | 'timed' | 'deadlineMarker' | 'list' | 'events' | 'deadlines' | 'scheduled'; item: NativeCalendarItem }
@@ -313,6 +317,13 @@ export type NativeCalendarView = {
         | {
             mode: 'day';
             dayKey: string;
+            /**
+             * The all-day card draws its first `allDayLimit` items, then an
+             * `allDayMore` chip ("+2 more", null when nothing is hidden) that
+             * expands the card to every item and becomes `text.allDayLess`.
+             */
+            allDayLimit: number;
+            allDayMore: string | null;
             hourLabels: string[];
             nowMinutes: number | null;
             query: string;
@@ -1409,6 +1420,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                         }, sourceTask(entry), event);
                     }),
                     opens: null,
+                    allDayMore: null,
                 });
             }
             let details: Extract<NativeCalendarView['content'], { mode: 'month' }>['details'] = null;
@@ -1457,26 +1469,29 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
         } else if (period.viewMode === 'week') {
             const weekDays = getCalendarWeekDays(weekStartTime);
             title = formatCalendarWeekTitle(weekDays, dates);
-            for (const date of weekDays) {
+            const allDayLanes = weekDays.map((date) => getCalendarAllDayLane(getCalendarDayItems(lists(date)), CALENDAR_WEEK_ALL_DAY_ITEMS));
+            weekDays.forEach((date, index) => {
+                const { hiddenCount } = allDayLanes[index];
                 entries.push({
                     type: 'day', key: dayKey(date), title: `${getCalendarWeekdayLabel(date, dates)} ${date.getDate()}`,
                     dayNumber: String(date.getDate()), weekday: getCalendarWeekdayLabel(date, dates),
                     isToday: isSameCalendarDate(date, now), selected: Boolean(selected && isSameCalendarDate(date, selected)),
                     accessibilityLabel: null, counts: null, preview: [],
                     opens: toState(selectCalendarViewMode({ ...period, selectedDate: date }, 'day', now)),
+                    allDayMore: hiddenCount > 0 ? formatCalendarAllDayMore(hiddenCount, t) : null,
                 });
-            }
-            for (const date of weekDays) {
-                for (const entry of getCalendarWeekAllDayItems(getCalendarDayItems(lists(date)))) {
+            });
+            weekDays.forEach((date, index) => {
+                for (const entry of allDayLanes[index].items) {
                     const tones = getCalendarWeekAllDayTones(entry);
                     const event = sourceEvent(entry);
                     entries.push({ type: 'item', dayKey: dayKey(date), lane: 'allDay', item: item(entry, {
                         title: getCalendarItemTitle(entry, projectedLabel, formatDate), projected: tones.dashed, pressable: !tones.disabled,
-                        tones: { fill: tones.fill, accent: tones.accent, text: 'text', dashed: tones.dashed, struck: false, faded: false },
+                        tones: { fill: tones.fill, accent: tones.accent, text: tones.text, dashed: tones.dashed, struck: tones.struck, faded: false },
                         sourceColor: event ? sourceColor(event.sourceId) : null,
                     }, sourceTask(entry), event) });
                 }
-            }
+            });
             for (const date of weekDays) {
                 const { dayStart, dayEnd } = getCalendarDayBounds(date);
                 addDeadlineMarkers(date);
@@ -1514,12 +1529,15 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             const day = selected!;
             title = dateLabels.dayTitle;
             const dayLists = lists(day);
-            for (const entry of getCalendarDayItems(dayLists).filter(isCalendarAllDayItem)) {
+            // Every all-day item, in slot order: the screen keeps whether its card is expanded.
+            const allDayLane = getCalendarAllDayLane(getCalendarDayItems(dayLists), CALENDAR_DAY_ALL_DAY_ITEMS, true);
+            for (const entry of allDayLane.items) {
+                const tones = getCalendarDayAllDayTones(entry);
                 const event = sourceEvent(entry);
                 entries.push({ type: 'item', dayKey: dayKey(day), lane: 'allDay', item: item(entry, {
-                    title: getCalendarItemTitle(entry, projectedLabel, formatDate),
-                    projected: getCalendarDayAllDayTones(entry).text === 'tint', pressable: !getCalendarDayAllDayTones(entry).disabled,
-                    tones: { fill: null, accent: null, text: getCalendarDayAllDayTones(entry).text, dashed: false, struck: false, faded: false },
+                    title: getCalendarItemTitle(entry, projectedLabel, formatDate), projected: tones.dashed, pressable: !tones.disabled,
+                    tones: { fill: tones.fill, accent: tones.accent, text: tones.text, dashed: tones.dashed, struck: tones.struck, faded: false },
+                    sourceColor: event ? sourceColor(event.sourceId) : null,
                 }, sourceTask(entry), event) });
             }
             const { dayStart, dayEnd } = getCalendarDayBounds(day);
@@ -1546,6 +1564,8 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
             content = {
                 mode: 'day',
                 dayKey: dayKey(day),
+                allDayLimit: CALENDAR_DAY_ALL_DAY_ITEMS,
+                allDayMore: allDayLane.hiddenCount > 0 ? formatCalendarAllDayMore(allDayLane.hiddenCount, t) : null,
                 hourLabels: getCalendarHourLabels(formatDate),
                 nowMinutes: isSameCalendarDate(day, now) ? getCalendarNowMinutes(now) : null,
                 query,
@@ -1560,6 +1580,7 @@ export function createCalendarViewMethods(deps: CalendarViewDeps) {
                     type: 'day', key, title: formatCalendarScheduleDayTitle(section.date, { dates, t, now }),
                     dayNumber: String(section.date.getDate()), weekday: getCalendarWeekdayLabel(section.date, dates),
                     isToday: isSameCalendarDate(section.date, now), selected: false, accessibilityLabel: null, counts: null, preview: [], opens: null,
+                    allDayMore: null,
                 });
                 for (const entry of section.items) {
                     const text = getCalendarScheduleItemText(entry, { t, formatDate, projectedLabel, sourceNames, timeEstimateToMinutes: ctx.estimateMinutes });

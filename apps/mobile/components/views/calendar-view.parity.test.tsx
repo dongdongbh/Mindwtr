@@ -350,6 +350,8 @@ const scenarios: Scenario[] = [
       ['press', 'Previous day'], ['swipe', 'day', 100], ['press', 'Today'],
     ],
   },
+  // #1462: the all-day card shows four chips and "+N more", which expands it in place.
+  { name: 'day: all-day overflow expands and folds', settings: 'day', actions: [['press', 'Next day'], ['press', '+1 more'], ['press', 'Less']] },
   {
     name: 'day: across the year',
     settings: 'month',

@@ -124,6 +124,42 @@ describe('native host contract: Calendar', () => {
         expect(recorder.log).toEqual([]);
     });
 
+    it('caps the all-day lanes with "+N more", and crosses out completed items (#1462)', async () => {
+        freezeClock();
+        const { host } = await openHost(scenario('completed'));
+        const store = useTaskStore.getState();
+        const added: string[] = [];
+        for (let index = 0; index < 6; index += 1) {
+            const result = await store.addTask(`All-day ${index}`, { status: 'next', dueDate: '2026-10-28' });
+            if (!result.success || !result.id) throw new Error('seed failed');
+            added.push(result.id);
+        }
+        await flushPendingSave();
+
+        const day = value(host.getCalendarView({ state: { ...week, viewMode: 'day' }, calendar: ready, ...page }));
+        if (day.content.mode !== 'day') throw new Error('not the day view');
+        const allDay = items(day, 'allDay');
+        // Every item is sent; the screen draws the first allDayLimit and the chip.
+        expect(added.every((id) => allDay.some((item) => item.taskId === id))).toBe(true);
+        expect(day.content.allDayLimit).toBe(4);
+        expect(day.content.allDayMore).toBe(`+${allDay.length - 4} more`);
+        expect(day.text.allDayLess).toBe('Less');
+
+        const weekView = value(host.getCalendarView({ state: week, calendar: ready, ...page }));
+        const wednesday = days(weekView).find((entry) => entry.key === '2026-10-28')!;
+        const lane = weekView.items.filter((entry) => entry.type === 'item' && entry.lane === 'allDay' && entry.dayKey === '2026-10-28');
+        expect(lane).toHaveLength(3);
+        expect(wednesday.allDayMore).toBe(`+${allDay.length - 3} more`);
+        expect(wednesday.opens).toMatchObject({ viewMode: 'day', selectedDate: '2026-10-28' });
+        expect(days(weekView).find((entry) => entry.key === '2026-10-25')?.allDayMore).toBeNull();
+
+        // The fixture's completed task (Show completed on), on Oct 27, in both lanes.
+        const completedDay = value(host.getCalendarView({ state: { viewMode: 'day', selectedDate: '2026-10-27', visibleMonth: '2026-10-27' }, calendar: ready, ...page }));
+        for (const view of [weekView, completedDay]) {
+            expect(items(view, 'allDay').find((item) => item.taskId === 'd-done')?.tones).toMatchObject({ struck: true, text: 'secondary', fill: 'secondary' });
+        }
+    });
+
     it('returns what core\'s calendar model returns when called directly', async () => {
         freezeClock();
         const { host } = await openHost(scenario('completed'));

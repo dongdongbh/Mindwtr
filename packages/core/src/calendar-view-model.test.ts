@@ -23,6 +23,11 @@ import {
     getCalendarMovedStart,
     getCalendarMonthCell,
     getCalendarMonthCellAccessibilityLabel,
+    CALENDAR_DAY_ALL_DAY_ITEMS,
+    formatCalendarAllDayMore,
+    getCalendarAllDayLane,
+    getCalendarDayAllDayTones,
+    getCalendarWeekAllDayTones,
     planCalendarTaskMove,
     indexCalendarScheduledTasks,
     calendarDateKey,
@@ -220,6 +225,32 @@ describe('calendar view model', () => {
         expect(cell).toMatchObject({ showCounts: true, taskCount: 6, eventCount: 0, accessibilityLabel: 'Friday, October 30. 6 tasks' });
         const two = getCalendarMonthCell(new Date(2026, 9, 30), { ...lists, deadlines: tasks.slice(0, 2) }, { dates: createCalendarLocaleDates('en-US'), t: (key) => key });
         expect([two.previewItems.length, two.showCounts]).toEqual([2, false]);
+    });
+
+    it('draws a completed all-day item crossed out and muted in the day and week lanes (#1462)', () => {
+        const open = task({ id: 'open', title: 'Open', dueDate: '2026-10-30' });
+        const done = task({ id: 'done', title: 'Done', status: 'done', completedAt: '2026-10-30T15:00:00.000Z' });
+        const items = getCalendarDayItems({ scheduled: [], deadlines: [open], completed: [done], events: [] });
+        const completed = items.find((item) => item.kind === 'completed')!;
+        const deadline = items.find((item) => item.kind === 'deadline')!;
+        for (const tones of [getCalendarWeekAllDayTones(completed), getCalendarDayAllDayTones(completed)]) {
+            expect(tones).toMatchObject({ struck: true, text: 'secondary', fill: 'secondary', accent: 'secondary', disabled: true });
+        }
+        for (const tones of [getCalendarWeekAllDayTones(deadline), getCalendarDayAllDayTones(deadline)]) {
+            expect(tones).toMatchObject({ struck: false, text: 'text', fill: 'input', accent: 'danger', disabled: false });
+        }
+    });
+
+    it('caps an all-day lane and counts the rest for "+N more" (#1462)', () => {
+        const deadlines = Array.from({ length: 6 }, (_, index) => task({ id: `t${index}`, title: `T${index}`, dueDate: '2026-10-30' }));
+        const items = getCalendarDayItems({ scheduled: [], deadlines, completed: [], events: [] });
+        const lane = getCalendarAllDayLane(items, CALENDAR_DAY_ALL_DAY_ITEMS);
+        expect(lane.items.map((item) => item.title)).toEqual(['T0', 'T1', 'T2', 'T3']);
+        expect(lane.hiddenCount).toBe(2);
+        expect(formatCalendarAllDayMore(lane.hiddenCount, (key) => (key === 'calendar.more' ? 'more' : key))).toBe('+2 more');
+        const expanded = getCalendarAllDayLane(items, CALENDAR_DAY_ALL_DAY_ITEMS, true);
+        expect([expanded.items.length, expanded.hiddenCount]).toEqual([6, 2]);
+        expect(getCalendarAllDayLane(items.slice(0, 4), CALENDAR_DAY_ALL_DAY_ITEMS).hiddenCount).toBe(0);
     });
 
     it('starts the weekday labels on Sunday after the time zone changes', () => {

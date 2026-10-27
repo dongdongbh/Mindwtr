@@ -182,6 +182,7 @@ export async function replayCalendarScenario(options: {
     let query = '';
     let composer: NativeCalendarComposerView | null = null;
     let editor: string | null = null;
+    let allDayExpanded = false;
     let feed: NativeCalendarFeed | undefined;
     let fetchedRange = '';
     let calendars: ExternalCalendarSubscription[] = [];
@@ -390,6 +391,7 @@ export async function replayCalendarScenario(options: {
             text(view.text.allDay);
             for (const day of days) {
                 for (const item of byDay(day.key, 'allDay')) press({ disabled: !item.pressable, press: itemPress(item) }, [item.title]);
+                if (day.allDayMore) press({ press: async () => { state = day.opens!; await setViewMode('day'); } }, [day.allDayMore]);
             }
             content.hourLabels.forEach(text);
             for (const day of days) {
@@ -406,7 +408,10 @@ export async function replayCalendarScenario(options: {
             const allDay = byDay(content.dayKey, 'allDay');
             if (allDay.length > 0) {
                 text(view.text.allDay);
-                for (const item of allDay) press({ press: itemPress(item) }, [item.title]);
+                for (const item of allDayExpanded || !content.allDayMore ? allDay : allDay.slice(0, content.allDayLimit)) press({ press: itemPress(item) }, [item.title]);
+                if (content.allDayMore) {
+                    press({ press: async () => { allDayExpanded = !allDayExpanded; } }, [allDayExpanded ? view.text.allDayLess : content.allDayMore]);
+                }
             }
             drawn.presses.push({ press: async () => undefined, texts: [] });
             content.hourLabels.forEach(text);

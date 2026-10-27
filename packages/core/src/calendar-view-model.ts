@@ -95,6 +95,8 @@ export const CALENDAR_COMPOSER_CANDIDATE_LIMIT = 10;
 export const CALENDAR_MONTH_PREVIEW_ITEMS = 2;
 export const CALENDAR_MONTH_PREVIEW_HIDDEN_AT = 6;
 export const CALENDAR_WEEK_ALL_DAY_ITEMS = 3;
+/** The day view's pinned all-day card shows this many chips before "+N more", like desktop's all-day row. */
+export const CALENDAR_DAY_ALL_DAY_ITEMS = 4;
 /** A timeline tap opens the composer with this duration. */
 export const CALENDAR_TAP_DURATION_MINUTES = 30;
 
@@ -469,6 +471,7 @@ export const getCalendarScreenText = (t: Translate) => {
         showCompleted: tr('calendar.showCompleted'),
         showCompletedHint: tr('calendar.showCompletedHint'),
         allDay: t('calendar.allDay'),
+        allDayLess: t('common.less'),
         addTask: t('calendar.addTask'),
         schedulePlaceholder: t('calendar.schedulePlaceholder'),
         searchResultsTitle: t('calendar.scheduleResults'),
@@ -857,24 +860,56 @@ export const getCalendarMonthPreviewTones = (item: CalendarDayItem) => {
     };
 };
 
+/**
+ * An all-day lane capped at `limit` chips, as desktop draws it: one-off items
+ * take the slots before projected recurring ones, and `hiddenCount` is what a
+ * "+N more" chip counts. `expanded` shows every item; `hiddenCount` stays the
+ * collapsed count so the screen can keep offering the toggle.
+ */
+export function getCalendarAllDayLane(items: readonly CalendarDayItem[], limit: number, expanded = false) {
+    const all = orderCalendarDayItemsForLimitedSlots(items.filter(isCalendarAllDayItem));
+    return {
+        items: expanded ? all : all.slice(0, limit),
+        hiddenCount: Math.max(0, all.length - limit),
+    };
+}
+
+/** The overflow chip's label: "+2 more", as desktop writes it. */
+export const formatCalendarAllDayMore = (hiddenCount: number, t: Translate): string => `+${hiddenCount} ${t('calendar.more')}`;
+
 /** The week view's all-day lane: its first three items; a projected one cannot be pressed. */
 export const getCalendarWeekAllDayItems = (items: readonly CalendarDayItem[]): CalendarDayItem[] => (
-    items.filter(isCalendarAllDayItem).slice(0, CALENDAR_WEEK_ALL_DAY_ITEMS)
+    getCalendarAllDayLane(items, CALENDAR_WEEK_ALL_DAY_ITEMS).items
 );
 
+/**
+ * An all-day chip, in the week lane and the day card alike, as desktop draws
+ * it: a fill with a colored left edge (the event's calendar, the tint for a
+ * scheduled or projected task, danger for a deadline), and a completed item
+ * crossed out and muted.
+ */
 export const getCalendarWeekAllDayTones = (item: CalendarDayItem) => {
     const projected = item.kind !== 'event' && isProjectedRecurringTask(item.task);
+    const completed = item.kind === 'completed';
     return {
-        fill: (item.kind === 'event' ? 'secondary' : 'input') as CalendarTone,
-        accent: (item.kind === 'event' ? 'source' : projected ? 'tint' : 'danger') as CalendarTone,
+        fill: (item.kind === 'event' || completed ? 'secondary' : 'input') as CalendarTone,
+        accent: (item.kind === 'event'
+            ? 'source'
+            : projected || item.kind === 'scheduled'
+                ? 'tint'
+                : completed
+                    ? 'secondary'
+                    : 'danger') as CalendarTone,
+        text: (completed ? 'secondary' : projected ? 'tint' : 'text') as CalendarTone,
         dashed: projected,
-        disabled: projected || item.kind === 'completed',
+        struck: completed,
+        disabled: projected || completed,
     };
 };
 
-/** The day view's pinned all-day list; completed items have no action. */
+/** The day view's pinned all-day card: the week lane's chips, but a projected item still opens; completed items have no action. */
 export const getCalendarDayAllDayTones = (item: CalendarDayItem) => ({
-    text: (item.kind !== 'event' && isProjectedRecurringTask(item.task) ? 'tint' : 'text') as CalendarTone,
+    ...getCalendarWeekAllDayTones(item),
     disabled: item.kind === 'completed',
 });
 

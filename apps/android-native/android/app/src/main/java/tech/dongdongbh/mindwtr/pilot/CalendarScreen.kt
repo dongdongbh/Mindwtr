@@ -90,6 +90,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -603,7 +604,7 @@ private fun WeekView(model: InboxViewModel, view: JSONObject, content: JSONObjec
                             Text(text.getString("allDay"), style = rnText(10, 900), color = c.secondaryText, textAlign = TextAlign.End,
                                 modifier = Modifier.fillMaxWidth().padding(end = 6.dp, top = 10.dp))
                         }
-                        for (day in days) WeekAllDay(model, placed.lane("allDay", day.getString("key")), column, compact)
+                        for (day in days) WeekAllDay(model, day, placed.lane("allDay", day.getString("key")), column, compact)
                     }
                     WeekTimeline(model, content, placed, column, compact, ultra, pin)
                 }
@@ -630,28 +631,40 @@ private fun WeekDayHeader(model: InboxViewModel, day: JSONObject, width: Dp, com
     }
 }
 
-/** RN's all-day cell: core's all-day items with their tones; a tap opens the item's sheet where core allows it. */
+/** RN's all-day cell: core's first all-day items as chips, then core's "+N more", which opens the day. */
 @Composable
-private fun WeekAllDay(model: InboxViewModel, items: List<JSONObject>, width: Dp, compact: Boolean) = with(model.menu) {
-    val theme = LocalTheme.current
-    val c = theme.colors
+private fun WeekAllDay(model: InboxViewModel, day: JSONObject, items: List<JSONObject>, width: Dp, compact: Boolean) = with(model.menu) {
+    val c = LocalTheme.current.colors
     Column(Modifier.width(width).fillMaxHeight().leftBorder(c.border, 1.dp)
         .padding(horizontal = if (compact) 2.dp else 5.dp, vertical = if (compact) 4.dp else 5.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) { ExactTargets {
-        for (item in items) {
-            val tones = item.getJSONObject("tones")
-            val fill = if (tones.menuText("fill") == "secondary") theme.wash(c.secondaryText, 0.14f, 0.28f) else c.inputBg
-            val accent = if (item.getString("kind") == "event") coreColorOrNull(item.menuText("sourceColor")) ?: c.secondaryText
-            else if (tones.menuText("accent") == "tint") c.tint else c.danger
-            val pressable = item.getBoolean("pressable")
-            val spoken = item.spoken()
-            Text(item.getString("title"), style = rnText(if (compact) 8 else 10, 800), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp)).background(fill).leftBorder(accent, if (compact) 2.dp else 3.dp, tones.optBoolean("dashed"))
-                    .testTag("calendar-block")
-                    .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (pressable && idle) onClick { calendar.openItem(item); true } else disabled() }
-                    .clickable(enabled = pressable && idle) { calendar.openItem(item) }
-                    .padding(start = if (compact) 4.dp else 8.dp, end = if (compact) 2.dp else 5.dp, top = 2.dp, bottom = 2.dp))
-        }
+        for (item in items) AllDayChip(model, item, rnText(if (compact) 8 else 10, 800), if (compact) 2.dp else 3.dp, 5.dp,
+            PaddingValues(start = if (compact) 4.dp else 8.dp, end = if (compact) 2.dp else 5.dp, top = 2.dp, bottom = 2.dp))
+        val more = day.menuText("allDayMore")
+        val opens = day.optJSONObject("opens")
+        if (more != null && opens != null) Text(more, style = rnText(if (compact) 8 else 10, 700), color = c.secondaryText, maxLines = 1,
+            modifier = Modifier.clearAndSetSemantics { contentDescription = more; role = Role.Button; if (idle) onClick { calendar.go(opens); true } else disabled() }
+                .clickable(enabled = idle) { calendar.go(opens) }.padding(horizontal = 2.dp))
     } }
+}
+
+/** RN's all-day chip, in the week lane and the day card: core's fill, left edge and title tones; a completed item is crossed out and muted. */
+@Composable
+private fun AllDayChip(model: InboxViewModel, item: JSONObject, style: TextStyle, edge: Dp, radius: Dp, padding: PaddingValues) = with(model.menu) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val tones = item.getJSONObject("tones")
+    val fill = if (tones.menuText("fill") == "secondary") theme.wash(c.secondaryText, 0.14f, 0.28f) else c.inputBg
+    val accent = if (item.getString("kind") == "event") coreColorOrNull(item.menuText("sourceColor")) ?: c.secondaryText
+    else theme.calendarTone(tones.menuText("accent")) ?: c.danger
+    val pressable = item.getBoolean("pressable")
+    val spoken = item.spoken()
+    Text(item.getString("title"), style = style.copy(textDecoration = if (tones.optBoolean("struck")) TextDecoration.LineThrough else null),
+        color = theme.calendarTone(tones.menuText("text")) ?: c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(radius)).background(fill).leftBorder(accent, edge, tones.optBoolean("dashed"))
+            .testTag("calendar-block")
+            .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (pressable && idle) onClick { calendar.openItem(item); true } else disabled() }
+            .clickable(enabled = pressable && idle) { calendar.openItem(item) }
+            .padding(padding))
 }
 
 /**
@@ -855,6 +868,8 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
     val text = view.getJSONObject("text")
     val dayKey = content.getString("dayKey")
     val allDay = placed.lane("allDay", dayKey)
+    // RN's day card past its "+N more", kept across days as RN keeps it.
+    var allDayExpanded by rememberSaveable { mutableStateOf(false) }
     val down = rememberScrollState()
     var scrolledFor by rememberSaveable { mutableStateOf("") }
     val pending = calendar.scrollTo
@@ -868,17 +883,19 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
             val shape = RoundedCornerShape(12.dp)
             Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) {
                 Text(text.getString("allDay").uppercase(), style = rnText(12, 800), color = c.secondaryText, modifier = Modifier.padding(bottom = 8.dp))
-                Column(Modifier.heightIn(max = 132.dp).verticalScroll(rememberScrollState())) { ExactTargets {
-                    for (item in allDay) {
-                        val pressable = item.getBoolean("pressable")
-                        val spoken = item.spoken()
-                        Text(item.getString("title"), style = rnText(13, 400), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            color = theme.calendarTone(item.getJSONObject("tones").menuText("text")) ?: c.text,
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp)).testTag("calendar-block")
-                                .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (pressable && idle) onClick { calendar.openItem(item); true } else disabled() }
-                                .clickable(enabled = pressable && idle) { calendar.openItem(item) }.padding(vertical = 2.dp))
-                    }
+                // Core sends every all-day item; collapsed, RN draws core's first allDayLimit and a "+N more" that expands in place.
+                val more = content.menuText("allDayMore")
+                val shown = if (allDayExpanded || more == null) allDay else allDay.take(content.getInt("allDayLimit"))
+                Column(Modifier.heightIn(max = 176.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) { ExactTargets {
+                    for (item in shown) AllDayChip(model, item, rnText(13, 600), 3.dp, 6.dp, PaddingValues(horizontal = 8.dp, vertical = 4.dp))
                 } }
+                if (more != null) {
+                    val label = if (allDayExpanded) text.getString("allDayLess") else more
+                    Text(label, style = rnText(12, 700), color = c.secondaryText,
+                        modifier = Modifier.padding(top = 4.dp).testTag("calendar-all-day-more")
+                            .clearAndSetSemantics { contentDescription = label; role = Role.Button; onClick { allDayExpanded = !allDayExpanded; true } }
+                            .clickable { allDayExpanded = !allDayExpanded }.padding(vertical = 4.dp, horizontal = 2.dp))
+                }
             }
         }
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(down).padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),

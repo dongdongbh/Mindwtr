@@ -6,6 +6,8 @@ struct CalendarScreen: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var weekOffset: CGFloat = 0
     @State private var measuredWeekdays = CalendarWeekdayMeasurements()
+    // RN's day card past its "+N more", kept across days as RN keeps it.
+    @State private var allDayExpanded = false
     @FocusState private var queryFocused: Bool
     @ScaledMetric(relativeTo: .body) private var monthCellHeight: CGFloat = 86
     @ScaledMetric(relativeTo: .body) private var weekHeaderHeight: CGFloat = 56
@@ -320,15 +322,25 @@ struct CalendarScreen: View {
         VStack(spacing: 0) {
             let allDay = entries.filter { $0.text("type") == "item" && $0.text("lane") == "allDay" }
             if !allDay.isEmpty {
+                // Core sends every all-day item; collapsed, RN draws core's first allDayLimit and a "+N more" that expands in place.
+                let more = content.text("allDayMore")
+                let shown = allDayExpanded || more.isEmpty ? allDay : Array(allDay.prefix(content.number("allDayLimit")))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(text.text("allDay")).rnFont(12, .semibold).foregroundStyle(palette.secondary)
                     ScrollView {
                         LazyVStack(spacing: 5) {
-                            ForEach(allDay.indices, id: \.self) { index in
-                                CalendarItemButton(item: allDay[index].object("item"), model: model, palette: palette)
+                            ForEach(shown.indices, id: \.self) { index in
+                                CalendarItemButton(item: shown[index].object("item"), model: model, palette: palette)
                             }
                         }
-                    }.frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 180 : 120)
+                    }.frame(maxHeight: dynamicTypeSize.isAccessibilitySize ? 260 : 200)
+                    if !more.isEmpty {
+                        Button { allDayExpanded.toggle() } label: {
+                            Text(allDayExpanded ? text.text("allDayLess") : more).rnFont(12, .semibold).foregroundStyle(palette.secondary)
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).accessibilityIdentifier("calendar-all-day-more")
+                    }
                 }.padding(10).background(palette.card)
             }
             CalendarAnchoredScroll(axis: .vertical, anchor: viewportAnchor("vertical"),
@@ -359,6 +371,7 @@ struct CalendarScreen: View {
             let canvasWidth = gutter + columnWidth * CGFloat(days.count)
             let allDayCount = days.map { day in
                 entries.filter { $0.text("type") == "item" && $0.text("lane") == "allDay" && $0.text("dayKey") == day.text("key") }.count
+                    + (day.text("allDayMore").isEmpty ? 0 : 1)
             }.max() ?? 0
             let visibleAllDayRows = min(allDayCount, geometry.size.height < 360 || dynamicTypeSize.isAccessibilitySize ? 1 : 2)
             let allDayHeight = CGFloat(visibleAllDayRows) * max(44, allDayRowHeight) + 4
@@ -394,6 +407,15 @@ struct CalendarScreen: View {
                                     VStack(spacing: 3) {
                                         ForEach(items.indices, id: \.self) { itemIndex in
                                             CalendarItemButton(item: items[itemIndex].object("item"), model: model, palette: palette, compact: true)
+                                        }
+                                        // Core's "+N more": the hidden items live in this day's own view.
+                                        if !days[index].text("allDayMore").isEmpty {
+                                            Button { navigate(days[index].object("opens")) } label: {
+                                                Text(days[index].text("allDayMore")).rnFont(10, .semibold).foregroundStyle(palette.secondary)
+                                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                                            }
+                                            .buttonStyle(.plain).disabled(!model.calendarActionsEnabled)
+                                            .accessibilityIdentifier("calendar-week-all-day-more-" + days[index].text("key"))
                                         }
                                     }.padding(2)
                                 }.frame(width: columnWidth, height: allDayHeight)

@@ -398,11 +398,14 @@ export const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 16,
   },
-  // Bounded so a day full of all-day items cannot crowd out the timeline. The
-  // list scrolls past this height, so it holds every item — do not add a count
-  // cap on top of it: that drops the overflow with nothing on screen saying so.
+  // Bounded so a day full of all-day items cannot crowd out the timeline.
+  // Collapsed, the card shows core's first four chips (they fit) and a
+  // "+N more" chip; expanded, the list scrolls past this height.
   allDayList: {
-    maxHeight: 132,
+    maxHeight: 176,
+  },
+  allDayListContent: {
+    gap: 4,
   },
   sectionLabel: {
     fontSize: 12,
@@ -412,10 +415,23 @@ export const styles = StyleSheet.create({
   },
   allDayItem: {
     fontSize: 13,
-    paddingVertical: 2,
+    fontWeight: '600',
   },
-  allDayPressable: {
+  allDayChip: {
+    borderLeftWidth: 3,
     borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  allDayMore: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 2,
+  },
+  allDayMoreText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   // 9 above and below the grid (half the 18-high hour row), so the first and
   // last hour labels show whole.
@@ -613,6 +629,11 @@ export const styles = StyleSheet.create({
   },
   weekAllDayTextCompact: {
     fontSize: 8,
+  },
+  weekAllDayMore: {
+    fontSize: 10,
+    fontWeight: '700',
+    paddingHorizontal: 2,
   },
   weekVertical: {
     flex: 1,
