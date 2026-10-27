@@ -9950,4 +9950,17 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(header, /section\.help\?\.let \{ if \(helpOpen\) ContextualHelpBody\(editorId, section\.id, it\) \}\s+if \(open\) Column/);
     assert.doesNotMatch(editorUi, /help\.getString\("dismiss"\)/);
 }
+// Item 1: RN's expanded editor (description and project notes) opens with the keyboard up and RN's MarkdownFormatToolbar over
+// it: core's actions and labels (markdownToolbarActions), each action core's applyMarkdownToolbarAction (markdownToolbarApply), Undo.
+{
+    const toolbarKt = source('MarkdownToolbar.kt');
+    assert.match(toolbarKt, /LaunchedEffect\(draft, enabled\) \{ if \(enabled\) \{ draft\.focus\.requestFocus\(\); keyboard\?\.show\(\) \} \}/);
+    assert.match(toolbarKt, /runtime\.menuRead\("markdownToolbarActions", "\{\}"\)/);
+    assert.match(toolbarKt, /runtime\.menuRead\("markdownToolbarApply", input\.toString\(\)\)/);
+    assert.match(toolbarKt, /if \(shown == null \|\| !draft\.focused \|\| !WindowInsets\.isImeVisible\) return/);
+    assert.match(toolbarKt, /Icon\(Ionicons\.ArrowUndoOutline, null/);
+    assert.match(editorUi, /if \(editing\) MarkdownToolbar\(model, draft, store\)/);
+    assert.match(projectsUi + source('ProjectDetails.kt'), /MarkdownInput\(draft, store, raw != null[\s\S]*?MarkdownToolbar\(model, draft, store\)/);
+    assert.match(hostEntry, /markdownToolbarActions: \(\) => contract\.getMarkdownToolbarActions\(\),\s+markdownToolbarApply: \(input\) => contract\.applyMarkdownToolbar\(input\),/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

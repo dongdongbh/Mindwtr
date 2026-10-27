@@ -1267,12 +1267,19 @@ private fun DescriptionFullscreen(model: InboxViewModel, editor: TaskEditor, loc
                     .clickable(role = Role.Button) { editing = !editing }.semantics { contentDescription = modeLabel },
                     contentAlignment = Alignment.Center) { Icon(if (editing) Lucide.Eye else Lucide.Pencil, null, tint = c.tint, modifier = Modifier.size(18.dp)) }
             }
+            // RN's expanded editor opens with the keyboard up and its Markdown toolbar over it (MarkdownToolbar.kt).
+            val draft = remember(editor.id) { MarkdownDraft(editor.text("description")) }
+            draft.sync(editor.text("description"))
+            val store = { text: String -> editText("description", text) }
             if (editing) Box(Modifier.weight(1f).padding(16.dp)) {
-                EditorInput(editor.text("description"), { editText("description", it) }, t("taskEdit.descriptionPlaceholder"), !locked,
-                    singleLine = false, minHeight = 240, description = t("taskEdit.descriptionLabel"))
+                val shape = RoundedCornerShape(10.dp)
+                MarkdownInput(draft, store, !locked, t("taskEdit.descriptionPlaceholder"), t("taskEdit.descriptionLabel"),
+                    rnText(16, 400).copy(color = if (!locked) c.text else c.secondaryText), Modifier.fillMaxWidth().heightIn(min = 240.dp),
+                    { field -> Box(Modifier.fillMaxWidth().heightIn(min = 240.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) { field() } })
             } else Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
                 DescriptionPreview(model, editor, follow, Modifier.fillMaxWidth().heightIn(min = 120.dp))
             }
+            if (editing) MarkdownToolbar(model, draft, store)
         }
     }
 }

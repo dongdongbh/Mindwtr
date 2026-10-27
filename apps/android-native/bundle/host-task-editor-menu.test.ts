@@ -44,6 +44,13 @@ async function open() {
 afterEach(async () => { await flushPendingSave(); resetForTests(); });
 
 describe('the task editor menu through host-entry', () => {
+    it('the expanded editor\'s Markdown toolbar reads core\'s actions and applies one to the text', async () => {
+        const { contract, MENU_READS } = await open();
+        expect(MENU_READS.markdownToolbarActions({})).toEqual(contract.getMarkdownToolbarActions());
+        expect(MENU_READS.markdownToolbarApply({ value: 'pack the boxes', start: 5, end: 8, action: 'bold' }))
+            .toEqual({ ok: true, value: { value: 'pack **the** boxes', start: 7, end: 10 } });
+    });
+
     it('Share reads core\'s getTaskShare for the editor draft', async () => {
         const { contract, MENU_READS } = await open();
         const task = useTaskStore.getState()._tasksById.get('task')!;

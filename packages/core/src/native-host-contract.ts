@@ -234,7 +234,7 @@ import { getTaskListHeaderText, isStatusListTaskReadOnly, type ListFilterOptions
 import { getProjectAccentColor } from './task-accent-color';
 import { formatListItemCount } from './list-count';
 import type { ContextOrTagMatchMode } from './hierarchy-utils';
-import { getInlineMarkdownPreview } from './markdown';
+import { applyMarkdownToolbarAction, getInlineMarkdownPreview, MARKDOWN_TOOLBAR_ACTIONS, type MarkdownToolbarActionId } from './markdown';
 import { createMarkdownLinkLookup, resolveMarkdownBlocks, resolveMarkdownInline, type MarkdownInline, type ResolvedMarkdownBlock } from './markdown-blocks';
 import { resolveAutoTextDirection } from './text-direction';
 import { taskMatchesFilterSelections } from './task-filter-selections';
@@ -2159,6 +2159,26 @@ export function createNativeHostContract(options: {
             } catch (error) {
                 return fail('ACTION_FAILED', error instanceof Error ? error.message : String(error));
             }
+        },
+
+        /** RN's MarkdownFormatToolbar: core's actions, in order, with RN's labels (translateWithFallback), and Undo's label. */
+        getMarkdownToolbarActions(): NativeHostResult<{ actions: Array<{ id: MarkdownToolbarActionId; label: string; shortLabel: string }>; undoLabel: string }> {
+            const label = (key: string, fallback: string) => getEnglishI18nValue(key) === undefined ? fallback : translate(key);
+            return { ok: true, value: {
+                actions: MARKDOWN_TOOLBAR_ACTIONS.map(({ id, labelKey, fallbackLabel, shortLabel }) => ({ id, label: label(labelKey, fallbackLabel), shortLabel })),
+                undoLabel: label('common.undo', 'Undo'),
+            } };
+        },
+
+        /** One toolbar action on the expanded editor's text and selection (core's applyMarkdownToolbarAction). Writes nothing. */
+        applyMarkdownToolbar(input: { value: string; start: number; end: number; action: MarkdownToolbarActionId }): NativeHostResult<{ value: string; start: number; end: number }> {
+            const index = (value: unknown, max: number): value is number => Number.isInteger(value) && (value as number) >= 0 && (value as number) <= max;
+            if (!input || typeof input.value !== 'string' || input.value.length > 1_000_000 || !index(input.start, input.value.length)
+                || !index(input.end, input.value.length) || input.start > input.end || !MARKDOWN_TOOLBAR_ACTIONS.some((action) => action.id === input.action)) {
+                return fail('INVALID_INPUT', 'A Markdown toolbar action and a selection inside the text are required');
+            }
+            const { value, selection } = applyMarkdownToolbarAction(input.value, { start: input.start, end: input.end }, input.action);
+            return { ok: true, value: { value, start: selection.start, end: selection.end } };
         },
 
         getStrings(input: { keys: string[] }): NativeHostResult<{ language: Language; strings: Record<string, string>; missing: string[] }> {

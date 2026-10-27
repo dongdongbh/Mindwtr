@@ -1307,6 +1307,10 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     // Create project's "Expand checklist" switch: why it is off for the editor's unsaved draft and checklist (RN's
     // checklistProjectBlockReason under the switch), translated, or null. A read; the write is taskEditorAction's expandChecklist.
     taskChecklistProjectBlock: (input) => contract.getTaskChecklistProjectBlock(input),
+    // The expanded editor's Markdown toolbar (MarkdownToolbar.kt, RN's MarkdownFormatToolbar): core's actions and their labels,
+    // and one action on the editor's text and selection. Reads; the text is stored by the editor as typed text is.
+    markdownToolbarActions: () => contract.getMarkdownToolbarActions(),
+    markdownToolbarApply: (input) => contract.applyMarkdownToolbar(input),
 };
 /**
  * The attachments' long calls (native-host-contract-attachments.ts): Download and Open wait on the network (a synced file's bytes),

@@ -1075,7 +1075,19 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
                     .clickable(role = Role.Button) { editing = !editing }.semantics { contentDescription = modeLabel },
                     contentAlignment = Alignment.Center) { Icon(if (editing) Lucide.Eye else Lucide.Pencil, null, tint = c.tint, modifier = Modifier.size(18.dp)) }
             }
-            if (editing) NotesField(model, Modifier.padding(16.dp).fillMaxWidth().weight(1f), RoundedCornerShape(12.dp), 16, 16) { editing && notesFullscreen }
+            // RN's expanded editor opens with the keyboard up and its Markdown toolbar over it (MarkdownToolbar.kt).
+            val draft = remember { MarkdownDraft(notesDraft ?: storedNotes()) }
+            draft.sync(notesDraft ?: storedNotes())
+            val store = { text: String -> notesDraft = text }
+            if (editing) {
+                val shape = RoundedCornerShape(12.dp)
+                // Leaving the field stores the notes (RN's onBlur), as the inline notes field does.
+                MarkdownInput(draft, store, raw != null && !model.busy && model.failedAction == null, t("projects.notesPlaceholder"), t("project.notes"),
+                    rnText(16, 400, 24).copy(color = c.text), Modifier.padding(16.dp).fillMaxWidth().weight(1f).testTag("project-notes-input"),
+                    { field -> Box(Modifier.fillMaxSize().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) { field() } },
+                    onBlur = { if (editing && notesFullscreen) commitNotes() })
+                MarkdownToolbar(model, draft, store)
+            }
             else {
                 LaunchedEffect(model.project, notesDraft, model.busy) { if (!model.busy) readNotes() }
                 val shape = RoundedCornerShape(12.dp)
