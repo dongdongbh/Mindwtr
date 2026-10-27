@@ -136,21 +136,27 @@ export function normalizeTaskStatus(value: unknown): TaskStatus {
  * The fallback for legacy completed archives is stable entity data, never the
  * current clock, so loading an already-normalized task is idempotent.
  */
+/**
+ * The lifecycle fields for a task in [status]: a valid cancellation only on an archived task, a completion time on a finished one
+ * (its own, else its last update, else its creation), and no Focus on a finished one. The one rule for both normalizers below.
+ */
+function lifecycleFields(status: TaskStatus, cancelledAt: unknown, completedAt: string | undefined, updatedAt: string, createdAt: string) {
+    const cancelled = status === 'archived' ? normalizeCancellationTimestamp(cancelledAt) : undefined;
+    const terminal = isTaskFinished(status);
+    return {
+        cancelledAt: cancelled,
+        completedAt: cancelled ? undefined : terminal ? (completedAt || updatedAt || createdAt) : undefined,
+        terminal,
+    };
+}
+
 export function normalizeTaskLifecycleFields(task: Task): Task {
-    const cancelledAt = task.status === 'archived'
-        ? normalizeCancellationTimestamp(task.cancelledAt)
-        : undefined;
-    const completedAt = cancelledAt
-        ? undefined
-        : isTaskFinished(task.status)
-            ? (task.completedAt || task.updatedAt || task.createdAt)
-            : undefined;
-    const isTerminal = isTaskFinished(task.status);
+    const { cancelledAt, completedAt, terminal } = lifecycleFields(task.status, task.cancelledAt, task.completedAt, task.updatedAt, task.createdAt);
     const next: Task = {
         ...task,
         cancelledAt,
         completedAt,
-        ...(isTerminal ? { isFocusedToday: false, focusOrder: undefined } : {}),
+        ...(terminal ? { isFocusedToday: false, focusOrder: undefined } : {}),
     };
     return sameShallowRecord(task, next) ? task : next;
 }
@@ -160,13 +166,14 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
     const { rev: _legacyRev, revBy: _legacyRevBy, ...rest } = task as Task & { rev?: unknown; revBy?: unknown };
 
     let createdAtIso = typeof task.createdAt === 'string' ? task.createdAt : nowIso;
-    const createdAtMs = Date.parse(createdAtIso);
+    let createdAtMs = Date.parse(createdAtIso);
     if (!Number.isFinite(createdAtMs)) {
         createdAtIso = nowIso;
+        createdAtMs = Date.parse(createdAtIso);
     }
     let updatedAtIso = typeof task.updatedAt === 'string' ? task.updatedAt : createdAtIso;
     const updatedAtMs = Date.parse(updatedAtIso);
-    if (!Number.isFinite(updatedAtMs) || updatedAtMs < Date.parse(createdAtIso)) {
+    if (!Number.isFinite(updatedAtMs) || updatedAtMs < createdAtMs) {
         updatedAtIso = createdAtIso;
     }
 
@@ -203,6 +210,9 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
     const relativeStartOffset = task.dueDate
         ? preserveShallowIdentity(task.relativeStartOffset, normalizeRelativeStartOffset(task.relativeStartOffset))
         : undefined;
+    const lifecycle = lifecycleFields(normalizedStatus, task.cancelledAt, task.completedAt, updatedAtIso, createdAtIso);
+    // One object, in the key order the two steps (fields, then lifecycle) gave: at 5,000 tasks the second copy and its second
+    // comparison were most of the native boot's 230 ms here on the S23's QuickJS.
     const next: Task = {
         ...rest,
         createdAt: createdAtIso,
@@ -227,20 +237,21 @@ export function normalizeTaskForLoad(task: Task, nowIso: string = new Date().toI
         // content-oscillation sibling of the rev-bump loop fixed earlier;
         // stats.tombstoneRepairs stayed 0 because rev never changed).
         ...(hasValidPushCount || task.purgedAt ? {} : { pushCount: 0 }),
+        cancelledAt: lifecycle.cancelledAt,
+        completedAt: lifecycle.completedAt,
+        ...(lifecycle.terminal ? { isFocusedToday: false, focusOrder: undefined } : {}),
     };
-
-    const lifecycleNormalized = normalizeTaskLifecycleFields(next);
 
     // A future-start Next action keeps its queued star across load and sync.
     // focusOrder only applies once it has reached Today's Focus.
-    if (lifecycleNormalized.isFocusedToday && isFutureStart(lifecycleNormalized, new Date(nowIso), temporal)) {
-        if (lifecycleNormalized.status !== 'next') lifecycleNormalized.isFocusedToday = false;
-        lifecycleNormalized.focusOrder = undefined;
+    if (next.isFocusedToday && isFutureStart(next, new Date(nowIso), temporal)) {
+        if (next.status !== 'next') next.isFocusedToday = false;
+        next.focusOrder = undefined;
     }
 
     // Hand back the input when nothing actually changed, so an already-normalized
     // task keeps its identity through the merge normalizers (#766 — see
     // shallow-identity.ts). The time-dependent branches above naturally produce a
     // differing object on the cycle they fire, so this stays a pure no-change check.
-    return sameShallowRecord(task, lifecycleNormalized) ? task : lifecycleNormalized;
+    return sameShallowRecord(task, next) ? task : next;
 }
