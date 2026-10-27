@@ -1,4 +1,4 @@
-import * as chrono from 'chrono-node';
+import type * as chrono from 'chrono-node';
 import { format, isValid, set } from 'date-fns';
 import type { Area, AppSettings, Attachment, Person, Project, Task, TaskEnergyLevel, TaskPriority, TaskStatus } from './types';
 import { resolveFeatureFlags } from './resolve-feature-flags';
@@ -6,6 +6,7 @@ import { generateUUID } from './uuid';
 import { normalizeTaskStatus } from './task-status';
 import { normalizeLinkAttachmentInput } from './attachment-link-utils';
 import { getActiveLanguage, getMonthNamesForLanguage, isActiveDateFormatDayFirst, normalizeClockTimeInput } from './date';
+import { chronoLocale } from './quick-add-chrono';
 import type { Language } from './i18n/i18n-types';
 import { getRetainedTaskContexts, getUsedTaskTokens } from './task-token-usage';
 import { getPersonOptionNames } from './people';
@@ -324,18 +325,18 @@ const dotDateParser: chrono.Parser = {
     },
 };
 
-const quickAddChrono = chrono.casual.clone();
-quickAddChrono.parsers.push(dotDateParser);
+// English casual, and en.GB: the casual configuration in little-endian mode, so ambiguous slash dates ("10/8") read day-first.
+// Selected per parse from the active date format so `/due:10/8` means August 10 under a d/m/y setting (#1006). Built on first use.
+let quickAddChrono: chrono.Chrono | null = null;
+let quickAddChronoDayFirst: chrono.Chrono | null = null;
+const withDotDates = (instance: chrono.Chrono): chrono.Chrono => {
+    instance.parsers.push(dotDateParser);
+    return instance;
+};
 
-// chrono.en.GB is the casual configuration in little-endian mode, so ambiguous
-// slash dates ("10/8") read day-first. Selected per parse from the active date
-// format so `/due:10/8` means August 10 under a d/m/y setting (#1006).
-const quickAddChronoDayFirst = chrono.en.GB.clone();
-quickAddChronoDayFirst.parsers.push(dotDateParser);
-
-const getQuickAddChrono = (): chrono.Chrono => (
-    isActiveDateFormatDayFirst() ? quickAddChronoDayFirst : quickAddChrono
-);
+const getQuickAddChrono = (): chrono.Chrono => (isActiveDateFormatDayFirst()
+    ? quickAddChronoDayFirst ??= withDotDates(chronoLocale.en().GB.clone())
+    : quickAddChrono ??= withDotDates(chronoLocale.en().casual.clone()));
 
 // chrono-node locale parsers for the app languages it natively supports
 // (#1059). Every other app language (en, and any without a chrono locale)
@@ -343,17 +344,17 @@ const getQuickAddChrono = (): chrono.Chrono => (
 // detectTrailingDate below.
 type LocaleChronoLanguage = 'de' | 'es' | 'fr' | 'it' | 'ja' | 'nl' | 'pt' | 'ru' | 'sv' | 'zh' | 'zh-Hant';
 const LOCALE_CHRONO_FACTORY: Record<LocaleChronoLanguage, () => chrono.Chrono> = {
-    de: () => chrono.de.casual.clone(),
-    es: () => chrono.es.casual.clone(),
-    fr: () => chrono.fr.casual.clone(),
-    it: () => chrono.it.casual.clone(),
-    ja: () => chrono.ja.casual.clone(),
-    nl: () => chrono.nl.casual.clone(),
-    pt: () => chrono.pt.casual.clone(),
-    ru: () => chrono.ru.casual.clone(),
-    sv: () => chrono.sv.casual.clone(),
-    zh: () => chrono.zh.hans.casual.clone(),
-    'zh-Hant': () => chrono.zh.hant.casual.clone(),
+    de: () => chronoLocale.de().casual.clone(),
+    es: () => chronoLocale.es().casual.clone(),
+    fr: () => chronoLocale.fr().casual.clone(),
+    it: () => chronoLocale.it().casual.clone(),
+    ja: () => chronoLocale.ja().casual.clone(),
+    nl: () => chronoLocale.nl().casual.clone(),
+    pt: () => chronoLocale.pt().casual.clone(),
+    ru: () => chronoLocale.ru().casual.clone(),
+    sv: () => chronoLocale.sv().casual.clone(),
+    zh: () => chronoLocale.zh().hans.casual.clone(),
+    'zh-Hant': () => chronoLocale.zh().hant.casual.clone(),
 };
 const localeChronoCache = new Map<LocaleChronoLanguage, chrono.Chrono>();
 

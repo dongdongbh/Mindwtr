@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, 
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { androidHostEntry } from './android-host-table.mjs';
+import { lazyChrono } from './lazy-chrono.mjs';
 
 const app = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // node build-bundle.mjs [--trace-modules] [--out <file>]. --trace-modules is for startup measurement only (Gradle's
@@ -70,7 +71,7 @@ const result = await build({
     banner: { js: readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8') + (traceModules ? traceBanner : '') },
     // Android never sets the host platform: its iOS-only branches fold away, and the modules only they import with them.
     define: { 'globalThis.__mindwtrHostPlatform': '"android"' },
-    plugins: [traceModules ? moduleTrace : androidHostTable],
+    plugins: [lazyChrono, traceModules ? moduleTrace : androidHostTable],
     metafile: true,
 });
 // Every source outside node_modules must be this tree's own. A node_modules symlinked to another worktree resolves
