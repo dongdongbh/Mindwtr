@@ -253,7 +253,7 @@ fun FocusReorder(model: InboxViewModel, screen: JSONObject, modifier: Modifier) 
     var hint by rememberSaveable { mutableStateOf(true) }
     val enabled = model.menu.idle
     Column(modifier.background(c.bg)) {
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(12.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(12.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(screen.getString("title").uppercase(), style = rnText(13, 700, letterSpacing = 1f), color = c.text, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).semantics { heading() })

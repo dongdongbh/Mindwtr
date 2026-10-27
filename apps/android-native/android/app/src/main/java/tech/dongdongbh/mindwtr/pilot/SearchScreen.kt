@@ -172,7 +172,7 @@ fun SearchScreen(model: InboxViewModel, state: SearchState) = with(model) {
     val idle = writable && !busy && failedAction == null
     BackHandler(enabled = failedAction == null) { if (!busy) closeSearch() }
     Column(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("global-search")) {
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(16.dp), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(16.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Icon(Lucide.Search, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
             val focus = remember { FocusRequester() }

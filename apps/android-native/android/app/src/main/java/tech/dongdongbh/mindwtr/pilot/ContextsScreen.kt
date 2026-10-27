@@ -72,7 +72,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
     BackHandler(enabled = bulk != null && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("contexts-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         item(key = "search") {
-            Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(12.dp),
+            Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ListSearchField(own("contexts").optString("searchQuery"), view.getString("searchPlaceholder"), Modifier.weight(1f)) {
                     typeSearch("contexts", "searchQuery", it)
@@ -84,7 +84,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
             }
         }
         item(key = "chips") {
-            Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(top = 4.dp, bottom = 6.dp)) {
+            Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(top = 4.dp, bottom = 6.dp)) {
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     for (chip in view.menuObjects("chips")) {
@@ -155,7 +155,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
 private fun ContextsBulkBar(model: InboxViewModel, bulk: JSONObject, selected: List<String>, revisions: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
     val any = idle && selected.isNotEmpty()
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(bulk.getString("countLabel"), style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.weight(1f))

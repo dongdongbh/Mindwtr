@@ -10028,4 +10028,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(theme, /fun Modifier\.rnBorderTop\(color: Color\): Modifier = drawBehind \{[\s\S]{0,200}\}\.padding\(top = 1\.dp\)/);
     assert.match(source('ProjectsScreen.kt'), /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 56\.dp\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\.padding\(horizontal = 12\.dp, vertical = 8\.dp\)/);
 }
+// The border sweep (tabbar-borders-20261027-06): a 1 px hairline only where RN draws StyleSheet.hairlineWidth (17 sites: the tab
+// and title bars, the menu and filter-sheet rows, the Markdown toolbar, review area and project headers, history tabs, project
+// metadata and option rows, the expanded editors' headers, the capture-intent token row) and the native-only failure banner;
+// every RN borderWidth 1 is rnBorderBottom / rnBorderTop. Organize's picker rows and Manage's create row draw none, as RN.
+{
+    const { readdirSync } = await import('node:fs');
+    const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
+    const all = readdirSync(dir).filter((file) => file.endsWith('.kt')).map((file) => readFileSync(resolve(dir, file), 'utf8')).join('\n');
+    assert.equal(all.match(/\.hairline\(/g)?.length, 18 + 1, 'the 18 hairline sites and the helper itself');
+    assert.ok((all.match(/\.rnBorder(Bottom|Top)\(/g)?.length ?? 0) >= 68, 'RN\'s borderWidth 1 lines are rnBorderBottom / rnBorderTop');
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

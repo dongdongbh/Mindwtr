@@ -210,7 +210,7 @@ private fun BoardColumn(model: InboxViewModel, shown: BoardPage, column: JSONObj
         Box(Modifier.fillMaxWidth().height(4.dp).background(tone, RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)))
         val label = column.getString("label")
         val count = column.getInt("count")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(12.dp).testTag("board-column")
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(12.dp).testTag("board-column")
             .clearAndSetSemantics { contentDescription = "$label · $count"; heading() },
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(label, style = rnText(15, 600), color = c.text)

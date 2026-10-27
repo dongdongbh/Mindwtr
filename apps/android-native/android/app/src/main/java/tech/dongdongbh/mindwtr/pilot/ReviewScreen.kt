@@ -71,7 +71,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
     LazyColumn(Modifier.fillMaxSize().testTag("review-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         scope?.let {
             item(key = "scope") {
-                FlowRow(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                FlowRow(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (option in it.menuObjects("options")) {
                         val on = option.getString("id") == it.getString("selected")
@@ -92,7 +92,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
             }
         }
         if (bulk == null) item(key = "actions") {
-            Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 10.dp),
+            Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                 val expansion = view.getJSONObject("expansion")
                 val off = expansion.getBoolean("disabled")
@@ -209,7 +209,7 @@ private fun ReviewProject(model: InboxViewModel, project: JSONObject) = with(mod
 private fun ReviewBulkBar(model: InboxViewModel, bulk: JSONObject, selected: List<String>) = with(model.menu) {
     val c = LocalTheme.current.colors
     val context = LocalContext.current
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(bulk.getString("countLabel"), style = rnText(12, 600), color = c.secondaryText)

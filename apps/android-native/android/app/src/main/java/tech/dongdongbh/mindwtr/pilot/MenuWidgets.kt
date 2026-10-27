@@ -306,7 +306,7 @@ fun ChoiceModal(model: InboxViewModel, title: String, choices: List<Choice>, dis
 fun ActiveChips(model: InboxViewModel, chips: List<JSONObject>, clear: (() -> Unit)?) = with(model.menu) {
     if (chips.isEmpty()) return
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).horizontalScroll(rememberScrollState())
+    Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).horizontalScroll(rememberScrollState())
         .padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         for (chip in chips) {
             val excluded = chip.optBoolean("excluded")
@@ -389,7 +389,7 @@ fun IconEmptyState(icon: ImageVector, title: String, hint: String?, action: Stri
 fun StatBar(stats: JSONArray, color: Color, trailing: @Composable RowScope.() -> Unit = {}) {
     val theme = LocalTheme.current
     val c = theme.colors
-    Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(16.dp),
+    Row(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(16.dp),
         horizontalArrangement = Arrangement.spacedBy(24.dp), verticalAlignment = Alignment.CenterVertically) {
         for (index in 0 until stats.length()) {
             val stat = stats.getJSONObject(index)

@@ -49,7 +49,7 @@ fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
     val view = shown.view
     val c = LocalTheme.current.colors
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().background(c.bg).hairline(c.border, top = false).padding(16.dp), verticalAlignment = Alignment.Top) {
+        Row(Modifier.fillMaxWidth().background(c.bg).rnBorderBottom(c.border).padding(16.dp), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(view.getString("title"), style = rnText(20, 700), color = c.text, modifier = Modifier.semantics { heading() })
                 view.menuText("query")?.let { Text(it, style = rnText(12, 400), color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis) }

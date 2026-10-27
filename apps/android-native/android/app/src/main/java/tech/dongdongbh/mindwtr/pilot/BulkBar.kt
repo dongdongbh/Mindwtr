@@ -84,7 +84,7 @@ fun BulkBar(model: InboxViewModel) = with(model.menu) {
     val labels = bulk.getJSONObject("labels")
     // While a command runs or a retry is owed the bar's controls wait; core's own enabled rules apply on top.
     val enabled = { control: JSONObject -> idle && control.getBoolean("enabled") }
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 12.dp, vertical = 8.dp),
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(bar.getString("countLabel"), style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.weight(1f))
@@ -274,7 +274,7 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                 if (open.optBoolean("validation")) Text(organize.getString("validationMessage"), style = rnText(12, 600), color = c.danger,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
             }
-            Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+            Row(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
                 verticalAlignment = Alignment.CenterVertically) {
                 val cancel = organize.getString("cancelLabel")
                 Text(cancel, style = rnText(14, 700), color = c.secondaryText, modifier = Modifier.heightIn(min = 40.dp)
@@ -419,7 +419,7 @@ private fun OrganizePicker(model: InboxViewModel, open: JSONObject, kind: String
                     val on = item.getBoolean("selected")
                     val label = item.getString("label")
                     val choose = { organizePicker(null); item.optJSONObject("edit")?.let { organizeEdit(it) } }
-                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).hairline(c.border, top = false)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; selected = on; if (idle) onClick { choose(); true } else disabled() }
                         .clickable(enabled = idle) { choose() }.padding(horizontal = 4.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

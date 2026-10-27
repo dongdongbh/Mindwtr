@@ -60,7 +60,7 @@ fun WaitingList(model: InboxViewModel) = with(model.menu) {
 private fun PersonFilter(model: InboxViewModel, shown: MenuPage) = with(model.menu) {
     val c = LocalTheme.current.colors
     val view = shown.view
-    Column(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 10.dp),
+    Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(view.getString("filterLabel"), style = rnText(12, 600), color = c.secondaryText)
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
