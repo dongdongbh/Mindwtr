@@ -146,7 +146,7 @@ private fun MenuCard(model: InboxViewModel, rows: List<JSONObject>) = with(model
             val enabled = row.getBoolean("enabled") && idle
             val label = row.getString("accessibilityLabel")
             Row(Modifier.fillMaxWidth().heightIn(min = 72.dp)
-                .then(if (index < rows.size - 1) Modifier.hairline(c.border, top = false) else Modifier)
+                .then(if (index < rows.size - 1) Modifier.rnBorderBottom(c.border) else Modifier)
                 .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { settings.push(id); true } else disabled() }
                 .clickable(enabled = enabled) { settings.push(id) }.fade(if (row.getBoolean("enabled")) 1f else 0.5f)
                 .padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -192,7 +192,7 @@ internal fun Card(top: Int = 0, content: @Composable ColumnScope.() -> Unit) =
 internal fun SettingRow(label: String, description: String?, divider: Boolean = false, modifier: Modifier = Modifier, failure: String? = null,
                         dimmed: Boolean = false, trailing: (@Composable RowScope.() -> Unit)? = null) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).then(modifier).padding(16.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).then(modifier).padding(16.dp),
         verticalAlignment = Alignment.Top) {
         // RN's dimmed row fades its label and description only (opacity 0.5), never its control.
         Column(Modifier.weight(1f).padding(end = 16.dp).fade(if (dimmed) 0.5f else 1f)) {
@@ -238,7 +238,7 @@ private fun NavRow(model: InboxViewModel, link: JSONObject, first: Boolean = fal
     val c = LocalTheme.current.colors
     val title = link.getString("title")
     val enabled = model.menu.idle
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (first) Modifier else Modifier.hairline(c.border, top = true))
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (first) Modifier else Modifier.rnBorderTop(c.border))
         .clearAndSetSemantics { contentDescription = title; role = Role.Button; if (enabled) onClick { model.menu.settings.push(link.getString("screen")); true } else disabled() }
         .clickable(enabled = enabled) { model.menu.settings.push(link.getString("screen")) }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
@@ -450,7 +450,7 @@ private fun ImportCard(model: InboxViewModel, importData: JSONObject) = with(mod
             Icon(if (open) SettingsIonicons.ChevronUp else SettingsIonicons.ChevronDown, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
         }
         if (open) {
-            Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) { GuideLink(importData.getJSONObject("guide"), "import-guide-link", bottom = 0) }
+            Row(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) { GuideLink(importData.getJSONObject("guide"), "import-guide-link", bottom = 0) }
             val running = transfer.action
             val rows = importData.getJSONArray("rows")
             for (index in 0 until rows.length()) {
@@ -466,7 +466,7 @@ private fun ImportCard(model: InboxViewModel, importData: JSONObject) = with(mod
 @Composable
 internal fun BackupRow(label: String, description: String, color: Color, enabled: Boolean, busy: Boolean, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true)
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border)
         .clearAndSetSemantics { contentDescription = "$label, $description"; role = Role.Button; testTag = tag
             if (busy) stateDescription = "busy"
             if (enabled) onClick { onClick(); true } else disabled() }
@@ -499,7 +499,7 @@ internal fun DataTransferQuestion(model: InboxViewModel) {
 private fun ActionRow(label: String, description: String?, color: Color, enabled: Boolean, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val spoken = if (description == null) label else "$label, $description"
-    Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true)
+    Column(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border)
         .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; testTag = tag; if (enabled) onClick { onClick(); true } else disabled() }
         .clickable(enabled = enabled, onClick = onClick).padding(16.dp)) {
         // RN's settingInfo: 16dp to its right.
@@ -594,7 +594,7 @@ private fun ManageAreas(model: InboxViewModel, page: SettingsPage) = with(model.
     val c = theme.colors
     val areas = page.view.getJSONObject("areas")
     val unassigned = areas.getJSONObject("unassigned")
-    Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Swatch(unassigned.getString("color"))
         Column(Modifier.weight(1f)) {
             Text(unassigned.getString("label"), style = rnText(16, 500, 21), color = c.text, maxLines = 1)
@@ -607,7 +607,7 @@ private fun ManageAreas(model: InboxViewModel, page: SettingsPage) = with(model.
     areas.menuText("empty")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(16.dp)) }
     for (row in page.list("areas")) {
         val name = row.getString("name")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             Swatch(row.getString("color"))
             Text(name, style = rnText(16, 500, 21), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             RowButton(SettingsIonicons.PencilOutline, "${t("common.edit")}: $name", c.secondaryText, idle) { settings.openEditor(row.getJSONObject("edit")) }
@@ -638,7 +638,7 @@ private fun ManagePeople(model: InboxViewModel, page: SettingsPage) = with(model
     people.menuText("empty")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(16.dp)) }
     for (row in page.list("people")) {
         val name = row.getString("name")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(34.dp).clip(CircleShape).background(c.bg).rnBorder(1.dp, c.border, CircleShape), contentAlignment = Alignment.Center) {
                 Text(row.getString("initial"), style = rnText(14, 700), color = c.text)
             }
@@ -682,7 +682,7 @@ private fun ManageValues(model: InboxViewModel, page: SettingsPage, list: String
     empty?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(16.dp)) }
     for (row in page.list(list)) {
         val value = row.getString("value")
-        Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(value, style = rnText(16, 500, 21), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             RowButton(SettingsIonicons.PencilOutline, "${t("common.edit")}: $value", c.secondaryText, idle) { settings.openEditor(row.getJSONObject("edit")) }
             RowButton(SettingsIonicons.TrashOutline, "${t("common.delete")}: $value", theme.deleteAction, idle) {
@@ -692,7 +692,7 @@ private fun ManageValues(model: InboxViewModel, page: SettingsPage, list: String
     }
     if (page.list(list).size < page.total(list)) ListMore(model, list)
     val create = page.view.getJSONObject(list).getJSONObject("create")
-    Row(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp).heightIn(min = 44.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(create.getString("label"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.weight(1f))
         RowButton(SettingsIonicons.Add, create.getString("label"), c.tint, idle) { settings.openEditor(create.getJSONObject("edit")) }
     }
@@ -716,7 +716,7 @@ private fun SomedaySectionsManager(model: InboxViewModel, page: SettingsPage) = 
     for (row in sections.menuObjects("rows")) {
         val id = row.getString("id")
         val editing = renaming?.optString("id") == id
-        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).hairline(c.border, top = false).padding(horizontal = 12.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).rnBorderBottom(c.border).padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             if (editing) {
                 val typed = renaming!!.optString("title")
@@ -822,7 +822,7 @@ private fun GtdHub(model: InboxViewModel, hub: JSONObject) = with(model.menu.set
         }
         for (name in listOf("focusTaskLimit", "defaultProjectFlowMode")) {
             val control = hub.getJSONObject(name)
-            Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column {
                     Text(control.getString("label"), style = rnText(16, 500, 21), color = c.text)
                     Text(control.getString("description"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
@@ -1077,7 +1077,7 @@ private fun FieldRow(model: InboxViewModel, field: JSONObject, divider: Boolean)
     val visible = field.getBoolean("visible")
     val visibility = field.getJSONObject("visibility")
     val enabled = model.menu.idle
-    Row(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
+    Row(Modifier.fillMaxWidth().then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
         val label = visibility.getString("accessibilityLabel")
         Box(Modifier.padding(end = 12.dp).size(34.dp).clip(CircleShape).background(if (visible) c.filterBg else c.cardBg).rnBorder(1.dp, if (visible) c.tint else c.border, CircleShape)
@@ -1282,7 +1282,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
             }
             ToggleRow(model, sheet.getJSONObject("visible"), true, write = { gtd(it) })
             sheet.optJSONObject("sections")?.let { sections ->
-                Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) {
+                Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
                     Text(sections.getString("label"), style = rnText(16, 500, 21), color = c.text)
                     FlowRow(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         for (option in sections.menuObjects("options")) {
@@ -1298,7 +1298,7 @@ private fun FieldSheet(model: InboxViewModel, field: JSONObject) = with(model.me
                 }
             }
             val order = sheet.getJSONObject("order")
-            Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) {
+            Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
                 Text(order.getString("label"), style = rnText(16, 500, 21), color = c.text)
                 Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     for ((name, icon) in listOf("moveUp" to SettingsIonicons.ArrowUp, "moveDown" to SettingsIonicons.ArrowDown)) {

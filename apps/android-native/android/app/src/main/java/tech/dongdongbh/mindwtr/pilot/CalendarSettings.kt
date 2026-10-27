@@ -269,7 +269,7 @@ internal fun CalendarSettingsDialogs(model: InboxViewModel) {
 @Composable
 private fun CalendarRow(divider: Boolean, modifier: Modifier = Modifier, info: @Composable ColumnScope.() -> Unit, trailing: @Composable () -> Unit = {}) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).then(modifier).padding(16.dp),
+    Row(Modifier.fillMaxWidth().then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).then(modifier).padding(16.dp),
         verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f).padding(end = 16.dp), content = info)
         trailing()
@@ -360,10 +360,10 @@ private fun PushCard(model: InboxViewModel, push: JSONObject) {
         FoldHeader(model, push, screen.pushOpen, "calendar-push") { screen.togglePush() }
         if (!screen.pushOpen) return@Card
         push.menuText("denied")?.let { denied ->
-            Column(Modifier.padding(top = 12.dp).fillMaxWidth().hairline(c.border, top = true).padding(top = 12.dp)) { Detail(denied, top = 0) }
+            Column(Modifier.padding(top = 12.dp).fillMaxWidth().rnBorderTop(c.border).padding(top = 12.dp)) { Detail(denied, top = 0) }
         }
         val target = push.optJSONObject("target") ?: return@Card
-        Column(Modifier.fillMaxWidth().hairline(c.border, top = true)) {
+        Column(Modifier.fillMaxWidth().rnBorderTop(c.border)) {
             Column(Modifier.padding(16.dp)) {
                 Label(target.getString("title"))
                 Detail(target.getString("description"))
@@ -386,7 +386,7 @@ private fun PushCard(model: InboxViewModel, push: JSONObject) {
                 }) { if (on) Icon(SettingsIonicons.Checkmark, null, tint = c.tint, modifier = Modifier.size(20.dp)) }
             }
             target.optJSONObject("colors")?.let { colors ->
-                Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) {
+                Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
                     Label(colors.getString("title"))
                     Detail(colors.getString("description"))
                     FlowRow(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -427,7 +427,7 @@ private fun DeviceCard(model: InboxViewModel, device: JSONObject) {
     Card(top = 16) {
         FoldHeader(model, device, screen.deviceOpen, "calendar-device") { screen.toggleDevice() }
         if (!screen.deviceOpen || !device.getBoolean("enabled")) return@Card
-        Column(Modifier.padding(top = 12.dp).fillMaxWidth().hairline(c.border, top = true).padding(top = 12.dp).testTag("calendar-device-body")) {
+        Column(Modifier.padding(top = 12.dp).fillMaxWidth().rnBorderTop(c.border).padding(top = 12.dp).testTag("calendar-device-body")) {
             val access = device.optJSONObject("access")
             val calendars = device.menuObjects("calendars")
             when {

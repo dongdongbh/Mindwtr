@@ -336,7 +336,7 @@ internal fun AboutSettings(model: InboxViewModel, view: JSONObject) {
     val c = LocalTheme.current.colors
     val context = LocalContext.current
     Card(top = 0) {
-        Column(Modifier.fillMaxWidth().heightIn(min = 196.dp).hairline(c.border, top = false).padding(horizontal = 24.dp, vertical = 28.dp),
+        Column(Modifier.fillMaxWidth().heightIn(min = 196.dp).rnBorderBottom(c.border).padding(horizontal = 24.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             Image(painterResource(R.drawable.about_app_icon), null, contentScale = ContentScale.Crop,
                 modifier = Modifier.padding(bottom = 16.dp).size(84.dp).clip(RoundedCornerShape(20.dp)))
@@ -361,7 +361,7 @@ internal fun AboutSettings(model: InboxViewModel, view: JSONObject) {
             }
             // RN's settingRow: the label left, the value or link at the right (wrapping under it at large text), a hairline above
             // every row but Check for updates.
-            FlowRow(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (id != "checkForUpdates") Modifier.hairline(c.border, top = true) else Modifier)
+            FlowRow(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (id != "checkForUpdates") Modifier.rnBorderTop(c.border) else Modifier)
                 .then(if (link) Modifier.clearAndSetSemantics {
                     contentDescription = "$label, $value"; role = Role.Button; testTag = "about-$id"
                     if (!spinning) onClick { press(); true } else disabled()
@@ -434,7 +434,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
             Column(Modifier.fillMaxWidth().heightIn(max = maxHeight * 0.88f).clip(shape).background(c.cardBg)
                 .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.testTag("feedback-modal")) {
                 // The header: the title, core's GitHub line (not after a send), and the close X.
-                Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).hairline(c.border, top = false).padding(horizontal = 16.dp, vertical = 14.dp),
+                Row(Modifier.fillMaxWidth().heightIn(min = 76.dp).rnBorderBottom(c.border).padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Column(Modifier.weight(1f)) {
                         Text(text.getString("title"), style = padded(rnText(17, 700)), color = c.text, modifier = Modifier.semantics { heading() })
@@ -522,7 +522,7 @@ private fun FeedbackModal(model: InboxViewModel, view: JSONObject) {
                     if (!configured) Notice(text.getString("unavailable"), text.getString("unavailableDescription"), c.danger, wash = 0x18)
                     check?.menuText("visibleError")?.let { Notice(it, null, c.danger, wash = 0x18) }
                 }
-                Row(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
+                Row(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)) {
                     val secondary = RoundedCornerShape(12.dp)
                     val cancel = text.getString("cancel")
                     Box(Modifier.widthIn(min = 92.dp).heightIn(min = 44.dp).clip(secondary).rnBorder(1.dp, c.border, secondary)

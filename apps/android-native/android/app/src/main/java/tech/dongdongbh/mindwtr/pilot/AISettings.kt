@@ -332,7 +332,7 @@ internal fun AISettingsDialogs(model: InboxViewModel, view: JSONObject) {
 private fun AIRow(label: String, description: String?, divider: Boolean = true, note: String? = null, modifier: Modifier = Modifier,
                   trailing: @Composable () -> Unit = {}) {
     val c = LocalTheme.current.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).then(modifier).padding(16.dp),
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).then(modifier).padding(16.dp),
         verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f).padding(end = 16.dp)) {
             Text(label, style = rnText(16, 500, 21), color = c.text)

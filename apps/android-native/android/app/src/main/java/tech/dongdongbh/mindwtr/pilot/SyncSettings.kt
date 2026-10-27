@@ -518,7 +518,7 @@ private fun SyncAction(action: JSONObject, tag: String, divider: Boolean = true,
     val enabled = action.getBoolean("enabled")
     val busy = action.getBoolean("busy")
     val spoken = if (description == null) label else "$label, $description"
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier)
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier)
         .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; testTag = tag; if (enabled) onClick { press(); true } else disabled() }
         .clickable(enabled = enabled, onClick = press).padding(16.dp), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f).padding(end = 16.dp)) {
@@ -551,7 +551,7 @@ private fun SyncInput(value: String, label: String, placeholder: String?, secure
 @Composable
 private fun InputGroup(divider: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalTheme.current.colors
-    Column(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).padding(16.dp), content = content)
+    Column(Modifier.fillMaxWidth().then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).padding(16.dp), content = content)
 }
 
 /** The WebDAV and self-hosted forms (RN's SyncWebDavBackendPanel, SyncSelfHostedBackendPanel), with the last sync card below. */
@@ -648,7 +648,7 @@ private fun FilePanel(sync: SyncSettingsModel, view: JSONObject, panel: JSONObje
         }
         SyncAction(panel.getJSONObject("syncNow"), "sync-now") { sync.syncNow(view) }
         // RN's file panel puts the whole status card (its margin and padding) inside a setting row's info column.
-        Column(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp)) {
             Column(Modifier.padding(end = 16.dp)) { LastSyncCard(sync, panel.getJSONObject("lastSync")) }
         }
     }
@@ -733,7 +733,7 @@ private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
                 && blocks[index - 1].first().optJSONObject("action")?.optString("type") == "generate")
             val row = block.first()
             when (row.getString("kind")) {
-                "text" -> Column(Modifier.fillMaxWidth().then(if (divider) Modifier.hairline(c.border, top = true) else Modifier).padding(16.dp)) {
+                "text" -> Column(Modifier.fillMaxWidth().then(if (divider) Modifier.rnBorderTop(c.border) else Modifier).padding(16.dp)) {
                     block.forEachIndexed { at, line ->
                         val tone = line.getString("tone")
                         val gap = if (at == 0) 0 else if (tone == "description" && block[at - 1].getString("tone") == "label") 2 else 8
@@ -754,7 +754,7 @@ private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
                 }
                 "reveal" -> {
                     val label = row.getString("label")
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier)
                         // RN's switch states whether the passphrase shows (accessibilityState checked).
                         .clearAndSetSemantics { contentDescription = label; role = Role.Switch; toggleableState = ToggleableState(row.getBoolean("revealed"))
                             onClick { sync.encryption(row.getJSONObject("action")); true } }
@@ -765,7 +765,7 @@ private fun EncryptionCard(sync: SyncSettingsModel, card: JSONObject) {
                 else -> {
                     val label = row.getString("label")
                     val enabled = row.getBoolean("enabled")
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.hairline(c.border, top = true) else Modifier)
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).then(if (divider) Modifier.rnBorderTop(c.border) else Modifier)
                         .clearAndSetSemantics { contentDescription = label; role = Role.Button; testTag = "sync-encryption-${row.getJSONObject("action").getString("type")}"
                             if (enabled) onClick { sync.encryption(row.getJSONObject("action")); true } else disabled() }
                         .clickable(enabled = enabled) { sync.encryption(row.getJSONObject("action")) }.padding(16.dp), verticalAlignment = Alignment.Top) {
@@ -865,7 +865,7 @@ private fun PreferencesCard(model: InboxViewModel, preferences: JSONObject, glyp
         FoldHeading(preferences.getString("title"), preferences.getString("description"), sync.preferencesOpen, glyphs, "sync-preferences-disclosure") { sync.togglePreferences() }
         if (sync.preferencesOpen) for (row in preferences.menuObjects("rows")) {
             val label = row.getString("label")
-            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true).padding(16.dp), verticalAlignment = Alignment.Top) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border).padding(16.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f).padding(end = 16.dp)) {
                     Text(label, style = rnText(16, 500, 21), color = c.text)
                     row.menuText("hint")?.let { Text(it, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp)) }
@@ -888,7 +888,7 @@ private fun SnapshotsCard(model: InboxViewModel, sync: SyncSettingsModel, snapsh
         FoldHeading(snapshots.getString("title"), snapshots.getString("description"), sync.snapshotsOpen, glyphs, "recovery-snapshots-disclosure") { sync.toggleSnapshots() }
         if (sync.snapshotsOpen) {
             val rows = snapshots.optJSONArray("rows")?.let { list -> List(list.length()) { list.getJSONObject(it) } }.orEmpty()
-            if (rows.isEmpty()) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true).padding(16.dp)) {
+            if (rows.isEmpty()) Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border).padding(16.dp)) {
                 Text(snapshots.getString("empty"), style = rnText(13, 400, 18), color = c.secondaryText)
             }
             val enabled = snapshots.optBoolean("enabled", true) && !transfer.busy
@@ -896,7 +896,7 @@ private fun SnapshotsCard(model: InboxViewModel, sync: SyncSettingsModel, snapsh
                 val name = row.getString("name")
                 val busy = transfer.action == "snapshot:$name"
                 val spoken = row.getString("accessibilityLabel") + ", " + row.getString("accessibilityHint")
-                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).hairline(c.border, top = true)
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).rnBorderTop(c.border)
                     .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; testTag = "recovery-snapshot-$name"
                         if (busy) stateDescription = "busy"
                         if (enabled) onClick { transfer.askSnapshot(name, undo = false); true } else disabled() }
