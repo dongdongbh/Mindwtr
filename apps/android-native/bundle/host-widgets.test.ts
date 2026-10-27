@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, setSystemTime } from 'bun:test';
 import { resetForTests, useTaskStore } from '@mindwtr/core';
 import { createWidgetPublisher, type WidgetBridge } from './host-widgets';
 
@@ -90,5 +90,41 @@ describe('native Android widget publisher and the widget chooser', () => {
         expect(widgets.publish()).toBe(true);
         const next = JSON.parse(calls.published[1]);
         expect(next.lists['context:@desk'].items.map((item: { id: string }) => item.id)).toEqual(['t-desk']);
+    });
+});
+
+// A cold start at 5,000 tasks asked for two full publications within 260 ms (a CoreWork job's end, then the first screen's held
+// one), 185 and 146 ms on core's one thread while the first screen's reads waited. The second built the same payload.
+describe('native Android widget publisher with nothing changed', () => {
+    afterEach(() => { setSystemTime(); resetForTests(); });
+
+    it('builds nothing again for the same store, device inputs and minute', () => {
+        resetForTests();
+        setSystemTime(new Date('2026-10-26T10:00:05Z'));
+        const { value, calls } = bridge();
+        const widgets = createWidgetPublisher(value);
+        expect(widgets.publish()).toBe(true);
+        const built = calls.builds;
+
+        expect(widgets.publish()).toBe(false);
+        expect(calls.builds).toBe(built);
+        expect(calls.published).toHaveLength(1);
+    });
+
+    it('builds again in a new minute, when the device inputs change, and when the last one never reached the widgets', () => {
+        resetForTests();
+        setSystemTime(new Date('2026-10-26T10:00:05Z'));
+        const { value, calls } = bridge();
+        const widgets = createWidgetPublisher(value);
+        widgets.publish();
+        setSystemTime(new Date('2026-10-26T10:01:05Z'));
+        widgets.publish();
+        expect(calls.builds).toBe(2);
+        value.inputs = () => ({ systemColorScheme: 'dark', systemLocale: 'en-US', listSelections: [], stale: false });
+        widgets.publish();
+        expect(calls.builds).toBe(3);
+        value.inputs = () => ({ systemColorScheme: 'dark', systemLocale: 'en-US', listSelections: [], stale: true });
+        expect(widgets.publish()).toBe(true);
+        expect(calls.builds).toBe(4);
     });
 });

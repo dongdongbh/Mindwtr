@@ -64,26 +64,36 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
     let storeChangePending = false;
     let lastStoreRefreshAt = 0;
 
+    // What the last payload was built from. The payload depends only on these (the store's objects, the device's inputs, the
+    // language, the Focus filter, and the time through the day and the minute), so equal inputs build an equal payload, which is
+    // never sent again: the whole build is skipped (at 5,000 tasks a cold start built it twice in 260 ms, 146 ms the second time).
+    let lastBuild: unknown[] | null = null;
     const publish = (): boolean => {
         if (timer !== null) clearTimeout(timer);
         timer = null;
         if (storeChangePending) lastStoreRefreshAt = Date.now();
         storeChangePending = false;
-        if (isSandboxMode() || !bridge.ready()) return false;
+        if (isSandboxMode()) return false;
         const state = useTaskStore.getState();
-        const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections, areas: state._allAreas, settings: state.settings ?? {} };
         const input = bridge.inputs();
+        const focusFilter = getFocusWidgetFilter();
+        const built = [state._allTasks, state._allProjects, state._allSections, state._allAreas, state.settings, JSON.stringify(input),
+            bridge.storedLanguage(), focusFilter, Math.floor(Date.now() / 60_000)];
+        if (!input.stale && lastBuild && built.every((value, index) => value === lastBuild![index])) return false;
+        if (!bridge.ready()) return false;
+        const data = { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections, areas: state._allAreas, settings: state.settings ?? {} };
         const language = input.language ?? resolveWidgetLanguage(bridge.storedLanguage(), data.settings.language, resolveLanguageFromLocale(input.systemLocale));
         const publication = buildAndroidWidgetPublication(data, language, {
             systemColorScheme: input.systemColorScheme,
-            focusFilter: getFocusWidgetFilter(),
+            focusFilter,
             systemLocale: input.systemLocale,
             listSelections: input.listSelections,
         });
         const payload = JSON.stringify(publication);
-        if (payload === last && !input.stale) return false;
+        if (payload === last && !input.stale) { lastBuild = built; return false; }
         bridge.publish(payload);
         last = payload;
+        lastBuild = built;
         logInfo('Widget list presentation published', {
             scope: 'widget', force: true,
             context: { releaseCheck: 'v1.3.8/widget-list-presentation',
