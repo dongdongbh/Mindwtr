@@ -10,6 +10,8 @@
 // kept through process death that still saves; (d) a failed commit that keeps
 // its exact retry through rotation, Back, and a new screen, then stores once;
 // (i) a save whose reply dies with the process is replayed from the journal and sent again on relaunch, and stored once;
+// (l) the Scheduling header's (?) help after its title, its text under the header; (k) the expanded description editor's keyboard,
+// RN's Markdown toolbar (core's actions in order, Bold, H1) and its Undo back to nothing stored;
 // (g) a context chosen from core's suggestions and (h) a due date with a time,
 // in one save; (j) a new day for a timed due date keeps its time; (f) status Reference, whose rule core applies (the due date
 // goes), and a project from the Destination picker. It asserts through the
@@ -24,7 +26,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { bootFailure, button, check, connect, described, draftText, evidenced, fail, field, inEditor, inList, isOn, Stopped, tagged, taskRows, withDescription, chipOn, inboxCount } from './device.mjs';
+import { bootFailure, box, button, check, connect, described, draftText, evidenced, fail, field, inEditor, inList, isOn, Stopped, tagged, taskRows, withDescription, chipOn, inboxCount } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -410,6 +412,67 @@ try {
     await save();
     await inbox();
     row = expectStored({ title: titleI, dueDate: phoneMidnight(17), rev: row.rev + 1 }, '(j) a day pick kept the due date\'s time');
+
+    // (l) RN's (?) help sits in the Scheduling header right after its title (RN #1450): it opens the help text under the
+    // header and leaves the section as it was; a second tap closes it.
+    await openEditor(titleI);
+    nodes = await screen();
+    for (let step = 0; step < 4 && !tagged(nodes, 'contextual-help-scheduling')?.bounds?.match(/[1-9]/); step += 1) nodes = await device.swipe(nodes, 'down');
+    const helpButton = tagged(nodes, 'contextual-help-scheduling') ?? fail('no (?) on the Scheduling header');
+    const schedulingHeader = withDescription(nodes, 'Scheduling') ?? fail('no Scheduling header');
+    const [hl, ht, hr, hb] = box(helpButton);
+    const [sl, st, sr, sb] = box(schedulingHeader);
+    check((ht + hb) / 2 > st && (ht + hb) / 2 < sb && hl < (sl + sr) / 2,
+        `(l) the (?) sits in the Scheduling header after its title (help ${helpButton.bounds}, header ${schedulingHeader.bounds})`);
+    nodes = await tapExpecting(helpButton, (current) => Boolean(tagged(current, 'contextual-help-body-scheduling')), 'the Scheduling help text');
+    const helpBody = tagged(nodes, 'contextual-help-body-scheduling');
+    const headerNow = withDescription(nodes, 'Scheduling');
+    check(helpButton['content-desc']?.startsWith('Help: ') && box(helpBody)[1] >= box(headerNow)[3] - 4 && box(helpBody)[1] <= box(headerNow)[3] + 40,
+        `(l) "${helpButton['content-desc']}" opened the help text right under the header (body ${helpBody.bounds}, header ${headerNow.bounds})`);
+    await tapExpecting(tagged(nodes, 'contextual-help-scheduling'), (current) => !tagged(current, 'contextual-help-body-scheduling'), 'the help text closed');
+    check(true, '(l) a second tap closed the help text');
+
+    // (k) RN's expanded description editor opens with the keyboard up and RN's Markdown toolbar over it: core's actions in RN's
+    // order (H1, Bold, Italic, ... then Undo), each core's applyMarkdownToolbarAction on the text, and Undo stepping back.
+    // Description sits in core's Details section, folded while the task has none: open it, then bring Expand into view.
+    // Whole and clear of the gesture bar: a control clipped at the bottom edge takes no tap (phone3: Expand at y 2307-2340).
+    const onScreen = (current, label) => [withDescription(current, label)].find((node) => node && node.bounds !== '[0,0][0,0]'
+        && (([, t, , b]) => b - t >= 80 && b <= 2150)(box(node)));
+    nodes = await screen();
+    for (let step = 0; step < 6 && !onScreen(nodes, 'Expand') && !onScreen(nodes, 'Details'); step += 1) nodes = await device.swipe(nodes, 'down');
+    if (!onScreen(nodes, 'Expand')) nodes = await tapExpecting(onScreen(nodes, 'Details') ?? fail('no Details section'), (current) => Boolean(withDescription(current, 'Expand')), 'the Details section open');
+    for (let step = 0; step < 4 && !onScreen(nodes, 'Expand'); step += 1) nodes = await device.swipe(nodes, 'down');
+    nodes = await tapExpecting(onScreen(nodes, 'Expand') ?? fail('no Expand on the Description field'),
+        (current) => Boolean(tagged(current, 'task-description-fullscreen')) && Boolean(tagged(current, 'markdown-toolbar')), 'the expanded editor with its toolbar');
+    check(/mInputShown=true/.test(sh('dumpsys input_method')), '(k) the expanded editor opened with the keyboard up');
+    // RN's labels (core's MARKDOWN_TOOLBAR_ACTIONS, translateWithFallback): as many as fit, then Undo.
+    const ACTIONS = ['Insert heading', 'Bold', 'Italic', 'Strikethrough', 'Insert link', 'Inline code', 'Code block', 'Quote', 'Horizontal rule', 'Bullet list', 'Numbered list', 'Task list'];
+    const [tl, tt, tr, tb] = box(tagged(nodes, 'markdown-toolbar'));
+    // A button's 48 dp touch box is taller than the toolbar row (phone4): keep a label whose center is in the row.
+    const inBar = [...new Set(nodes.filter((node) => node['content-desc'] && node.bounds !== '[0,0][0,0]' && (() => {
+        const [l, t, r, b] = box(node);
+        return (l + r) / 2 >= tl && (l + r) / 2 <= tr && (t + b) / 2 >= tt && (t + b) / 2 <= tb;
+    })()).sort((a, b) => box(a)[0] - box(b)[0]).map((node) => node['content-desc']))];
+    check(inBar.length >= 6 && inBar.at(-1) === 'Undo' && JSON.stringify(inBar.slice(0, -1)) === JSON.stringify(ACTIONS.slice(0, inBar.length - 1)),
+        `(k) the toolbar shows RN's actions in order, then Undo: ${JSON.stringify(inBar)}`);
+    check(withDescription(nodes, 'Undo')?.enabled === 'false', '(k) Undo is off before any change');
+    const typed = run.slice(0, 3);
+    requireAppFront();
+    sh(`input text ${typed}`);
+    const fullText = (want) => (current) => field(current)?.text === want;
+    nodes = await waitFor(`the typed ${typed}`, fullText(typed), 15_000);
+    nodes = await tapExpecting(withDescription(nodes, 'Bold'), fullText(`${typed}****`), 'Bold at the cursor');
+    check(true, `(k) Bold put core's ** pair at the cursor: "${typed}****"`);
+    nodes = await tapExpecting(withDescription(nodes, 'Undo'), fullText(typed), 'Undo of Bold');
+    nodes = await tapExpecting(withDescription(nodes, 'Insert heading'), fullText(`# ${typed}`), 'H1 on the line');
+    check(true, `(k) Undo took Bold back, and H1 made the line a heading: "# ${typed}"`);
+    for (let step = 0; step < 8 && field(nodes)?.text !== ''; step += 1) nodes = await tapExpecting(withDescription(nodes, 'Undo'), (current) => field(current)?.text !== field(nodes)?.text, 'one Undo');
+    check(field(nodes)?.text === '' && withDescription(nodes, 'Undo')?.enabled === 'false', '(k) Undo stepped back through every change to the empty description');
+    await hideKeyboard();
+    await tapExpecting(withDescription(await screen(), 'Collapse') ?? fail('no Collapse'), (current) => inEditor(current) && !tagged(current, 'task-description-fullscreen'), 'the editor form');
+    await tapExpecting(button(await screen(), 'Close') ?? fail('no Close'), (current) => !inEditor(current), 'the editor closed with nothing to save');
+    await inbox();
+    row = expectStored({ title: titleI, rev: row.rev }, '(k) (l) nothing was stored: the help and the toolbar only changed the draft, and Undo took it back');
 
     // (f) Status Reference and a project from the Destination picker: core applies its reference rule (the due date goes).
     await openEditor(titleI);

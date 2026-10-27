@@ -12,7 +12,9 @@
 //     deleted again at the end); Cancel task archives the task with cancelledAt and its Undo restores it; Create project from
 //     task makes a project named after the task, moves the task into it, and opens it.
 // (3) that task, now in its project, gets two checklist items (98<run>31, 98<run>32): its rows add Convert to Section; Create
-//     project shows RN's dialog (cancelled, nothing stored); Convert to Section makes a section named after the task in the
+//     project shows RN's dialog (cancelled, nothing stored); with Expand checklist on and the name 98<run>5 it makes that project
+//     with one Next task per item, the task in Trash, its releaseCheck line once, and the toast's Undo brings the task back to its
+//     project (the expanded project in Trash) and opens it; Convert to Section makes a section named after the task in the
 //     project with one task per item, deletes the task, and logs its releaseCheck line once. The two tasks and the project are
 //     then deleted through the app.
 // (2) a Reference task (Status chip, saved, reopened from Search): Convert to action shows, sets the draft to Next, and Save
@@ -31,7 +33,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, chipOn, connect, draftText, evidenced, fail, field, hasText, inboxCount, inEditor, inList, isOn,
+import { box, button, check, chipOn, connect, draftText, evidenced, fail, field, hasText, inboxCount, inEditor, inList, isOn, switchOn,
     linesAfter, logStamp, mainList, projectTitled, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
@@ -56,11 +58,13 @@ const TAG = 'MindwtrNativeDev';
 const UI_FILE = '/data/local/tmp/mindwtr-native-dev-ui.xml';
 const ACTION_TIMEOUT = 'accessibility_interactive_ui_timeout_ms';
 const CONVERT_LINE = 'releaseCheck=v1.3.8/native-convert-to-section';
+const EXPAND_LINE = 'releaseCheck=v1.3.8/native-checklist-to-project';
 const work = resolve(app, 'android/build/editor-menu-check');
 // Digits only: some phone keyboards hold typed letters in a composition strip.
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const prefix = `98${run}`;
-const names = { plain: `${prefix}1`, copy: `${prefix}19`, items: [`${prefix}31`, `${prefix}32`], reference: `${prefix}2`, recurring: `${prefix}4` };
+const names = { plain: `${prefix}1`, copy: `${prefix}19`, items: [`${prefix}31`, `${prefix}32`], reference: `${prefix}2`, recurring: `${prefix}4`,
+    expanded: `${prefix}5` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting, type, reveal } = device;
@@ -210,9 +214,9 @@ const deleteProject = async (title) => {
     nodes = await tapExpecting(tagged(nodes, 'project-delete-button'), (current) => !tagged(current, 'project-actions-sheet') && Boolean(button(current, en['common.delete'])), 'the delete confirm');
     await tapExpecting(button(nodes, en['common.delete']), (current) => !projectTitled(current, title), 'the project closed');
 };
-// This check's title shapes (98 (no other check's titles start with it), a 12-digit run id, then 1, 19, 2, 4, 31 or 32; its project is the 1).
+// This check's title shapes (98 (no other check's titles start with it), a 12-digit run id, then 1, 19, 2, 4, 31 or 32; its projects are 1 and 5).
 const OWN_TASK = /^98[0-9]{12}(1|19|2|4|31|32)$/;
-const OWN_PROJECT = /^98[0-9]{12}1$/;
+const OWN_PROJECT = /^98[0-9]{12}(1|5)$/;
 /**
  * An earlier run that stopped part way leaves its tasks and project live: each is found by Search and deleted through the app
  * (a skipped occurrence stays archived, as a finished run leaves it).
@@ -412,6 +416,43 @@ try {
     const afterCancel = taskById(plain.id);
     check(afterCancel.rev === row.rev && afterCancel.projectId === project.id
         && sqlite(`SELECT id FROM projects WHERE title = ${quote(names.plain)} AND deletedAt IS NULL`).length === 1, '(3) the cancelled dialog stored nothing');
+
+    // Create project with Expand checklist on (RN's switch): a new project, named as typed, with one task per checklist item, the
+    // task in Trash, and the tester's line once. The toast's Undo brings the task back to its project, the new project goes to
+    // Trash, and the task opens (RN's undo()).
+    stamp = logStamp(logs());
+    nodes = await choose(ROW.promote, (current) => Boolean(tagged(current, 'promote-dialog')), '(3) Create project shows its dialog again');
+    const expandSwitch = (current) => withDescription(current, en['task.expandChecklist']);
+    nodes = await waitFor('the Expand checklist switch on core\'s answer', (current) => expandSwitch(current)?.enabled === 'true', 15_000);
+    // A Compose switch's label node never says checked on this phone: device.mjs switchOn reads the checkable parent.
+    check(!switchOn(nodes, en['task.expandChecklist']) && hasText(nodes, en['task.keepChecklistDescription']), '(3) Expand checklist starts off, with the keep-checklist note');
+    await device.focusAtEnd(tagged(nodes, 'promote-title') ?? fail('no project name field'));
+    requireAppFront();
+    sh(`input keyevent ${Array(names.plain.length + 2).fill('KEYCODE_DEL').join(' ')}`);
+    sh(`input text ${names.expanded}`);
+    nodes = await waitFor(`the project name ${names.expanded}`, (current) => tagged(current, 'promote-title')?.text === names.expanded, 15_000);
+    await hideKeyboard();
+    nodes = await tapExpecting(expandSwitch(await screen()), (current) => switchOn(current, en['task.expandChecklist']) && hasText(current, en['task.expandChecklistDescription']), 'Expand checklist on');
+    let seenExpand = false;
+    await tapExpecting(tagged(nodes, 'promote-confirm'), (current) => (seenExpand ||= inProject(names.expanded)(current) || undoToast(en['task.promoteToProjectCreated'])(current)),
+        '(3) Create project with Expand checklist');
+    const expandedProject = await until('the expanded project', () => sqlite(`SELECT id, title, deletedAt FROM projects WHERE title = ${quote(names.expanded)}`), (rows) => rows.length === 1);
+    const expandedTasks = sqlite(`SELECT ${FIELDS} FROM tasks WHERE projectId = ${quote(expandedProject[0].id)} AND deletedAt IS NULL ORDER BY title`);
+    check(JSON.stringify(expandedTasks.map((item) => [item.title, item.status])) === JSON.stringify(names.items.map((title) => [title, 'next'])),
+        `(3) Expand checklist made project "${names.expanded}" with one Next task per checklist item: ${JSON.stringify(expandedTasks.map((item) => item.title))}`);
+    row = await until('the source task in Trash', () => taskById(plain.id), (item) => Boolean(item.deletedAt));
+    check(true, '(3) the source task went to Trash');
+    await tapUndo(en['task.promoteToProjectCreated']);
+    row = await until('the source task back', () => taskById(plain.id), (item) => !item.deletedAt);
+    check(row.projectId === project.id && sqlite(`SELECT deletedAt FROM projects WHERE id = ${quote(expandedProject[0].id)}`)[0]?.deletedAt
+        && sqlite(`SELECT id FROM tasks WHERE projectId = ${quote(expandedProject[0].id)} AND deletedAt IS NULL`).length === 0,
+        '(3) Undo brought the task back to its project, and the expanded project and its tasks went to Trash');
+    await waitFor(`the editor for ${names.plain}`, (current) => inEditor(current) && hasText(current, names.plain) || editorShows(current, names.plain), 20_000);
+    check(true, '(3) Undo opened the task, as RN\'s undo() does');
+    await sleep(2000);
+    const expanded = linesAfter(logs(), stamp).filter((line) => line.includes('Native checklist expanded into a project') && line.includes(EXPAND_LINE)).length;
+    check(expanded === 1, `(3) logcat shows "Native checklist expanded into a project ${EXPAND_LINE}" once (${expanded})`);
+    await formTab();
 
     // Convert to Section: a section named after the task in its project, one task per checklist item there, the task deleted.
     stamp = logStamp(logs());
