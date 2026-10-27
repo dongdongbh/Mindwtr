@@ -324,6 +324,10 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                 else Modifier.weight(1f, fill = false)) {
                 // RN's field: Return saves (Add another keeps the keyboard up for the next capture). RN's mic is not built.
                 TitleField(draft.text, copy.getString("inputLabel"), !locked, Modifier.focusRequester(titleFocus)) { typed -> typeCapture(typed) }
+                // RN's Add notes field under the title, shown with More closed too (#1406): the task's description.
+                NoteField(draft, copy.getString("notePlaceholder"), copy.getString("noteLabel"), !locked) { note ->
+                    editCapture(JSONObject().put("type", "setNote").put("value", note))
+                }
                 val preview = view.items("preview")
                 if (preview.isNotEmpty()) PreviewStrip(preview, Modifier.padding(top = 8.dp))
                 FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -351,11 +355,6 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
                     }
                 }
                 if (draft.expanded) Column(if (landscape) Modifier else Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
-                    val noteLabel = copy.getString("noteLabel")
-                    Text(noteLabel, style = rnText(12, 600), color = c.secondaryText, maxLines = 1, modifier = Modifier.padding(top = 10.dp))
-                    NoteField(draft, copy.getString("notePlaceholder"), noteLabel, !locked) { note ->
-                        editCapture(JSONObject().put("type", "setNote").put("value", note))
-                    }
                     FlowRow(Modifier.padding(top = 10.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         FocusChip(model, view, collapsed = false, locked = locked)
                         view.getJSONObject("due").child("time")?.let { time ->
@@ -436,7 +435,7 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
         })
 }
 
-/** The More panel's Description: typed text stays as typed; core's note replaces it only when no edit is still with core. */
+/** RN's Add notes field (noteInput): typed text stays as typed; core's note replaces it only when no edit is still with core. */
 @Composable
 private fun NoteField(draft: CaptureDraft, placeholder: String, label: String, enabled: Boolean, send: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -446,10 +445,10 @@ private fun NoteField(draft: CaptureDraft, placeholder: String, label: String, e
     LaunchedEffect(draft.session, coreValue) { if (!pending && field.text != coreValue) field = TextFieldValue(coreValue, TextRange(coreValue.length)) }
     val shape = RoundedCornerShape(12.dp)
     BasicTextField(field, { typed -> val changed = typed.text != field.text; field = typed; if (changed) send(typed.text) }, enabled = enabled,
-        textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint), minLines = 2,
+        textStyle = rnText(15, 400).copy(color = if (enabled) c.text else c.secondaryText), cursorBrush = SolidColor(c.tint),
         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-        modifier = Modifier.padding(top = 6.dp).fillMaxWidth().heightIn(min = 64.dp, max = 120.dp).clip(shape).background(c.inputBg)
-            .rnBorder(1.dp, c.border, shape).semantics { contentDescription = label },
+        modifier = Modifier.padding(top = 8.dp).fillMaxWidth().heightIn(min = 44.dp, max = 96.dp).clip(shape).background(c.inputBg)
+            .rnBorder(1.dp, c.border, shape).semantics { contentDescription = label }.testTag("capture-note"),
         decorationBox = { inner ->
             Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                 if (field.text.isEmpty()) Text(placeholder, style = rnText(15, 400), color = c.secondaryText)

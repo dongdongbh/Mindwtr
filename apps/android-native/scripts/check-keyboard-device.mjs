@@ -124,6 +124,12 @@ try {
     shot('a-capture-popup');
     aboveKeyboard('(a)', 'the capture popup\'s focused title', tagged(nodes, 'capture-title'));
     aboveKeyboard('(a)', 'the capture popup\'s Save', nodes.find((node) => node.text === en['common.save'] && node.class === 'android.widget.TextView'));
+    // RN's Add notes field (#1406): right under the title with More closed, the task's description, labelled for TalkBack.
+    const note = tagged(nodes, 'capture-note');
+    const moreClosed = withDescription(nodes, en['common.more']);
+    check(Boolean(note) && note['content-desc'] === en['taskEdit.descriptionLabel'] && box(note)[1] >= box(tagged(nodes, 'capture-title'))[3]
+        && Boolean(moreClosed) && box(note)[3] <= box(moreClosed)[1],
+        `(a) the popup shows RN's Add notes field under the title with More closed (note ${note?.bounds}, More ${moreClosed?.bounds})`);
     nodes = await back(atTabs, 'the popup to close');
 
     // (b) The capture screen from a capture link (#1347: it waits for the screen before focusing the title).

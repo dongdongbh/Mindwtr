@@ -9993,4 +9993,12 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /useTaskStore\.subscribe\(nameNotifyListener\('auto-sync-trigger'/);
     assert.match(coreHostKt, /if \(leave\) callAsync\("widgetsRefresh", "leave"\) else \{\s+(?:\/\/[^\n]*\n\s+)*awaitQuiet\(\)\s+callAsync\("widgetsRefresh"\)/);
 }
+// Parity-small item 2 (parity-small-20261027-05): RN's capture popup shows its Add notes field under the title, always (#1406),
+// not inside More: no heading, RN's noteInput (8 above, 44 to 96 high, radius 12, 12 by 10).
+{
+    const popup = source('CaptureScreen.kt');
+    assert.match(popup, /TitleField\(draft\.text, [^\n]*\n\s+\/\/[^\n]*\n\s+NoteField\(draft, copy\.getString\("notePlaceholder"\), copy\.getString\("noteLabel"\), !locked\)/);
+    assert.doesNotMatch(popup, /Text\(noteLabel, style = rnText\(12, 600\)/);
+    assert.match(popup, /\.padding\(top = 8\.dp\)\.fillMaxWidth\(\)\.heightIn\(min = 44\.dp, max = 96\.dp\)\.clip\(shape\)/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
