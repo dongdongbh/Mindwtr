@@ -159,7 +159,7 @@ of save's gap to RN (173 ms) is `core:captureSubmit` itself, 230–250 ms at 5k;
   - Capture "settled" counts native's per-frame keyboard layout, so keyboard-shown is the comparison.
   - Tab "settled" on native is the button ripple.
   - The first jank rule counted system-attributed jank.
-- **Not done yet:** memory at large-5000 (Java, native QuickJS heap, PSS), and the S2 save split. Startup budgets are not changed in this
+- **Not done yet:** the S2 save split. Startup budgets are not changed in this
   pass: warm first content at 5k failed its 100 ms budget at 103 ms on the baseline, and it has not been re-measured after the fixes.
 
 ### First save after a cold start (S2a)
@@ -185,3 +185,22 @@ Interleaved ABBA, 16 saves per side at large-5000, save-only runs (`save-s2a`, `
 
 So a call that arrives during the warm waits at most about 17 ms (one slice). The new row now appears about 130 ms after Save, vs RN's
 173 ms settled.
+
+## Memory, RN vs native (large-5000)
+
+`mem.mjs` runs the same session on both apps: a fresh seed of `large-5000-newest.db`, a cold start, then `dumpsys meminfo` after each
+step. Native is base2 (`d1a87597c`); RN is `b27d017a0` with the benchmark-scheme patch. QuickJS (native) and Hermes (RN) both count in
+Native Heap. Medians of 3 rounds, in MiB; rounds differ by at most 8 MiB (`runs/mem-base2`, `runs/mem-rn`).
+
+| After | Native total PSS | RN total PSS | Native heap (native / RN) | Java heap (native / RN) | Code (native / RN) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Start (+10 s) | **193** | 284 | 91 / 60 | 29 / 40 | 16 / 55 |
+| Inbox scroll | **197** | 377 | 87 / 131 | 22 / 46 | 16 / 55 |
+| Editor open and close | **194** | 402 | 87 / 137 | 18 / 54 | 16 / 55 |
+| Capture and save | **191** | 338 | 87 / 101 | 23 / 26 | 17 / 56 |
+| 30 s idle | **185** | 330 | 88 / 100 | 16 / 19 | 17 / 56 |
+
+Native uses about half of RN's memory after any interaction, and stays flat over the session (185–197 MiB). Its largest part is the
+QuickJS heap (87–91 MiB), which holds the 5,000-task store and the bundle. RN starts lower on native heap (60 MiB) but grows by about
+75 MiB once the lists render.
+
