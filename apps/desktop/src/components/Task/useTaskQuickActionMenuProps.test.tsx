@@ -288,3 +288,42 @@ describe('useTaskQuickActionMenuProps contexts panel', () => {
         await vi.waitFor(() => expect(useTaskStore.getState()._tasksById.get(task.id)?.contexts).toEqual(['@a', '@remote', '@mine']));
     });
 });
+
+describe('Add to checklist quick action (#1467)', () => {
+    const initialTaskState = useTaskStore.getState();
+    const initialUiState = useUiStore.getState();
+    const capture: Task = { ...task, id: 'capture', title: 'Eggs', status: 'inbox' };
+
+    afterEach(() => {
+        act(() => {
+            useTaskStore.setState(initialTaskState, true);
+            useUiStore.setState(initialUiState, true);
+        });
+    });
+
+    it('is offered only for a title-only Inbox task that is not read-only', () => {
+        expect(renderHook(() => useTaskQuickActionMenuProps(capture)).result.current.checklistMove).toBeDefined();
+        expect(renderHook(() => useTaskQuickActionMenuProps({ ...capture, tags: ['#x'] })).result.current.checklistMove).toBeUndefined();
+        expect(renderHook(() => useTaskQuickActionMenuProps({ ...capture, status: 'next' })).result.current.checklistMove).toBeUndefined();
+        expect(renderHook(() => useTaskQuickActionMenuProps(capture, { readOnly: true })).result.current.checklistMove).toBeUndefined();
+    });
+
+    it('moves through the one store action and undoes through its pair', async () => {
+        const showToast = vi.fn();
+        const moveTaskToChecklist = vi.fn(async () => ({ success: true, id: 'target' }));
+        const undoMoveTaskToChecklist = vi.fn(async () => ({ success: true }));
+        act(() => {
+            useTaskStore.setState({ moveTaskToChecklist, undoMoveTaskToChecklist });
+            useUiStore.setState({ showToast });
+        });
+        const { result } = renderHook(() => useTaskQuickActionMenuProps(capture));
+        await act(async () => {
+            result.current.checklistMove!.onSelect('target');
+            await Promise.resolve();
+        });
+        expect(moveTaskToChecklist).toHaveBeenCalledExactlyOnceWith('capture', 'target');
+        expect(showToast).toHaveBeenCalledExactlyOnceWith('Added to checklist', 'info', 5000, expect.objectContaining({ label: 'Undo' }));
+        await act(async () => { showToast.mock.calls[0][3].onClick(); await Promise.resolve(); });
+        expect(undoMoveTaskToChecklist).toHaveBeenCalledExactlyOnceWith('capture', 'target');
+    });
+});

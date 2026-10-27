@@ -356,6 +356,8 @@ export const faOverrides: Record<string, string> = {
         'task.copyTitle': 'کپی عنوان',
         "task.copyTaskLink": "کپی پیوند کار",
         "task.copyTaskId": "کپی شناسهٔ کار",
+        "task.addToChecklist": "افزودن به چک‌لیست…",
+        "task.addedToChecklist": "به چک‌لیست افزوده شد",
         "task.linkNotFound": "این کار در این کتابخانه نیست. ممکن است حذف شده باشد یا هنوز با این دستگاه همگام نشده باشد.",
         'task.titleCopied': 'عنوان کپی شد',
         'task.titlesCopied': 'عنوان‌ها کپی شدند',

@@ -346,6 +346,8 @@ export const esOverrides: Record<string, string> = {
 'task.copyTitle': 'Copiar título',
 "task.copyTaskLink": "Copiar enlace de la tarea",
 "task.copyTaskId": "Copiar ID de la tarea",
+"task.addToChecklist": "Añadir a la lista de verificación…",
+"task.addedToChecklist": "Añadido a la lista de verificación",
 "task.linkNotFound": "Esta tarea no está en esta biblioteca. Puede que se haya eliminado o que aún no se haya sincronizado con este dispositivo.",
 'task.titleCopied': 'Título copiado',
 'task.titlesCopied': 'Títulos copiados',

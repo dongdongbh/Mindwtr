@@ -10,6 +10,8 @@ import {
     buildTaskMovePatch,
     buildTaskRowMeta,
     buildTaskRowSwipeActions,
+    canMoveTaskToChecklist,
+    resolveQuickCaptureDefaultAreaId,
     flushPendingSave,
     getDateFormattingConfig,
     parseProjectNextActionInput,
@@ -39,6 +41,7 @@ import { CompletedAtPicker } from './completed-at-picker';
 import { useSwipeableChecklist } from './swipeable-task-item/useSwipeableChecklist';
 import { settleStoreAction } from './store-action-result';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
+import { ChecklistTargetPicker } from './swipeable-task-item/ChecklistTargetPicker';
 
 /**
  * Everything a row can mutate, on one object whose identity never changes
@@ -356,6 +359,7 @@ function SwipeableTaskItemInner({
     const [showStatusMenu, setShowStatusMenu] = useState(false);
     const [showDatesSheet, setShowDatesSheet] = useState(false);
     const [showDestinationPicker, setShowDestinationPicker] = useState(false);
+    const [showChecklistPicker, setShowChecklistPicker] = useState(false);
     const [projectNextActionPrompt, setProjectNextActionPrompt] = useState<ProjectNextActionPromptState | null>(null);
     const [projectNextActionTitle, setProjectNextActionTitle] = useState('');
     const [isProjectNextActionSubmitting, setIsProjectNextActionSubmitting] = useState(false);
@@ -734,6 +738,30 @@ function SwipeableTaskItemInner({
             });
     };
 
+    // Add to checklist (#1467): one store write; Undo is one write back.
+    const handleMoveToChecklist = (targetId: string) => {
+        if (interactionDisabled) return;
+        void settleStoreAction(() => useTaskStore.getState().moveTaskToChecklist(task.id, targetId))
+            .then((outcome) => {
+                if (!outcome.ok) {
+                    showActionFailure(outcome.message);
+                    return;
+                }
+                showToast({
+                    message: tFallback(t, 'task.addedToChecklist', 'Added to checklist'),
+                    tone: 'info',
+                    actionLabel: tFallback(t, 'common.undo', 'Undo'),
+                    onAction: () => {
+                        void settleStoreAction(() => useTaskStore.getState().undoMoveTaskToChecklist(task.id, targetId))
+                            .then((undoOutcome) => {
+                                if (!undoOutcome.ok) showActionFailure(undoOutcome.message);
+                            });
+                    },
+                    durationMs: 5200,
+                });
+            });
+    };
+
     const handleLongPress = () => {
         if (interactionDisabled) return;
         ignorePressUntil.current = Date.now() + 500;
@@ -858,6 +886,7 @@ function SwipeableTaskItemInner({
                 onStatusChange={handleStatusChange}
                 onMoveToDestination={() => setShowDestinationPicker(true)}
                 onMoveToSection={onMoveToSection}
+                onAddToChecklist={canMoveTaskToChecklist(task, resolveQuickCaptureDefaultAreaId(useTaskStore.getState().settings, useTaskStore.getState().areas)) ? () => setShowChecklistPicker(true) : undefined}
                 onBackdatedComplete={canBackdateCompletion ? () => setCompletedAtPicker('complete') : undefined}
                 taskId={task.id}
                 taskStatus={task.status}
@@ -884,6 +913,15 @@ function SwipeableTaskItemInner({
                     t={t}
                     onClose={() => setShowDestinationPicker(false)}
                     onSelect={handleMoveToDestination}
+                />
+            ) : null}
+            {!interactionDisabled && showChecklistPicker ? (
+                <ChecklistTargetPicker
+                    sourceId={task.id}
+                    tc={tc}
+                    t={t}
+                    onClose={() => setShowChecklistPicker(false)}
+                    onSelect={handleMoveToChecklist}
                 />
             ) : null}
             {!interactionDisabled && completedAtPicker ? (

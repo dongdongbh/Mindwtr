@@ -370,6 +370,7 @@ export function TaskBulkOrganizeModal({
                             placeholder={tFallback(t, 'bulk.keepProject', 'Keep project')}
                             searchPlaceholder={tFallback(t, 'projects.search', 'Search projects')}
                             noMatchesLabel={tFallback(t, 'common.noMatches', 'No matches')}
+                            deferredLabel={tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
                             createProjectLabel={tFallback(t, 'projects.create', 'Create project')}
                             ariaLabel={tFallback(t, 'taskEdit.projectLabel', 'Project')}
                             disabled={isBusy}

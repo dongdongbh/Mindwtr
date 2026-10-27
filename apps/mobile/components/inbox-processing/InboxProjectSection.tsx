@@ -1,4 +1,4 @@
-import { getProjectAccentColor } from '@mindwtr/core';
+import { getProjectAccentColor, groupProjectsForPicker, tFallback, type Project as CoreProject } from '@mindwtr/core';
 import React from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Folder, X } from 'lucide-react-native';
@@ -9,7 +9,7 @@ import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
 type Area = { id: string; name: string; color?: string };
-type Project = { id: string; title: string; areaId?: string; color?: string; colorOverride?: string | null };
+type Project = { id: string; title: string; status?: CoreProject['status']; areaId?: string; color?: string; colorOverride?: string | null };
 type Section = { id: string; title: string };
 
 type Props = {
@@ -180,6 +180,31 @@ export function InboxProjectSection({
     );
   };
 
+  // Active projects first, then Someday / Waiting after a heading (#1467).
+  const projectGroups = groupProjectsForPicker(filteredProjects);
+  const renderProjectChip = (project: Project) => {
+    const projectColor = getProjectAccentColor(project, areaById);
+    const isSelected = selectedProjectId === project.id;
+    return (
+      <TouchableOpacity
+        key={project.id}
+        accessibilityRole="button"
+        accessibilityLabel={optionLabel(projectLabel, project.title)}
+        style={[
+          styles.projectChip,
+          isSelected
+            ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
+            : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
+        ]}
+        onPress={() => selectProjectEarly(project.id)}
+        accessibilityState={{ selected: isSelected }}
+      >
+        <View style={[styles.projectDot, { backgroundColor: projectColor || tc.secondaryText }]} />
+        <Text style={[styles.projectChipText, { color: tc.text }]}>{project.title}</Text>
+      </TouchableOpacity>
+    );
+  };
+
   const renderProjectPicker = () => {
     const noProjectSelected = !selectedProjectId;
     return (
@@ -241,28 +266,16 @@ export function InboxProjectSection({
                 {noProjectSelected ? '✓ ' : ''}{t('inbox.noProject')}
               </Text>
             </TouchableOpacity>
-            {filteredProjects.map((project) => {
-              const projectColor = getProjectAccentColor(project, areaById);
-              const isSelected = selectedProjectId === project.id;
-              return (
-                <TouchableOpacity
-                  key={project.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={optionLabel(projectLabel, project.title)}
-                  style={[
-                    styles.projectChip,
-                    isSelected
-                      ? { backgroundColor: tc.filterBg, borderWidth: 1, borderColor: tc.tint }
-                      : { backgroundColor: tc.cardBg, borderWidth: 1, borderColor: tc.border },
-                  ]}
-                  onPress={() => selectProjectEarly(project.id)}
-                  accessibilityState={{ selected: isSelected }}
-                >
-                  <View style={[styles.projectDot, { backgroundColor: projectColor || tc.secondaryText }]} />
-                  <Text style={[styles.projectChipText, { color: tc.text }]}>{project.title}</Text>
-                </TouchableOpacity>
-              );
-            })}
+            {[projectGroups.active, projectGroups.deferred].map((group, groupIndex) => (
+              <React.Fragment key={groupIndex === 0 ? 'active' : 'deferred'}>
+                {groupIndex === 1 && group.length > 0 ? (
+                  <Text style={[styles.projectFieldLabel, { color: tc.secondaryText, marginBottom: 8 }]} accessibilityRole="header">
+                    {tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
+                  </Text>
+                ) : null}
+                {group.map(renderProjectChip)}
+              </React.Fragment>
+            ))}
           </View>
         </>
       )}

@@ -41,6 +41,8 @@ export const nlOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "De tagwijziging kon niet worden bevestigd. Start Mindwtr opnieuw om de opgeslagen gegevens opnieuw te laden.",
     "task.copyTaskLink": "Taaklink kopiëren",
     "task.copyTaskId": "Taak-ID kopiëren",
+    "task.addToChecklist": "Toevoegen aan checklist…",
+    "task.addedToChecklist": "Toegevoegd aan checklist",
     "task.linkNotFound": "Deze taak staat niet in deze bibliotheek. Mogelijk is deze verwijderd of nog niet met dit apparaat gesynchroniseerd.",
     'task.doneCompletedAtOutcomeUnknown': "De wijziging van het voltooiingstijdstip kon niet worden bevestigd. Start Mindwtr opnieuw om opgeslagen gegevens opnieuw te laden.",
     'task.destinationOutcomeUnknown': "De wijziging van de bestemming kon niet worden bevestigd. Start Mindwtr opnieuw om opgeslagen gegevens opnieuw te laden.",

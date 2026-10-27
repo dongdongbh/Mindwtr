@@ -353,6 +353,8 @@ export const svOverrides: Record<string, string> = {
         'task.copyTitle': 'Kopiera titel',
         "task.copyTaskLink": "Kopiera uppgiftslänk",
         "task.copyTaskId": "Kopiera uppgiftens ID",
+        "task.addToChecklist": "Lägg till i checklista…",
+        "task.addedToChecklist": "Tillagd i checklista",
         "task.linkNotFound": "Den här uppgiften finns inte i det här biblioteket. Den kan ha raderats eller ännu inte synkroniserats till den här enheten.",
         'task.titleCopied': 'Titel kopierad',
         'task.titlesCopied': 'Titlar kopierade',

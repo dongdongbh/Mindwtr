@@ -374,6 +374,19 @@ export function getProjectChoiceState(
     };
 }
 
+/**
+ * A destination picker's two groups (#1467): active projects, then Someday / Waiting ones. Each group keeps
+ * the order it came in, so search matches stay matches and the picker's own order rule still applies inside.
+ */
+export function groupProjectsForPicker<T extends { status?: Project['status'] }>(projects: readonly T[]): { active: T[]; deferred: T[] } {
+    const active: T[] = [];
+    const deferred: T[] = [];
+    for (const project of projects) {
+        (project.status === 'someday' || project.status === 'waiting' ? deferred : active).push(project);
+    }
+    return { active, deferred };
+}
+
 export const getProjectsByTag = (projects: Project[], tagId: string): Project[] => {
     return projects
         .filter(p => !p.deletedAt && (p.tagIds || []).includes(tagId))

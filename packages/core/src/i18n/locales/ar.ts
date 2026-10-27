@@ -31,6 +31,8 @@ export const arOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "تعذّر تأكيد تغيير الوسوم. أعد تشغيل Mindwtr لإعادة تحميل البيانات المحفوظة.",
     "task.copyTaskLink": "نسخ رابط المهمة",
     "task.copyTaskId": "نسخ معرّف المهمة",
+    "task.addToChecklist": "إضافة إلى قائمة التحقق…",
+    "task.addedToChecklist": "أُضيفت إلى قائمة التحقق",
     "task.linkNotFound": "هذه المهمة ليست في هذه المكتبة. ربما حُذفت أو لم تتم مزامنتها مع هذا الجهاز بعد.",
     'task.doneCompletedAtOutcomeUnknown': "تعذر تأكيد تغيير وقت الإكمال. أعد تشغيل Mindwtr لإعادة تحميل البيانات المحفوظة.",
     'task.destinationOutcomeUnknown': "تعذّر تأكيد تغيير الوجهة. أعد تشغيل Mindwtr لإعادة تحميل البيانات المحفوظة.",

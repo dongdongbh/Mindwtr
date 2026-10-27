@@ -440,6 +440,7 @@ export function TaskItemEditor({
                                         destinationLabel={t('task.destination')}
                                         projectsLabel={t('projects.title')}
                             areasLabel={t('areas.manage')}
+                                        deferredLabel={t('projects.deferredSection')}
                                         noneLabel={t('common.none')}
                                         searchPlaceholder={t('common.search')}
                                         noMatchesLabel={t('common.noMatches')}

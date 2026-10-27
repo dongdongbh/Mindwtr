@@ -214,6 +214,40 @@ describe('Task edit pickers', () => {
         expect(emptyMessage).toBeTruthy();
     });
 
+    it('lists active projects first, then Someday / Waiting under a heading, in both project pickers (#1467)', () => {
+        const project = (id: string, title: string, status: string, order: number) => ({
+            id, title, status, color: '#3b82f6', order, tagIds: [], createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z',
+        }) as any;
+        const projects = [project('s', 'Someday one', 'someday', 0), project('a', 'Active one', 'active', 1), project('w', 'Waiting one', 'waiting', 2)];
+        const sequence = (tree: renderer.ReactTestRenderer) => tree.root
+            .findAll((node) => typeof node.type === 'string' && (node.props.accessibilityRole === 'header' || node.props.accessibilityRole === 'button'))
+            .map((node) => node.props.accessibilityRole === 'header' ? `# ${React.Children.toArray(node.props.children).join('')}` : node.props.accessibilityLabel);
+        let projectTree!: renderer.ReactTestRenderer;
+        let destinationTree!: renderer.ReactTestRenderer;
+        act(() => {
+            projectTree = renderer.create(
+                <TaskEditProjectPicker visible projects={projects} tc={tc as any} t={(key) => key}
+                    onClose={vi.fn()} onSelectProject={vi.fn()} onCreateProject={vi.fn().mockResolvedValue(null)} />,
+            );
+            destinationTree = renderer.create(
+                <TaskEditDestinationPicker visible projects={projects} areas={[]} allowAreas={false}
+                    tc={{ ...tc, danger: '#f00' } as any} t={(key) => key} onClose={vi.fn()} onSelect={vi.fn()} />,
+            );
+        });
+        const projectRows = sequence(projectTree).filter((label) => label !== 'taskEdit.projectLabel');
+        expect(projectRows.slice(projectRows.indexOf('Active one'), projectRows.indexOf('Waiting one') + 1))
+            .toEqual(['Active one', '# Someday / Waiting', 'Someday one', 'Waiting one']);
+        const destinationRows = sequence(destinationTree);
+        expect(destinationRows.slice(destinationRows.indexOf('nav.projects: Active one'), destinationRows.indexOf('nav.projects: Waiting one') + 1))
+            .toEqual(['nav.projects: Active one', 'nav.projects: Someday one', 'nav.projects: Waiting one']);
+        expect(destinationTree.root.findAll((node) => typeof node.type === 'string'
+            && React.Children.toArray(node.props.children).join('') === 'Someday / Waiting')).toHaveLength(1);
+        // The heading sits between the active and the deferred rows.
+        const texts = destinationTree.root.findAll((node) => typeof node.type === 'string' && typeof node.props.children === 'string')
+            .map((node) => node.props.children as string);
+        expect(texts.indexOf('Active one') < texts.indexOf('Someday / Waiting') && texts.indexOf('Someday / Waiting') < texts.indexOf('Someday one')).toBe(true);
+    });
+
     it('hides archived and legacy completed projects from task assignment choices', () => {
         let tree: renderer.ReactTestRenderer;
         act(() => {

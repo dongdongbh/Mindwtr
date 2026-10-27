@@ -56,6 +56,28 @@ const renderSelector = (overrides: Partial<Parameters<typeof DestinationSelector
 );
 
 describe('DestinationSelector', () => {
+    it('groups Someday / Waiting projects after the active ones, also while searching (#1467)', () => {
+        const onChange = vi.fn();
+        const grouped: Project[] = [
+            { ...projects[0], id: 'p-someday', title: 'Alpha someday', status: 'someday' },
+            { ...projects[0], id: 'p-active', title: 'Beta active', status: 'active' },
+            { ...projects[0], id: 'p-waiting', title: 'Ceta waiting', status: 'waiting' },
+        ];
+        const view = renderSelector({ projects: grouped, onChange, deferredLabel: 'Someday / Waiting' });
+        fireEvent.click(view.getByRole('button', { name: 'Destination' }));
+        const groupTitles = (name: string) => Array.from(view.getByRole('group', { name }).querySelectorAll('[role="option"]')).map((option) => option.textContent);
+        expect(groupTitles('Projects')).toEqual(['Beta active']);
+        expect(groupTitles('Someday / Waiting')).toEqual(['Alpha someday', 'Ceta waiting']);
+        const optionTitles = () => view.getAllByRole('option').map((option) => option.textContent);
+        expect(optionTitles()).toEqual(['None', 'Beta active', 'Alpha someday', 'Ceta waiting', 'Home']);
+
+        const input = view.getByLabelText('Search') as HTMLInputElement;
+        setInputValue(input, 'a');
+        expect(optionTitles().slice(0, 3)).toEqual(['Beta active', 'Alpha someday', 'Ceta waiting']);
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(onChange).toHaveBeenCalledWith({ kind: 'project', id: 'p-active' });
+    });
+
     it('does not offer inactive projects while still naming the current assignment', () => {
         const archivedProject: Project = {
             ...projects[0],

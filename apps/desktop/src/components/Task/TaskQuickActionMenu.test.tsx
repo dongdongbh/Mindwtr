@@ -571,6 +571,33 @@ describe('TaskQuickActionMenu', () => {
         expect(screen.queryByRole('menuitem', { name: 'Move to Next' })).not.toBeInTheDocument();
     });
 
+    it('Add to checklist lists open tasks, ones with a checklist first, searches by title, and picks one (#1467)', () => {
+        const onSelect = vi.fn();
+        const make = (id: string, patch: Partial<Task> = {}): Task => ({ ...task, id, title: id, ...patch });
+        const props = renderMenu({
+            task: make('capture', { status: 'inbox', title: 'Eggs' }),
+            checklistMove: { onSelect, tasks: [
+                make('capture', { status: 'inbox', title: 'Eggs' }),
+                make('plain', { title: 'Plain task' }),
+                make('closed', { title: 'Closed list', status: 'done', checklist: [{ id: 'c0', title: 'x', isCompleted: false }] }),
+                make('groceries', { title: 'Groceries', checklist: [{ id: 'c1', title: 'Milk', isCompleted: true }, { id: 'c2', title: 'Bread', isCompleted: false }] }),
+            ] },
+        });
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Add to checklist…' }));
+        const panel = screen.getByRole('dialog', { name: 'Add to checklist…' });
+        expect(within(panel).getAllByRole('option').map((option) => option.textContent)).toEqual(['Groceries1/2', 'Plain task']);
+        fireEvent.change(within(panel).getByRole('textbox', { name: 'Search' }), { target: { value: 'plain' } });
+        expect(within(panel).getAllByRole('option').map((option) => option.textContent)).toEqual(['Plain task']);
+        fireEvent.keyDown(within(panel).getByRole('textbox', { name: 'Search' }), { key: 'Enter' });
+        expect(onSelect).toHaveBeenCalledWith('plain');
+        expect(props.onClose).toHaveBeenCalled();
+    });
+
+    it('has no Add to checklist entry without a checklist move (#1467)', () => {
+        renderMenu();
+        expect(screen.queryByRole('menuitem', { name: 'Add to checklist…' })).toBeNull();
+    });
+
     it('opens one panel at a time and exposes dialog state without pressed state', () => {
         renderMenu();
 

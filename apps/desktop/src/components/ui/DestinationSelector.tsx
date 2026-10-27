@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import {
     compareAreasByOrder,
+    groupProjectsForPicker,
     isSelectableProjectForTaskAssignment,
     numericTextCollator,
     type Area,
@@ -24,6 +25,8 @@ type DestinationSelectorProps = {
     destinationLabel: string;
     projectsLabel: string;
     areasLabel: string;
+    /** Heading of the Someday / Waiting projects, listed after the active ones (#1467). */
+    deferredLabel?: string;
     noneLabel: string;
     searchPlaceholder: string;
     noMatchesLabel: string;
@@ -47,6 +50,7 @@ export function DestinationSelector({
     destinationLabel,
     projectsLabel,
     areasLabel,
+    deferredLabel = 'Someday / Waiting',
     noneLabel,
     searchPlaceholder,
     noMatchesLabel,
@@ -87,14 +91,16 @@ export function DestinationSelector({
         [areas],
     );
     const normalizedQuery = query.trim().toLocaleLowerCase();
-    const filteredProjects = useMemo(
-        () => !showProjects
+    const projectGroups = useMemo(
+        () => groupProjectsForPicker(!showProjects
             ? []
             : normalizedQuery
                 ? sortedProjects.filter((project) => project.title.toLocaleLowerCase().includes(normalizedQuery))
-                : sortedProjects,
+                : sortedProjects),
         [normalizedQuery, showProjects, sortedProjects],
     );
+    // Visual order: Enter takes the first row and the arrow keys walk the DOM, so both follow it.
+    const filteredProjects = useMemo(() => [...projectGroups.active, ...projectGroups.deferred], [projectGroups]);
     const filteredAreas = useMemo(
         () => !showAreas
             ? []
@@ -358,19 +364,21 @@ export function DestinationSelector({
                         <div role="listbox" aria-label={destinationLabel}>
                             <div className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
                                 {!searching && noneOption}
-                                {filteredProjects.length > 0 && (
-                                    <div role="group" aria-label={projectsLabel}>
-                                        <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                            {projectsLabel}
+                                {([[projectsLabel, projectGroups.active], [deferredLabel, projectGroups.deferred]] as const).map(([label, group]) => (
+                                    group.length > 0 && (
+                                        <div key={label} role="group" aria-label={label}>
+                                            <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                {label}
+                                            </div>
+                                            {group.map((project) => renderOption(
+                                                `project-${project.id}`,
+                                                project.title,
+                                                { kind: 'project', id: project.id },
+                                                Folder,
+                                            ))}
                                         </div>
-                                        {filteredProjects.map((project) => renderOption(
-                                            `project-${project.id}`,
-                                            project.title,
-                                            { kind: 'project', id: project.id },
-                                            Folder,
-                                        ))}
-                                    </div>
-                                )}
+                                    )
+                                ))}
                                 {filteredAreas.length > 0 && (
                                     <div role="group" aria-label={areasLabel}>
                                         <div className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">

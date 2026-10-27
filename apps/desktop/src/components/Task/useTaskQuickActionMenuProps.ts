@@ -1,5 +1,6 @@
 import { createElement, useCallback, useMemo } from 'react';
 import {
+    canMoveTaskToChecklist,
     canSkipRecurringTaskOccurrence,
     createBulkOrganizeProject,
     createTaskCancellationUndo,
@@ -12,6 +13,7 @@ import {
     shallow,
     tFallback,
     updateTaskFromDraft,
+    resolveQuickCaptureDefaultAreaId,
     useTaskStore,
     type Task,
     type TaskDraftSetter,
@@ -79,6 +81,43 @@ export function deleteTaskWithUndo(
 }
 
 /**
+ * Add to checklist (#1467): one store write turns the Inbox task into an item on the target's checklist and
+ * sends it to Trash; Undo is one write back.
+ */
+export async function moveTaskToChecklistWithUndo(
+    sourceId: string,
+    targetId: string,
+    { t }: { t: (key: string) => string },
+): Promise<void> {
+    const failed = (error?: string) => useUiStore.getState().showToast(
+        error || tFallback(t, 'task.updateFailed', 'Could not update task.'), 'error');
+    try {
+        const result = await useTaskStore.getState().moveTaskToChecklist(sourceId, targetId);
+        if (!result.success) {
+            failed(result.error);
+            return;
+        }
+    } catch (error) {
+        reportError('Failed to move task to checklist', error);
+        failed();
+        return;
+    }
+    const undo = registerUndoableAction(() => {
+        void useTaskStore.getState().undoMoveTaskToChecklist(sourceId, targetId)
+            .then((result) => { if (!result.success) failed(result.error); })
+            .catch((error) => reportError('Failed to undo move to checklist', error));
+    });
+    useUiStore.getState().showToast(
+        tFallback(t, 'task.addedToChecklist', 'Added to checklist'),
+        'info',
+        5000,
+        useTaskStore.getState().settings?.undoNotificationsEnabled === false
+            ? undefined
+            : { label: tFallback(t, 'common.undo', 'Undo'), onClick: undo },
+    );
+}
+
+/**
  * Single duplicate implementation for every surface that offers it: the row's
  * hover button, the row menu, and the calendar menu.
  *
@@ -132,8 +171,8 @@ export function useTaskQuickActionMenuProps(
     overrides?: TaskQuickActionMenuOverrides,
 ): Omit<TaskQuickActionMenuProps, 'x' | 'y' | 'onClose'> {
     const { t, language } = useLanguage();
-    const { areas, projects, sections, settings } = useTaskStore(
-        (state) => ({ areas: state.areas, projects: state.projects, sections: state.sections, settings: state.settings }),
+    const { areas, projects, sections, settings, tasks } = useTaskStore(
+        (state) => ({ areas: state.areas, projects: state.projects, sections: state.sections, settings: state.settings, tasks: state.tasks }),
         shallow,
     );
     const nativeDateInputLocale = useMemo(() => {
@@ -221,6 +260,11 @@ export function useTaskQuickActionMenuProps(
     const onDelete = useCallback(() => {
         deleteTaskWithUndo(task.id, { t, onBeforeDelete: overrides?.onBeforeDelete });
     }, [overrides?.onBeforeDelete, t, task.id]);
+
+    const checklistMove = useMemo(() => (readOnly || !canMoveTaskToChecklist(task, resolveQuickCaptureDefaultAreaId(useTaskStore.getState().settings, useTaskStore.getState().areas)) ? undefined : {
+        tasks,
+        onSelect: (targetId: string) => { void moveTaskToChecklistWithUndo(task.id, targetId, { t }); },
+    }), [readOnly, t, task, tasks]);
 
     const cancelAction = useMemo(() => {
         if (readOnly || !isTaskActionable(task) || isProjectedRecurringTask(task)) return [];
@@ -360,6 +404,7 @@ export function useTaskQuickActionMenuProps(
         onCreateArea,
         onCreateProject,
         onUpdateTask,
+        checklistMove,
         extraActions: [...cancelAction, ...(overrides?.extraActions ?? [])],
     };
 }

@@ -77,6 +77,8 @@ export const deOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Die Tag-Änderung konnte nicht bestätigt werden. Starte Mindwtr neu, um die gespeicherten Daten erneut zu laden.",
     "task.copyTaskLink": "Aufgabenlink kopieren",
     "task.copyTaskId": "Aufgaben-ID kopieren",
+    "task.addToChecklist": "Zur Checkliste hinzufügen…",
+    "task.addedToChecklist": "Zur Checkliste hinzugefügt",
     "task.linkNotFound": "Diese Aufgabe ist nicht in dieser Bibliothek. Sie wurde möglicherweise gelöscht oder noch nicht mit diesem Gerät synchronisiert.",
     'task.doneCompletedAtOutcomeUnknown': "Die Änderung des Abschlusszeitpunkts konnte nicht bestätigt werden. Starte Mindwtr neu, um die gespeicherten Daten erneut zu laden.",
     'task.destinationOutcomeUnknown': "Die Änderung des Ziels konnte nicht bestätigt werden. Starte Mindwtr neu, um die gespeicherten Daten erneut zu laden.",

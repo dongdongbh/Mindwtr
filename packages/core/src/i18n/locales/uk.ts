@@ -369,6 +369,8 @@ export const ukOverrides: Record<string, string> = {
     "task.copyTitle": "Скопіювати назву",
     "task.copyTaskLink": "Скопіювати посилання на завдання",
     "task.copyTaskId": "Скопіювати ID завдання",
+    "task.addToChecklist": "Додати до контрольного списку…",
+    "task.addedToChecklist": "Додано до контрольного списку",
     "task.linkNotFound": "Цього завдання немає в цій бібліотеці. Можливо, його видалено або ще не синхронізовано з цим пристроєм.",
     "task.titleCopied": "Назву скопійовано",
     "task.titlesCopied": "Назви скопійовано",

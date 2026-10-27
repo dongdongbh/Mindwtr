@@ -271,6 +271,36 @@ describe('ProjectSelector', () => {
         expect(queryByRole('option', { name: 'Work Project' })).not.toBeInTheDocument();
     });
 
+    it('lists active projects first, then Someday / Waiting under a heading, and keys follow that order (#1467)', () => {
+        const onChange = vi.fn();
+        const grouped: Project[] = [
+            { ...projects[0], id: 's1', title: 'Garden someday', status: 'someday' },
+            { ...projects[0], id: 'a1', title: 'Garden active', status: 'active' },
+            { ...projects[0], id: 'w1', title: 'Garden waiting', status: 'waiting' },
+        ];
+        const { getByRole, getByLabelText, getAllByRole, getByText } = render(
+            <ProjectSelector projects={grouped} value="" onChange={onChange} placeholder="Select project"
+                searchPlaceholder="Search projects" deferredLabel="Someday / Waiting" />,
+        );
+        fireEvent.click(getByRole('button', { name: 'Select project' }));
+        const items = () => getAllByRole('option').filter((option) => option.getAttribute('data-selector-option-kind') === 'item');
+        expect(items().map((option) => option.textContent)).toEqual(['Garden active', 'Garden someday', 'Garden waiting']);
+        const heading = getByText('Someday / Waiting');
+        expect(heading.compareDocumentPosition(getByRole('option', { name: 'Garden active' })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+        expect(heading.compareDocumentPosition(getByRole('option', { name: 'Garden someday' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+        // While searching the matches are grouped the same way, and Enter takes the first row shown.
+        const input = getByLabelText('Search projects') as HTMLInputElement;
+        setInputValue(input, 'garden');
+        expect(items().map((option) => option.textContent)).toEqual(['Garden active', 'Garden someday', 'Garden waiting']);
+        fireEvent.keyDown(input, { key: 'ArrowDown' });
+        expect(getByRole('option', { name: 'Garden active' })).toHaveFocus();
+        fireEvent.keyDown(getByRole('option', { name: 'Garden active' }), { key: 'ArrowDown' });
+        expect(getByRole('option', { name: 'Garden someday' })).toHaveFocus();
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(onChange).toHaveBeenCalledWith('a1');
+    });
+
     it('selects the first matching project from the search input with Enter', () => {
         const onChange = vi.fn();
         const { getByRole, getByLabelText } = render(

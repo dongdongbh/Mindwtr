@@ -114,6 +114,7 @@ export function ListBulkActions({
                     destinationLabel={tFallback(t, 'task.destination', 'Destination')}
                     projectsLabel={tFallback(t, 'projects.title', 'Projects')}
                     areasLabel={tFallback(t, 'areas.manage', 'Areas')}
+                    deferredLabel={tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
                     noneLabel={tFallback(t, 'common.none', 'None')}
                     searchPlaceholder={tFallback(t, 'common.search', 'Search')}
                     noMatchesLabel={tFallback(t, 'common.noMatches', 'No matches')}

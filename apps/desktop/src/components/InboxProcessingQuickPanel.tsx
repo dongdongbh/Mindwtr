@@ -287,6 +287,7 @@ export function InboxProcessingQuickPanel({
                         noProjectLabel={t('process.noProject')}
                         searchPlaceholder={t('projects.search')}
                         noMatchesLabel={t('common.noMatches')}
+                        deferredLabel={t('projects.deferredSection')}
                         emptyLabel={projectFilterAreaId ? t('projects.noProjectsInArea') : undefined}
                         createProjectLabel={t('projects.create')}
                         controlClassName="rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/40 focus:outline-none"

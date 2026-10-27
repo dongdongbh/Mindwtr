@@ -352,6 +352,8 @@ export const en: Record<string, string> = {
         'task.copyTitle': 'Copy Title',
         "task.copyTaskLink": "Copy task link",
         "task.copyTaskId": "Copy task ID",
+        "task.addToChecklist": "Add to checklist…",
+        "task.addedToChecklist": "Added to checklist",
         "task.linkNotFound": "This task is not in this library. It may have been deleted or not synced to this device.",
         'task.titleCopied': 'Title copied',
         'task.titlesCopied': 'Titles copied',

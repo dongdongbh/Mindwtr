@@ -14,6 +14,8 @@ interface SwipeableTaskItemStatusMenuProps {
     onStatusChange: (status: TaskStatus) => void;
     onMoveToSection?: () => void;
     onMoveToDestination?: () => void;
+    /** Add to checklist (#1467): only for a title-only Inbox task. */
+    onAddToChecklist?: () => void;
     taskId: string;
     taskStatus: TaskStatus;
     tc: ThemeColors;
@@ -29,6 +31,7 @@ export function SwipeableTaskItemStatusMenu({
     onStatusChange,
     onMoveToSection,
     onMoveToDestination,
+    onAddToChecklist,
     taskId,
     taskStatus,
     tc,
@@ -39,6 +42,7 @@ export function SwipeableTaskItemStatusMenu({
     const { showToast } = useToast();
     const moveToDestinationLabel = tFallback(t, 'task.moveToProjectOrArea', 'Move to project or area…');
     const moveToSectionLabel = tFallback(t, 'viewSections.moveToSection', 'Move to section…');
+    const addToChecklistLabel = tFallback(t, 'task.addToChecklist', 'Add to checklist…');
     return (
         <Modal
             visible={visible}
@@ -84,7 +88,7 @@ export function SwipeableTaskItemStatusMenu({
                             );
                         })}
                     </View>
-                    {onMoveToDestination || onMoveToSection ? (
+                    {onMoveToDestination || onMoveToSection || onAddToChecklist ? (
                         <View style={styles.menuMoveActions}>
                             {/* Organize (#1464) sets Status above and Destination here: two headed groups. */}
                             <Text style={[styles.menuSectionTitle, { color: tc.secondaryText }]} accessibilityRole="header">
@@ -114,6 +118,19 @@ export function SwipeableTaskItemStatusMenu({
                                     accessibilityLabel={moveToSectionLabel}
                                 >
                                     <Text style={[styles.menuMoveText, { color: tc.text }]}>{moveToSectionLabel}</Text>
+                                </Pressable>
+                            ) : null}
+                            {onAddToChecklist ? (
+                                <Pressable
+                                    style={[styles.menuMoveItem, { borderColor: tc.border }]}
+                                    onPress={() => {
+                                        onAddToChecklist();
+                                        onClose();
+                                    }}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={addToChecklistLabel}
+                                >
+                                    <Text style={[styles.menuMoveText, { color: tc.text }]}>{addToChecklistLabel}</Text>
                                 </Pressable>
                             ) : null}
                         </View>

@@ -348,6 +348,8 @@ export const daOverrides: Record<string, string> = {
     'task.copyTitle': 'Kopiér titel',
     "task.copyTaskLink": "Kopiér opgavelink",
     "task.copyTaskId": "Kopiér opgavens ID",
+    "task.addToChecklist": "Føj til tjekliste…",
+    "task.addedToChecklist": "Føjet til tjekliste",
     "task.linkNotFound": "Denne opgave findes ikke i dette bibliotek. Den kan være slettet eller endnu ikke synkroniseret til denne enhed.",
     'task.titleCopied': 'Titel kopieret',
     'task.titlesCopied': 'Titler kopieret',

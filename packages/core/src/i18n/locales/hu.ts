@@ -346,6 +346,8 @@ export const huOverrides: Record<string, string> = {
     'task.copyTitle': 'Cím másolása',
     "task.copyTaskLink": "Feladat hivatkozásának másolása",
     "task.copyTaskId": "Feladatazonosító másolása",
+    "task.addToChecklist": "Hozzáadás az ellenőrzőlistához…",
+    "task.addedToChecklist": "Hozzáadva az ellenőrzőlistához",
     "task.linkNotFound": "Ez a feladat nem található ebben a könyvtárban. Lehet, hogy törölték, vagy még nem szinkronizálódott erre az eszközre.",
     'task.titleCopied': 'Cím másolva',
     'task.titlesCopied': 'Címek másolva',

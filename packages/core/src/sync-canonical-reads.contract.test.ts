@@ -2751,6 +2751,20 @@ describe('canonical local reads contract', () => {
             duplicateProject: () => call('duplicateProject', projectId),
             duplicateTask: () => call('duplicateTask', taskId),
             moveTask: () => call('moveTask', taskId, 'waiting'),
+            moveTaskToChecklist: async () => {
+                const added = await useTaskStore.getState().addTask('Contract checklist capture', { status: 'inbox' });
+                // The fixture's default area lands on a capture; a title-only capture has none.
+                await call('updateTask', added.id, { areaId: undefined });
+                expect(await call('moveTaskToChecklist', added.id, nextTaskIds[0])).toMatchObject({ success: true });
+            },
+            undoMoveTaskToChecklist: async (control) => {
+                const added = await useTaskStore.getState().addTask('Contract checklist capture', { status: 'inbox' });
+                // The fixture's default area lands on a capture; a title-only capture has none.
+                await call('updateTask', added.id, { areaId: undefined });
+                expect(await call('moveTaskToChecklist', added.id, nextTaskIds[0])).toMatchObject({ success: true });
+                control.resetBaseline();
+                expect(await call('undoMoveTaskToChecklist', added.id, nextTaskIds[0])).toMatchObject({ success: true });
+            },
             promoteTaskToProject: () => call('promoteTaskToProject', taskId),
             undoChecklistToProject: async (control) => {
                 const command = await checklistConversion();

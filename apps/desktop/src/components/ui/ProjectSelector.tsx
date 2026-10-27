@@ -1,5 +1,5 @@
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { getProjectChoiceState, type Project } from '@mindwtr/core';
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { getProjectChoiceState, groupProjectsForPicker, type Project } from '@mindwtr/core';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ModalPortal } from '../ModalPortal';
@@ -17,6 +17,8 @@ interface ProjectSelectorProps {
     noMatchesLabel?: string;
     emptyLabel?: string;
     createProjectLabel?: string;
+    /** Heading above Someday / Waiting projects, which list after the active ones (#1467). */
+    deferredLabel?: string;
     leadingOption?: { value: string; label: string };
     noProjectValue?: string;
     ariaLabel?: string;
@@ -39,6 +41,7 @@ export function ProjectSelector({
     noMatchesLabel = 'No matches',
     emptyLabel,
     createProjectLabel = 'Create project',
+    deferredLabel = 'Someday / Waiting',
     leadingOption,
     noProjectValue = '',
     ariaLabel,
@@ -76,10 +79,13 @@ export function ProjectSelector({
     });
 
     const normalizedQuery = query.trim().toLowerCase();
-    const { filteredProjects: filtered, canCreate } = useMemo(
+    const { filteredProjects, canCreate } = useMemo(
         () => getProjectChoiceState(projects, query, projectPool),
         [projectPool, projects, query],
     );
+    const groups = useMemo(() => groupProjectsForPicker(filteredProjects), [filteredProjects]);
+    // Visual order: the arrow keys walk the DOM and Enter takes the first row, so both follow it.
+    const filtered = useMemo(() => [...groups.active, ...groups.deferred], [groups]);
 
     useEffect(() => {
         if (!open) return;
@@ -316,26 +322,37 @@ export function ProjectSelector({
                             {!searching && leadingButton}
                             {!searching && noneButton}
                             <div className="overflow-y-auto" style={{ maxHeight: listMaxHeight }}>
-                                {filtered.map((project) => {
+                                {filtered.map((project, index) => {
                                     const id = `${optionIdPrefix}-item-${project.id}`;
-                                    return (
-                                        <button
-                                            key={project.id}
-                                            id={id}
-                                            type="button"
-                                            data-selector-option="true"
-                                            data-selector-option-kind="item"
-                                            role="option"
-                                            aria-selected={project.id === value}
-                                            disabled={disabled || isCreating}
-                                            onClick={() => {
-                                                onChange(project.id);
-                                                closeDropdown();
-                                            }}
-                                            className={optionClassName(id, project.id === value)}
+                                    const heading = index === groups.active.length && (
+                                        <div
+                                            role="presentation"
+                                            data-selector-group="deferred"
+                                            className="px-2 pt-2 pb-1 text-[0.7rem] font-semibold uppercase tracking-wide text-muted-foreground"
                                         >
-                                            {project.title}
-                                        </button>
+                                            {deferredLabel}
+                                        </div>
+                                    );
+                                    return (
+                                        <Fragment key={project.id}>
+                                            {heading}
+                                            <button
+                                                id={id}
+                                                type="button"
+                                                data-selector-option="true"
+                                                data-selector-option-kind="item"
+                                                role="option"
+                                                aria-selected={project.id === value}
+                                                disabled={disabled || isCreating}
+                                                onClick={() => {
+                                                    onChange(project.id);
+                                                    closeDropdown();
+                                                }}
+                                                className={optionClassName(id, project.id === value)}
+                                            >
+                                                {project.title}
+                                            </button>
+                                        </Fragment>
                                     );
                                 })}
                                 {filtered.length === 0 && !showCreate && (

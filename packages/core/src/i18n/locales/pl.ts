@@ -28,6 +28,8 @@ export const plOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Nie udało się potwierdzić zmiany tagów. Uruchom ponownie Mindwtr, aby ponownie wczytać zapisane dane.",
     "task.copyTaskLink": "Kopiuj link do zadania",
     "task.copyTaskId": "Kopiuj ID zadania",
+    "task.addToChecklist": "Dodaj do listy kontrolnej…",
+    "task.addedToChecklist": "Dodano do listy kontrolnej",
     "task.linkNotFound": "Tego zadania nie ma w tej bibliotece. Mogło zostać usunięte lub nie zostało jeszcze zsynchronizowane z tym urządzeniem.",
     'task.doneCompletedAtOutcomeUnknown': "Nie udało się potwierdzić zmiany czasu ukończenia. Uruchom ponownie Mindwtr, aby wczytać zapisane dane.",
     'task.destinationOutcomeUnknown': "Nie udało się potwierdzić zmiany miejsca docelowego. Uruchom ponownie Mindwtr, aby wczytać zapisane dane.",

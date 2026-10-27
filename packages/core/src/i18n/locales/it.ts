@@ -26,6 +26,8 @@ export const itOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Impossibile confermare la modifica dei tag. Riavvia Mindwtr per ricaricare i dati salvati.",
     "task.copyTaskLink": "Copia link dell’attività",
     "task.copyTaskId": "Copia ID dell’attività",
+    "task.addToChecklist": "Aggiungi alla lista di controllo…",
+    "task.addedToChecklist": "Aggiunto alla lista di controllo",
     "task.linkNotFound": "Questa attività non è presente in questa libreria. Potrebbe essere stata eliminata o non ancora sincronizzata su questo dispositivo.",
     'task.doneCompletedAtOutcomeUnknown': "Impossibile confermare la modifica della data di completamento. Riavvia Mindwtr per ricaricare i dati salvati.",
     'task.destinationOutcomeUnknown': "Impossibile confermare la modifica della destinazione. Riavvia Mindwtr per ricaricare i dati salvati.",

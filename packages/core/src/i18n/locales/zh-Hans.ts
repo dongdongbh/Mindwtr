@@ -407,6 +407,8 @@ export const zhHans: Record<string, string> = {
         'task.copyTitle': '复制标题',
         "task.copyTaskLink": "复制任务链接",
         "task.copyTaskId": "复制任务 ID",
+        "task.addToChecklist": "添加到清单…",
+        "task.addedToChecklist": "已添加到清单",
         "task.linkNotFound": "此任务不在当前资料库中。它可能已被删除，或尚未同步到此设备。",
         'task.titleCopied': '标题已复制',
         'task.titlesCopied': '多个标题已复制',

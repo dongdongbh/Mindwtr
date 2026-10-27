@@ -28,6 +28,8 @@ export const ptOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Não foi possível confirmar a alteração das etiquetas. Reinicie o Mindwtr para recarregar os dados salvos.",
     "task.copyTaskLink": "Copiar link da tarefa",
     "task.copyTaskId": "Copiar ID da tarefa",
+    "task.addToChecklist": "Adicionar à lista de verificação…",
+    "task.addedToChecklist": "Adicionado à lista de verificação",
     "task.linkNotFound": "Esta tarefa não está nesta biblioteca. Pode ter sido excluída ou ainda não ter sido sincronizada com este dispositivo.",
     'task.doneCompletedAtOutcomeUnknown': "Não foi possível confirmar a alteração da data de conclusão. Reinicie o Mindwtr para recarregar os dados salvos.",
     'task.destinationOutcomeUnknown': "Não foi possível confirmar a alteração do destino. Reinicie o Mindwtr para recarregar os dados salvos.",

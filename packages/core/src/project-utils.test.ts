@@ -6,6 +6,7 @@ import {
     getProjectNextActionCandidates,
     getProjectNextActionPromptData,
     getProjectChoiceState,
+    groupProjectsForPicker,
     getProjectSectionsForView,
     getProjectsByArea,
     getProjectsByTag,
@@ -432,6 +433,14 @@ describe('project-utils', () => {
         expect(archived.filteredProjects).toEqual([]);
         expect(archived.exactMatch).toBeUndefined();
         expect(archived.canCreate).toBe(true);
+    });
+
+    it('groups picker projects into active, then Someday / Waiting, keeping each group in its given order (#1467)', () => {
+        const row = (id: string, status: Project['status']) => ({ id, status });
+        const grouped = groupProjectsForPicker([row('s1', 'someday'), row('a1', 'active'), row('w1', 'waiting'), row('a2', 'active'), row('s2', 'someday')]);
+        expect(grouped.active.map((project) => project.id)).toEqual(['a1', 'a2']);
+        expect(grouped.deferred.map((project) => project.id)).toEqual(['s1', 'w1', 's2']);
+        expect(groupProjectsForPicker([])).toEqual({ active: [], deferred: [] });
     });
 
     it('marks archived and legacy completed projects as unavailable for task assignment', () => {

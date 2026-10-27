@@ -77,6 +77,8 @@ export const frOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Impossible de confirmer la modification des étiquettes. Redémarrez Mindwtr pour recharger les données enregistrées.",
     "task.copyTaskLink": "Copier le lien de la tâche",
     "task.copyTaskId": "Copier l’identifiant de la tâche",
+    "task.addToChecklist": "Ajouter à la liste de contrôle…",
+    "task.addedToChecklist": "Ajouté à la liste de contrôle",
     "task.linkNotFound": "Cette tâche ne figure pas dans cette bibliothèque. Elle a peut-être été supprimée ou n’a pas encore été synchronisée sur cet appareil.",
     'task.doneCompletedAtOutcomeUnknown': "Impossible de confirmer la modification de la date de fin. Redémarrez Mindwtr pour recharger les données enregistrées.",
     'task.destinationOutcomeUnknown': "Impossible de confirmer le changement de destination. Redémarrez Mindwtr pour recharger les données enregistrées.",

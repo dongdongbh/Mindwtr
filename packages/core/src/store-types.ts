@@ -779,6 +779,10 @@ export interface TaskStore {
     undoChecklistToProject: (command: ChecklistProjectConversion) => Promise<StoreActionResult>;
     /** Create or reuse a project from a task, then move the task into it. */
     promoteTaskToProject: (id: string, options?: { title?: string; color?: string; areaId?: string }) => Promise<StoreActionResult>;
+    /** One write: a title-only Inbox task becomes an unchecked item on the target's checklist and goes to Trash (#1467). */
+    moveTaskToChecklist: (sourceId: string, targetId: string) => Promise<StoreActionResult>;
+    /** One write: restores the moved task from Trash and removes its checklist item from the target. */
+    undoMoveTaskToChecklist: (sourceId: string, targetId: string) => Promise<StoreActionResult>;
     /** Reset checklist items to unchecked */
     resetTaskChecklist: (id: string) => Promise<StoreActionResult>;
     /** Move task to a different status */

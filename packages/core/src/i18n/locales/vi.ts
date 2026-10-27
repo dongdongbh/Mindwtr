@@ -26,6 +26,8 @@ export const viOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Không thể xác nhận thay đổi thẻ. Hãy khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
     "task.copyTaskLink": "Sao chép liên kết công việc",
     "task.copyTaskId": "Sao chép mã công việc",
+    "task.addToChecklist": "Thêm vào danh sách kiểm tra…",
+    "task.addedToChecklist": "Đã thêm vào danh sách kiểm tra",
     "task.linkNotFound": "Công việc này không có trong thư viện này. Có thể công việc đã bị xóa hoặc chưa được đồng bộ với thiết bị này.",
     'task.doneCompletedAtOutcomeUnknown': "Không thể xác nhận thay đổi thời gian hoàn thành. Hãy khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",
     'task.destinationOutcomeUnknown': "Không thể xác nhận thay đổi đích đến. Khởi động lại Mindwtr để tải lại dữ liệu đã lưu.",

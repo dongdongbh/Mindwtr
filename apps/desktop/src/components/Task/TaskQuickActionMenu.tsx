@@ -10,10 +10,11 @@ import {
     type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Folder, Pencil, Tag, Trash2 } from 'lucide-react';
+import { Calendar, CalendarClock, Check, ChevronRight, Copy, Flag, Folder, ListChecks, Pencil, Tag, Trash2 } from 'lucide-react';
 import {
     buildTaskMovePatch,
     getAdvancedReviewDate,
+    getChecklistMoveTargets,
     isDueForReview,
     normalizeBulkTaskTokenInput,
     safeParseDate,
@@ -47,7 +48,7 @@ const PANEL_GAP_PX = 8;
 const MENU_WIDTH_PX = 224;
 const HOVER_OPEN_DELAY_MS = 250;
 
-type QuickPanelId = 'dates' | 'startTime' | 'dueDate' | 'reviewAt' | 'destination' | 'contexts' | 'priority' | null;
+type QuickPanelId = 'dates' | 'startTime' | 'dueDate' | 'reviewAt' | 'destination' | 'contexts' | 'priority' | 'checklist' | null;
 
 const isDateEditorPanel = (panel: QuickPanelId) => panel === 'startTime' || panel === 'dueDate' || panel === 'reviewAt';
 
@@ -91,6 +92,11 @@ export interface TaskQuickActionMenuProps {
     onCreateProject: (title: string) => Promise<string | null>;
     /** With [base] (the task an edit panel opened on), the updates merge onto the latest row field by field. */
     onUpdateTask: (updates: Partial<Task>, base?: Task) => Promise<StoreActionResult>;
+    /**
+     * Add to checklist (#1467): present only for a title-only Inbox task. `tasks` are the store's visible tasks;
+     * the panel lists the open ones (core's getChecklistMoveTargets) and hands the picked id to `onSelect`.
+     */
+    checklistMove?: { tasks: Task[]; onSelect: (targetId: string) => void };
     /** Extra entries rendered above Delete. Generic by design — the menu does not interpret them. */
     extraActions?: Array<{
         id: string;
@@ -206,6 +212,7 @@ export function TaskQuickActionMenu({
     onCreateArea,
     onCreateProject,
     onUpdateTask,
+    checklistMove,
     extraActions = [],
 }: TaskQuickActionMenuProps) {
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -220,6 +227,8 @@ export function TaskQuickActionMenu({
     const destinationButtonRef = useRef<HTMLButtonElement | null>(null);
     const contextsButtonRef = useRef<HTMLButtonElement | null>(null);
     const priorityButtonRef = useRef<HTMLButtonElement | null>(null);
+    const checklistButtonRef = useRef<HTMLButtonElement | null>(null);
+    const [checklistQuery, setChecklistQuery] = useState('');
     const startItemRef = useRef<HTMLButtonElement | null>(null);
     const dueItemRef = useRef<HTMLButtonElement | null>(null);
     const reviewItemRef = useRef<HTMLButtonElement | null>(null);
@@ -283,6 +292,14 @@ export function TaskQuickActionMenu({
     const noSectionLabel = tFallback(t, 'taskEdit.noSectionOption', 'No Section');
     const createSectionLabel = tFallback(t, 'projects.addSection', 'Add section');
     const noMatchesLabel = tFallback(t, 'common.noMatches', 'No matches');
+    const addToChecklistLabel = tFallback(t, 'task.addToChecklist', 'Add to checklist…');
+    const checklistTargets = activePanel === 'checklist' && checklistMove
+        ? getChecklistMoveTargets(checklistMove.tasks, task.id, checklistQuery)
+        : [];
+    const chooseChecklistTarget = (targetId: string) => {
+        checklistMove?.onSelect(targetId);
+        onClose();
+    };
     const createAreaLabel = tFallback(t, 'areas.new', 'New area');
     const canMarkReviewed = isDueForReview(task.reviewAt);
     // Keep the stored baseline so an explicit Save can repair legacy bare tokens.
@@ -396,7 +413,9 @@ export function TaskQuickActionMenu({
                     ? destinationButtonRef.current
                     : panelId === 'priority'
                         ? priorityButtonRef.current
-                        : contextsButtonRef.current
+                        : panelId === 'checklist'
+                            ? checklistButtonRef.current
+                            : contextsButtonRef.current
         );
         const closeActivePanel = () => {
             if (!activePanel) return;
@@ -611,6 +630,8 @@ export function TaskQuickActionMenu({
             setSectionDraft(task.projectId ? task.sectionId || '' : '');
         } else if (panelId === 'priority') {
             // The priority panel applies immediately from task state; no draft to reset.
+        } else if (panelId === 'checklist') {
+            setChecklistQuery('');
         } else if (panelId === 'contexts') {
             setContextsDraft(task.contexts?.join(', ') || '');
             contextsBaseRef.current = task;
@@ -782,6 +803,8 @@ export function TaskQuickActionMenu({
         } else if (activePanel === 'destination') {
             if (destinationDraftChanged || sectionDraftChanged) void handleDestinationSave();
             else onClose();
+        } else if (activePanel === 'checklist') {
+            if (checklistTargets[0]) chooseChecklistTarget(checklistTargets[0].id);
         } else if (contextsDraftChanged) {
             void handleContextsSave();
         } else {
@@ -925,6 +948,15 @@ export function TaskQuickActionMenu({
                     hoverPanel: 'priority',
                     showChevron: true,
                 })}
+                {!readOnly && checklistMove && renderMenuAction({
+                    ref: checklistButtonRef,
+                    icon: <ListChecks className="h-4 w-4" />,
+                    label: addToChecklistLabel,
+                    active: activePanel === 'checklist',
+                    onClick: () => openPanel('checklist'),
+                    hoverPanel: 'checklist',
+                    showChevron: true,
+                })}
                 {!readOnly ? <div className="my-1 h-px bg-border/70" role="separator" /> : null}
                 {renderMenuAction({
                     icon: <Copy className="h-4 w-4" />,
@@ -1057,7 +1089,9 @@ export function TaskQuickActionMenu({
                                         ? destinationLabel
                                             : activePanel === 'priority'
                                                 ? priorityLabel
-                                                : contextsLabel
+                                                : activePanel === 'checklist'
+                                                    ? addToChecklistLabel
+                                                    : contextsLabel
                     }
                     className="fixed z-50 w-[min(30rem,calc(100vw-1rem))] rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-xl"
                     style={{
@@ -1261,6 +1295,7 @@ export function TaskQuickActionMenu({
                                     destinationLabel={destinationLabel}
                                     projectsLabel={projectsLabel}
                                     areasLabel={areasLabel}
+                                    deferredLabel={tFallback(t, 'projects.deferredSection', 'Someday / Waiting')}
                                     noneLabel={tFallback(t, 'common.none', 'None')}
                                     searchPlaceholder={searchDestinationLabel}
                                     noMatchesLabel={noMatchesLabel}
@@ -1305,6 +1340,50 @@ export function TaskQuickActionMenu({
                                 >
                                     {saveLabel}
                                 </Button>
+                            </div>
+                        </div>
+                    ) : activePanel === 'checklist' ? (
+                        <div
+                            className="space-y-2"
+                            onKeyDown={(event) => {
+                                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+                                // The search box and the rows walk in visual order.
+                                const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input, [role="option"]'));
+                                const index = controls.indexOf(document.activeElement as HTMLElement);
+                                const next = controls[(index + (event.key === 'ArrowDown' ? 1 : -1) + controls.length) % controls.length];
+                                event.preventDefault();
+                                next?.focus();
+                            }}
+                        >
+                            <input
+                                autoFocus
+                                value={checklistQuery}
+                                onChange={(event) => setChecklistQuery(event.target.value)}
+                                placeholder={searchDestinationLabel}
+                                aria-label={searchDestinationLabel}
+                                className="w-full rounded border border-border bg-muted/50 px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+                            />
+                            <div role="listbox" aria-label={addToChecklistLabel} className="max-h-64 space-y-0.5 overflow-y-auto">
+                                {checklistTargets.map((target) => (
+                                    <button
+                                        key={target.id}
+                                        type="button"
+                                        role="option"
+                                        aria-selected={false}
+                                        onClick={() => chooseChecklistTarget(target.id)}
+                                        className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted/60 focus:bg-muted focus:outline-none"
+                                    >
+                                        <span className="flex-1 truncate">{target.title}</span>
+                                        {target.checklist?.length ? (
+                                            <span className="shrink-0 text-xs text-muted-foreground">
+                                                {target.checklist.filter((item) => item.isCompleted).length}/{target.checklist.length}
+                                            </span>
+                                        ) : null}
+                                    </button>
+                                ))}
+                                {checklistTargets.length === 0 && (
+                                    <div className="px-3 py-2 text-sm text-muted-foreground">{noMatchesLabel}</div>
+                                )}
                             </div>
                         </div>
                     ) : activePanel === 'priority' ? (

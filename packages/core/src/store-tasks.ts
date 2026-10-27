@@ -76,6 +76,8 @@ import {
     resolveTaskContainerHierarchy,
 } from './task-container-rules';
 import { findSelectableProjectByTitleAndArea, isSelectableProjectForTaskAssignment } from './project-utils';
+import { canMoveTaskToChecklist, checklistItemIdForMovedTask, isChecklistMoveTarget } from './task-checklist-move';
+import { resolveQuickCaptureDefaultAreaId } from './quick-capture-model';
 import { isStatusListTaskReadOnly } from './menu-views-model';
 import { getBulkMoveStatusOptions } from './task-list-bulk-actions';
 import { buildBulkTaskTokenUpdates } from './bulk-task-tokens';
@@ -129,6 +131,8 @@ type TaskActions = Pick<
     | 'promoteTaskToProject'
     | 'commitPreparedTaskPromotion'
     | 'resetTaskChecklist'
+    | 'moveTaskToChecklist'
+    | 'undoMoveTaskToChecklist'
     | 'moveTask'
     | 'batchUpdateTasks'
     | 'batchMoveTasks'
@@ -3193,6 +3197,52 @@ export function createTaskActions({ set, get, getStorage, debouncedSave, flushPe
                 return task && !task.deletedAt && task.checklist && task.checklist.length > 0 ? [task] : [];
             },
             buildUpdates: buildResetTaskChecklistUpdates,
+            missingMessage: 'Task not found',
+        });
+    },
+
+    moveTaskToChecklist: async (sourceId: string, targetId: string) => {
+        const itemId = checklistItemIdForMovedTask(sourceId);
+        let alreadyMoved = false;
+        // Target and source change in one snapshot: no save holds the trashed source without its checklist item.
+        const result = await mutateTasks({ set, debouncedSave }, {
+            selectTasks: (state) => {
+                const source = state._tasksById.get(sourceId);
+                const target = state._tasksById.get(targetId);
+                if (!source || !target || !isChecklistMoveTarget(target, sourceId)) return [];
+                const hasItem = Boolean(target.checklist?.some((item) => item.id === itemId));
+                if (hasItem && source.deletedAt) {
+                    alreadyMoved = true; // a retry of a move that already landed
+                    return [];
+                }
+                if (!canMoveTaskToChecklist(source, resolveQuickCaptureDefaultAreaId(state.settings, state.areas))) return [];
+                return hasItem ? [source] : [target, source];
+            },
+            buildUpdates: (task, { now, state }) => task.id === sourceId
+                ? { deletedAt: now }
+                : { checklist: [...(task.checklist ?? []),
+                    { id: itemId, title: state._tasksById.get(sourceId)!.title.trim(), isCompleted: false }] },
+            missingMessage: 'Task not found',
+        });
+        return alreadyMoved || result.success ? actionOk({ id: targetId }) : result;
+    },
+
+    undoMoveTaskToChecklist: async (sourceId: string, targetId: string) => {
+        const itemId = checklistItemIdForMovedTask(sourceId);
+        return mutateTasks({ set, debouncedSave }, {
+            selectTasks: (state) => {
+                const source = state._tasksById.get(sourceId);
+                const target = state._tasksById.get(targetId);
+                return [
+                    ...(target && target.id !== sourceId && target.checklist?.some((item) => item.id === itemId) ? [target] : []),
+                    ...(source?.deletedAt && !source.purgedAt ? [source] : []),
+                ];
+            },
+            buildUpdates: (task, { state }) => {
+                if (task.id === sourceId) return { deletedAt: undefined, ...sanitizeRestoredTaskContainerReferences(task, state) };
+                const checklist = (task.checklist ?? []).filter((item) => item.id !== itemId);
+                return { checklist: checklist.length > 0 ? checklist : undefined };
+            },
             missingMessage: 'Task not found',
         });
     },

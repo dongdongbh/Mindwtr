@@ -17,6 +17,7 @@ import type { AppSettings, TaskEditorFieldId } from '@mindwtr/core';
 import { SwipeableTaskItem, readTaskRowRenderCount, type TaskRowActions } from './swipeable-task-item';
 import { TaskEditDestinationPicker } from './task-edit/TaskEditDestinationPicker';
 import { SwipeableTaskItemStatusMenu } from './swipeable-task-item/SwipeableTaskItemStatusMenu';
+import { ChecklistTargetPicker } from './swipeable-task-item/ChecklistTargetPicker';
 import { SwipeableTaskItemTray } from './swipeable-task-item/SwipeableTaskItemTray';
 import { TaskEditModal } from './task-edit-modal';
 
@@ -1780,6 +1781,55 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     });
 
     expect(onStatusChange).toHaveBeenCalledWith('reference');
+  });
+
+  it('moves a title-only Inbox task into a picked checklist from the Organize menu, with Undo (#1467)', async () => {
+    const moveTaskToChecklist = vi.fn(async () => ({ success: true, id: 'groceries' }));
+    const undoMoveTaskToChecklist = vi.fn(async () => ({ success: true }));
+    const at = '2026-01-01T00:00:00.000Z';
+    const capture = { id: 'task-1', title: 'Eggs', status: 'inbox', tags: [], contexts: [], createdAt: at, updatedAt: at } as any;
+    const previousTasks = storeState.tasks;
+    Object.assign(storeState, {
+      moveTaskToChecklist, undoMoveTaskToChecklist,
+      tasks: [
+        capture,
+        { ...capture, id: 'plain', title: 'Plain task', status: 'next' },
+        { ...capture, id: 'groceries', title: 'Groceries', status: 'next', checklist: [{ id: 'c1', title: 'Milk', isCompleted: false }] },
+        { ...capture, id: 'closed', title: 'Closed list', status: 'done' },
+      ],
+    });
+    const tc = { taskItemBg: '#111111', cardBg: '#111111', border: '#222222', text: '#ffffff', secondaryText: '#999999', tint: '#3b82f6', warning: '#f59e0b' } as any;
+    const renderRow = (task: any) => {
+      let tree!: renderer.ReactTestRenderer;
+      renderer.act(() => {
+        tree = renderer.create(<SwipeableTaskItem task={task} isDark={false} tc={tc} onPress={vi.fn()} onStatusChange={vi.fn()} onDelete={vi.fn()} />);
+      });
+      renderer.act(() => {
+        tree.root.find((node) => node.props.accessibilityLabel === 'Change status. Current status: Inbox').props.onPress({ stopPropagation: vi.fn() });
+      });
+      return tree;
+    };
+    const addEntry = (tree: renderer.ReactTestRenderer) => tree.root.findAll(
+      (node) => node.props.accessibilityLabel === 'Add to checklist…' && typeof node.props.onPress === 'function', { deep: false });
+    try {
+      expect(addEntry(renderRow({ ...capture, tags: ['#home'] }))).toHaveLength(0);
+
+      const tree = renderRow(capture);
+      renderer.act(() => { addEntry(tree)[0].props.onPress(); });
+      const rows = tree.root.findByType(ChecklistTargetPicker).findAll((node) => typeof node.props.onPress === 'function'
+        && ['Plain task', 'Groceries', 'Closed list', 'Eggs'].includes(node.props.accessibilityLabel), { deep: false });
+      expect(rows.map((node) => node.props.accessibilityLabel)).toEqual(['Groceries', 'Plain task']);
+      await renderer.act(async () => { rows[0].props.onPress(); });
+      expect(moveTaskToChecklist).toHaveBeenCalledExactlyOnceWith('task-1', 'groceries');
+      const toast = showToast.mock.calls.find(([entry]) => entry.message === 'Added to checklist')?.[0];
+      expect(toast).toMatchObject({ actionLabel: 'Undo' });
+      await renderer.act(async () => { toast.onAction(); });
+      expect(undoMoveTaskToChecklist).toHaveBeenCalledExactlyOnceWith('task-1', 'groceries');
+    } finally {
+      Object.assign(storeState, { tasks: previousTasks });
+      delete (storeState as any).moveTaskToChecklist;
+      delete (storeState as any).undoMoveTaskToChecklist;
+    }
   });
 
   it('renders the status control as an icon button on single-status lists and still opens the menu', () => {

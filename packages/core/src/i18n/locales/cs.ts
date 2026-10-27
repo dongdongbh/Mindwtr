@@ -25,6 +25,8 @@ export const csOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "Změnu štítků se nepodařilo potvrdit. Restartujte Mindwtr a znovu načtěte uložená data.",
     "task.copyTaskLink": "Kopírovat odkaz na úkol",
     "task.copyTaskId": "Kopírovat ID úkolu",
+    "task.addToChecklist": "Přidat do kontrolního seznamu…",
+    "task.addedToChecklist": "Přidáno do kontrolního seznamu",
     "task.linkNotFound": "Tento úkol není v této knihovně. Možná byl odstraněn nebo ještě nebyl synchronizován s tímto zařízením.",
     'task.doneCompletedAtOutcomeUnknown': "Změnu času dokončení se nepodařilo potvrdit. Restartujte Mindwtr a znovu načtěte uložená data.",
     'task.destinationOutcomeUnknown': "Změnu cíle se nepodařilo potvrdit. Restartujte Mindwtr a znovu načtěte uložená data.",

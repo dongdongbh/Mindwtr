@@ -407,6 +407,8 @@ export const zhHant: Record<string, string> = {
         'task.copyTitle': '複製標題',
         "task.copyTaskLink": "複製任務連結",
         "task.copyTaskId": "複製任務 ID",
+        "task.addToChecklist": "加入清單…",
+        "task.addedToChecklist": "已加入清單",
         "task.linkNotFound": "此任務不在目前的資料庫中。它可能已被刪除，或尚未同步到此裝置。",
         'task.titleCopied': '標題已複製',
         'task.titlesCopied': '多個標題已複製',

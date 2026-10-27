@@ -31,6 +31,8 @@ export const hiOverrides: Record<string, string> = {
     'task.doneTagOutcomeUnknown': "टैग में बदलाव की पुष्टि नहीं हो सकी। सहेजे गए डेटा को फिर से लोड करने के लिए Mindwtr को पुनः प्रारंभ करें।",
     "task.copyTaskLink": "कार्य का लिंक कॉपी करें",
     "task.copyTaskId": "कार्य की आईडी कॉपी करें",
+    "task.addToChecklist": "जांच सूची में जोड़ें…",
+    "task.addedToChecklist": "जांच सूची में जोड़ा गया",
     "task.linkNotFound": "यह कार्य इस लाइब्रेरी में नहीं है। इसे हटाया गया हो सकता है या इस डिवाइस पर अभी सिंक नहीं हुआ है।",
     'task.doneCompletedAtOutcomeUnknown': "पूरा होने के समय में बदलाव की पुष्टि नहीं हो सकी। सहेजे गए डेटा को फिर से लोड करने के लिए Mindwtr को पुनः शुरू करें।",
     'task.destinationOutcomeUnknown': "गंतव्य में बदलाव की पुष्टि नहीं हो सकी। सहेजा गया डेटा फिर से लोड करने के लिए Mindwtr को पुनः शुरू करें।",

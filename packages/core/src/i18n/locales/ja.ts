@@ -366,6 +366,8 @@ export const jaOverrides: Record<string, string> = {
         'task.copyTitle': 'タイトルをコピー',
         "task.copyTaskLink": "タスクのリンクをコピー",
         "task.copyTaskId": "タスク ID をコピー",
+        "task.addToChecklist": "チェックリストに追加…",
+        "task.addedToChecklist": "チェックリストに追加しました",
         "task.linkNotFound": "このライブラリにタスクがありません。削除されたか、この端末にまだ同期されていない可能性があります。",
         'task.titleCopied': 'タイトルをコピーしました',
         'task.titlesCopied': '複数のタイトルをコピーしました',
