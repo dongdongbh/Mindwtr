@@ -2403,7 +2403,9 @@ export function createNativeHostContract(options: {
                     : null,
                 ...(controls || (section.key === 'focus' && section.total !== section.items.length) ? { rowTotal: section.items.length, groups: windowGroups(section, 0, input.limit) } : {}),
             }));
-            const { projectTaskSummaryById: summaries, focusedProjectCount } = useTaskStore.getState().getDerivedState();
+            // The derived project summaries (a pass over every task) serve only the review projects' rows.
+            const { projectTaskSummaryById: summaries, focusedProjectCount } = cachedReviewProjects.length > 0
+                ? useTaskStore.getState().getDerivedState() : { projectTaskSummaryById: new Map(), focusedProjectCount: 0 };
             const formatDate = createDateFormatter(dateFormatting());
             const areaById = new Map(useTaskStore.getState().areas.map((area) => [area.id, area]));
             return {
