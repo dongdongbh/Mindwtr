@@ -30936,7 +30936,7 @@ final class CoreModel: ObservableObject {
     }
 
     func setTaskPickedDate(_ field: String, mode: String, value: String) {
-        guard taskDateFieldAvailable(field), ["date", "time"].contains(mode), mode != "time" || field != "reviewAt" else { return }
+        guard taskDateFieldAvailable(field), ["date", "time"].contains(mode) else { return }
         enqueueTaskScheduleEdit(field + ":" + mode,
             edit: ["type": mode == "date" ? "pickDate" : "pickTime", "field": field, mode: value])
     }
@@ -31683,7 +31683,7 @@ final class CoreModel: ObservableObject {
                     "process.waitingFor", "process.waitingForDesc", "common.cancel", "common.save",
                     "taskEdit.startDateLabel", "taskEdit.dueDateLabel", "taskEdit.reviewDateLabel", "taskEdit.dateOnly",
                     "taskEdit.startModeAbsolute", "taskEdit.startModeRelative", "taskEdit.relativeStartAmount",
-                    "taskEdit.relativeStartBeforeDue", "task.aria.startTime", "task.aria.dueTime", "calendar.changeTime", "common.done",
+                    "taskEdit.relativeStartBeforeDue", "task.aria.startTime", "task.aria.dueTime", "task.aria.reviewTime", "calendar.changeTime", "common.done",
                     "taskEdit.recurrenceLabel", "recurrence.repeatEvery", "recurrence.dayUnit", "recurrence.weekUnit",
                     "recurrence.monthUnit", "recurrence.yearUnit", "recurrence.monthlyOnDay", "recurrence.custom",
                     "recurrence.endsLabel", "recurrence.endsNever", "recurrence.endsOnDate", "recurrence.endsAfterCount",

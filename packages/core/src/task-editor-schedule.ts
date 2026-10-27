@@ -106,6 +106,17 @@ export function setTaskDraftTime(
     return combined.toISOString();
 }
 
+/** The review value after picking a time: as setTaskDraftTime, kept as local wall time like the review day picker. */
+export function setTaskDraftReviewTime(
+    value: string | undefined,
+    time: { hours: number; minutes: number },
+    formatDate: DateFormatter,
+    now: Date = new Date(),
+): string {
+    const picked = new Date(setTaskDraftTime(value, time, null, now));
+    return `${formatDate(picked, 'yyyy-MM-dd')}T${formatDate(picked, 'HH:mm')}`;
+}
+
 /**
  * The draft fields a date control writes, in order. A new start ends the relative
  * start link even when it equals the computed start; a new due moves a relative

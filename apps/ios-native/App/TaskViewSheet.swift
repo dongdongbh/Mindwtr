@@ -1921,18 +1921,16 @@ private struct TaskScheduleField: View {
 
     @ViewBuilder private var dateActions: some View {
         if !part.text("value").isEmpty {
-            if field != "reviewAt" {
-                Button { openPicker("time") } label: {
-                    Image(systemName: "clock").font(.system(size: 14)).frame(width: 44, height: 44)
-                        .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).foregroundStyle(palette.secondary)
-                .accessibilityLabel(part.flag("hasTime") && !part.text("time").isEmpty
-                    ? model.label(field == "startTime" ? "task.aria.startTime" : "task.aria.dueTime") + ": " + part.text("time")
-                    : model.label("calendar.changeTime"))
-                .accessibilityIdentifier(prefix + "-time")
+            Button { openPicker("time") } label: {
+                Image(systemName: "clock").font(.system(size: 14)).frame(width: 44, height: 44)
+                    .background(palette.filter, in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.border, lineWidth: 1)).contentShape(Rectangle())
             }
+            .buttonStyle(.plain).foregroundStyle(palette.secondary)
+            .accessibilityLabel(part.flag("hasTime") && !part.text("time").isEmpty
+                ? model.label(field == "startTime" ? "task.aria.startTime" : field == "dueDate" ? "task.aria.dueTime" : "task.aria.reviewTime") + ": " + part.text("time")
+                : model.label("calendar.changeTime"))
+            .accessibilityIdentifier(prefix + "-time")
             if part.flag("hasTime") {
                 chip(model.label("taskEdit.dateOnly"), selected: false, id: prefix + "-date-only", compact: true) {
                     pickerID = ""

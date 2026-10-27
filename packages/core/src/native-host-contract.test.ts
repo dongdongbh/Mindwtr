@@ -2365,9 +2365,8 @@ describe('native host contract', () => {
                     // The repeated 01:30 on the autumn change takes its first occurrence (EDT).
                     vi.setSystemTime(new Date('2027-11-07T10:00:00'));
                     expect(pickTime('dueDate', '01:30', openDraft(host, 'fall'), 'fall')).toBe('2027-11-07T05:30:00.000Z');
-                    // Review has no time in the mobile editor.
-                    expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'pickTime', field: 'reviewAt' as never, time: '14:30' } }))
-                        .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+                    // Review keeps the picked time as local wall time on its own day, as its day picker does.
+                    expect(edited(host, draft, { type: 'pickTime', field: 'reviewAt', time: '14:30' }).draft.reviewAt).toBe('2027-03-20T14:30');
                 } finally {
                     if (originalTz === undefined) delete process.env.TZ;
                     else process.env.TZ = originalTz;
@@ -2480,7 +2479,7 @@ describe('native host contract', () => {
                     [draft, { type: 'fields', patch: { status: 'archived' } }],
                     [draft, { type: 'date', field: 'completedAt', value: '' }],
                     [draft, { type: 'pickDate', field: 'dueDate', date: '2026-02-30' }],
-                    [draft, { type: 'pickTime', field: 'reviewAt', time: '10:00' }],
+                    [draft, { type: 'pickTime', field: 'completedAt', time: '10:00' }],
                     [draft, { type: 'pickTime', field: 'dueDate', time: '24:00' }],
                     [draft, { type: 'relativeStart', amount: 1, unit: 'month' }],
                     [draft, { type: 'recurrence', edit: { kind: 'rule', rule: 'hourly' } }],

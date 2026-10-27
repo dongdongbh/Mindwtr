@@ -9,13 +9,14 @@ import {
     safeFormatDate,
     safeParseDate,
     setTaskDraftDate,
+    setTaskDraftReviewTime,
     setTaskDraftTime,
     type TaskEditorDateField,
 } from '@mindwtr/core';
 import type { TaskDraft, TaskDraftField, TaskDraftSetter } from '@mindwtr/core/task-draft';
 
 
-type TaskEditDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end';
+type TaskEditDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end';
 
 type UseTaskEditDatesParams = {
     draft: TaskDraft | null;
@@ -24,8 +25,8 @@ type UseTaskEditDatesParams = {
     setDraftField: TaskDraftSetter;
     setPendingDueDate: React.Dispatch<React.SetStateAction<Date | null>>;
     setPendingStartDate: React.Dispatch<React.SetStateAction<Date | null>>;
-    setShowDatePicker: React.Dispatch<React.SetStateAction<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null>>;
-    showDatePicker: 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null;
+    setShowDatePicker: React.Dispatch<React.SetStateAction<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end' | null>>;
+    showDatePicker: 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end' | null;
     defaultScheduleTime?: string;
     t: (key: string) => string;
 };
@@ -87,6 +88,12 @@ export function useTaskEditDates({
 
         if (currentMode === 'review') {
             applyDateEdit(setDraftField, 'reviewAt', setTaskDraftDate('reviewAt', draft?.reviewAt, selectedDate, dateOptions));
+            if (closePicker) setShowDatePicker(null);
+            return;
+        }
+
+        if (currentMode === 'review-time') {
+            applyDateEdit(setDraftField, 'reviewAt', setTaskDraftReviewTime(draft?.reviewAt, pickedTime(selectedDate), safeFormatDate));
             if (closePicker) setShowDatePicker(null);
             return;
         }

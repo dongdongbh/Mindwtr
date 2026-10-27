@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Mobile: a task's Review date can have a time, as on desktop. Once a review date is set, tap the clock button next to it to add a time; Date only removes it (#1465).
 - Mobile: swiping a task now shows a small set of fixed actions. Swipe right for Done and Focus; swipe left for Organize (status and destination), Dates (Start and Due) and Delete. Done now completes an Inbox or Someday task directly; before, swiping right on those moved them to Next, which is now under Organize. Focus on an Inbox task moves it to Next and stars it in one step, or leaves it untouched if Focus is full. Completed tasks keep Restore. The same actions are in the screen reader's actions menu (#1464).
 - Inbox processing: after you choose a project that has sections, you can also choose its section, on desktop and mobile. On desktop, while you type in a project picker, matching projects come first, then Create project, then No project, and the row Enter will pick is highlighted. The task editor's destination picker follows the same order (#1461).
 - Mobile calendar: all-day items are chips like on desktop, and completed ones are crossed out and dimmed. The Day view shows four all-day items and a "+N more" button that opens the rest, and each Week column shows "+N more" when a day has more than three (#1462).

@@ -190,7 +190,7 @@ export function useTaskEditState({
         });
     }, []);
 
-    const [showDatePicker, setShowDatePicker] = React.useState<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null>(null);
+    const [showDatePicker, setShowDatePicker] = React.useState<'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end' | null>(null);
     const [pendingStartDate, setPendingStartDate] = React.useState<Date | null>(null);
     const [pendingDueDate, setPendingDueDate] = React.useState<Date | null>(null);
     const [editTab, setEditTab] = React.useState<TaskEditTab>(() => resolveInitialTaskEditTab(defaultTab, task));

@@ -23,7 +23,7 @@ import type {
 import type { TaskDraft, TaskDraftSetter } from '@mindwtr/core/task-draft';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
-export type ShowDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'recurrence-end' | null;
+export type ShowDatePickerMode = 'start' | 'start-time' | 'due' | 'due-time' | 'review' | 'review-time' | 'recurrence-end' | null;
 
 export type PickerOption<T extends string> = {
     value: T | '';

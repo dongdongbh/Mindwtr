@@ -506,7 +506,7 @@ describe('TaskEditScheduleField', () => {
         act(() => { tree.unmount(); });
     });
 
-    it.each(['due', 'due-time', 'start', 'start-time', 'review', 'recurrence-end'])('renders the iOS %s picker with a calendar for dates and a wheel for times', (pickerMode) => {
+    it.each(['due', 'due-time', 'start', 'start-time', 'review', 'review-time', 'recurrence-end'])('renders the iOS %s picker with a calendar for dates and a wheel for times', (pickerMode) => {
         Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
 
         let tree!: renderer.ReactTestRenderer;
@@ -516,7 +516,7 @@ describe('TaskEditScheduleField', () => {
                     customWeekdays: [],
                     dailyInterval: 1,
                     draft: makeDraft({ dueDate: '2026-04-28T09:20:00' }),
-                    fieldId: pickerMode.startsWith('start') ? 'startTime' : pickerMode === 'review' ? 'reviewAt' : pickerMode === 'recurrence-end' ? 'recurrence' : 'dueDate',
+                    fieldId: pickerMode.startsWith('start') ? 'startTime' : pickerMode.startsWith('review') ? 'reviewAt' : pickerMode === 'recurrence-end' ? 'recurrence' : 'dueDate',
                     formatDate: (value?: string) => value ?? '',
                     formatDueDate: (value?: string) => value ?? '',
                     getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'),
@@ -981,6 +981,54 @@ describe('TaskEditScheduleField', () => {
         const clearChip = tree.root.findByProps({ accessibilityLabel: 'common.clear' });
         expect(clearChip.props.accessibilityRole).toBe('button');
         expect(clearChip.findAll((node) => node.props?.size === 14).length).toBeGreaterThan(0);
+    });
+
+    it('offers Add time on a set review date, shows the time once set, and Date only drops it (#1465)', () => {
+        const setDraftField = vi.fn();
+        const setShowDatePicker = vi.fn();
+        const props = {
+            customWeekdays: [],
+            dailyInterval: 1,
+            draft: makeDraft({ reviewAt: '2026-04-28' }),
+            fieldId: 'reviewAt' as const,
+            formatDate: (value?: string) => value ?? '',
+            formatDueDate: (value?: string) => value ?? '',
+            getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'),
+            monthlyPattern: 'date',
+            onDateChange: vi.fn(),
+            openCustomRecurrence: vi.fn(),
+            pendingDueDate: null,
+            pendingStartDate: null,
+            recurrenceOptions: [],
+            recurrenceRRuleValue: '',
+            recurrenceRuleValue: '',
+            recurrenceStrategyValue: 'strict',
+            recurrenceWeekdayButtons: [],
+            setCustomWeekdays: vi.fn(),
+            setDraftField,
+            setShowDatePicker,
+            showDatePicker: null,
+            styles,
+            t,
+            task: null,
+            tc,
+        } as unknown as ComponentProps<typeof TaskEditScheduleField>;
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+            tree = renderer.create(<TaskEditScheduleField {...props} />);
+        });
+
+        const addTime = tree.root.findByProps({ accessibilityLabel: 'Add time' });
+        act(() => { addTime.props.onPress(); });
+        expect(setShowDatePicker).toHaveBeenCalledWith('review-time');
+
+        act(() => { tree.update(<TaskEditScheduleField {...props} draft={makeDraft({ reviewAt: '2026-04-28T14:30' })} />); });
+        expect(tree.root.findAllByProps({ accessibilityLabel: 'Add time' })).toHaveLength(0);
+        expect(tree.root.findByProps({ accessibilityLabel: 'task.aria.reviewTime: 14:30' }).props.accessibilityRole).toBe('button');
+        const dateOnly = tree.root.findAllByType(TouchableOpacity).find((node) => node.findAllByType(Text).some((text) => text.props.children === 'taskEdit.dateOnly'))!;
+        act(() => { dateOnly.props.onPress(); });
+        expect(setDraftField).toHaveBeenCalledWith('reviewAt', '2026-04-28');
+        act(() => { tree.unmount(); });
     });
 });
 

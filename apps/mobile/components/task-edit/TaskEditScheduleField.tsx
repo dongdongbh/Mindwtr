@@ -114,7 +114,7 @@ export function TaskEditScheduleField({
     const getDatePickerValue = (mode: NonNullable<ShowDatePickerMode>) => {
         if (mode === 'start') return getSafePickerDateValue(draft.startTime);
         if (mode === 'start-time') return pendingStartDate ?? getSafePickerDateValue(draft.startTime);
-        if (mode === 'review') return getSafePickerDateValue(draft.reviewAt);
+        if (mode === 'review' || mode === 'review-time') return getSafePickerDateValue(draft.reviewAt);
         if (mode === 'recurrence-end') {
             return getSafePickerDateValue(recurrenceDetails.until);
         }
@@ -122,7 +122,7 @@ export function TaskEditScheduleField({
         return getSafePickerDateValue(draft.dueDate);
     };
     const getDatePickerMode = (mode: NonNullable<ShowDatePickerMode>) =>
-        mode === 'start-time' || mode === 'due-time' ? 'time' : 'date';
+        mode === 'start-time' || mode === 'due-time' || mode === 'review-time' ? 'time' : 'date';
     const renderInlineIOSDatePicker = (targetModes: NonNullable<ShowDatePickerMode>[]) => {
         if (Platform.OS !== 'ios' || !showDatePicker || !targetModes.includes(showDatePicker)) {
             return null;
@@ -734,6 +734,7 @@ export function TaskEditScheduleField({
         case 'reviewAt': {
             const parsed = draft.reviewAt ? safeParseDate(draft.reviewAt) : null;
             const hasTime = hasTimeComponent(draft.reviewAt);
+            const timeOnly = hasTime && parsed ? safeFormatDate(parsed, 'HH:mm') : '';
             return (
                 <View style={styles.formGroup}>
                     <FieldHeading
@@ -750,6 +751,18 @@ export function TaskEditScheduleField({
                             >
                                 <Text style={{ color: tc.text }}>{formatStartDateTime(draft.reviewAt)}</Text>
                             </TouchableOpacity>
+                            {!!draft.reviewAt && (
+                                <TouchableOpacity
+                                    style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
+                                    onPress={() => openDatePicker('review-time')}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={hasTime && timeOnly
+                                        ? `${t('task.aria.reviewTime')}: ${timeOnly}`
+                                        : tFallback(t, 'calendar.changeTime', 'Add time')}
+                                >
+                                    <Clock size={14} color={tc.secondaryText} aria-hidden accessible={false} pointerEvents="none" />
+                                </TouchableOpacity>
+                            )}
                             {!!draft.reviewAt && hasTime && (
                                 <TouchableOpacity
                                     style={[styles.clearDateBtn, { borderColor: tc.border, backgroundColor: tc.filterBg }]}
@@ -770,7 +783,7 @@ export function TaskEditScheduleField({
                             )}
                         </View>
                         {renderQuickDateChips('review', parsed)}
-                        {renderInlineIOSDatePicker(['review'])}
+                        {renderInlineIOSDatePicker(['review', 'review-time'])}
                     </View>
                 </View>
             );

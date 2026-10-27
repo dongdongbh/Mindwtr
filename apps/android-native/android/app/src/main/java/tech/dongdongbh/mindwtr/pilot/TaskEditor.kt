@@ -877,11 +877,11 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
             val label = t(when (id) { "dueDate" -> "taskEdit.dueDateLabel"; "startTime" -> "taskEdit.startDateLabel"; else -> "taskEdit.reviewDateLabel" })
             val icon = when (id) { "dueDate" -> Lucide.CalendarDays; "startTime" -> Lucide.Calendar; else -> Lucide.CalendarClock }
             FieldHeading(icon, label)
-            // RN's date row, set or not: core's label, the clock (not for review), Date only when it has a time, and Clear.
+            // RN's date row, set or not: core's label, the clock, Date only when it has a time, and Clear.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 DateButton(part.label, label, !locked, Modifier.weight(1f)) { pickDate(id) }
                 if (part.value.isNotEmpty()) {
-                    if (id != "reviewAt") SmallButton(Lucide.Clock, "${t("calendar.changeTime")} $label", !locked) { pickTime(id) }
+                    SmallButton(Lucide.Clock, "${t("calendar.changeTime")} $label", !locked) { pickTime(id) }
                     if (part.hasTime) SmallTextButton(t("taskEdit.dateOnly"), "${t("taskEdit.dateOnly")} $label", !locked) { setDate(id, part.dateOnly) }
                     SmallButton(Lucide.CalendarX, "${t("common.clear")} $label", !locked) { setDate(id, "") }
                 }

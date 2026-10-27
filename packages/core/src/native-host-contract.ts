@@ -64,6 +64,7 @@ import {
     parseTaskEditorTimeEstimate,
     parseTaskEditorTimeSpent,
     setTaskDraftDate,
+    setTaskDraftReviewTime,
     setTaskDraftTime,
     type TaskDraftRecurrenceEdit,
     type TaskEditorDateField,
@@ -845,7 +846,7 @@ export type NativeTaskDraftEdit =
     /** A day from the date picker, yyyy-MM-dd: an existing time is kept, else the default schedule time is added. */
     | { type: 'pickDate'; field: TaskEditorDateField; date: string }
     /** A time from the time picker, HH:mm, on the field's day (today when unset). */
-    | { type: 'pickTime'; field: 'startTime' | 'dueDate'; time: string }
+    | { type: 'pickTime'; field: TaskEditorDateField; time: string }
     /** "Start N units before due"; `amount` as typed. */
     | { type: 'relativeStart'; amount: number | string; unit: RelativeStartOffsetUnit }
     | { type: 'recurrence'; edit: NativeTaskDraftRecurrenceEdit }
@@ -954,10 +955,12 @@ const applyNativeTaskDraftEdit = (
             return withPatch(getTaskDraftDateEdit(field, value));
         }
         case 'pickTime': {
-            // The React Native editor has no review time: its review field offers a date only.
-            if ((field !== 'startTime' && field !== 'dueDate') || typeof edit.time !== 'string' || !CLOCK_TIME_PATTERN.test(edit.time)) return null;
+            if (!EDITOR_DATE_FIELDS.includes(field) || typeof edit.time !== 'string' || !CLOCK_TIME_PATTERN.test(edit.time)) return null;
             const [hours, minutes] = edit.time.split(':').map(Number);
-            return withPatch(getTaskDraftDateEdit(field, setTaskDraftTime(draft[field], { hours, minutes }, null, context.now)));
+            const value = field === 'reviewAt'
+                ? setTaskDraftReviewTime(draft.reviewAt, { hours, minutes }, context.formatDate, context.now)
+                : setTaskDraftTime(draft[field], { hours, minutes }, null, context.now);
+            return withPatch(getTaskDraftDateEdit(field, value));
         }
         case 'relativeStart': {
             if (!RELATIVE_START_UNITS.includes(edit.unit as string)

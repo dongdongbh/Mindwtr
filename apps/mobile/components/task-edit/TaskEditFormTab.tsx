@@ -564,7 +564,7 @@ function TaskEditFormTabComponent({
                                 value={(() => {
                                     if (showDatePicker === 'start') return getSafePickerDateValue(draft?.startTime);
                                     if (showDatePicker === 'start-time') return pendingStartDate ?? getSafePickerDateValue(draft?.startTime);
-                                    if (showDatePicker === 'review') return getSafePickerDateValue(draft?.reviewAt);
+                                    if (showDatePicker === 'review' || showDatePicker === 'review-time') return getSafePickerDateValue(draft?.reviewAt);
                                     if (showDatePicker === 'recurrence-end') {
                                         return getSafePickerDateValue(parseRRuleString(draft?.recurrenceRRule ?? '').until);
                                     }
@@ -572,7 +572,7 @@ function TaskEditFormTabComponent({
                                     return getSafePickerDateValue(draft?.dueDate);
                                 })()}
                                 mode={
-                                    showDatePicker === 'start-time' || showDatePicker === 'due-time'
+                                    showDatePicker === 'start-time' || showDatePicker === 'due-time' || showDatePicker === 'review-time'
                                         ? 'time'
                                         : 'date'
                                 }
