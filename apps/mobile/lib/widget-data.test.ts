@@ -292,14 +292,18 @@ describe('widget-data', () => {
             ],
             settings: { filters: { areaIds: ['area-1'] } } as AppData['settings'],
             tasks: [
-                { id: '1', title: 'Work task', status: 'inbox', areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
-                { id: '2', title: 'Home task', status: 'inbox', areaId: 'area-2', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '1', title: 'Work task', status: 'next', areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '2', title: 'Home task', status: 'next', areaId: 'area-2', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '3', title: 'Work capture', status: 'inbox', areaId: 'area-1', tags: [], contexts: [], createdAt: now, updatedAt: now },
+                { id: '4', title: 'Home capture', status: 'inbox', areaId: 'area-2', tags: [], contexts: [], createdAt: now, updatedAt: now },
             ],
         };
 
-        const payload = buildWidgetPayload(data, 'en', { maxItems: 5, listIds: ['inbox'] });
-        expect(payload.lists.inbox.items.map((item) => item.title)).toEqual(['Work task']);
-        expect(payload.inboxCount).toBe(1);
+        const payload = buildWidgetPayload(data, 'en', { maxItems: 5, listIds: ['next', 'inbox'] });
+        expect(payload.lists.next.items.map((item) => item.title)).toEqual(['Work task']);
+        // The app's Inbox ignores the area selection, so the Inbox widget does too (#1458).
+        expect(payload.lists.inbox.items.map((item) => item.title)).toEqual(['Work capture', 'Home capture']);
+        expect(payload.inboxCount).toBe(2);
     });
 
     it('builds a saved-filter list with the app\'s own predicate and offers it to the chooser (#1173)', () => {

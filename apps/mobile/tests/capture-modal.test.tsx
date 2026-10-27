@@ -114,12 +114,7 @@ vi.mock('@mindwtr/core', async () => {
   )),
   parseQuickAdd,
   normalizeClockTimeInput: (value?: string | null) => String(value ?? '').trim(),
-  resolveDefaultNewTaskAreaId: (settings: any, areas: any[]) => {
-    const areaId = settings?.gtd?.defaultAreaId;
-    return typeof areaId === 'string' && areas.some((area) => area.id === areaId && !area.deletedAt)
-      ? areaId
-      : undefined;
-  },
+  resolveQuickCaptureDefaultAreaId: actual.resolveQuickCaptureDefaultAreaId,
   resolveFeatureFlags: actual.resolveFeatureFlags,
   shallow: (left: unknown, right: unknown) => Object.is(left, right),
   splitQuickAddBulkLines: (input: string) => input
