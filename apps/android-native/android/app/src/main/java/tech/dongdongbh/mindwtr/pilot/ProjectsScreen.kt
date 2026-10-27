@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -468,6 +469,11 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             val after = items.size - entry + (if (items.size < detail.total) 1 else 0)
             listState.animateScrollToItem(maxOf(0, listState.layoutInfo.totalItemsCount - after))
         }
+        // RN's #765: the task the user is looking at, where Task order opens.
+        LaunchedEffect(listState) {
+            snapshotFlow { listState.layoutInfo.let { info -> firstViewedTask(info.visibleItemsInfo.map { Triple(it.key, it.offset, it.size) },
+                info.viewportStartOffset, info.viewportEndOffset) } }.collect { if (!projectDetails.reorderMode) projectDetails.viewedTaskId = it }
+        }
         // RN's reorder mode: the list's header rows (Getting Started's actions, Details) pinned above its own reorder list.
         if (projectDetails.reorderMode) {
             // The order reads again with every read of the project (on Reorder, after a move, the view options, the filter chip,
@@ -510,3 +516,13 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
         }
     }
 }
+
+/**
+ * RN's #765 anchor: the first task row ([items]: the lazy list's key, offset and size) at least 10% inside the viewport, RN's
+ * viewabilityConfig { itemVisiblePercentThreshold: 10 }. Task order opens on it.
+ */
+internal fun firstViewedTask(items: List<Triple<Any, Int, Int>>, viewportStart: Int, viewportEnd: Int): String? =
+    items.firstOrNull { (key, offset, size) ->
+        (key as? String)?.startsWith("task:") == true && size > 0
+            && (minOf(offset + size, viewportEnd) - maxOf(offset, viewportStart)) * 10 >= size
+    }?.let { (key) -> (key as String).removePrefix("task:") }

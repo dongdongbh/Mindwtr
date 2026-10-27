@@ -289,6 +289,8 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     // ---- RN's reorder mode (the view options' Reorder): core's project order view and its prepared move ----
 
     var reorderMode by mutableStateOf(false); private set
+    /** The project list's first task at least 10% shown (RN's firstViewableTaskId): Task order opens on it (#765). */
+    var viewedTaskId: String? = null
     /** Core's project order view (getProjectTaskOrderView): its words, orderToken, and every row (all windows) in core's order. */
     var orderView by mutableStateOf<JSONObject?>(null); private set
 
@@ -1418,6 +1420,15 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                 contentAlignment = Alignment.Center) { Text(done, style = rnText(13, 700), color = c.onTint) }
         }
         val listState = rememberLazyListState()
+        // RN's #765: Task order opens on the task the user was looking at, once, when core's order first shows it (not the first row).
+        val anchor = remember { viewedTaskId }
+        var anchored by remember { mutableStateOf(false) }
+        LaunchedEffect(items) {
+            if (anchored || items.isEmpty()) return@LaunchedEffect
+            anchored = true
+            val index = items.indexOfFirst { it.getString("type") == "task" && it.getJSONObject("row").getString("id") == anchor }
+            if (index > 0) listState.scrollToItem(index)
+        }
         // The order shown: core's, or a move made just now until core's next read (DraggableFlatList shows a drop at once).
         var local by remember(view) { mutableStateOf<List<JSONObject>?>(null) }
         val shown = local ?: items

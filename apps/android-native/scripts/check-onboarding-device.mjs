@@ -217,6 +217,28 @@ try {
     nodes = await tapExpecting(button(nodes, en['filters.clear']) ?? fail('no Clear'), (current) => !button(current, en['filters.clear']), 'the filters cleared');
     nodes = await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => !sheetUp(current) && !tagged(current, 'project-task-filter-button'), 'the chip gone');
     check(true, '(c) Clear removes the filter and its chip');
+    // #765: Task order opens on the task the user was looking at. Scroll the project list, read its first task at least 10% shown
+    // (RN's viewability rule), and Reorder starts on it; Done, then back to the top for the steps below.
+    const listRows = (current) => current.filter((node) => (node['resource-id'] ?? '').endsWith('task-row') && node.text).sort((a, b) => centerY(a) - centerY(b));
+    nodes = await screen();
+    const firstTitle = listRows(nodes)[0]?.text ?? fail('no task rows in the project');
+    const fullRow = Math.max(...listRows(nodes).map((row) => box(row)[3] - box(row)[1]));
+    nodes = await device.swipe(nodes, 'down');
+    const viewed = listRows(nodes).find((row) => (box(row)[3] - box(row)[1]) * 10 >= fullRow)?.text ?? fail('no task row after the scroll');
+    check(viewed !== firstTitle, `(c) the project list scrolled: "${viewed}" is the first task shown, not "${firstTitle}"`);
+    nodes = await openView();
+    nodes = await tapExpecting(tagged(nodes, 'project-view-reorder-option') ?? fail('no Reorder row'),
+        (current) => Boolean(tagged(current, 'project-reorder-list')) && Boolean(tagged(current, 'project-task-drag-handle')), 'the reorder list', 15_000);
+    const firstReorderTitle = (current) => {
+        const row = current.filter((node) => (node['resource-id'] ?? '').endsWith('project-task-reorder-row')).sort((a, b) => centerY(a) - centerY(b))[0];
+        return row && current.find((node) => node.text && box(node)[1] >= box(row)[1] && box(node)[3] <= box(row)[3])?.text;
+    };
+    nodes = await waitFor(`Task order on "${viewed}"`, (current) => firstReorderTitle(current) === viewed, 15_000);
+    shot('project-reorder-anchor');
+    check(true, `(c) Task order opened on "${viewed}", the task the list showed first (RN #765)`);
+    nodes = await tapExpecting(tagged(nodes, 'project-task-reorder-toggle'), (current) => !tagged(current, 'project-reorder-list'), 'the project list again');
+    for (let step = 0; step < 6 && listRows(nodes)[0]?.text !== firstTitle; step += 1) nodes = await device.swipe(nodes, 'up');
+    check(listRows(nodes)[0]?.text === firstTitle, '(c) the project list is back at its top');
     // b4c: Reorder opens RN's reorder list (its bar, a handle per task); a drag on the first task's handle moves it one row down
     // (core's prepared move), and Done returns to the list.
     nodes = await openView();
