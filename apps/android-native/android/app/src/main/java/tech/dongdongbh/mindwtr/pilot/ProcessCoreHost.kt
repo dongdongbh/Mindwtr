@@ -177,6 +177,9 @@ internal object ProcessCoreHost {
         }, "mindwtr-save-warm").also { it.priority = Thread.MIN_PRIORITY }.start()
     }
 
+    /** Whether this process logged a quiet resume cycle (appState): later quiet ones are not logged. */
+    private val resumeCycleLogged = java.util.concurrent.atomic.AtomicBoolean(false)
+
     /** Whether this process started the first save's warm ([contentShown]). */
     private val saveWarmStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -429,9 +432,12 @@ internal object ProcessCoreHost {
             // trigger behind it never waits longer; alarms stay as planned until it does.
             resumedRuntime()?.let { runtime ->
                 val ended = runtime.awaitQuiet(resumedAt) { appState != "active" }
-                val context = JSONObject().put("releaseCheck", "v1.3.8/native-resume-cycle-quiet").put("stage", ended)
-                    .put("durationMs", SystemClock.uptimeMillis() - resumedAt)
-                runtime.logLine("Native Android resume reminder cycle after its quiet wait releaseCheck=v1.3.8/native-resume-cycle-quiet", context)
+                // The tester's line on a process's first resume and whenever the wait did not end quiet (1-6 ms of core each).
+                if (ended != "quiet" || resumeCycleLogged.compareAndSet(false, true)) {
+                    val context = JSONObject().put("releaseCheck", "v1.3.8/native-resume-cycle-quiet").put("stage", ended)
+                        .put("durationMs", SystemClock.uptimeMillis() - resumedAt)
+                    runtime.logLine("Native Android resume reminder cycle after its quiet wait releaseCheck=v1.3.8/native-resume-cycle-quiet", context)
+                }
             }
             runCatching { reminders.resume() }
                 .onSuccess { if (reminders.reply != null) remindersStarted.complete(Unit) }
