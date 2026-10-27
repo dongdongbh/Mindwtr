@@ -63,3 +63,4 @@ Changes collected since the latest stable release.
 - Android: after you switch the phone between light and dark mode, a widget's task rings and dates take the new theme's colors right away. Before, they kept the old colors until Mindwtr updated the widget.
 - Windows: the desktop Local API (for scripts and tools that talk to Mindwtr over HTTP) no longer fails a request now and then with "Invalid HTTP request" or a dropped connection when the request arrived a moment after the connection opened.
 - Mobile: in the task editor, the screen reader names the date on each clear button ("Clear Start Date", "Clear Due Date", "Clear Review Date"). Before, all three said only "Clear".
+- Mobile: the screen reader names the Markdown toolbar's Quote, Numbered list and Task list buttons in your app language. Before, these three were always read in English.

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { getEnglishI18nValue } from './i18n';
 import {
+    MARKDOWN_TOOLBAR_ACTIONS,
     applyMarkdownKeyboardShortcut,
     applyMarkdownPairInsertion,
     applyMarkdownToolbarAction,
@@ -581,5 +583,11 @@ describe('markdown editor assist gate', () => {
         expect(
             continueMarkdownOnTextChange('- item', '- item\n', { start: 6, end: 6 }, { assist: false }),
         ).toBeNull();
+    });
+});
+
+describe('Markdown toolbar labels', () => {
+    it('gives every toolbar action an English text of its own, so no app falls back to core\'s built-in label', () => {
+        expect(MARKDOWN_TOOLBAR_ACTIONS.filter((action) => getEnglishI18nValue(action.labelKey) !== action.fallbackLabel).map((action) => action.labelKey)).toEqual([]);
     });
 });

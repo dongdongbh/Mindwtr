@@ -13,7 +13,7 @@ describe('the native Markdown toolbar', () => {
         if (!reply.ok) return;
         expect(reply.value.actions.map((action) => action.id)).toEqual(MARKDOWN_TOOLBAR_ACTIONS.map((action) => action.id));
         expect(reply.value.actions.slice(0, 2)).toEqual([{ id: 'heading', label: 'Insert heading', shortLabel: 'H1' }, { id: 'bold', label: 'Bold', shortLabel: 'B' }]);
-        // No en.ts text: RN shows core's fallback label.
+        // en.ts now has its own text, the same as core's fallback label.
         expect(reply.value.actions.find((action) => action.id === 'quote')?.label).toBe('Quote');
         expect(reply.value.undoLabel).toBe('Undo');
     });
