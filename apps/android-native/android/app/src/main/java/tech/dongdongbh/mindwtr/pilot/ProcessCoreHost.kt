@@ -179,6 +179,9 @@ internal object ProcessCoreHost {
     /** Whether this process started the first save's warm ([contentShown]). */
     private val saveWarmStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    /** The booted host, for a resume's work (null while the boot still runs: its own start plans the reminders). */
+    private fun resumedRuntime(): CoreHost? = boot?.takeIf { it.isDone }?.let { task -> runCatching { task.get() }.getOrNull() }
+
     /** Whether this process sent its first screen's About work ([aboutStartup]). */
     private val aboutStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -417,6 +420,8 @@ internal object ProcessCoreHost {
         // RN plans the reminder alarms again on every resume (its start runs one more cycle), so a permission that changed counts;
         // a start that failed starts again.
         if (state == "active") syncThread.execute {
+            // The new screen's reads first: at 5,000 tasks the cycle (37 ms) held core while a warm start's Focus read waited.
+            resumedRuntime()?.awaitQuiet()
             runCatching { reminders.resume() }
                 .onSuccess { if (reminders.reply != null) remindersStarted.complete(Unit) }
                 .onFailure { Log.w(CoreHost.TAG, "Native Android reminders cycle failed", it) }

@@ -813,16 +813,25 @@ class CoreHost(
      */
     fun refreshWidgets(leave: Boolean = false) {
         if (leave) callAsync("widgetsRefresh", "leave") else {
-            // The build waits for core to be quiet (WidgetRefreshGate), bounded; leaving the app flushes at once.
-            val askedAt = SystemClock.uptimeMillis()
-            while (Thread.currentThread() !== engineThread) {
-                val wait = WidgetRefreshGate.waitMs(SystemClock.uptimeMillis(), askedAt, lastCallAt, engineBusy())
-                if (wait <= 0) break
-                Thread.sleep(wait)
-            }
+            // The build waits for core to be quiet, bounded; leaving the app flushes at once.
+            awaitQuiet()
             callAsync("widgetsRefresh")
         }
         widgets?.settle()
+    }
+
+    /**
+     * Waits on the caller's thread until core is quiet (no call queued, none for [WidgetRefreshGate.QUIET_MS]), at most
+     * [WidgetRefreshGate.MAX_WAIT_MS]: work nothing on screen needs yet (the widget build, a resume's reminder cycle) lets the
+     * screen's reads go first. Never on the engine thread.
+     */
+    fun awaitQuiet() {
+        val askedAt = SystemClock.uptimeMillis()
+        while (Thread.currentThread() !== engineThread) {
+            val wait = WidgetRefreshGate.waitMs(SystemClock.uptimeMillis(), askedAt, lastCallAt, engineBusy())
+            if (wait <= 0) break
+            Thread.sleep(wait)
+        }
     }
 
     /**

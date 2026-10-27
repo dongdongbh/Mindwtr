@@ -9977,4 +9977,12 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(menuKt, /"expandChecklistUndo" -> shell\.openSavedTask\(taskId, expandedFrom\.remove\(input\.getString\("expandRequestId"\)\)\)/);
     assert.match(hostEntry, /taskChecklistProjectBlock: \(input\) => contract\.getTaskChecklistProjectBlock\(input\),/);
 }
+// A resume's reminder cycle (37 ms at 5,000 tasks) waits for core to be quiet, bounded, so the new screen's first read goes first;
+// the widget build waits the same way (CoreHost.awaitQuiet).
+{
+    const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
+    const processKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
+    assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+(?:\/\/[^\n]*\n\s+)*resumedRuntime\(\)\?\.awaitQuiet\(\)\s+runCatching \{ reminders\.resume\(\) \}/);
+    assert.match(coreHostKt, /if \(leave\) callAsync\("widgetsRefresh", "leave"\) else \{\s+(?:\/\/[^\n]*\n\s+)*awaitQuiet\(\)\s+callAsync\("widgetsRefresh"\)/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
