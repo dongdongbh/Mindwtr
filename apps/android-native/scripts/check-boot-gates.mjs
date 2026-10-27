@@ -9941,4 +9941,13 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(coreHostKt, /if \(callAsync\("saveWarm", SAVE_WARM_SLICE\)\.optBoolean\("done", true\)\) return/);
     assert.match(processKt, /if \(runtime != null && saveWarmStarted\.compareAndSet\(false, true\)\) Thread\(\{\s+runCatching \{ runtime\.warmFirstSave\(\) \}/);
 }
+// Editor follow-ups (task editor-followups-20261027-04). Item 2: RN's (?) help sits in the section header right after the title
+// (RN #1450, CollapsibleSection + ContextualHelpButton), before the badge; its text opens under the header, the section open or
+// folded, with no label row and no close X (RN's ContextualHelpBody).
+{
+    const header = /private fun CollapsibleSection\([\s\S]*?\n\}\n/.exec(editorUi)?.[0] ?? '';
+    assert.match(header, /Text\(title\.uppercase\(\)[^\n]*\n\s+section\.help\?\.let \{ help ->[\s\S]*?Icon\(Lucide\.CircleHelp, null, tint = c\.secondaryText, modifier = Modifier\.size\(16\.dp\)\)[\s\S]*?Spacer\(Modifier\.weight\(1f\)\)\s+if \(section\.filledCount > 0\)/);
+    assert.match(header, /section\.help\?\.let \{ if \(helpOpen\) ContextualHelpBody\(editorId, section\.id, it\) \}\s+if \(open\) Column/);
+    assert.doesNotMatch(editorUi, /help\.getString\("dismiss"\)/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

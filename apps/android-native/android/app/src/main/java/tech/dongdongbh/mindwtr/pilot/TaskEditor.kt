@@ -1151,66 +1151,53 @@ private fun SomedaySections(model: InboxViewModel, editor: TaskEditor, locked: B
     }
 }
 
-/** RN's CollapsibleSection: a top rule, the chevron, the title in capitals, and core's badge. Open state lasts while the editor is open. */
+/**
+ * RN's CollapsibleSection: a top rule, the chevron, the title in capitals, RN's (?) help button right after the title (#1450),
+ * and core's badge at the right. The help text opens under the header, open or folded. Open states last while the editor is open.
+ */
 @Composable
 private fun CollapsibleSection(editorId: String, section: EditorSection, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalTheme.current.colors
     var open by rememberSaveable(editorId, section.id) { mutableStateOf(section.open) }
+    var helpOpen by rememberSaveable(editorId, section.id, "help") { mutableStateOf(false) }
     val title = t(section.titleKey!!)
     Column(Modifier.padding(top = 8.dp).hairline(c.border, top = true)) {
         Row(Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = t(if (open) "markdown.collapse" else "markdown.expand")) { open = !open }
-            .semantics { contentDescription = title; heading() }.padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            .semantics { contentDescription = title; heading() }.heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (open) Lucide.ChevronDown else Lucide.ChevronRight, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
-            Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 0.6f), color = c.text, modifier = Modifier.padding(start = 8.dp).weight(1f))
+            Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 0.6f), color = c.text, modifier = Modifier.padding(start = 8.dp).weight(1f, fill = false))
+            section.help?.let { help ->
+                // RN's ContextualHelpButton: 4 padding around the 16 icon, 8 after the title, hitSlop 12 (here a 40 box, same icon spot).
+                Box(Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { helpOpen = !helpOpen }
+                    .semantics { contentDescription = help.getString("label"); stateDescription = t(if (helpOpen) "markdown.collapse" else "markdown.expand") }
+                    .testTag("contextual-help-${section.id}"), contentAlignment = Alignment.Center) {
+                    Icon(Lucide.CircleHelp, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
+                }
+            }
+            Spacer(Modifier.weight(1f))
             if (section.filledCount > 0) Box(Modifier.clip(RoundedCornerShape(10.dp)).background(c.tint).padding(horizontal = 8.dp, vertical = 2.dp)) {
                 Text("${section.filledCount}", style = rnText(12, 600), color = c.onTint)
             }
         }
-        if (open) Column(Modifier.padding(bottom = 16.dp)) {
-            section.help?.let { ContextualHelp(editorId, section.id, it) }
-            content()
-        }
+        section.help?.let { if (helpOpen) ContextualHelpBody(editorId, section.id, it) }
+        if (open) Column(Modifier.padding(bottom = 16.dp)) { content() }
     }
 }
 
-/**
- * RN's ContextualHelp (components/ContextualHelp.tsx) at the top of an editor section: the help icon, closed by default; open, its
- * label, core's hint, Read the guide (its failure line when no app opens it) and a close X. Closing only folds it: RN's stored
- * dismissal changes nothing while no surface reveals help on its own (O2e ruling).
- */
+/** RN's ContextualHelpBody: core's hint, then Read the guide with its link icon (its failure line when no app opens it). */
 @Composable
-private fun ContextualHelp(editorId: String, sectionId: String, help: JSONObject) {
+private fun ContextualHelpBody(editorId: String, sectionId: String, help: JSONObject) {
     val c = LocalTheme.current.colors
     val context = LocalContext.current
-    var expanded by rememberSaveable(editorId, sectionId, "help") { mutableStateOf(false) }
     var failed by rememberSaveable(editorId, sectionId, "helpError") { mutableStateOf(false) }
-    val label = help.getString("label")
-    Column(Modifier.padding(vertical = 4.dp).testTag("contextual-help-$sectionId")) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Top) {
-            Row((if (expanded) Modifier.weight(1f) else Modifier).heightIn(min = 44.dp).widthIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
-                .clickable(role = Role.Button) { expanded = !expanded }
-                // RN's accessibilityState={{ expanded }}, worded as the app's other folding rows (Details, the review groups).
-                .semantics { contentDescription = label; stateDescription = t(if (expanded) "markdown.collapse" else "markdown.expand") }
-                .padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp, if (expanded) Alignment.Start else Alignment.CenterHorizontally),
-                verticalAlignment = Alignment.CenterVertically) {
-                Icon(Lucide.CircleHelp, null, tint = c.secondaryText, modifier = Modifier.size(16.dp))
-                if (expanded) Text(label, style = rnText(14, 400), color = c.secondaryText)
-            }
-            if (expanded) Box(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).clickable(role = Role.Button) { expanded = false }
-                .semantics { contentDescription = help.getString("dismiss") }, contentAlignment = Alignment.Center) {
-                Icon(Lucide.X, null, tint = c.secondaryText, modifier = Modifier.size(18.dp))
-            }
+    Column(Modifier.padding(bottom = 8.dp).testTag("contextual-help-body-$sectionId")) {
+        Text(help.getString("body"), style = rnText(14, 400, 21), color = c.secondaryText)
+        val openGuide = { failed = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, help.getString("guideUrl").toUri())) }.isFailure }
+        Row(Modifier.heightIn(min = 44.dp).clickable(onClick = openGuide), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(guideLink(help.getString("readGuide"), c.tint, openGuide), style = rnText(14, 400), color = c.tint)
+            Icon(HelpExternalLink, null, tint = c.tint, modifier = Modifier.size(14.dp))
         }
-        if (expanded) Column(Modifier.padding(start = 8.dp, end = 8.dp, bottom = 4.dp)) {
-            Text(help.getString("body"), style = rnText(14, 400, 21), color = c.secondaryText)
-            val openGuide = { failed = runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, help.getString("guideUrl").toUri())) }.isFailure }
-            Row(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = openGuide).padding(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(guideLink(help.getString("readGuide"), c.tint, openGuide), style = rnText(14, 400), color = c.tint)
-                Icon(HelpExternalLink, null, tint = c.tint, modifier = Modifier.size(14.dp))
-            }
-            if (failed) Text(help.getString("guideError"), style = rnText(14, 400), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-        }
+        if (failed) Text(help.getString("guideError"), style = rnText(14, 400), color = c.danger, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
     }
 }
 
