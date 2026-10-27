@@ -95,4 +95,106 @@ describe('SqliteAdapter.readRowBaseline', () => {
         // A blank id maps to nothing, so the table's count (3) and the mapped list (2) differ: the host's check sees it.
         expect(light?.settings.savedFilters?.map((saved) => saved.id)).toEqual(['f1', 'f2']);
     });
+
+    describe('reuse while nothing changed the rows', () => {
+        const ROW_READ = 'SELECT rowid AS _rowid, id, rev, updatedAt FROM tasks';
+        /** The client with a count of task row-version reads, the part of readRowBaseline a reuse skips. */
+        const counting = (path: string) => {
+            const client = connect(path);
+            const counter = { rowReads: 0 };
+            const counted = new Proxy(client, { get: (target, name, receiver) => {
+                const value = Reflect.get(target, name, receiver);
+                if (name !== 'all' || typeof value !== 'function') return typeof value === 'function' ? value.bind(target) : value;
+                return (sql: string, ...rest: unknown[]) => {
+                    if (sql === ROW_READ) counter.rowReads += 1;
+                    return value.call(target, sql, ...rest);
+                };
+            } });
+            return { client: counted, counter };
+        };
+        const ready = async (path: string) => {
+            const { client, counter } = counting(path);
+            const adapter = new SqliteAdapter(client, { rejectConcurrentWrites: true });
+            await adapter.getData();
+            await adapter.saveData({ ...empty, tasks: [task('t1')] });
+            return { adapter, client, counter };
+        };
+
+        it('(d) reads the rows once, and the reused result equals a fresh read', async () => {
+            const path = file();
+            const { adapter, counter } = await ready(path);
+            const first = await adapter.readRowBaseline();
+            const knownAfterFirst = plain(known(adapter));
+            const second = await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(1);
+            const fresh = new SqliteAdapter(connect(path), { rejectConcurrentWrites: true });
+            await fresh.getData();
+            expect(second).toEqual(await fresh.readRowBaseline());
+            expect(second).toEqual(first);
+            // New objects each call, as a read builds them: a caller's change to one result never reaches the next.
+            expect(second).not.toBe(first);
+            expect(second?.ids.tasks).not.toBe(first?.ids.tasks);
+            expect(second?.settings).not.toBe(first?.settings);
+            expect(plain(known(adapter))).toEqual(knownAfterFirst);
+        });
+
+        it('(a) a write by this adapter since makes it read the rows again', async () => {
+            const { adapter, counter } = await ready(file());
+            await adapter.readRowBaseline();
+            await adapter.saveTask(task('t2'));
+            const light = await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+            expect(light?.ids.tasks.sort()).toEqual(['t1', 't2']);
+        });
+
+        it('(a) a write through withConnection since makes it read the rows again', async () => {
+            const { adapter, client, counter } = await ready(file());
+            await adapter.readRowBaseline();
+            await adapter.withConnection(() => client.run("UPDATE tasks SET rev = 2 WHERE id = 't1'"), { write: true });
+            await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+            expect(known(adapter)?.get('tasks')?.get('t1')?.rev).toBe(2);
+        });
+
+        it("(b) another connection's commit since: null, and after a full read the rows are read again", async () => {
+            const path = file();
+            const { adapter, counter } = await ready(path);
+            await adapter.readRowBaseline();
+            await new SqliteAdapter(connect(path)).saveTask(task('t2'));
+            expect(await adapter.readRowBaseline()).toBeNull();
+            await adapter.getData();
+            const light = await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+            expect(light?.ids.tasks.sort()).toEqual(['t1', 't2']);
+        });
+
+        it('(c) a direct-SQL invalidation since: no reuse (null until a full read)', async () => {
+            const { adapter, counter } = await ready(file());
+            await adapter.readRowBaseline();
+            (adapter as unknown as { invalidateWriteBaselineAfterDirectSQL(): void }).invalidateWriteBaselineAfterDirectSQL();
+            expect(await adapter.readRowBaseline()).toBeNull();
+            await adapter.getData();
+            await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+        });
+
+        it("a reuse still runs the subclass's check of the read", async () => {
+            const path = file();
+            const checks: number[] = [];
+            class Checked extends SqliteAdapter {
+                fail = false;
+                protected override async afterReadNow(loaded: (table: 'tasks') => number): Promise<void> {
+                    checks.push(loaded('tasks'));
+                    if (this.fail) throw new Error('check failed');
+                }
+            }
+            const adapter = new Checked(connect(path), { rejectConcurrentWrites: true });
+            await adapter.getData();
+            await adapter.saveData({ ...empty, tasks: [task('t1')] });
+            await adapter.readRowBaseline();
+            adapter.fail = true;
+            await expect(adapter.readRowBaseline()).rejects.toThrow('check failed');
+            expect(checks.slice(-2)).toEqual([1, 1]);
+        });
+    });
 });

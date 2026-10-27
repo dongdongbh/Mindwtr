@@ -504,6 +504,9 @@ export class SqliteAdapter {
     // Every write transaction this adapter has started (entity, receipt, calendar and host writes). Unlike writesStarted it
     // voids a read token without voiding the cold-start fingerprint shortcut, which only entity writes can stale.
     private generation = 0;
+    // The last row-version read's rows (readRowBaselineNow), reused while the epoch it read under is still the accepted one and no write
+    // transaction has started since (generation). Every row change on this connection starts one; another connection's moves the epoch.
+    private rowBaseline: { epoch: number; generation: number; rows: [Record<string, unknown>[][], Record<string, unknown> | undefined, Record<string, unknown>[]] } | null = null;
     private readonly readTokens = new WeakMap<object, SqliteReadToken>();
     /** Rows a sliced sync cycle built before its save (prepareSaveRows), with the write generation they were built at. */
     private readonly preparedSaveRows = new WeakMap<AppData, { generation: number; rows: SqliteSaveRows }>();
@@ -619,6 +622,7 @@ export class SqliteAdapter {
         this.lastSavedFingerprints = null;
         this.lastReadRows = null;
         this.warmedRead = null;
+        this.rowBaseline = null;
         this.lastKnownRowVersions = null;
         this.lastObservedExternalChangeEpoch = undefined;
     }
@@ -1386,14 +1390,19 @@ export class SqliteAdapter {
         const accepted = this.lastObservedExternalChangeEpoch;
         if (!this.rejectConcurrentWrites || accepted === undefined) return null;
         if (await this.readExternalChangeEpoch() !== accepted) return null;
-        const [entityRows, settingsRow, savedFilterRows] = await Promise.all([
+        // Nothing changed the rows since the last read (same accepted epoch, no write transaction since): its rows again, mapped
+        // to new objects and checked by the subclass under this hold, as a read is.
+        const reused = this.rowBaseline;
+        const reuse = reused !== null && reused.epoch === accepted && reused.generation === this.generation && this.lastKnownRowVersions !== null;
+        const read = reuse ? reused.rows : await Promise.all([
             Promise.all(SQLITE_ENTITY_TABLES.map((table) => this.client.all<Record<string, unknown>>(
                 `SELECT rowid AS _rowid, id, rev, updatedAt FROM ${table}`,
             ))),
             this.client.get<Record<string, unknown>>('SELECT data FROM settings WHERE id = 1'),
             this.client.all<Record<string, unknown>>('SELECT rowid as _rowid, * FROM saved_filters ORDER BY createdAt, name'),
         ]);
-        if (await this.readExternalChangeEpoch() !== accepted) return null;
+        if (!reuse && await this.readExternalChangeEpoch() !== accepted) return null;
+        const [entityRows, settingsRow, savedFilterRows] = read;
         const light = {
             ids: Object.fromEntries(SQLITE_ENTITY_TABLES.map((table, index) => [table, entityRows[index].map((row) => String(row.id))])) as Record<SqliteTombstoneTable, string[]>,
             settings: this.mapSettings(settingsRow, savedFilterRows),
@@ -1401,10 +1410,12 @@ export class SqliteAdapter {
         await this.afterReadNow((table) => light.ids[table].length, light.settings);
         // As getData's e3: another connection's commit during the check makes this read no baseline.
         if (this.afterReadNow !== SqliteAdapter.prototype.afterReadNow && await this.readExternalChangeEpoch() !== accepted) return null;
+        if (reuse) return light;
         this.lastKnownRowVersions = new Map<SqliteEntityTable, Map<string, SqliteKnownRowVersion>>([
             ...SQLITE_ENTITY_TABLES.map((table, index) => [table, this.knownRowVersionsFromRows(entityRows[index])] as const),
             ['saved_filters', this.knownRowVersionsFromRows(savedFilterRows)],
         ]);
+        this.rowBaseline = { epoch: accepted, generation: this.generation, rows: read };
         return light;
     }
 
