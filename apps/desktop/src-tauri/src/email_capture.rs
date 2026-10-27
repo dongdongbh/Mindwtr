@@ -965,6 +965,33 @@ mod tests {
         assert!(message.received_at.is_some());
     }
 
+    // Japanese mail clients still send ISO-2022-JP and Shift_JIS; mail-parser decodes
+    // them only with its full_encoding feature (#1466).
+    #[test]
+    fn build_message_decodes_japanese_legacy_charsets() {
+        let iso_2022_jp = concat!(
+            "Subject: =?ISO-2022-JP?B?GyRCMnE1RCROO3FOQRsoQg==?=\r\n",
+            "Content-Type: text/plain; charset=ISO-2022-JP\r\n",
+            "Content-Transfer-Encoding: 7bit\r\n",
+            "\r\n",
+            "\x1b$BL@F|$^$G$KAw$k\x1b(B\r\n",
+        );
+        let message = build_email_capture_message(1, 7, iso_2022_jp.as_bytes());
+        assert_eq!(message.subject, "会議の資料");
+        assert_eq!(message.body_text, "明日までに送る");
+
+        let shift_jis = concat!(
+            "Subject: =?Shift_JIS?B?ie+LY4LMjpGXvw==?=\r\n",
+            "Content-Type: text/plain; charset=Shift_JIS\r\n",
+            "Content-Transfer-Encoding: base64\r\n",
+            "\r\n",
+            "lr6T+oLcgsWCyZGXguk=\r\n",
+        );
+        let message = build_email_capture_message(2, 7, shift_jis.as_bytes());
+        assert_eq!(message.subject, "会議の資料");
+        assert_eq!(message.body_text, "明日までに送る");
+    }
+
     #[test]
     fn build_message_converts_html_only_mail_to_text() {
         let raw = concat!(

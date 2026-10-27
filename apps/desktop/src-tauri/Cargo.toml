@@ -60,7 +60,7 @@ imap = "2.4"
 # IMAP capture still uses native-tls; keep OpenSSL vendored so Linux packages do
 # not depend on the build machine's libssl.
 native-tls = { version = "0.2", features = ["vendored"] }
-mail-parser = "0.11"
+mail-parser = { version = "0.11", features = ["full_encoding"] }
 hound = "3.5"
 whisper-rs = "0.16.0"
 cpal = "0.15"
