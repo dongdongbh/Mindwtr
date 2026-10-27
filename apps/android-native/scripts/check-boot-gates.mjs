@@ -9973,6 +9973,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(menuKt, /JSONObject\(\)\.put\("kind", "expandChecklistUndo"\)\.put\("expandRequestId", input\.getString\("requestId"\)\)/);
     assert.match(menuKt, /logLine\("Native checklist expanded into a project releaseCheck=v1\.3\.8\/native-checklist-to-project"/);
     assert.match(menuKt, /RnSwitch\(editorMenu\.expand, /);
+    // RN's undo() opens the task with openTaskScreen(source.id, source.projectId, 'task'): its project (else Focus), then the editor.
+    assert.match(menuKt, /"expandChecklistUndo" -> shell\.openSavedTask\(taskId, expandedFrom\.remove\(input\.getString\("expandRequestId"\)\)\)/);
     assert.match(hostEntry, /taskChecklistProjectBlock: \(input\) => contract\.getTaskChecklistProjectBlock\(input\),/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

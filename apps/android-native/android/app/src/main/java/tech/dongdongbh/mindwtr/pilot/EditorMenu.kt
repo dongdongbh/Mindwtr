@@ -87,6 +87,8 @@ class EditorMenuModel(private val shell: InboxViewModel) {
     var expand by mutableStateOf(false)
     /** Why Expand is off for the draft (core's checklistProjectBlockReason, translated), "" when it is allowed, null until read. */
     var expandBlocked by mutableStateOf<String?>(null)
+    /** Each confirmed expansion's source project, by its request: its Undo opens the task there (RN's openTaskScreen). */
+    private val expandedFrom = mutableMapOf<String, String?>()
     /** Create project or Convert to section held for the editor's own Save (RN saves the draft first): the task, kind and title. */
     private var afterSave: Triple<String, String, String?>? = null
 
@@ -209,6 +211,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
                 // The tester's line: the expansion landed (or a replay found it landed); never the task's or project's text.
                 val fields = JSONObject().put("releaseCheck", "v1.3.8/native-checklist-to-project").put("outcome", reply.optString("outcome"))
                 shell.anyTime({ it.logLine("Native checklist expanded into a project releaseCheck=v1.3.8/native-checklist-to-project", fields) }, {})
+                expandedFrom[input.getString("requestId")] = shell.editor?.takeIf { it.id == taskId }?.text("projectId")?.takeIf { it.isNotEmpty() }
                 shell.closeEditor()
                 shell.showToast(t("common.success"), t("task.promoteToProjectCreated"), "success", t("common.undo"), 5200) {
                     send(taskId, revision, JSONObject().put("kind", "expandChecklistUndo").put("expandRequestId", input.getString("requestId")))
@@ -216,8 +219,9 @@ class EditorMenuModel(private val shell: InboxViewModel) {
                 val projectId = reply.getString("projectId")
                 shell.menu.whenIdle { shell.menu.openProjects(projectId) }
             }
-            // RN's undo(): the task is back, and it opens.
-            "expandChecklistUndo" -> shell.menu.whenIdle { shell.openEditor(taskId) }
+            // RN's undo(): the task is back, and openTaskScreen(source.id, source.projectId, 'task') opens it on its project (else
+            // Focus) on the Form tab.
+            "expandChecklistUndo" -> shell.openSavedTask(taskId, expandedFrom.remove(input.getString("expandRequestId")))
             "convertToSection" -> {
                 // The tester's line: the conversion landed (or a replay found it landed); never the task's or section's text.
                 val fields = JSONObject().put("releaseCheck", "v1.3.8/native-convert-to-section").put("outcome", reply.optString("outcome"))
