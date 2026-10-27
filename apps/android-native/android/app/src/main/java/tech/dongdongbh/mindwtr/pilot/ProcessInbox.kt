@@ -204,7 +204,7 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
             // RN reserves the toast's room above the footer, so feedback never covers a decision.
             ToastCard(model, Modifier.padding(bottom = 8.dp))
             view.text("fileIt")?.let { label ->
-                Box(Modifier.fillMaxWidth().hairline(c.border, top = true).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 10.dp)) {
+                Box(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 10.dp)) {
                     FilledButton(label, canAnswer("inboxCommit", "fileIt"), Modifier.fillMaxWidth()) { answer("inboxCommit", "fileIt") }
                 }
             }
@@ -254,7 +254,7 @@ private fun ProgressHeader(model: InboxViewModel, flow: InboxProcessing, canSkip
     val view = flow.view
     val progress = view.getJSONObject("progress")
     val statusTop = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp().value }
-    Row(Modifier.fillMaxWidth().heightIn(min = headerMinHeight(statusTop).dp).hairline(c.border, top = false)
+    Row(Modifier.fillMaxWidth().heightIn(min = headerMinHeight(statusTop).dp).rnBorderBottom(c.border)
         .padding(start = 20.dp, end = 20.dp, top = headerTopPadding(statusTop).dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         val close = t("common.close")
@@ -490,7 +490,7 @@ private fun FilledButton(label: String, enabled: Boolean, modifier: Modifier = M
 @Composable
 private fun Section(content: @Composable ColumnScope.() -> Unit) {
     val c = LocalTheme.current.colors
-    Column(Modifier.padding(bottom = 18.dp).fillMaxWidth().hairline(c.border, top = false).padding(bottom = 18.dp), content = content)
+    Column(Modifier.padding(bottom = 18.dp).fillMaxWidth().rnBorderBottom(c.border).padding(bottom = 18.dp), content = content)
 }
 
 @Composable

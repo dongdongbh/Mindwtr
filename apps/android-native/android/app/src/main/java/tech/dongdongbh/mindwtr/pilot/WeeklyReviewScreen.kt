@@ -442,7 +442,7 @@ private fun ContextCard(model: InboxViewModel, shown: MenuPage, card: JSONObject
         }
         for (task in if (open) tasks else tasks.take(preview)) {
             Text(task.getString("title"), style = rnText(13, 500), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().hairline(c.border, top = true).clickable(enabled = menu.idle, role = Role.Button) { model.openEditor(task.getString("id")) }
+                modifier = Modifier.fillMaxWidth().rnBorderTop(c.border).clickable(enabled = menu.idle, role = Role.Button) { model.openEditor(task.getString("id")) }
                     .padding(horizontal = 10.dp, vertical = 8.dp))
         }
         if (open && tasks.size < shown.collectionTotal(name)) Box(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) { MoreChip(menu.idle) { menu.loadCollection(name) } }
@@ -541,7 +541,7 @@ private fun CompletedStep(model: InboxViewModel, content: JSONObject, labels: JS
         val shape = RoundedCornerShape(10.dp)
         Column(Modifier.padding(bottom = 16.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             content.optJSONObject("week")?.let { week ->
-                Column(Modifier.fillMaxWidth().hairline(c.border, top = false).padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.fillMaxWidth().rnBorderBottom(c.border).padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(week.getString("heading"), style = rnText(14, 600), color = c.secondaryText)
                     val rows = week.getJSONArray("rows")
                     for (index in 0 until rows.length()) SummaryRow(true, rows.getString(index))
