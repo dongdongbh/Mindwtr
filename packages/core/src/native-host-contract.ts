@@ -1745,7 +1745,7 @@ export function createNativeHostContract(options: {
         // The editor's Convert to section (RN's convertTaskToSection), prepared and journaled.
         ...createTaskToSectionMethods({ readiness, receipts, isReadOnly: isInArchivedProject }),
         // The editor's "..." menu writes as one journaled command (Android's taskEditorAction).
-        ...createTaskEditorActionMethods({ readiness, save, receipts, contract: () => self ?? {} }),
+        ...createTaskEditorActionMethods({ readiness, save, receipts, contract: () => self ?? {}, t: () => translate }),
         ...inboxProcessingMethods,
         // Settings › AI and the AI actions: native-host-contract-ai.ts.
         ...createAIMethods({

@@ -1,7 +1,8 @@
+import { prepareChecklistProjectConversion, type ChecklistProjectConversion } from './checklist-project-conversion';
 import type { NativeHostResult } from './native-host-contract';
 import { canonicalJSON } from './native-host-contract-task-to-section';
 import { isNativeJsonWithinBytes, toChecklist } from './native-host-contract-task-view';
-import { settleWrite, type NativeRequestReceipts } from './native-request-receipts';
+import { requestRowId, settleWrite, taskRevisionOf, type NativeRequestReceipts } from './native-request-receipts';
 import { useTaskStore } from './store';
 import { isTaskCancelled } from './task-status';
 
@@ -21,7 +22,9 @@ export type NativeTaskEditorAction = { requestId: string; taskId: string; taskRe
     | { kind: 'delete' }
     | { kind: 'deleteUndo'; deleteRequestId: string }
     | { kind: 'cancel' | 'skip'; save: NativeTaskEditorSave }
-    | { kind: 'cancelUndo'; cancelRequestId: string });
+    | { kind: 'cancelUndo'; cancelRequestId: string }
+    | { kind: 'expandChecklist'; title: string }
+    | { kind: 'expandChecklistUndo'; expandRequestId: string });
 export type NativeTaskEditorActionResult = { kind: NativeTaskEditorAction['kind']; outcome: 'saved' | 'unchanged';
     projectId?: string; sectionId?: string; reused?: boolean;
     cancellation?: { message: string; undoLabel: string; undoEnabled: boolean } };
@@ -30,7 +33,8 @@ type Json = Record<string, unknown>;
 type Reply = NativeHostResult<unknown>;
 type Extra = Omit<NativeTaskEditorActionResult, 'kind' | 'outcome'>;
 /** A core prepared command: its prepare and commit methods on the contract, and the reply fields its result gives. */
-type Step = { prepare: string; commit: string; request: Json; input?: Json; extra: (result: Json) => Extra };
+type Port = string | ((input: Json) => Reply | Promise<Reply>);
+type Step = { prepare: Port; commit: Port; request: Json; input?: Json; extra: (result: Json) => Extra };
 type Plan = { outcome: 'unchanged'; extra?: Extra } | { refused: NativeHostResult<never> } | Step;
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
@@ -38,20 +42,24 @@ const ATTEMPTS = 4;
 const SAVE_KEYS = ['base', 'patch', 'scheduleBase', 'recurrenceBase', 'checklist', 'attachments'];
 /** The commands whose core commit keeps no receipt: the whole action runs under one, so a replay answers its first reply. */
 const RECEIPTED = new Set(['promote', 'cancel', 'skip', 'cancelUndo']);
-const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION', message: string): NativeHostResult<never> => ({ ok: false, error: { code, message } });
+const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'TASK_NOT_FOUND' | 'SAVE_FAILED', message: string): NativeHostResult<never> => ({ ok: false, error: { code, message } });
 const record = (value: unknown): value is Json => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown, max: number): value is string => typeof value === 'string' && value.length > 0 && value.length <= max;
 const keys = (input: Json, names: string[]) => Object.keys(input).length === names.length + 4
     && ['requestId', 'taskId', 'taskRevision', 'kind', ...names].every((name) => Object.prototype.hasOwnProperty.call(input, name));
 const otherRequest = (input: Json, value: unknown) => typeof value === 'string' && UUID.test(value) && value !== input.requestId;
+/** Expand checklist's new rows take ids from its request UUID; the tasks' name the source task too, so its project shows whose it is. */
+const expandedProjectId = (requestId: string) => requestRowId(requestId, 'checklist-project');
+const expandedTaskId = (requestId: string, taskId: string, index: number) => requestRowId(requestId, `checklist-project:${taskId}:${index}`);
 
 const valid = (input: unknown): input is NativeTaskEditorAction => {
     if (!record(input) || !isNativeJsonWithinBytes(input) || typeof input.requestId !== 'string' || !UUID.test(input.requestId)
         || !text(input.taskId, 500) || !text(input.taskRevision, 2000)) return false;
     switch (input.kind) {
         case 'convertToSection': case 'delete': return keys(input, []);
-        case 'promote': return keys(input, ['title']) && typeof input.title === 'string' && Boolean(input.title.trim())
-            && input.title.length <= 100_000;
+        case 'promote': case 'expandChecklist': return keys(input, ['title']) && typeof input.title === 'string'
+            && Boolean(input.title.trim()) && input.title.length <= 100_000;
+        case 'expandChecklistUndo': return keys(input, ['expandRequestId']) && otherRequest(input, input.expandRequestId);
         case 'deleteUndo': return keys(input, ['deleteRequestId']) && otherRequest(input, input.deleteRequestId);
         case 'cancelUndo': return keys(input, ['cancelRequestId']) && otherRequest(input, input.cancelRequestId);
         case 'cancel': case 'skip': {
@@ -71,27 +79,58 @@ const valid = (input: unknown): input is NativeTaskEditorAction => {
  * section and Delete by their target state (the section named by the request, the task in Trash), the others by a receipt
  * kept on disk with the data on Android. That receipt commits in its own transaction right after the write: a process death
  * between the two leaves a boot replay with no receipt, which the write's own checks refuse (Create project STALE_REVISION,
- * Cancel and Skip INVALID_INPUT) without writing twice. Convert to section has no such gap.
+ * Cancel and Skip INVALID_INPUT) without writing twice. Convert to section has no such gap, nor has Expand checklist (RN's
+ * Create project with "Expand checklist" on: core's prepareChecklistProjectConversion and the store's convertChecklistToProject),
+ * whose project is named by the request (a replay finds it, even after a process death), nor its Undo (the source back, the
+ * project in Trash).
  */
 export function createTaskEditorActionMethods(deps: {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     receipts: NativeRequestReceipts;
     contract: () => Json;
+    t: () => (key: string) => string;
 }) {
-    const call = async (name: string, input: unknown): Promise<Reply> => {
+    const call = async (name: Port, input: unknown): Promise<Reply> => {
+        if (typeof name === 'function') return await name(input as Json);
         const port = deps.contract();
         return await (port[name] as (value: unknown) => Reply | Promise<Reply>).call(port, input);
     };
-    // The Deletes and Cancels this process confirmed, by request UUID: their Undo needs the confirmed envelope. RN's Undo lives
+    // The Deletes, Cancels and checklist expansions this process confirmed, by request UUID: their Undo needs the confirmed envelope. RN's Undo lives
     // as long as its toast and is gone after a restart; these are gone after a restart too.
     const deletes = new Map<string, Json>();
     const cancels = new Map<string, Json>();
-    // The envelope a Convert to section or Delete prepared while its save is owed: the retry commits that same envelope.
+    const expansions = new Map<string, ChecklistProjectConversion>();
+    // The envelope a Convert to section, Delete or Expand checklist (or its Undo) prepared while its save is owed: the retry commits that same envelope.
     const preparedBy = new Map<string, Step & { prepared: Json }>();
     const remember = <T,>(map: Map<string, T>, key: string, value: T) => {
         map.set(key, value);
         if (map.size > 20) map.delete(map.keys().next().value as string);
+    };
+
+    /** A store key (`task.expandChecklist*`) as the user reads it, under the code the editor action answers. */
+    const expandRefusal = (key: string): NativeHostResult<never> => fail(key === 'task.expandChecklistConflict' ? 'STALE_REVISION'
+        : key === 'task.expandChecklistSaveFailed' ? 'SAVE_FAILED' : 'INVALID_INPUT', deps.t()(key));
+    /** The store's convert or Undo on the command, then the host's save (the store's flush leaves a failed save in persistenceFailure). */
+    const expandWrite = (undo: boolean) => async ({ prepared }: Json): Promise<Reply> => {
+        const command = prepared as ChecklistProjectConversion;
+        const store = useTaskStore.getState();
+        const written = await (undo ? store.undoChecklistToProject(command) : store.convertChecklistToProject(command));
+        if (!written.success) return expandRefusal(written.error ?? 'task.expandChecklistConflict');
+        const saved = await deps.save();
+        return saved.ok ? { ok: true, value: {} }
+            : saved.error.code === 'SAVE_FAILED' ? expandRefusal('task.expandChecklistSaveFailed') : saved;
+    };
+    /** RN's preparation on the saved task the editor showed (RN saves the draft first), with ids from the request UUID. */
+    const prepareExpansion = (action: { requestId: string; taskId: string; taskRevision: string; title: string }): Reply => {
+        const state = useTaskStore.getState();
+        const source = state._tasksById.get(action.taskId);
+        if (!source || source.deletedAt || source.purgedAt) return fail('TASK_NOT_FOUND', 'Task not found');
+        if (taskRevisionOf(source) !== action.taskRevision) return fail('STALE_REVISION', 'Task changed since it was opened');
+        const ids = { project: expandedProjectId(action.requestId),
+            tasks: (source.checklist ?? []).map((_, index) => expandedTaskId(action.requestId, action.taskId, index)) };
+        const prepared = prepareChecklistProjectConversion(state, source, action.title, ids);
+        return prepared.success ? { ok: true, value: { kind: 'prepared', prepared: prepared.command } } : expandRefusal(prepared.error);
     };
 
     const plan = (action: NativeTaskEditorAction): Plan => {
@@ -145,6 +184,25 @@ export function createTaskEditorActionMethods(deps: {
                 return { prepare: 'prepareTaskCancellationUndo', commit: 'commitPreparedTaskCancellationUndo', request,
                     input: { request, cancel }, extra: () => ({}) };
             }
+            case 'expandChecklist': case 'expandChecklistUndo': {
+                const expandRequestId = action.kind === 'expandChecklist' ? requestId : action.expandRequestId;
+                const projectId = expandedProjectId(expandRequestId);
+                const made = state._projectsById.get(projectId);
+                // A checklist is never empty here, so an expansion of this task made its first task.
+                const ours = Boolean(made) && state._tasksById.has(expandedTaskId(expandRequestId, taskId, 0));
+                if (action.kind === 'expandChecklist') {
+                    if (made && !ours) return { refused: fail('INVALID_INPUT', 'Request ID already belongs to another action') };
+                    if (made) return !made.deletedAt && !live ? { outcome: 'unchanged', extra: { projectId } }
+                        : { refused: fail('STALE_REVISION', 'Task changed since it was opened') };
+                    const request = { requestId, taskId, taskRevision, title: action.title };
+                    return { prepare: () => prepareExpansion(request), commit: expandWrite(false), request, extra: () => ({ projectId }) };
+                }
+                if (ours && made!.deletedAt && live) return { outcome: 'unchanged' };
+                const command = expansions.get(expandRequestId);
+                if (!command || command.source.id !== taskId) return { refused: fail('STALE_REVISION', 'The project can no longer be undone') };
+                return { prepare: () => ({ ok: true, value: { kind: 'prepared', prepared: command } }), commit: expandWrite(true),
+                    request: { requestId, expandRequestId }, extra: () => ({}) };
+            }
         }
     };
 
@@ -156,6 +214,7 @@ export function createTaskEditorActionMethods(deps: {
             const landed = committed.ok || committed.error.code === 'SAVE_FAILED';
             if (landed && action.kind === 'delete') remember(deletes, action.requestId, { request: entry.request, prepared: entry.prepared });
             if (landed && action.kind === 'cancel') remember(cancels, action.requestId, { request: entry.request, prepared: entry.prepared });
+            if (landed && action.kind === 'expandChecklist') remember(expansions, action.requestId, entry.prepared as ChecklistProjectConversion);
             // Only a save owed keeps the envelope: once settled, a replay is a plan that finds the work done.
             if (!RECEIPTED.has(action.kind) && landed && !committed.ok) remember(preparedBy, action.requestId, entry);
             else preparedBy.delete(action.requestId);

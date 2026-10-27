@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNativeHostContract } from './native-host-contract';
-import { taskRevisionOf } from './native-request-receipts';
+import { requestRowId, taskRevisionOf } from './native-request-receipts';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Project, Task } from './types';
 
@@ -235,6 +235,106 @@ describe('runTaskEditorAction', () => {
         expect(data().tasks).toHaveLength(2);
     });
 
+    it('expands the checklist into a project once; a replay or a restart answers the same project and writes nothing', async () => {
+        const { host, data, saves, stored } = await open();
+        const input = action(40, 'expandChecklist', { title: ' Kitchen ' });
+        const projectId = requestRowId(uuid(40), 'checklist-project');
+        expect(await host.runTaskEditorAction(input)).toEqual({ ok: true, value: { kind: 'expandChecklist', outcome: 'saved', projectId } });
+        expect(data().projects.find((row) => row.id === projectId)).toMatchObject({ title: 'Kitchen', status: 'active' });
+        expect(data().tasks.filter((row) => row.projectId === projectId).map((row) => [row.title, row.status]))
+            .toEqual([['Wrap the glasses', 'next']]);
+        expect(stored().deletedAt).toBeTruthy();
+        const count = saves();
+        const unchanged = { ok: true, value: { kind: 'expandChecklist', outcome: 'unchanged', projectId } };
+        expect(await host.runTaskEditorAction(input)).toEqual(unchanged);
+        expect(saves()).toBe(count);
+        const cold = await open({ tasks: data().tasks, projects: data().projects });
+        expect(await cold.host.runTaskEditorAction(input)).toEqual(unchanged);
+        expect(cold.data().projects).toHaveLength(2);
+        expect(cold.data().tasks).toHaveLength(2);
+    });
+
+    it('refuses an expansion of a task changed since the editor opened, or one core blocks, and writes nothing', async () => {
+        const { host, data, stored } = await open({ tasks: [task(), task({ id: 'timed', timeEstimate: '30min' })] });
+        expect(await host.runTaskEditorAction({ ...(action(41, 'expandChecklist', { title: 'Kitchen' }) as object),
+            taskRevision: '1:old:2026-01-01T00:00:00.000Z' } as never)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const timed = { requestId: uuid(42), taskId: 'timed', taskRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get('timed')!),
+            kind: 'expandChecklist', title: 'Kitchen' };
+        expect(await host.runTaskEditorAction(timed as never)).toEqual({ ok: false, error: { code: 'INVALID_INPUT',
+            message: 'Keep the checklist together, or clear the assignee, location, time estimate and recorded time before expanding. These task details cannot be transferred to a project.' } });
+        expect(await host.runTaskEditorAction(action(43, 'expandChecklist', { title: 'Move house' }))).toEqual({ ok: false, error: { code: 'INVALID_INPUT',
+            message: 'A project with this name already exists in the area. Choose another name to expand the checklist into a new project.' } });
+        expect(stored().deletedAt).toBeUndefined();
+        expect(data().projects).toHaveLength(1);
+    });
+
+    it('refuses an expansion request ID that already expanded another task, and writes nothing', async () => {
+        const { host, data } = await open({ tasks: [task(), task({ id: 'other', title: 'Paint the hall' })] });
+        expect(await host.runTaskEditorAction(action(44, 'expandChecklist', { title: 'Kitchen' }))).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        const reused = { requestId: uuid(44), taskId: 'other', taskRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get('other')!),
+            kind: 'expandChecklist', title: 'Hall' };
+        expect(await host.runTaskEditorAction(reused as never))
+            .toEqual({ ok: false, error: { code: 'INVALID_INPUT', message: 'Request ID already belongs to another action' } });
+        expect(data().tasks.find((row) => row.id === 'other')?.deletedAt).toBeUndefined();
+        expect(data().projects).toHaveLength(2);
+    });
+
+    it('answers SAVE_FAILED when an expansion\'s save fails, and the retry only saves it', async () => {
+        let failing = false;
+        const { host, data } = await open({}, () => failing);
+        failing = true;
+        const input = action(45, 'expandChecklist', { title: 'Kitchen' });
+        const projectId = requestRowId(uuid(45), 'checklist-project');
+        expect(await host.runTaskEditorAction(input)).toEqual({ ok: false, error: { code: 'SAVE_FAILED',
+            message: 'Could not save the conversion. Retry to save the same conversion without creating duplicates.' } });
+        expect(data().projects).toHaveLength(1);
+        failing = false;
+        expect(await host.runTaskEditorAction(input)).toMatchObject({ ok: true, value: { kind: 'expandChecklist', projectId } });
+        expect(data().projects).toHaveLength(2);
+        expect(data().tasks.filter((row) => row.projectId === projectId)).toHaveLength(1);
+        expect(data().tasks.find((row) => row.id === 'task')?.deletedAt).toBeTruthy();
+    });
+
+    it('undoes an expansion once: the task is back, the project and its tasks in Trash; a replay writes nothing', async () => {
+        const { host, data, stored, saves } = await open();
+        expect(await host.runTaskEditorAction(action(46, 'expandChecklist', { title: 'Kitchen' }))).toMatchObject({ ok: true });
+        const projectId = requestRowId(uuid(46), 'checklist-project');
+        const undo = action(47, 'expandChecklistUndo', { expandRequestId: uuid(46) });
+        expect(await host.runTaskEditorAction(undo)).toEqual({ ok: true, value: { kind: 'expandChecklistUndo', outcome: 'saved' } });
+        expect(stored()).toMatchObject({ title: 'Pack the kitchen', projectId: 'p', status: 'next' });
+        expect(stored().deletedAt).toBeUndefined();
+        expect(data().projects.find((row) => row.id === projectId)?.deletedAt).toBeTruthy();
+        expect(data().tasks.filter((row) => row.id !== 'task').every((row) => row.deletedAt)).toBe(true);
+        const count = saves();
+        expect(await host.runTaskEditorAction(undo)).toEqual({ ok: true, value: { kind: 'expandChecklistUndo', outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+    });
+
+    it('answers SAVE_FAILED for an expansion Undo whose save fails, and the retry only saves it', async () => {
+        let failing = false;
+        const { host, data } = await open({}, () => failing);
+        expect(await host.runTaskEditorAction(action(48, 'expandChecklist', { title: 'Kitchen' }))).toMatchObject({ ok: true });
+        failing = true;
+        const undo = action(49, 'expandChecklistUndo', { expandRequestId: uuid(48) });
+        expect(await host.runTaskEditorAction(undo)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        expect(data().tasks.find((row) => row.id === 'task')?.deletedAt).toBeTruthy();
+        failing = false;
+        expect(await host.runTaskEditorAction(undo)).toMatchObject({ ok: true, value: { kind: 'expandChecklistUndo' } });
+        expect(data().tasks.find((row) => row.id === 'task')?.deletedAt).toBeUndefined();
+        expect(data().projects.find((row) => row.id === requestRowId(uuid(48), 'checklist-project'))?.deletedAt).toBeTruthy();
+    });
+
+    it('refuses an expansion Undo this process did not confirm (after a restart), and writes nothing', async () => {
+        const { host, data } = await open();
+        expect(await host.runTaskEditorAction(action(50, 'expandChecklist', { title: 'Kitchen' }))).toMatchObject({ ok: true });
+        const cold = await open({ tasks: data().tasks, projects: data().projects });
+        const saved = cold.saves();
+        expect(await cold.host.runTaskEditorAction(action(51, 'expandChecklistUndo', { expandRequestId: uuid(50) })))
+            .toEqual({ ok: false, error: { code: 'STALE_REVISION', message: 'The project can no longer be undone' } });
+        expect(cold.stored().deletedAt).toBeTruthy();
+        expect(cold.saves()).toBe(saved);
+    });
+
     it('refuses malformed or unbounded actions', async () => {
         const { host } = await open();
         const good = action(21, 'delete') as Record<string, unknown>;
@@ -246,6 +346,11 @@ describe('runTaskEditorAction', () => {
             { ...good, kind: 'deleteUndo', deleteRequestId: uuid(21) },
             { ...good, kind: 'promote', title: '   ' },
             { ...good, kind: 'cancel', save: { base: {}, patch: {}, scheduleBase, other: 1 } },
+            { ...good, kind: 'expandChecklist' },
+            { ...good, kind: 'expandChecklist', title: ' ' },
+            { ...good, kind: 'expandChecklist', title: 'Kitchen', extra: 1 },
+            { ...good, kind: 'expandChecklistUndo', expandRequestId: uuid(21) },
+            { ...good, kind: 'expandChecklistUndo', expandRequestId: 'nope' },
         ]) expect(await host.runTaskEditorAction(bad as never), JSON.stringify(bad)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 });
