@@ -326,7 +326,9 @@ data class WidgetPayload(
     const val UPCOMING_LIST_ID = "upcoming"
     const val MAX_ITEMS = 200
     private const val MAX_LIST_ID_LENGTH = 1_024
-    private val FIXED_LIST_IDS = setOf(WidgetListStore.DEFAULT_LIST, "inbox", NEXT_LIST_ID, UPCOMING_LIST_ID, "waiting", "someday")
+    private val FIXED_LIST_IDS = setOf(
+      WidgetListStore.DEFAULT_LIST, WidgetListStore.FOCUS_AVAILABLE_LIST, "inbox", NEXT_LIST_ID, UPCOMING_LIST_ID, "waiting", "someday",
+    )
     private val DATE_ONLY = Regex("""\d{4}-\d{2}-\d{2}""")
     private val DATE_TIME = Regex("""\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})?""")
 

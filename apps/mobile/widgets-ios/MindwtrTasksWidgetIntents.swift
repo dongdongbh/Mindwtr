@@ -70,10 +70,24 @@ struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent {
     @Parameter(title: "List")
     var list: MindwtrWidgetListEntity?
 
+    // #1468: Focus only. Off keeps the Focus widget as it was.
+    @Parameter(
+        title: "Include available actions",
+        description: "Focus only: adds Next Actions whose start date has arrived. Not tasks marked in progress.",
+        default: false
+    )
+    var includeAvailableActions: Bool
+
     init() {}
 
     init(list: MindwtrWidgetListEntity?) {
         self.list = list
+    }
+
+    /// The payload list this widget draws: Focus with available actions has its own.
+    var payloadListId: String {
+        let listId = list?.id ?? mindwtrDefaultWidgetListId
+        return listId == mindwtrDefaultWidgetListId && includeAvailableActions ? mindwtrFocusAvailableListId : listId
     }
 }
 
@@ -97,7 +111,7 @@ struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider {
         let now = Date()
         let entries = MindwtrTasksWidgetSnapshotStore.timelineEntries(
             for: context.family,
-            listId: configuration.list?.id ?? mindwtrDefaultWidgetListId,
+            listId: configuration.payloadListId,
             now: now
         )
         let refresh = Calendar.current.date(byAdding: .minute, value: 30, to: now)
@@ -112,7 +126,7 @@ struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider {
     ) -> MindwtrTasksWidgetEntry {
         MindwtrTasksWidgetSnapshotStore.entry(
             for: family,
-            listId: configuration.list?.id ?? mindwtrDefaultWidgetListId,
+            listId: configuration.payloadListId,
             date: date
         )
     }

@@ -487,7 +487,13 @@ describe('widget-service', () => {
         expect(payloadByKey.get('mindwtr-ios-widget-payload-extra-large')?.items).toHaveLength(30);
         expect(payloadByKey.get('mindwtr-ios-widget-payload')?.items).toHaveLength(20);
         expect(payloadByKey.get('mindwtr-ios-widget-payload')?.headerTitle).toBe('Today');
-        expect(Object.keys(payloadByKey.get('mindwtr-ios-widget-payload')?.lists)).toEqual(['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming']);
+        // The Focus variant (#1468) rides every family: the choice lives in each widget's Edit Widget settings.
+        expect(Object.keys(payloadByKey.get('mindwtr-ios-widget-payload')?.lists)).toEqual(['focus', 'focus:available', 'inbox', 'next', 'waiting', 'someday', 'upcoming']);
+        expect(mockLogInfo).toHaveBeenCalledWith('Focus widget available actions published', {
+            scope: 'widget',
+            force: true,
+            extra: expect.objectContaining({ releaseCheck: 'v1.3.8/widget-focus-available', platform: 'ios' }),
+        });
         expect(payloadByKey.get('mindwtr-ios-widget-payload-small')?.lists.focus.items).toHaveLength(11);
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrTasksWidget');
         expect(mockIosWidgetReloadTimelines).toHaveBeenCalledWith('MindwtrCompactWidget');
@@ -507,7 +513,7 @@ describe('widget-service', () => {
         });
         expect(JSON.stringify(mockLogInfo.mock.calls)).not.toContain('Focused 1');
 
-        const listIds = ['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming'];
+        const listIds = ['focus', 'inbox', 'next', 'waiting', 'someday', 'upcoming', 'focus:available'];
         const expectedFamilies = new Map([
             ['mindwtr-ios-widget-payload', 20],
             ['mindwtr-ios-widget-payload-small', 11],

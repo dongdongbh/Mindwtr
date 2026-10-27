@@ -249,7 +249,7 @@ object WidgetRenderer {
     // full title with a small count, so the header never reads as two lists. A
     // list picked in the chooser that the app has not published yet has no rows
     // to count, so it shows its bare title until the next publish.
-    val listId = payload.resolvedListId(WidgetListStore.read(context, appWidgetId))
+    val listId = payload.resolvedListId(WidgetListStore.displayListId(context, appWidgetId))
     bindTasksChrome(context, views, appWidgetId, payload, listId)
 
     val stats = bindCollection(context, views, appWidgetId, WidgetKind.TASKS, payload)
@@ -409,7 +409,7 @@ object WidgetRenderer {
   internal fun tasksChrome(payload: WidgetPayload, listId: String): Chrome {
     val resolvedListId = payload.resolvedListId(listId)
     val list = payload.listFor(resolvedListId)
-    val isFocus = resolvedListId == WidgetListStore.DEFAULT_LIST
+    val isFocus = WidgetListStore.baseListId(resolvedListId) == WidgetListStore.DEFAULT_LIST
     val counted = payload.lists[resolvedListId] != null
     val rowCount = if (list.sections.isEmpty()) list.items.size else list.sections.sumOf { it.items.size }
     return Chrome(
@@ -479,7 +479,7 @@ object WidgetRenderer {
     views: RemoteViews,
     appWidgetId: Int,
     payload: WidgetPayload,
-    listId: String = WidgetListStore.read(context, appWidgetId),
+    listId: String = WidgetListStore.displayListId(context, appWidgetId),
   ) {
     applyTasksChrome(views, tasksChrome(payload, listId))
     val actions = tasksHeaderActions(payload, listId, appWidgetId)

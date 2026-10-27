@@ -1972,6 +1972,8 @@ export const jaOverrides: Record<string, string> = {
         'widget.background': '背景',
         'widget.backgroundLightText': '透明・明るい文字',
         'widget.backgroundDarkText': '透明・暗い文字',
+        'widget.availableActions': '着手可能なアクション',
+        'widget.includeAvailableActions': '開始日が来た次のアクションを追加',
         'agenda.laterToday': '今日このあと',
         'agenda.allClear': 'すべて片付きました！',
         'agenda.noTasks': '今フォーカスするものはありません。タスクにスターを付けるか期限を設定すると、ここに表示されます。',

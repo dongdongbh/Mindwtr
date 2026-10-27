@@ -63,7 +63,7 @@ class TasksWidgetFactory(
   private fun setSnapshot(snapshot: WidgetPayload) {
     payload = snapshot.displaySnapshot(emptySet()).payload
     val requestedListId = when (kind) {
-      WidgetKind.TASKS -> WidgetListStore.read(context, appWidgetId)
+      WidgetKind.TASKS -> WidgetListStore.displayListId(context, appWidgetId)
       WidgetKind.COMPACT -> payload.compactListId()
       WidgetKind.QUICK_CAPTURE -> WidgetListStore.DEFAULT_LIST
     }

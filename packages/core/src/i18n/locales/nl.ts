@@ -20,6 +20,8 @@ export const nlOverrides: Record<string, string> = {
     'widget.background': 'Achtergrond',
     'widget.backgroundLightText': 'Transparant, lichte tekst',
     'widget.backgroundDarkText': 'Transparant, donkere tekst',
+    'widget.availableActions': 'Beschikbare acties',
+    'widget.includeAvailableActions': 'Volgende acties toevoegen waarvan de startdatum is aangebroken',
     "projects.convertBlocked.destination-section-sequence": "Kies een doelproject met Sequentieel → Binnen secties. De nieuwe sectie behoudt de taakvolgorde; andere secties kunnen onafhankelijk doorgaan.",
     'timeline.moveTaskDates': "Taakdatums verplaatsen",
     'timeline.moveProjectDates': "Projectdatums verplaatsen",

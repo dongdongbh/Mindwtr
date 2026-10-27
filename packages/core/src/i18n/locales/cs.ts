@@ -1576,6 +1576,8 @@ export const csOverrides: Record<string, string> = {
         'widget.background': 'Pozadí',
         'widget.backgroundLightText': 'Průhledné, světlý text',
         'widget.backgroundDarkText': 'Průhledné, tmavý text',
+        'widget.availableActions': 'Dostupné akce',
+        'widget.includeAvailableActions': 'Přidat další akce, jejichž datum zahájení už nastalo',
         'agenda.allClear': 'Vše čisté!',
         'agenda.noTasks': 'Teď není na co se soustředit. Označte úkol hvězdičkou nebo mu nastavte termín a objeví se tady.',
         'agenda.emptyStart': 'Zatím žádné úkoly. Přidejte vše, co máte v hlavě, do Schránky a roztřiďte to později.',

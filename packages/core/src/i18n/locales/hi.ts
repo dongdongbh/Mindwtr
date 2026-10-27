@@ -1259,6 +1259,8 @@ export const hiOverrides: Record<string, string> = {
         'widget.background': 'पृष्ठभूमि',
         'widget.backgroundLightText': 'पारदर्शी, हल्का टेक्स्ट',
         'widget.backgroundDarkText': 'पारदर्शी, गहरा टेक्स्ट',
+        'widget.availableActions': 'उपलब्ध कार्य',
+        'widget.includeAvailableActions': 'वे अगली कार्रवाइयाँ जोड़ें जिनकी आरंभ तिथि आ चुकी है',
         'agenda.allClear': 'सब साफ!',
         'agenda.noTasks': 'अभी फ़ोकस करने के लिए कुछ नहीं है. किसी कार्य पर स्टार लगाएँ या नियत तारीख दें, वह यहाँ दिखेगा.',
         'agenda.emptyStart': 'अभी कोई कार्य नहीं है. जो भी मन में है उसे इनबॉक्स में जोड़ें और बाद में व्यवस्थित करें.',

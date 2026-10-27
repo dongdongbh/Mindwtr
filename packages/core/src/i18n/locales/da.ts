@@ -2015,6 +2015,8 @@ export const daOverrides: Record<string, string> = {
     'widget.background': 'Baggrund',
     'widget.backgroundLightText': 'Gennemsigtig, lys tekst',
     'widget.backgroundDarkText': 'Gennemsigtig, mørk tekst',
+    'widget.availableActions': 'Tilgængelige handlinger',
+    'widget.includeAvailableActions': 'Tilføj næste handlinger, hvis startdato er nået',
     'agenda.laterToday': 'Senere i dag',
     'agenda.allClear': 'Alt klart!',
     'agenda.noTasks':

@@ -1272,6 +1272,8 @@ export const trOverrides: Record<string, string> = {
         'widget.background': 'Arka plan',
         'widget.backgroundLightText': 'Şeffaf, açık renkli metin',
         'widget.backgroundDarkText': 'Şeffaf, koyu renkli metin',
+        'widget.availableActions': 'Uygun eylemler',
+        'widget.includeAvailableActions': 'Başlangıç tarihi gelmiş sonraki eylemleri ekle',
         'agenda.allClear': 'Hepsi Açık!',
         'agenda.noTasks': 'Şu anda odaklanacak bir şey yok. Bir göreve yıldız ekleyin veya son tarih verin; burada görünecek.',
         'agenda.emptyStart': 'Henüz görev yok. Aklınızdakileri Gelen kutusuna ekleyin, sonra düzenlersiniz.',

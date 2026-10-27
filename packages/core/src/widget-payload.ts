@@ -35,6 +35,7 @@ import {
     buildWidgetTaskList,
     parseWidgetListSelection,
     WIDGET_FIXED_LIST_IDS,
+    WIDGET_FOCUS_AVAILABLE_LIST_ID,
     type WidgetTaskList,
     WIDGET_SAVED_FILTER_LIST_PREFIX,
     widgetListTitles,
@@ -635,8 +636,15 @@ export function createWidgetPayloadProjection(
     // Focus-screen sections remain available through their explicit widget
     // lists and must never become an implicit fallback here.
     const curatedTasks = [...lists.focusedTasks, ...lists.schedule];
-    const curatedSections = buildFocusTaskSections(lists, (key) => tr[key])
+    const curatedSections: { key: string; title: string; items: Task[] }[] = buildFocusTaskSections(lists, (key) => tr[key])
         .filter((section) => section.key === 'focus' || section.key === 'schedule');
+    // The opt-in Focus variant (#1468): the Next Actions whose explicit start has arrived, by
+    // exact time, in Next Actions order. Review Due and undated actions stay out; nothing is starred.
+    const curatedIds = new Set(curatedTasks.map((task) => task.id));
+    const availableTasks = lists.nextActions.filter((task) => {
+        const start = safeParseDate(task.startTime);
+        return start !== null && start.getTime() <= now.getTime() && !curatedIds.has(task.id);
+    });
     const inboxCount = inboxTasks.length;
     const dateLabel = formatDateLabel(now, language, 'long');
     const listContext = { data, activeTasks, inboxTasks, now, focusLists: lists, sortBy: widgetSort, prioritiesEnabled, tr,
@@ -653,6 +661,7 @@ export function createWidgetPayloadProjection(
     const tags = options?.includeTokenLists ? buildWidgetTokenOptions(tokenSources, 'tags') : undefined;
     const taskLists = new Map<string, NonNullable<ReturnType<typeof buildWidgetTaskList>>>();
     const requestedListIds = new Set(options?.listIds ?? []);
+    const includeFocusAvailable = requestedListIds.has(WIDGET_FOCUS_AVAILABLE_LIST_ID);
     if (options?.includeSavedFilterLists) {
         for (const { id } of savedFilters) requestedListIds.add(`${WIDGET_SAVED_FILTER_LIST_PREFIX}${id}`);
     }
@@ -700,25 +709,30 @@ export function createWidgetPayloadProjection(
             const items = curatedTasks.slice(0, maxItems).map(toItem);
             const hiddenTaskCount = Math.max(curatedTasks.length - items.length, 0);
 
-            let remaining = maxItems;
-            const sections: WidgetTaskSection[] = [];
-            for (const section of curatedSections) {
-                if (remaining <= 0) break;
-                if (section.items.length === 0) continue;
-                const sectionItems = section.items.slice(0, remaining).map(toItem);
-                remaining -= sectionItems.length;
-                sections.push({
-                    key: section.key,
-                    title: section.title,
-                    detail: section.key === 'schedule' ? formatDateLabel(now, language, 'short') : null,
-                    items: section.key === 'schedule'
-                        ? sectionItems.map((item) => {
-                            const task = scheduleById.get(item.id);
-                            return task ? dropSameDayDue(item, task) : item;
-                        })
-                        : sectionItems,
-                });
-            }
+            // The sections share one `maxItems` budget, in order.
+            const buildSections = (source: typeof curatedSections): WidgetTaskSection[] => {
+                let remaining = maxItems;
+                const built: WidgetTaskSection[] = [];
+                for (const section of source) {
+                    if (remaining <= 0) break;
+                    if (section.items.length === 0) continue;
+                    const sectionItems = section.items.slice(0, remaining).map(toItem);
+                    remaining -= sectionItems.length;
+                    built.push({
+                        key: section.key,
+                        title: section.title,
+                        detail: section.key === 'schedule' ? formatDateLabel(now, language, 'short') : null,
+                        items: section.key === 'schedule'
+                            ? sectionItems.map((item) => {
+                                const task = scheduleById.get(item.id);
+                                return task ? dropSameDayDue(item, task) : item;
+                            })
+                            : sectionItems,
+                    });
+                }
+                return built;
+            };
+            const sections = buildSections(curatedSections);
 
             const subtitleParts = [`${tr['nav.inbox'] ?? 'Inbox'}: ${inboxCount}`];
             if (hiddenTaskCount > 0) {
@@ -735,6 +749,21 @@ export function createWidgetPayloadProjection(
                     openUri: WIDGET_LIST_DIRECT_URIS.focus,
                 },
             };
+            if (includeFocusAvailable) {
+                const focusAvailableTasks = [...curatedTasks, ...availableTasks];
+                listPayloads[WIDGET_FOCUS_AVAILABLE_LIST_ID] = {
+                    title: listTitles.focus,
+                    dateLabel,
+                    sections: buildSections([...curatedSections, {
+                        key: 'available',
+                        title: tr['widget.availableActions'] ?? 'Available actions',
+                        items: availableTasks,
+                    }]),
+                    items: focusAvailableTasks.slice(0, maxItems).map(toItem),
+                    totalCount: focusAvailableTasks.length,
+                    openUri: WIDGET_LIST_DIRECT_URIS.focus,
+                };
+            }
             let hasUpcoming = false;
             for (const [selection, list] of taskLists) {
                 const listId = parseWidgetListSelection(selection)!.listId;
@@ -784,6 +813,7 @@ export function createWidgetPayloadProjection(
                 listTitles: options?.includeTokenLists ? { ...listTitles,
                     contexts: tr['contexts.title'] ?? 'Contexts', tags: tr['tags.title'] ?? 'Tags',
                     search: tr['common.search'] ?? 'Search',
+                    focusAvailable: tr['widget.includeAvailableActions'] ?? 'Add Next Actions whose start date has arrived',
                 } : listTitles,
                 savedFilters,
                 ...(contexts ? { contexts } : {}),
@@ -882,7 +912,8 @@ export function iosWidgetProjectionOptions(input: WidgetPublicationInput): Widge
         systemColorScheme: input.systemColorScheme,
         focusFilter: input.focusFilter,
         systemLocale: input.systemLocale,
-        listIds: WIDGET_FIXED_LIST_IDS,
+        // A widget's own Edit Widget option picks the Focus variant (#1468); the app cannot see it.
+        listIds: [...WIDGET_FIXED_LIST_IDS, WIDGET_FOCUS_AVAILABLE_LIST_ID],
         includeSavedFilterLists: true,
     };
 }

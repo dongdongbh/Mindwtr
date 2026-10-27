@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Widgets: a Tasks widget showing Focus has a new option, Include available actions. When it is on, the widget adds an Available actions section after Today's Focus and Today, with Next Actions whose start date has arrived. Undated actions, future starts and tasks due for review stay out, and nothing gets starred. Each Android widget keeps its own setting; on iOS, turn it on in Edit Widget. It is off by default (#1468).
 - Desktop: a picker opened from a small button, such as Destination in the bulk actions toolbar, now opens a menu wide enough to read project and area names (#1470).
 - Desktop: email capture and Gmail capture read mail in Japanese, Chinese and Korean legacy encodings such as ISO-2022-JP, Shift_JIS, EUC-JP, GBK, Big5 and EUC-KR. Before, those subjects and bodies came in as garbled text (#1466).
 - Mobile: a task's Review date can have a time, as on desktop. Once a review date is set, tap the clock button next to it to add a time; Date only removes it (#1465).

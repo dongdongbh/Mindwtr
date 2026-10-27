@@ -327,6 +327,30 @@ class WidgetPayloadTest {
   }
 
   @Test
+  fun aFocusWidgetWithAvailableActionsDrawsItsOwnVariantAsFocus() {
+    val root = JSONObject(sample)
+    val variant = listPayload("Focus", sections = sections("Available actions", "s"), openUri = "mindwtr:///focus")
+      .put("dateLabel", "Saturday, Sep 6")
+    root.getJSONObject("lists").put(WidgetListStore.FOCUS_AVAILABLE_LIST, variant)
+    val payload = WidgetPayload.parse(root.toString())!!
+
+    // Off: the stored selection draws plain Focus. On: the variant, with Focus's header and route.
+    assertEquals("focus", WidgetListStore.displayListId("focus", focusAvailable = false))
+    val listId = WidgetListStore.displayListId("focus", focusAvailable = true)
+    assertEquals(WidgetListStore.FOCUS_AVAILABLE_LIST, payload.resolvedListId(listId))
+    assertEquals(listOf("s"), payload.listFor(listId).sections.flatMap { section -> section.items.map { it.id } })
+    assertEquals("mindwtr:///focus", payload.lists.getValue(listId).openUri)
+    assertEquals("mindwtr:///focus", payload.openUriFor(listId))
+    val chrome = WidgetRenderer.tasksChrome(payload, listId)
+    assertEquals("Saturday, Sep 6", chrome.title)
+    assertEquals(payload.subtitle, chrome.subtitle)
+    // Another list keeps its selection, and an unpublished variant draws plain Focus.
+    assertEquals("waiting", WidgetListStore.displayListId("waiting", focusAvailable = true))
+    assertEquals("a", WidgetPayload.parse(sample)!!.listFor(listId).items.single().id)
+    assertEquals("focus", WidgetListStore.baseListId(listId))
+  }
+
+  @Test
   fun listOpenUrisAcceptOnlyHostlessMindwtrRoutes() {
     val root = JSONObject(sample)
     root.put("lists", JSONObject()

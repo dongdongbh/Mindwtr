@@ -1249,6 +1249,8 @@ export const plOverrides: Record<string, string> = {
         'widget.background': 'Tło',
         'widget.backgroundLightText': 'Przezroczyste, jasny tekst',
         'widget.backgroundDarkText': 'Przezroczyste, ciemny tekst',
+        'widget.availableActions': 'Dostępne działania',
+        'widget.includeAvailableActions': 'Dodaj następne działania, których data rozpoczęcia już nadeszła',
         'agenda.allClear': 'Wszystko jasne!',
         'agenda.noTasks': 'Nie ma teraz na czym się skupić. Oznacz zadanie gwiazdką lub nadaj mu termin, a pojawi się tutaj.',
         'agenda.emptyStart': 'Nie ma jeszcze zadań. Dodaj wszystko, co masz w głowie, do Skrzynki odbiorczej i uporządkuj później.',

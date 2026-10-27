@@ -10,6 +10,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.widget.EditText
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.RadioButton
 import android.content.Context
 import android.view.ViewGroup
@@ -37,6 +38,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
   private var groupingOptions = WidgetListStore.GROUPINGS
   private var kind = WidgetKind.TASKS
   private var pendingBackground = WidgetBackground.DEFAULT
+  private var pendingFocusAvailable = false
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -75,6 +77,7 @@ class WidgetConfigureActivity : AppCompatActivity() {
     pendingSelection = savedInstanceState?.getString("listSelection") ?: current
     pendingBackground = savedInstanceState?.getString("background")?.let { name -> WidgetBackground.entries.firstOrNull { it.name == name } }
       ?: WidgetListStore.background(this, appWidgetId)
+    pendingFocusAvailable = savedInstanceState?.getBoolean("focusAvailable") ?: WidgetListStore.focusAvailable(this, appWidgetId)
 
     val list = findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val textColor = palette?.text ?: getColor(R.color.mindwtr_widget_text)
@@ -106,6 +109,12 @@ class WidgetConfigureActivity : AppCompatActivity() {
         }
         override fun onNothingSelected(parent: AdapterView<*>?) {}
       }
+    }
+    findViewById<CheckBox>(R.id.mindwtr_widget_configure_available).apply {
+      text = payload.listTitles["focusAvailable"] ?: "Add Next Actions whose start date has arrived"
+      setTextColor(textColor)
+      isChecked = pendingFocusAvailable
+      setOnCheckedChangeListener { _, checked -> pendingFocusAvailable = checked }
     }
     updateGroupingVisibility()
     findViewById<TextView>(R.id.mindwtr_widget_configure_background_label).apply {
@@ -149,11 +158,14 @@ class WidgetConfigureActivity : AppCompatActivity() {
   override fun onSaveInstanceState(outState: Bundle) {
     outState.putString("listSelection", pendingSelection)
     outState.putString("background", pendingBackground.name)
+    outState.putBoolean("focusAvailable", pendingFocusAvailable)
     super.onSaveInstanceState(outState)
   }
 
   private fun save() {
     if (kind == WidgetKind.TASKS) WidgetListStore.write(this, appWidgetId, pendingSelection)
+    // The dropdown sheet does not show the option, so it leaves the stored choice alone.
+    if (kind == WidgetKind.TASKS && !dropdown) WidgetListStore.writeFocusAvailable(this, appWidgetId, pendingFocusAvailable)
     WidgetListStore.writeBackground(this, appWidgetId, pendingBackground)
     val manager = AppWidgetManager.getInstance(this)
     WidgetRenderer.render(this, manager, intArrayOf(appWidgetId), kind)
@@ -166,6 +178,9 @@ class WidgetConfigureActivity : AppCompatActivity() {
     val focus = WidgetListStore.baseListId(pendingSelection) == WidgetListStore.DEFAULT_LIST
     findViewById<View>(R.id.mindwtr_widget_configure_grouping_row).visibility =
       if (dropdown || focus || kind != WidgetKind.TASKS) View.GONE else View.VISIBLE
+    // INVISIBLE keeps Cancel and Save where they are when the list changes.
+    findViewById<View>(R.id.mindwtr_widget_configure_available).visibility =
+      if (!dropdown && focus && kind == WidgetKind.TASKS) View.VISIBLE else View.INVISIBLE
     findViewById<Spinner>(R.id.mindwtr_widget_configure_grouping).setSelection(
       (groupingOptions.indexOf(WidgetListStore.grouping(pendingSelection)?.first) + 1).coerceAtLeast(0),
     )

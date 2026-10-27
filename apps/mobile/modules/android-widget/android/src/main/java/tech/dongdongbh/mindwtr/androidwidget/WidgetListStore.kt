@@ -31,7 +31,11 @@ enum class WidgetBackground(internal val stored: String?) {
 object WidgetListStore {
   const val PREFS_NAME = "mindwtr_widget_lists"
   const val BACKGROUNDS_PREFS_NAME = "mindwtr_widget_backgrounds"
+  /** Widget ids whose Focus adds available actions (#1468); absent = off. */
+  const val FOCUS_AVAILABLE_PREFS_NAME = "mindwtr_widget_focus_available"
   const val DEFAULT_LIST = "focus"
+  /** Core's WIDGET_FOCUS_AVAILABLE_LIST_ID: Focus plus Next Actions whose start date has arrived. */
+  const val FOCUS_AVAILABLE_LIST = "focus:available"
   /** Kept for installed widgets that still carry a project selection. */
   const val PROJECT_PREFIX = "project:"
   const val CONTEXT_PREFIX = "context:"
@@ -51,7 +55,8 @@ object WidgetListStore {
     return parts[1] to base
   }
 
-  fun baseListId(listId: String): String = grouping(listId)?.second ?: listId
+  fun baseListId(listId: String): String =
+    grouping(listId)?.second ?: if (listId == FOCUS_AVAILABLE_LIST) DEFAULT_LIST else listId
 
   fun withGrouping(listId: String, grouping: String?): String {
     val base = baseListId(listId)
@@ -94,6 +99,22 @@ object WidgetListStore {
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(appWidgetId.toString(), listId).commit()
   }
 
+  fun focusAvailable(context: Context, appWidgetId: Int): Boolean =
+    context.getSharedPreferences(FOCUS_AVAILABLE_PREFS_NAME, Context.MODE_PRIVATE).getBoolean(appWidgetId.toString(), false)
+
+  fun writeFocusAvailable(context: Context, appWidgetId: Int, enabled: Boolean) {
+    val editor = context.getSharedPreferences(FOCUS_AVAILABLE_PREFS_NAME, Context.MODE_PRIVATE).edit()
+    if (enabled) editor.putBoolean(appWidgetId.toString(), true) else editor.remove(appWidgetId.toString())
+    editor.commit()
+  }
+
+  /** The payload list this widget draws: its selection, or the Focus variant when it chose available actions. */
+  fun displayListId(context: Context, appWidgetId: Int): String =
+    displayListId(read(context, appWidgetId), focusAvailable(context, appWidgetId))
+
+  internal fun displayListId(selection: String, focusAvailable: Boolean): String =
+    if (selection == DEFAULT_LIST && focusAvailable) FOCUS_AVAILABLE_LIST else selection
+
   /** Default until the widget's settings pick another. The first release stored Transparent as `true`: that reads as light text. */
   fun background(context: Context, appWidgetId: Int): WidgetBackground =
     when (val stored = context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).all[appWidgetId.toString()]) {
@@ -108,14 +129,14 @@ object WidgetListStore {
   }
 
   fun remove(context: Context, appWidgetIds: IntArray) {
-    for (name in listOf(PREFS_NAME, BACKGROUNDS_PREFS_NAME)) {
+    for (name in listOf(PREFS_NAME, BACKGROUNDS_PREFS_NAME, FOCUS_AVAILABLE_PREFS_NAME)) {
       val editor = context.getSharedPreferences(name, Context.MODE_PRIVATE).edit()
       for (id in appWidgetIds) editor.remove(id.toString())
       editor.apply()
     }
   }
 
-  /** Distinct list ids bound to the Tasks widgets currently placed. */
+  /** Distinct payload list ids the placed Tasks widgets draw (the Focus variant included). */
   fun selections(context: Context): List<String> {
     val manager = AppWidgetManager.getInstance(context) ?: return emptyList()
     return selectionsForProviders(
@@ -123,7 +144,7 @@ object WidgetListStore {
       idsForProvider = { className ->
         manager.getAppWidgetIds(ComponentName(context.packageName, className))
       },
-      readSelection = { appWidgetId -> read(context, appWidgetId) },
+      readSelection = { appWidgetId -> displayListId(context, appWidgetId) },
     )
   }
 

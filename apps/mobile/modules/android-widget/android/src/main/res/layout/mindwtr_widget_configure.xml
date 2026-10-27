@@ -97,6 +97,16 @@
         android:gravity="end|center_vertical"
         android:orientation="horizontal">
 
+        <!-- Focus only (#1468). It shares the Save line, so a short window keeps the list's height. -->
+        <CheckBox
+            android:id="@+id/mindwtr_widget_configure_available"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="48dp"
+            android:textColor="@color/mindwtr_widget_text"
+            android:textSize="13sp" />
+
         <Button
             android:id="@+id/mindwtr_widget_configure_cancel"
             style="?attr/borderlessButtonStyle"

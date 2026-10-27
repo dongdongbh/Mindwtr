@@ -1786,6 +1786,8 @@ export const viOverrides: Record<string, string> = {
         'widget.background': 'Nền',
         'widget.backgroundLightText': 'Trong suốt, chữ sáng',
         'widget.backgroundDarkText': 'Trong suốt, chữ tối',
+        'widget.availableActions': 'Việc có thể làm',
+        'widget.includeAvailableActions': 'Thêm hành động tiếp theo đã đến ngày bắt đầu',
         'agenda.allClear': 'Tất cả ổn!',
         'agenda.noTasks': 'Hiện chưa có gì để tập trung. Gắn sao hoặc đặt hạn cho một nhiệm vụ để nó hiển thị ở đây.',
         'agenda.emptyStart': 'Chưa có nhiệm vụ nào. Thêm những gì bạn đang nghĩ vào Hộp thư đến rồi sắp xếp sau.',

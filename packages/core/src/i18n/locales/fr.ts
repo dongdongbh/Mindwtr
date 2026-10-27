@@ -1588,6 +1588,8 @@ export const frOverrides: Record<string, string> = {
         'widget.background': 'Arrière-plan',
         'widget.backgroundLightText': 'Sans fond, texte clair',
         'widget.backgroundDarkText': 'Sans fond, texte foncé',
+        'widget.availableActions': 'Actions disponibles',
+        'widget.includeAvailableActions': 'Ajouter les actions suivantes dont la date de début est arrivée',
         'agenda.laterToday': 'Plus tard aujourd’hui',
         'agenda.allClear': 'Tout est traité !',
         'agenda.noTasks': 'Rien à traiter pour l’instant. Ajoutez une étoile ou une date d’échéance à une tâche pour la voir ici.',

@@ -1335,6 +1335,8 @@ export const ptOverrides: Record<string, string> = {
         'widget.background': 'Fundo',
         'widget.backgroundLightText': 'Transparente, texto claro',
         'widget.backgroundDarkText': 'Transparente, texto escuro',
+        'widget.availableActions': 'Ações disponíveis',
+        'widget.includeAvailableActions': 'Adicionar próximas ações cuja data de início já chegou',
         'agenda.allClear': 'Tudo limpo!',
         'agenda.noTasks': 'Nada em que focar agora. Marque uma tarefa com estrela ou defina um prazo e ela aparecerá aqui.',
         'agenda.emptyStart': 'Ainda não há tarefas. Adicione o que estiver na sua cabeça à Caixa de entrada e organize depois.',

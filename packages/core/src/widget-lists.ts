@@ -17,6 +17,11 @@ export const WIDGET_SAVED_FILTER_LIST_PREFIX = 'filter:';
 export const WIDGET_SAVED_FILTER_OPTION_CAP = 50;
 export const WIDGET_CONTEXT_LIST_PREFIX = 'context:';
 export const WIDGET_TAG_LIST_PREFIX = 'tag:';
+/**
+ * Focus plus a third section, "Available actions" (#1468): Next Actions whose start date has
+ * arrived. A per-widget option, so the payload carries it under its own key and Focus is unchanged.
+ */
+export const WIDGET_FOCUS_AVAILABLE_LIST_ID = 'focus:available';
 
 export type WidgetGroupBy = 'none' | 'context' | 'project' | 'priority';
 

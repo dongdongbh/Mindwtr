@@ -5,6 +5,7 @@ import android.appwidget.AppWidgetProviderInfo
 import android.content.ComponentName
 import android.content.Intent
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.RadioButton
 import android.view.View
@@ -104,6 +105,41 @@ class WidgetContextSelectionTest {
     assertEquals("context:@家/desk +?%#", WidgetListStore.read(context, 42))
     assertEquals("tag:#urgent", WidgetListStore.read(context, 43))
   }
+  @Test fun focusAvailableActionsIsAPerWidgetFocusOption() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val manager = AppWidgetManager.getInstance(context)
+    shadowOf(manager).addBoundWidget(44, AppWidgetProviderInfo().apply { provider = ComponentName(context.packageName, "TasksWidgetProvider") })
+    WidgetPayloadStore.write(context, root().put("listTitles", JSONObject().put("focusAvailable", "Add started")).toString())
+    WidgetListStore.write(context, 44, "focus")
+    WidgetListStore.write(context, 45, "focus")
+    val intent = Intent(context, WidgetConfigureActivity::class.java).putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, 44)
+    val controller = Robolectric.buildActivity(WidgetConfigureActivity::class.java, intent)
+    controller.get().setTheme(androidx.appcompat.R.style.Theme_AppCompat)
+    val activity = controller.create().get()
+    val option = activity.findViewById<CheckBox>(R.id.mindwtr_widget_configure_available)
+    assertEquals(View.VISIBLE, option.visibility)
+    assertEquals("Add started", option.text.toString())
+    assertFalse(option.isChecked)
+    // Another list hides it; Focus brings it back.
+    val list = activity.findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
+    val adapter = list.adapter as WidgetConfigureActivity.ChooserAdapter
+    val inbox = (0 until adapter.count).single { adapter.getItem(it).first == "inbox" }
+    list.performItemClick(adapter.getView(inbox, null, list), inbox, adapter.getItemId(inbox))
+    assertEquals(View.INVISIBLE, option.visibility)
+    val focus = (0 until adapter.count).single { adapter.getItem(it).first == "focus" }
+    list.performItemClick(adapter.getView(focus, null, list), focus, adapter.getItemId(focus))
+    assertEquals(View.VISIBLE, option.visibility)
+    option.performClick()
+    activity.findViewById<Button>(R.id.mindwtr_widget_configure_ok).performClick()
+    assertTrue(WidgetListStore.focusAvailable(context, 44))
+    assertFalse(WidgetListStore.focusAvailable(context, 45))
+    assertEquals(WidgetListStore.FOCUS_AVAILABLE_LIST, WidgetListStore.displayListId(context, 44))
+    assertEquals("focus", WidgetListStore.displayListId(context, 45))
+    assertEquals("focus", WidgetListStore.read(context, 44))
+    WidgetListStore.remove(context, intArrayOf(44))
+    assertFalse(WidgetListStore.focusAvailable(context, 44))
+  }
+
   @Test fun largeTokenInventoryInflatesOnlyVisibleRowsAndRecyclesCheckedState() {
     val context = ApplicationProvider.getApplicationContext<Context>()
     var chosen = "context:@14999"

@@ -1417,6 +1417,8 @@ export const itOverrides: Record<string, string> = {
         'widget.background': 'Sfondo',
         'widget.backgroundLightText': 'Trasparente, testo chiaro',
         'widget.backgroundDarkText': 'Trasparente, testo scuro',
+        'widget.availableActions': 'Azioni disponibili',
+        'widget.includeAvailableActions': 'Aggiungi le azioni successive la cui data di inizio è arrivata',
         'agenda.allClear': 'Tutto a posto!',
         'agenda.noTasks': 'Niente su cui concentrarsi al momento. Aggiungi una stella o una scadenza a un’attività e apparirà qui.',
         'agenda.emptyStart': 'Ancora nessuna attività. Aggiungi quello che hai in mente in Entrata e sistemalo più tardi.',

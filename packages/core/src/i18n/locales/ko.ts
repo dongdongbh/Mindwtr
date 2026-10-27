@@ -1748,6 +1748,8 @@ export const koOverrides: Record<string, string> = {
         'widget.background': '배경',
         'widget.backgroundLightText': '투명, 밝은 글자',
         'widget.backgroundDarkText': '투명, 어두운 글자',
+        'widget.availableActions': '시작 가능한 작업',
+        'widget.includeAvailableActions': '시작일이 된 다음 행동 추가',
         'agenda.allClear': '모두 완료!',
         'agenda.noTasks': '지금은 집중할 항목이 없습니다. 할 일에 별표를 하거나 마감일을 지정하면 여기에 표시됩니다.',
         'agenda.emptyStart': '아직 할 일이 없습니다. 떠오르는 일을 수집함에 추가하고 나중에 정리하세요.',

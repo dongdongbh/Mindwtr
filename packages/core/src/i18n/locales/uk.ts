@@ -1911,6 +1911,8 @@ export const ukOverrides: Record<string, string> = {
     'widget.background': 'Тло',
     'widget.backgroundLightText': 'Прозоре, світлий текст',
     'widget.backgroundDarkText': 'Прозоре, темний текст',
+    'widget.availableActions': 'Доступні дії',
+    'widget.includeAvailableActions': 'Додати наступні дії, дата початку яких настала',
     "agenda.laterToday": "Пізніше сьогодні",
     "agenda.allClear": "Все ясно!",
     "agenda.noTasks": "Зараз немає на чому зосередитися. Позначте завдання зірочкою або вкажіть термін виконання, і воно з’явиться тут.",

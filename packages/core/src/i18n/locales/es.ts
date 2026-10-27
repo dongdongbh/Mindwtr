@@ -1909,6 +1909,8 @@ export const esOverrides: Record<string, string> = {
 'widget.background': 'Fondo',
 'widget.backgroundLightText': 'Transparente, texto claro',
 'widget.backgroundDarkText': 'Transparente, texto oscuro',
+'widget.availableActions': 'Acciones disponibles',
+'widget.includeAvailableActions': 'Añadir próximas acciones cuya fecha de inicio ya llegó',
 'agenda.laterToday': "Más tarde hoy",
 'agenda.allClear': "¡Todo limpio!",
 'agenda.noTasks': "Nada en qué enfocarse ahora. Marca una tarea con una estrella o ponle una fecha de vencimiento y aparecerá aquí.",

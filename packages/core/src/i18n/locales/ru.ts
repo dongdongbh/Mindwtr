@@ -1255,6 +1255,8 @@ export const ruOverrides: Record<string, string> = {
         'widget.background': 'Фон',
         'widget.backgroundLightText': 'Прозрачный, светлый текст',
         'widget.backgroundDarkText': 'Прозрачный, тёмный текст',
+        'widget.availableActions': 'Доступные действия',
+        'widget.includeAvailableActions': 'Добавить следующие действия, дата начала которых наступила',
         'agenda.allClear': 'Все ясно!',
         'agenda.noTasks': 'Сейчас не на чем сфокусироваться. Отметьте задачу звёздочкой или задайте срок — и она появится здесь.',
         'agenda.emptyStart': 'Задач пока нет. Добавьте всё, что держите в голове, во Входящие и разберите позже.',

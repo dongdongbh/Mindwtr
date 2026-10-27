@@ -1834,6 +1834,8 @@ export const zhHant: Record<string, string> = {
         'widget.background': '背景',
         'widget.backgroundLightText': '透明，淺色文字',
         'widget.backgroundDarkText': '透明，深色文字',
+        'widget.availableActions': '可開始的行動',
+        'widget.includeAvailableActions': '加入開始日期已到的下一步行動',
         'agenda.laterToday': '今天稍後',
         'agenda.allClear': '全部完成！',
         'agenda.noTasks': '目前沒有需要專注的任務。為任務加上星號或截止日期，就會顯示在這裡。',

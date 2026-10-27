@@ -1352,6 +1352,8 @@ export const deOverrides: Record<string, string> = {
         'widget.background': 'Hintergrund',
         'widget.backgroundLightText': 'Durchsichtig, helle Schrift',
         'widget.backgroundDarkText': 'Durchsichtig, dunkle Schrift',
+        'widget.availableActions': 'Verfügbare Aktionen',
+        'widget.includeAvailableActions': 'Nächste Aktionen hinzufügen, deren Startdatum erreicht ist',
         'agenda.laterToday': 'Später heute',
         'agenda.allClear': 'Alles geklärt!',
         'agenda.noTasks': 'Gerade nichts im Fokus. Markiere eine Aufgabe mit einem Stern oder gib ihr ein Fälligkeitsdatum, dann erscheint sie hier.',

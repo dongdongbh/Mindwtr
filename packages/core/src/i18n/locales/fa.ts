@@ -1938,6 +1938,8 @@ export const faOverrides: Record<string, string> = {
         'widget.background': 'پس‌زمینه',
         'widget.backgroundLightText': 'شفاف، متن روشن',
         'widget.backgroundDarkText': 'شفاف، متن تیره',
+        'widget.availableActions': 'اقدام‌های در دسترس',
+        'widget.includeAvailableActions': 'افزودن اقدام‌های بعدی که تاریخ شروعشان رسیده است',
         'agenda.laterToday': 'بعدتر در امروز',
         'agenda.allClear': 'همه‌چیز مرتب است!',
         'agenda.noTasks': 'فعلاً چیزی برای تمرکز نیست. یک کار را ستاره بزنید یا برایش تاریخ سررسید تعیین کنید تا اینجا نمایش داده شود.',

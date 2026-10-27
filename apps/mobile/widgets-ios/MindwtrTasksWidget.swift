@@ -138,8 +138,14 @@ struct MindwtrTasksWidgetPayload: Decodable {
         pendingActions: [MindwtrWidgetPendingAction] = [],
         at date: Date = Date()
     ) -> MindwtrTasksWidgetPayload {
-        let normalizedId = nonEmpty(listId) ?? "focus"
-        let focusPayload = unfilteredSelection(for: "focus")
+        var normalizedId = nonEmpty(listId) ?? "focus"
+        // The Focus variant (#1468) is Focus with a third section; a payload without it draws plain Focus.
+        var focusListId = "focus"
+        if normalizedId == mindwtrFocusAvailableListId {
+            normalizedId = "focus"
+            if lists?[mindwtrFocusAvailableListId] != nil { focusListId = mindwtrFocusAvailableListId }
+        }
+        let focusPayload = unfilteredSelection(for: focusListId)
         let nextPayload = unfilteredSelection(for: "next")
         let resolvedId = MindwtrWidgetActionProjection.resolvedListId(
             requestedListId: normalizedId,
@@ -150,7 +156,7 @@ struct MindwtrTasksWidgetPayload: Decodable {
             pendingActions: pendingActions,
             at: date
         )
-        return unfilteredSelection(for: resolvedId)
+        return unfilteredSelection(for: resolvedId == "focus" ? focusListId : resolvedId)
             .filteringHiddenActions(pendingActions, at: date, upcomingOnly: resolvedId == "upcoming")
     }
 
@@ -181,11 +187,12 @@ struct MindwtrTasksWidgetPayload: Decodable {
 
     private func unfilteredSelection(for listId: String) -> MindwtrTasksWidgetPayload {
         if let list = lists?[listId] {
+            let isFocus = listId == "focus" || listId == mindwtrFocusAvailableListId
             return replacingRoot(
                 // The default is the short localized Today label published at
                 // the root. Explicit lists use their own localized title.
-                title: listId == "focus" ? headerTitle : list.title,
-                dateLabel: listId == "focus" ? (list.dateLabel ?? self.dateLabel) : list.dateLabel,
+                title: isFocus ? headerTitle : list.title,
+                dateLabel: isFocus ? (list.dateLabel ?? self.dateLabel) : list.dateLabel,
                 sections: list.sections ?? [],
                 items: list.items ?? [],
                 openUri: MindwtrWidgetListNavigation.destination(
@@ -296,6 +303,9 @@ private extension MindwtrWidgetTaskItem {
         MindwtrWidgetActionIdentity(taskId: id, completionToken: isUpcomingPreview ? nil : completionToken)
     }
 }
+
+/// Core's WIDGET_FOCUS_AVAILABLE_LIST_ID: Focus plus Next Actions whose start date has arrived (#1468).
+let mindwtrFocusAvailableListId = "focus:available"
 
 func nonEmpty(_ value: String?) -> String? {
     guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {

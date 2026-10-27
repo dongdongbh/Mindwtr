@@ -1305,6 +1305,8 @@ export const arOverrides: Record<string, string> = {
         'widget.background': 'الخلفية',
         'widget.backgroundLightText': 'شفافة، نص فاتح',
         'widget.backgroundDarkText': 'شفافة، نص داكن',
+        'widget.availableActions': 'إجراءات متاحة',
+        'widget.includeAvailableActions': 'إضافة الإجراءات التالية التي حلّ تاريخ بدئها',
         'agenda.allClear': 'كل شيء واضح!',
         'agenda.noTasks': 'لا شيء للتركيز عليه الآن. ضع نجمة على مهمة أو حدّد لها موعدًا نهائيًا لتظهر هنا.',
         'agenda.emptyStart': 'لا توجد مهام بعد. أضف ما يدور في ذهنك إلى البريد الوارد ورتّبه لاحقًا.',

@@ -14,7 +14,7 @@ import {
     iosWidgetProjectionOptions,
     isWidgetAudioCaptureEnabled,
 } from '@mindwtr/core/widget-payload';
-import { WIDGET_FIXED_LIST_IDS } from '@mindwtr/core/widget-lists';
+import { WIDGET_FIXED_LIST_IDS, WIDGET_FOCUS_AVAILABLE_LIST_ID } from '@mindwtr/core/widget-lists';
 import {
     buildShortcutsSnapshot,
     createWidgetPayloadProjection,
@@ -97,6 +97,22 @@ const ANDROID_WIDGET_PROVIDER_COMPAT_RELEASE_CHECK = 'v1.3.0/android-widget-prov
 const WIDGET_FOCUS_TODAY_RELEASE_CHECK = 'v1.3.0/widget-focus-today';
 const IOS_WIDGET_PARITY_RELEASE_CHECK = 'v1.3.1/ios-widget-parity';
 let androidWidgetUnavailableLogged = false;
+
+// #1468: proves a Focus widget's "available actions" variant was published, and how many rows it added.
+function logFocusAvailablePublished(payload: TasksWidgetPayload, platform: 'android' | 'ios'): void {
+    const list = payload.lists[WIDGET_FOCUS_AVAILABLE_LIST_ID];
+    if (!list) return;
+    void logInfo('Focus widget available actions published', {
+        scope: 'widget',
+        force: true,
+        extra: {
+            releaseCheck: 'v1.3.8/widget-focus-available',
+            platform,
+            count: String(list.sections?.find((section) => section.key === 'available')?.items.length ?? 0),
+            totalItems: String(list.totalCount),
+        },
+    });
+}
 
 async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, language: Language, audioEnabled: boolean): Promise<boolean> {
     if (Platform.OS !== 'android') return false;
@@ -190,6 +206,7 @@ async function updateAndroidWidgetsFromData(rendered: TasksWidgetPayload, langua
             force: true,
             extra: { releaseCheck: 'v1.3.8/widget-snapshot-rollover', platform: 'android', count: payload.lists.upcoming?.items.length ?? 0 },
         });
+        logFocusAvailablePublished(payload, 'android');
         void logInfo('Android widget fixed lists published', {
             scope: 'widget',
             extra: {
@@ -275,6 +292,7 @@ async function updateIosWidgetPayloads(projection: WidgetPayloadProjection): Pro
             force: true,
             extra: { releaseCheck: 'v1.3.8/widget-snapshot-rollover', platform: 'ios', count: payload.lists.upcoming?.items.length ?? 0 },
         });
+        logFocusAvailablePublished(payload, 'ios');
         void logInfo('iOS Focus widget payload published', {
             scope: 'widget',
             extra: {

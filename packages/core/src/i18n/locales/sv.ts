@@ -1933,6 +1933,8 @@ export const svOverrides: Record<string, string> = {
         'widget.background': 'Bakgrund',
         'widget.backgroundLightText': 'Genomskinlig, ljus text',
         'widget.backgroundDarkText': 'Genomskinlig, mörk text',
+        'widget.availableActions': 'Tillgängliga åtgärder',
+        'widget.includeAvailableActions': 'Lägg till nästa åtgärder vars startdatum har kommit',
         'agenda.laterToday': 'Senare idag',
         'agenda.allClear': 'Allt klart!',
         'agenda.noTasks': 'Inget att fokusera på just nu. Stjärnmärk en uppgift eller ge den ett förfallodatum så visas den här.',

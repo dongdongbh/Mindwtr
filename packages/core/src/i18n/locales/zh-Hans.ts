@@ -1834,6 +1834,8 @@ export const zhHans: Record<string, string> = {
         'widget.background': '背景',
         'widget.backgroundLightText': '透明，浅色文字',
         'widget.backgroundDarkText': '透明，深色文字',
+        'widget.availableActions': '可开始的行动',
+        'widget.includeAvailableActions': '添加开始日期已到的下一步行动',
         'agenda.laterToday': '今天稍后',
         'agenda.allClear': '全部完成！',
         'agenda.noTasks': '目前没有需要专注的任务。给任务加星或设置截止日期，就会显示在这里。',

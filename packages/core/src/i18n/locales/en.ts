@@ -1963,6 +1963,8 @@ export const en: Record<string, string> = {
         'widget.background': 'Background',
         'widget.backgroundLightText': 'Transparent, light text',
         'widget.backgroundDarkText': 'Transparent, dark text',
+        'widget.availableActions': 'Available actions',
+        'widget.includeAvailableActions': 'Add Next Actions whose start date has arrived',
         'agenda.laterToday': 'Later today',
         'agenda.allClear': 'All Clear!',
         'agenda.noTasks': 'Nothing to focus on right now. Star a task or give it a due date and it will show up here.',
