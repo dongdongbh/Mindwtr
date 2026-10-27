@@ -122,7 +122,6 @@ export type PreparedProjectCreate = {
     defaultProjectFlowMode: string | null;
 };
 
-/** One saved task move, with an optional new project, and complete written-row receipts. */
 /** A frozen native Convert to section: the source task's soft delete, the new section and its checklist tasks. */
 export type PreparedTaskToSection = {
     sourceBefore: Task;
@@ -138,6 +137,7 @@ export type PreparedTaskToSection = {
     result: { projectId: string; sectionId: string };
 };
 
+/** One saved task move, with an optional new project, and complete written-row receipts. */
 export type PreparedTaskPromotion = {
     sourceBefore: Task;
     sourceProject: Project | null;

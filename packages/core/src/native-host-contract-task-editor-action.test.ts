@@ -65,6 +65,17 @@ describe('runTaskEditorAction', () => {
         expect(cold.data().sections).toHaveLength(1);
     });
 
+    it('refuses a Convert to section request ID that already made another task\'s section, and writes nothing', async () => {
+        const { host, data } = await open({ tasks: [task(), task({ id: 'other', title: 'Paint the hall' })] });
+        expect(await host.runTaskEditorAction(action(30, 'convertToSection'))).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        const reused = { requestId: uuid(30), taskId: 'other', taskRevision: taskRevisionOf(useTaskStore.getState()._tasksById.get('other')!),
+            kind: 'convertToSection' };
+        expect(await host.runTaskEditorAction(reused as never))
+            .toEqual({ ok: false, error: { code: 'INVALID_INPUT', message: 'Request ID already belongs to another action' } });
+        expect(data().tasks.find((row) => row.id === 'other')?.deletedAt).toBeUndefined();
+        expect(data().sections).toHaveLength(1);
+    });
+
     it('prepares Convert to section again when a sync lands between its preparation and commit', async () => {
         const { host, data } = await open();
         const prepare = host.prepareTaskToSection.bind(host);
@@ -176,6 +187,20 @@ describe('runTaskEditorAction', () => {
         expect(await cold.host.runTaskEditorAction(action(17, 'cancelUndo', { cancelRequestId: uuid(16) })))
             .toEqual({ ok: false, error: { code: 'STALE_REVISION', message: 'The cancellation can no longer be undone' } });
         expect(cold.stored().status).toBe('archived');
+    });
+
+    it('answers an unchanged Undo whose save fails with SAVE_FAILED, and its retry with the full reply', async () => {
+        let failing = false;
+        const { host } = await open({ tasks: [task(), task({ id: 'other', title: 'Paint the hall' })] }, () => failing);
+        expect(await host.runTaskEditorAction(action(31, 'cancel', { save: { base: {}, patch: {}, scheduleBase } }))).toMatchObject({ ok: true });
+        expect(await host.runTaskEditorAction(action(32, 'cancelUndo', { cancelRequestId: uuid(31) }))).toMatchObject({ ok: true });
+        // A second Undo tap finds the task restored while an unrelated change waits for a save that fails.
+        void useTaskStore.getState().updateTask('other', { title: 'Queued' });
+        failing = true;
+        const again = action(33, 'cancelUndo', { cancelRequestId: uuid(31) });
+        expect(await host.runTaskEditorAction(again)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        expect(await host.runTaskEditorAction(again)).toEqual({ ok: true, value: { kind: 'cancelUndo', outcome: 'unchanged' } });
     });
 
     it('answers SAVE_FAILED for a cancel whose save fails, and the retry only saves it', async () => {

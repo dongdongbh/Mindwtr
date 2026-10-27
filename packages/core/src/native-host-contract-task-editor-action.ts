@@ -1,7 +1,7 @@
 import type { NativeHostResult } from './native-host-contract';
 import { canonicalJSON } from './native-host-contract-task-to-section';
 import { isNativeJsonWithinBytes, toChecklist } from './native-host-contract-task-view';
-import type { NativeRequestReceipts } from './native-request-receipts';
+import { settleWrite, type NativeRequestReceipts } from './native-request-receipts';
 import { useTaskStore } from './store';
 import { isTaskCancelled } from './task-status';
 
@@ -31,7 +31,7 @@ type Reply = NativeHostResult<unknown>;
 type Extra = Omit<NativeTaskEditorActionResult, 'kind' | 'outcome'>;
 /** A core prepared command: its prepare and commit methods on the contract, and the reply fields its result gives. */
 type Step = { prepare: string; commit: string; request: Json; input?: Json; extra: (result: Json) => Extra };
-type Plan = { outcome: 'unchanged'; extra?: Extra } | { conflict: string } | Step;
+type Plan = { outcome: 'unchanged'; extra?: Extra } | { refused: NativeHostResult<never> } | Step;
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const ATTEMPTS = 4;
@@ -69,7 +69,9 @@ const valid = (input: unknown): input is NativeTaskEditorAction => {
  * retry redoes the whole action. A sync landing between the steps (STALE_REVISION) prepares again; a failed save keeps what
  * landed and the retry only saves it. A replay of an action that landed answers its first reply and writes nothing: Convert to
  * section and Delete by their target state (the section named by the request, the task in Trash), the others by a receipt
- * kept on disk with the data on Android.
+ * kept on disk with the data on Android. That receipt commits in its own transaction right after the write: a process death
+ * between the two leaves a boot replay with no receipt, which the write's own checks refuse (Create project STALE_REVISION,
+ * Cancel and Skip INVALID_INPUT) without writing twice. Convert to section has no such gap.
  */
 export function createTaskEditorActionMethods(deps: {
     readiness: () => NativeHostResult<null>;
@@ -101,6 +103,9 @@ export function createTaskEditorActionMethods(deps: {
             case 'convertToSection': {
                 // The section takes the request UUID as its id: once it exists, the conversion landed.
                 const made = state._sectionsById.get(requestId);
+                if (made && (live || made.projectId !== task?.projectId)) {
+                    return { refused: fail('INVALID_INPUT', 'Request ID already belongs to another action') };
+                }
                 if (made) return { outcome: 'unchanged', extra: { projectId: made.projectId, sectionId: made.id } };
                 return { prepare: 'prepareTaskToSection', commit: 'commitPreparedTaskToSection', request: { requestId, taskId, taskRevision },
                     extra: (result) => ({ projectId: result.projectId as string, sectionId: result.sectionId as string }) };
@@ -116,7 +121,7 @@ export function createTaskEditorActionMethods(deps: {
             case 'deleteUndo': {
                 if (live) return { outcome: 'unchanged' };
                 const deletion = deletes.get(action.deleteRequestId);
-                if (!deletion || (deletion.request as Json).taskId !== taskId) return { conflict: 'The Delete can no longer be undone' };
+                if (!deletion || (deletion.request as Json).taskId !== taskId) return { refused: fail('STALE_REVISION', 'The Delete can no longer be undone') };
                 const request = { requestId, deleteRequestId: action.deleteRequestId };
                 return { prepare: 'prepareTaskDeleteUndo', commit: 'commitPreparedTaskDeleteUndo', request,
                     input: { request, delete: deletion }, extra: () => ({}) };
@@ -135,7 +140,7 @@ export function createTaskEditorActionMethods(deps: {
             case 'cancelUndo': {
                 if (live && !isTaskCancelled(task!)) return { outcome: 'unchanged' };
                 const cancel = cancels.get(action.cancelRequestId);
-                if (!cancel || (cancel.request as Json).id !== taskId) return { conflict: 'The cancellation can no longer be undone' };
+                if (!cancel || (cancel.request as Json).id !== taskId) return { refused: fail('STALE_REVISION', 'The cancellation can no longer be undone') };
                 const request = { requestId, cancelRequestId: action.cancelRequestId };
                 return { prepare: 'prepareTaskCancellationUndo', commit: 'commitPreparedTaskCancellationUndo', request,
                     input: { request, cancel }, extra: () => ({}) };
@@ -165,21 +170,16 @@ export function createTaskEditorActionMethods(deps: {
         let stale = 'Task changed; the action could not be applied';
         for (let attempt = 0; attempt < ATTEMPTS; attempt += 1) {
             const step = plan(action);
-            if ('conflict' in step) return fail('STALE_REVISION', step.conflict);
-            if ('outcome' in step) {
-                const saved = await deps.save();
-                return saved.ok ? { ok: true, value: answer('unchanged', step.extra) } : saved;
-            }
+            if ('refused' in step) return step.refused;
+            // A failed save still carries the answer, so the receipt's retry replies in full.
+            if ('outcome' in step) return settleWrite(await deps.save(), answer('unchanged', step.extra));
             const prepared = await call(step.prepare, step.input ?? step.request) as NativeHostResult<Json>;
             if (!prepared.ok) {
                 if (prepared.error.code !== 'STALE_REVISION') return prepared;
                 stale = prepared.error.message;
                 continue;
             }
-            if (prepared.value.kind !== 'prepared') {
-                const saved = await deps.save();
-                return saved.ok ? { ok: true, value: answer('unchanged') } : saved;
-            }
+            if (prepared.value.kind !== 'prepared') return settleWrite(await deps.save(), answer('unchanged'));
             const committed = await commit({ ...step, prepared: prepared.value.prepared as Json });
             if (committed.ok || committed.error.code !== 'STALE_REVISION') return committed;
             stale = committed.error.message;
