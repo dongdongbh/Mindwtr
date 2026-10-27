@@ -123,3 +123,68 @@ describe('warming the first save\'s read fingerprints', () => {
         } finally { plainDb.sql.close(); warmDb.sql.close(); }
     });
 });
+
+// Review of the fingerprint warm (guard probes): each fails if its guard is dropped from fingerprintsFromLastRead.
+describe('the warmed read fingerprints are used only for the same read with no write since', () => {
+    const title = async (sql: ReturnType<typeof openScratchSqlite>) => (await sql.client.all<{ title: string }>('SELECT title FROM tasks WHERE id = ?', ['t3']))[0].title;
+
+    it('ignores them after this adapter wrote between the warm and the save (writesStarted)', async () => {
+        const { sql, adapter, read } = await cold(library(10));
+        try {
+            while (!adapter.warmReadFingerprints(3)) { /* slices of 3 */ }
+            await adapter.saveTask({ ...read.tasks[3], title: 'B' });
+            // The read's own row for t3 is older than the database now: the save compares with fresh fingerprints and writes it back.
+            await adapter.saveData(read);
+            expect(await title(sql)).toBe('Task 3');
+        } finally { sql.close(); }
+    });
+
+    it('ignores them for a newer read, after another connection committed (the read object)', async () => {
+        const data = library(10);
+        const dir = mkdtempSync(join(tmpdir(), 'warm-guard-')); directories.push(dir);
+        const file = join(dir, 'guard.sqlite');
+        const first = openScratchSqlite(file);
+        await new SqliteAdapter(first.client).saveData(data);
+        first.close();
+        const sql = openScratchSqlite(file);
+        const adapter = new SqliteAdapter(sql.client, { rejectConcurrentWrites: true });
+        try {
+            const read = await adapter.getData();
+            while (!adapter.warmReadFingerprints(3)) { /* slices of 3 */ }
+            const other = openScratchSqlite(file);
+            await other.client.run('UPDATE tasks SET title = ? WHERE id = ?', ['B', 't3']);
+            other.close();
+            await adapter.getData();
+            await adapter.saveData(read);
+            expect(await title(sql)).toBe('Task 3');
+        } finally { sql.close(); }
+    });
+
+    it('fills every table the save compares (tasks, projects, sections, areas, people, saved filters) as a recompute does', async () => {
+        const six = (): AppData => ({
+            ...library(30),
+            projects: [{ id: 'p1', title: 'Project', status: 'active', color: '#123456', order: 0, tagIds: [], createdAt: AT, updatedAt: AT }],
+            sections: [{ id: 's1', projectId: 'p1', title: 'Section', order: 0, createdAt: AT, updatedAt: AT }],
+            areas: [{ id: 'a1', name: 'Area', order: 0, createdAt: AT, updatedAt: AT }],
+            people: [{ id: 'u1', name: 'Person', createdAt: AT, updatedAt: AT }],
+            settings: { deviceId: 'device', savedFilters: [{ id: 'f1', name: 'Filter', view: 'tasks', criteria: { tags: ['#a'] }, createdAt: AT, updatedAt: AT }] },
+        } as AppData);
+        const plain = await cold(six());
+        const warm = await cold(six());
+        const all = async (sql: ReturnType<typeof openScratchSqlite>) => JSON.stringify(await Promise.all(['tasks', 'projects', 'sections', 'areas', 'people', 'saved_filters', 'settings']
+            .map((table) => sql.client.all(`SELECT * FROM ${table} ORDER BY rowid`))));
+        try {
+            const edit = (read: AppData): AppData => ({ ...read,
+                projects: read.projects.map((project) => ({ ...project, title: 'Project renamed' })),
+                areas: read.areas.map((area) => ({ ...area, name: 'Area renamed' })) });
+            await plain.adapter.saveData(edit(plain.read));
+            for (let from = 0; from < warm.read.tasks.length;) from = warmTaskRowEntries(warm.read.tasks, from, 7);
+            let slices = 0;
+            while (!warm.adapter.warmReadFingerprints(7)) slices += 1;
+            expect(slices).toBeGreaterThanOrEqual(4);
+            const warmed = await stringifiesDuring(() => warm.adapter.saveData(edit(warm.read)));
+            expect(warmed).toBeLessThan(40);
+            expect(await all(warm.sql)).toBe(await all(plain.sql));
+        } finally { plain.sql.close(); warm.sql.close(); }
+    });
+});

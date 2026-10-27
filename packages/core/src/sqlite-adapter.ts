@@ -618,6 +618,7 @@ export class SqliteAdapter {
     protected invalidateWriteBaselineAfterDirectSQL(): void {
         this.lastSavedFingerprints = null;
         this.lastReadRows = null;
+        this.warmedRead = null;
         this.lastKnownRowVersions = null;
         this.lastObservedExternalChangeEpoch = undefined;
     }
@@ -1527,7 +1528,9 @@ export class SqliteAdapter {
      */
     warmReadFingerprints(count: number): boolean {
         const read = this.lastReadRows;
-        if (!read || read.writesStarted !== this.writesStarted) return true;
+        // Nothing to warm once the read is gone or stale, or a save already has its own fingerprints: let go of any warm, or a
+        // warm that lands after a committed save keeps a whole read alive for the process.
+        if (!read || read.writesStarted !== this.writesStarted || this.lastSavedFingerprints) { this.warmedRead = null; return true; }
         if (this.warmedRead?.read !== read) this.warmedRead = { read, tables: new Map(), table: 0, row: 0, done: false };
         const warm = this.warmedRead;
         if (warm.done) return true;
