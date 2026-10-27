@@ -854,7 +854,7 @@ assert.match(model, /fun refreshFocus\(\) \{\s+\/\/[^\n]*\s+if \(focus == null &
 // Projects waits even when already read: a list older than a write made outside a command (the welcome sheet's Getting Started)
 // would keep the project's header title blank (O2f phone check).
 assert.match(model, /fun refreshProjects\(\) \{\s+(?:\/\/[^\n]*\s+)+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
-assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)/);
+assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)/);
 // After a command every list is still read: the full read is the step after what is on screen.
 assert.match(model, /AfterCommandReads\.Read\.AllLists -> background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, done, ::showLists\)/);
 // A command's lists are read again only after it succeeds (or was refused as stale), in the background, once busy is released.
@@ -2470,7 +2470,7 @@ assert.equal(code(menuModel).match(/if \(failure\.message\?\.startsWith\("STALE_
 assert.match(menuModel, /private fun readMoveChoices\(depth: Int = WINDOW\) \{[\s\S]*?\.put\("offset", 0\)[\s\S]*?\.put\("revision", first\.getString\("revision"\)\)[\s\S]*?if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/,
     'the move dialog pages its choices under the first window\'s revision and rereads from the first window');
 assert.match(menuModel, /fun moreMoveChoices\(\) \{ moveChoices\?\.getJSONObject\("choices"\)\?\.getJSONArray\("items"\)\?\.length\(\)\?\.let \{ readMoveChoices\(it \+ WINDOW\) \} \}/);
-assert.match(model, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every sync');
+assert.match(model, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every sync');
 assert.match(model, /AfterCommandReads\.Read\.Menu -> menu\.refresh\(done\)/, 'the open Menu list is read again after every command, first when on screen');
 // Filters, sorts and groups: every choice sends the exact edit or value core put on it; only typed text builds an edit.
 {
