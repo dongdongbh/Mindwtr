@@ -194,7 +194,7 @@ describe('normalizeTaskForLoad in one pass', () => {
             same(task, NOW);
             same(frozenNormalizeTaskForLoad(task, NOW), NOW);
         }
-    });
+    }, 60_000);
 
     it('hands an already normalized task back as the same object', () => {
         for (const [, task] of corpus()) {
@@ -254,5 +254,7 @@ describe('normalizeTaskForLoad in one pass', () => {
             console.log('DIFF', diff(a, b, '').join(' | '));
         }
         expect(actual).toBe(expected);
-    });
+    // It imports the store twice (with and without the frozen normalizer): seconds of module loading on a loaded machine, so the
+    // default 5 s timeout would make it flaky.
+    }, 60_000);
 });

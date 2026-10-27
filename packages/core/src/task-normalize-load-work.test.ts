@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { normalizeTaskForLoad } from './task-status';
 
 // The load normalizer's work per task: one record comparison (and one built object), not one per step. At 5,000 tasks the two-step
 // form cost 230 ms of the native boot on the S23's QuickJS.
@@ -9,8 +10,9 @@ vi.mock('./shallow-identity', async (original) => {
 });
 
 describe('normalizeTaskForLoad work', () => {
-    it('compares each task with its normalized form once', async () => {
-        const { normalizeTaskForLoad } = await import('./task-status');
+    // Imported statically, with the counting mock hoisted above it: a dynamic import inside the test counted the module load
+    // against the test's 5 s timeout, which a loaded machine passed (gates2 needed a rerun).
+    it('compares each task with its normalized form once', () => {
         const tasks = Array.from({ length: 50 }, (_, i) => ({ id: `t${i}`, title: `t${i}`, status: i % 2 ? 'done' : 'next', tags: [], contexts: [],
             createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }));
         counts.compared = 0;
