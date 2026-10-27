@@ -1,5 +1,24 @@
 # Performance and stability handoff
 
+## Native Android (Kotlin + QuickJS host), October 26-27
+
+Full evidence: [native Android startup and interactions, 2026-10-26](native-android-startup-2026-10-26.md). Galaxy S23, Benchmark builds,
+large-5000 and 1k fixtures, interleaved A/B on archived APKs in quiet windows.
+
+- **Result:** cold first content at 5k went from 1012 to 823 ms. That is −19%, below the 10-01 budget run (874 ms), and 37% under RN
+  (1312 ms). The fixes: Focus builds derived summaries only for review projects (−52 ms); the load normalizer builds each task once
+  (−139 ms; shared core, so RN and desktop load faster too); the widget build no longer runs twice and waits for a quiet core (first tap
+  right after first content: 348 → 121 ms); after a command, the screen on show is read first (save's row about 40 ms sooner).
+- **Head to head with RN:** native leads on cold and warm start, tab switch, editor open, capture open (keyboard shown), and scroll frame
+  time. Save is native's remaining gap: 338 vs 173 ms settled at 5k. Almost all of it is `core:captureSubmit` (230–250 ms), the
+  snapshot save walking every row in QuickJS.
+- **Limits:** one phone; n = 8–20 per cell; the save and tab metrics end on animation frames. The H2H RN build carried a local scheme patch,
+  now committed as `eb1782e1f`.
+- **Next hypothesis (S2):** split `captureSubmit` with the probe build's save-step sections, then an exact incremental save for a write
+  that knows its changed ids. This is a persistence change: guardrails and an Opus review apply.
+- **Rejected or withdrawn:** skipping hidden-list reads after a write (a stale tap target); merging Pomodoro reads (stale presentation);
+  "rawReadRow bypasses #766" (wrong: raw rows exist only for `getData({ rawTasks: true })`, and the recheck is pinned).
+
 September 15 shared-core update: [archive reactivation candidate validation](archive-reactivation-2026-09-15.md) removes repeated full-section projections. This is synthetic core work-count evidence; native desktop and mobile latency remain unmeasured for this change.
 
 Updated September 13, 2026. Engineering handoff for future desktop and mobile
