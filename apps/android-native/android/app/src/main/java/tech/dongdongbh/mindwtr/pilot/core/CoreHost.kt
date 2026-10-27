@@ -809,9 +809,24 @@ class CoreHost(
      * waiting is published (RN's flush); the whole payload is not built again.
      */
     fun refreshWidgets(leave: Boolean = false) {
-        if (leave) callAsync("widgetsRefresh", "leave") else callAsync("widgetsRefresh")
+        if (leave) callAsync("widgetsRefresh", "leave") else {
+            // The build waits for core to be quiet (WidgetRefreshGate), bounded; leaving the app flushes at once.
+            val askedAt = SystemClock.uptimeMillis()
+            while (Thread.currentThread() !== engineThread) {
+                val wait = WidgetRefreshGate.waitMs(SystemClock.uptimeMillis(), askedAt, lastCallAt, engineBusy())
+                if (wait <= 0) break
+                Thread.sleep(wait)
+            }
+            callAsync("widgetsRefresh")
+        }
         widgets?.settle()
     }
+
+    /** When a call other than the widget refresh last went to the engine (uptime ms), for [WidgetRefreshGate]. */
+    @Volatile private var lastCallAt = 0L
+
+    /** A task is waiting to run on the engine now (a delayed one, the idle pump or a deadline check, does not count). */
+    private fun engineBusy(): Boolean = executor.queue.any { (it as? java.util.concurrent.Delayed)?.getDelay(TimeUnit.MILLISECONDS)?.let { d -> d <= 0 } ?: true }
 
     /** Core's receipts older than 30 days go; ProcessCoreHost calls it once, after a boot replay that left no entry. */
     fun pruneReceipts(): JSONObject = callAsync("pruneReceipts")
@@ -1068,6 +1083,7 @@ class CoreHost(
      * host calls queued meanwhile run between them. A caller on the engine thread (a nested call) pumps until its answer.
      */
     private fun callAsync(method: String, vararg args: Any?, deadlineMs: Long = deadline(method, args.toList())): JSONObject {
+        if (method != "widgetsRefresh") lastCallAt = SystemClock.uptimeMillis()
         val done = CompletableFuture<JSONObject>()
         val wait = {
             try { done.get() } catch (failure: ExecutionException) { throw failure.cause ?: failure }
