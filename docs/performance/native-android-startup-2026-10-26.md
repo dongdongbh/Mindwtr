@@ -161,3 +161,27 @@ of save's gap to RN (173 ms) is `core:captureSubmit` itself, 230–250 ms at 5k;
   - The first jank rule counted system-attributed jank.
 - **Not done yet:** memory at large-5000 (Java, native QuickJS heap, PSS), and the S2 save split. Startup budgets are not changed in this
   pass: warm first content at 5k failed its 100 ms budget at 103 ms on the baseline, and it has not been re-measured after the fixes.
+
+### First save after a cold start (S2a)
+
+The first save in a process did about 180 ms of one-time work at 5k:
+- building every task's save row: 108 ms, because #766's row cache is empty after a load;
+- fingerprinting the load's raw rows as the save's baseline: 72 ms.
+
+The probe builds attributed both (`runs/probe3-save`, `runs/probe4-save`). S2a does both while the engine is quiet after first
+content, in 500-row slices, through the same row cache and the same fingerprint rule the save uses. The warmed fingerprints are used only
+for the same read object with no write since (two guard tests, each failing when its guard is removed).
+
+Interleaved ABBA, 16 saves per side at large-5000, save-only runs (`save-s2a`, `ab-s2a`, `ft-s2a`):
+
+| Metric | base2 (`d1a87597c`) | s2a | n |
+| --- | ---: | ---: | ---: |
+| `core:captureSubmit` (the save) | 230–272 ms | **64–95 ms** | 16 / 16 |
+| Visible list read ends after the tap | 271–334 ms | **113–152 ms** | 16 / 16 |
+| Save "settled" (bounded by the sheet and keyboard animation) | 336 / 340 | 338 / 332 | 8 / 8 |
+| Cold first content median (p90) | 825 (841) | 835 (859), ranges overlap | 20 / 20 |
+| First tap after first content, settled | 68–78 | 71–83 | 7 / 8 |
+| Warm slices per cold start | | 21, mean 8.5 ms, max 11–17 ms, 179 ms total | 10 starts |
+
+So a call that arrives during the warm waits at most about 17 ms (one slice). The new row now appears about 130 ms after Save, vs RN's
+173 ms settled.
