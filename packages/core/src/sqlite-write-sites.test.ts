@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest';
 // write outside the adapter is invisible to PRAGMA data_version. So every SQL write in core and the native Android and iOS bundles is
 // listed here by its enclosing method, with why it is safe. A new raw run/exec, or a get/all of INSERT/UPDATE/DELETE, fails
 // this test until it is listed (and goes through noteWrite, withConnection(write: true), withHostConnection, or
-// invalidateWriteBaselineAfterDirectSQL). readRowBaseline also compares total_changes() before a reuse.
+// invalidateWriteBaselineAfterDirectSQL). Not caught here: SQL passed as a variable to get/all (an INSERT ... RETURNING in a
+// variable); for that and any write this scan misses, readRowBaseline compares total_changes() before a reuse.
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(srcDir, '..', '..', '..');

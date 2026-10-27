@@ -583,6 +583,8 @@ export class SqliteAdapter {
     /** A write transaction starts: every read token taken before it is void. */
     protected noteWrite(): void {
         this.generation += 1;
+        // readRowBaseline's kept rows are no baseline after a write: let them go.
+        this.rowBaseline = null;
     }
 
     /**
@@ -1409,8 +1411,7 @@ export class SqliteAdapter {
         // and the rollback moves no count. It needs a raw BEGIN outside the adapter (sqlite-write-sites.test.ts forbids one) or a
         // save whose COMMIT and ROLLBACK both failed; the next full read clears it.
         const reused = this.rowBaseline;
-        const reuse = reused !== null && reused.epoch === accepted && reused.generation === this.generation && this.lastKnownRowVersions !== null
-            && changes === reused.changes;
+        const reuse = reused !== null && reused.epoch === accepted && reused.generation === this.generation && changes === reused.changes;
         const read = reuse ? reused.rows : await Promise.all([
             Promise.all(SQLITE_ENTITY_TABLES.map((table) => this.client.all<Record<string, unknown>>(
                 `SELECT rowid AS _rowid, id, rev, updatedAt FROM ${table}`,

@@ -224,6 +224,14 @@ describe('SqliteAdapter.readRowBaseline', () => {
             expect(light?.settings.theme).toBe('dark');
         });
 
+        it('(i) a full read since, with nothing changed, still makes the next baseline read the rows (getData clears the kept rows)', async () => {
+            const { adapter, counter } = await ready(file());
+            await adapter.readRowBaseline();
+            await adapter.getData();
+            await adapter.readRowBaseline();
+            expect(counter.rowReads).toBe(2);
+        });
+
         it("a reuse still runs the subclass's check of the read", async () => {
             const path = file();
             const checks: number[] = [];
