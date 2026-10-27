@@ -10001,4 +10001,10 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(popup, /Text\(noteLabel, style = rnText\(12, 600\)/);
     assert.match(popup, /\.padding\(top = 8\.dp\)\.fillMaxWidth\(\)\.heightIn\(min = 44\.dp, max = 96\.dp\)\.clip\(shape\)/);
 }
+// Parity-small item 3: the project header is RN's height (modalHeader: 10 above, 8 below Android's 18/bold EditText, then a 1 dp
+// border), measured on the S23 at 64.3 dp (193 px at 3 px per dp); native drew it 60 dp with a 1 px line.
+{
+    const projects = source('ProjectsScreen.kt');
+    assert.match(projects, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 64\.3\.dp\)\.background\(c\.cardBg\)\.bottomBorder\(c\.border\)\.padding\(horizontal = 8\.dp\),/);
+}
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

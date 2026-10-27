@@ -394,7 +394,9 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
     LaunchedEffect(openProjectId) { projectDetails.follow(openProjectId) }
     DisposableEffect(Unit) { onDispose { projectDetails.closeOverlays() } }
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().background(c.cardBg).hairline(c.border, top = false).padding(horizontal = 8.dp, vertical = 6.dp),
+        // RN's modalHeader: 10 above and 8 below Android's 18/bold EditText (45.3 dp with its own padding), then a 1 dp border:
+        // 64.3 dp in all, as measured on the S23 (193 px at 3 px per dp).
+        Row(Modifier.fillMaxWidth().heightIn(min = 64.3.dp).background(c.cardBg).bottomBorder(c.border).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             val back = t("common.back")
             IconButton(onClick = model::closeProject, enabled = failedAction == null, modifier = Modifier.semantics { contentDescription = back }) {

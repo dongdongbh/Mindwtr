@@ -266,6 +266,12 @@ fun Modifier.hairline(color: Color, top: Boolean) = drawBehind {
     drawLine(color, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
 }
 
+/** RN's borderBottomWidth: 1, a 1 dp line inside the bottom edge. */
+fun Modifier.bottomBorder(color: Color) = drawBehind {
+    val width = 1.dp.toPx()
+    drawRect(color, Offset(0f, size.height - width), Size(size.width, width))
+}
+
 /**
  * RN's tab header: card background, a hairline below, the title centered at 17/700, RN's
  * area switcher at the left, and RN's search button (22, in a 44 box) at the right. 64 dp tall, as React Navigation's
