@@ -196,13 +196,16 @@ private fun SavedChip(label: String, selected: Boolean, deleteLabel: String?, en
     }
 }
 
-/** RN's Reorder beside Today's Focus: GripVertical and core's label; it opens the reorder screen. */
+/**
+ * RN's Reorder beside Today's Focus: GripVertical and core's label; it opens the reorder screen. TalkBack reads core's hint
+ * after the label, as RN's accessibilityHint does on Android.
+ */
 @Composable
-fun ReorderToggle(model: InboxViewModel, label: String) {
+fun ReorderToggle(model: InboxViewModel, label: String, hint: String) {
     val c = LocalTheme.current.colors
     val enabled = model.menu.idle
     Row(Modifier.heightIn(min = 36.dp).clip(RoundedCornerShape(8.dp))
-        .clearAndSetSemantics { contentDescription = label; role = Role.Button; if (enabled) onClick { model.menu.focusControls.reorder(true); true } else disabled() }
+        .clearAndSetSemantics { contentDescription = "$label, $hint"; role = Role.Button; if (enabled) onClick { model.menu.focusControls.reorder(true); true } else disabled() }
         .clickable(enabled = enabled) { model.menu.focusControls.reorder(true) }.padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Icon(Lucide.GripVertical, null, tint = c.secondaryText, modifier = Modifier.size(15.dp))

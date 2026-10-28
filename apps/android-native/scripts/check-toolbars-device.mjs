@@ -363,7 +363,7 @@ try {
     const expectedOrder = [...order.slice(0, -2), order.at(-1), order.at(-2)];
     const before = seen.focused;
     nodes = await device.toTop();
-    nodes = await tapExpecting(withDescription(nodes, en['projects.reorderTasks']) ?? fail('no Reorder'),
+    nodes = await tapExpecting(withDescription(nodes, `${en['projects.reorderTasks']}, ${en['focus.reorderScreenHint']}`) ?? fail('no Reorder'),
         (current) => Boolean(withDescription(current, seen.reorder.at(-1).positionLabel)), 'the reorder screen');
     nodes = await device.settle(nodes);
     const last = withDescription(nodes, seen.reorder.at(-1).positionLabel) ?? fail('the last row is not on screen');

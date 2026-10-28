@@ -185,6 +185,14 @@ describe('native host contract: Focus controls', () => {
         }
     });
 
+    // 0b859c1b7: RN's Reorder button carries a translated hint for screen readers (focus.reorderScreenHint).
+    it("gives the Reorder button RN's translated screen-reader hint", async () => {
+        freezeClock();
+        const host = await openHost('base');
+        expect(value(host.getFocus({ limit: 1, controls: DEFAULT_FOCUS_CONTROL_STATE })).controls.reorder!.screenHint)
+            .toBe('Opens a focused screen for reordering these tasks');
+    });
+
     it('round trips task-date options, widget criteria, preserved advanced chips and clear', async () => {
         freezeClock();
         const host = await openHost('base');

@@ -189,7 +189,7 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                         FocusSectionTitle(section.title, section.total, open, section.countLabel, Modifier.padding(top = top, bottom = 10.dp)) {
                             toggleFocusSection(section.key)
                         }
-                        reorderable?.let { ReorderToggle(model, it.getString("label")) }
+                        reorderable?.let { ReorderToggle(model, it.getString("label"), it.getString("screenHint")) }
                     }
                 }
                 section.hiddenByAreaLabel?.let { label ->

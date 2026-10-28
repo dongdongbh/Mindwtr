@@ -190,6 +190,8 @@ export type NativeFocusControls = {
         title: string;
         doneLabel: string;
         hint: string;
+        /** RN's accessibilityHint on the Reorder button (0b859c1b7). */
+        screenHint: string;
         moveUpLabel: string;
         moveDownLabel: string;
         rows: NativeWindow<NativeFocusReorderRow>;
@@ -432,6 +434,7 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
             title: t('agenda.todaysFocus') ?? "Today's Focus",
             doneLabel: tf('common.done', 'Done'),
             hint: tf('focus.reorderHint', 'Long press and drag to reorder'),
+            screenHint: tf('focus.reorderScreenHint', 'Opens a focused screen for reordering these tasks'),
             moveUpLabel: tf('projects.moveUp', 'Move up'),
             moveDownLabel: tf('projects.moveDown', 'Move down'),
             rows: firstWindow(focused.map((task, index) => ({
