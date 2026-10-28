@@ -80,7 +80,8 @@ export const createNativeSpeechPorts = (bindings: { readBytes: (uri: string) => 
     readBytes: async () => ({ bytes: await bindings.readBytes(uri), mimeType }),
     withOpenAIUpload: async (send) => {
         const bytes = await bindings.readBytes(uri);
-        return send({ part: new Blob([bytes], { type: mimeType }), fileName: uri.slice(uri.lastIndexOf('/') + 1) });
+        // A copy on its own ArrayBuffer, as RN's buildMultipartAudioPart makes it.
+        return send({ part: new Blob([new Uint8Array(bytes)], { type: mimeType }), fileName: uri.slice(uri.lastIndexOf('/') + 1) });
     },
     transcribeLocal: async () => { throw new Error('Local Whisper is not available on this host yet'); },
     // Core's warning carries the provider's error text in `extra`: only the message goes to the log.
