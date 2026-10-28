@@ -931,7 +931,12 @@ export function createCalendarSettingsMethods(deps: CalendarSettingsDeps) {
     };
 
     const lifecycleHost = deps.host();
-    if (lifecycleHost?.platform.os === 'ios' && lifecycleHost.requestPartialSync && lifecycleHost.bindPushLifecycle) {
+    // iOS hands each debounced change to native admission (requestPartialSync); Android has none, so the push's own
+    // debounce runs it in the bundle, as React Native's watcher does.
+    const lifecycleAdmission = lifecycleHost?.platform.os === 'ios'
+        ? Boolean(lifecycleHost.requestPartialSync)
+        : lifecycleHost?.platform.os === 'android' && !lifecycleHost.requestPartialSync;
+    if (lifecycleHost?.bindPushLifecycle && lifecycleAdmission) {
         let generation = 0;
         const push = () => {
             if (deps.host() !== lifecycleHost || !deps.readiness().ok || !hasCalendarPush(lifecycleHost) || isSandboxMode()) {

@@ -587,6 +587,28 @@ describe('native host contract: Settings › Calendar', () => {
             expect(handset.state.calendarWrites).toEqual([]);
         });
 
+        it('binds Android with no admission: its own debounce pushes a task change, as RN\'s watcher does', async () => {
+            await seed({});
+            await useTaskStore.getState().addTask('Due task', { status: 'next', dueDate: '2026-10-10' });
+            await flushPendingSave();
+            const task = useTaskStore.getState()._allTasks[0]!;
+            const handset = phone({ os: 'android', calendars: ['primary'],
+                storage: { [KEYS.pushEnabled]: '1', [KEYS.pushTarget]: 'g-primary' } });
+            let lifecycle!: Parameters<NonNullable<NativeCalendarHost['bindPushLifecycle']>>[0];
+            handset.host.bindPushLifecycle = (bound) => { lifecycle = bound; };
+            await openHost(handset.host);
+            expect(lifecycle).toBeDefined();
+            vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            try {
+                expect(await lifecycle.start()).toBe(true);
+                await lifecycle.run();
+                expect(handset.state.calendarWrites).toEqual([['createEvent', 'g-primary', 'Due task']]);
+                await useTaskStore.getState().updateTask(task.id, { title: 'Changed' });
+                await vi.advanceTimersByTimeAsync(2500);
+                expect(handset.state.calendarWrites).toEqual([['createEvent', 'g-primary', 'Due task'], ['createEvent', 'g-primary', 'Changed']]);
+            } finally { lifecycle.stop(); vi.useRealTimers(); }
+        });
+
         it.each(['ios', 'android'] as const)('does not bind lifecycle without iOS admission capability: %s', async (os) => {
             await seed({});
             const handset = phone({ os, calendars: ['primary'] });
