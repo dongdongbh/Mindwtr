@@ -137,6 +137,26 @@ describe('MobileAppLockGate', () => {
       expect(shows(tree)).toBe(false);
     });
 
+    // The root layout holds widget and share links while this is true (#1475).
+    it('reports the lock from the first render, the unlock, and the next lock', async () => {
+      setDelay(0);
+      const onLockedChange = vi.fn();
+      authenticateWithDeviceLockMock.mockResolvedValueOnce({ success: false, reason: 'cancelled' });
+      let tree!: ReactTestRenderer;
+      await act(async () => {
+        tree = create(<MobileAppLockGate enabled onLockedChange={onLockedChange}><></></MobileAppLockGate>);
+      });
+      mounted = tree;
+      expect(onLockedChange.mock.calls).toEqual([[true]]);
+      await wait(300);
+      expect(onLockedChange.mock.calls).toEqual([[true]]);
+      const unlock = tree.root.findAll((node) => String(node.type) === 'TouchableOpacity')[0];
+      await act(async () => { await unlock.props.onPress(); });
+      expect(onLockedChange).toHaveBeenLastCalledWith(false);
+      await changeTo('background');
+      expect(onLockedChange).toHaveBeenLastCalledWith(true);
+    });
+
     it('stays locked on a quick return when the app left while still locked', async () => {
       setDelay(15);
       authenticateWithDeviceLockMock.mockResolvedValue({ success: false, reason: 'cancelled' });

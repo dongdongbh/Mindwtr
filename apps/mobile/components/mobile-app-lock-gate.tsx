@@ -17,11 +17,13 @@ import {
 type MobileAppLockGateProps = {
   enabled: boolean;
   children: React.ReactNode;
+  /** Called with whether the lock covers the app, so the root layout can hold system links until the unlock (#1475). */
+  onLockedChange?: (locked: boolean) => void;
 };
 
 const AUTHENTICATE_AFTER_ACTIVE_DELAY_MS = 250;
 
-export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps) {
+export function MobileAppLockGate({ enabled, children, onLockedChange }: MobileAppLockGateProps) {
   // Minutes away before a return asks again; 0 asks every time. A cold start always asks.
   const relockDelayMinutes = useTaskStore((state) => (
     resolveMobileAppLockRelockDelayMinutes(state.settings?.security?.mobileAppLockRelockDelayMinutes)
@@ -42,6 +44,11 @@ export function MobileAppLockGate({ enabled, children }: MobileAppLockGateProps)
   lockedRef.current = locked;
   // When the app last left 'active' while unlocked; null while locked or after a cold start.
   const leftUnlockedAtRef = useRef<number | null>(null);
+
+  const coversApp = enabled && locked;
+  useEffect(() => {
+    onLockedChange?.(coversApp);
+  }, [coversApp, onLockedChange]);
 
   const resolveText = useCallback((key: string, fallback: string) => (
     translateWithFallback(t, key, fallback)

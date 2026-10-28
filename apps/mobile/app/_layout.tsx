@@ -292,6 +292,9 @@ function RootLayoutContentInner() {
   const settingsCalendarSystem = useTaskStore((state) => state.settings?.calendarSystem);
   const settingsTimeFormat = useTaskStore((state) => state.settings?.timeFormat);
   const mobileAppLockEnabled = useTaskStore((state) => state.settings?.security?.mobileAppLockEnabled === true);
+  // What the lock gate last reported (#1475). Links can run on dataReady before the gate mounts at first paint,
+  // so until it reports, an enabled lock counts as locked (a cold start always asks).
+  const [appLocked, setAppLocked] = useState(true);
   const seedGettingStarted = useTaskStore((state) => state.seedGettingStarted);
   const visibleDataCount = useTaskStore((state) => (
     state.tasks.length + state.projects.length + state.sections.length + state.areas.length
@@ -474,6 +477,7 @@ function RootLayoutContentInner() {
     hasShareIntent,
     incomingUrl,
     incomingUrlKey,
+    locked: mobileAppLockEnabled && appLocked,
     providerReady: shareIntentReady,
     resolveText,
     resetShareIntent,
@@ -1045,7 +1049,7 @@ function RootLayoutContentInner() {
       }}
     >
       <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
-          <MobileAppLockGate enabled={mobileAppLockEnabled}>
+          <MobileAppLockGate enabled={mobileAppLockEnabled} onLockedChange={setAppLocked}>
           <ProjectNextActionPromptProvider>
           <StartupReadinessContext.Provider value={startupReadiness}>
             <PersistenceFailureBanner />
@@ -1138,7 +1142,9 @@ function RootLayoutContentInner() {
 export default function RootLayout() {
   return (
     <MobileWorkspaceBootGate>
-      <ShareIntentProvider>
+      {/* The root layout resets each share once it handles it. The default reset on leaving 'active' would drop a
+          share held under the app lock when the Face ID prompt makes iOS report 'inactive' (#1475). */}
+      <ShareIntentProvider options={{ resetOnBackground: false }}>
         <ThemeProvider>
           <LanguageProvider>
             <ErrorBoundary>

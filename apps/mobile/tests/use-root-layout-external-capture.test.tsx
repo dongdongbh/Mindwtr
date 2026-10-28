@@ -65,6 +65,7 @@ function TestHarness({
   hasShareIntent = false,
   incomingUrl,
   incomingUrlKey = incomingUrl ? 1 : 0,
+  locked = false,
   providerReady = true,
   resetShareIntent = vi.fn(),
   router,
@@ -81,6 +82,7 @@ function TestHarness({
   hasShareIntent?: boolean;
   incomingUrl: string | null;
   incomingUrlKey?: number;
+  locked?: boolean;
   providerReady?: boolean;
   resetShareIntent?: () => void;
   router: RouterMock;
@@ -98,6 +100,7 @@ function TestHarness({
     hasShareIntent,
     incomingUrl,
     incomingUrlKey,
+    locked,
     providerReady,
     resolveText: (_key: string, fallback: string) => fallback,
     resetShareIntent,
@@ -1001,6 +1004,58 @@ describe('useRootLayoutExternalCapture', () => {
       pathname: '/focus',
       params: expect.objectContaining({ taskId: 'task-1', taskTab: 'view' }),
     });
+  });
+
+  // A widget task tap while the app lock was on (#1475): the replace ran while the lock had unmounted the
+  // app's navigator, so Expo Router replaced its own root route, which remounted the root layout (lock
+  // included) and replayed the link, over and over. The link now waits for the unlock, then opens once.
+  it('holds a task link while the app is locked and opens it once after the unlock (#1475)', () => {
+    storeTasksById.set('task-1', { id: 'task-1', title: 'Buy milk' });
+    const url = 'mindwtr://open?task=task-1';
+    let tree!: ReturnType<typeof create>;
+
+    act(() => {
+      tree = create(<TestHarness incomingUrl={url} locked router={router} showToast={showToast} />);
+    });
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} locked router={router} showToast={showToast} />);
+    });
+
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(setHighlightTask).not.toHaveBeenCalled();
+    const held = vi.mocked(logInfo).mock.calls.filter(([message]) => message === 'Incoming link held until unlock');
+    expect(held).toEqual([['Incoming link held until unlock', {
+      scope: 'routing',
+      extra: { releaseCheck: 'v1.3.8/app-lock-link-hold', kind: 'task' },
+      force: true,
+    }]]);
+
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+    act(() => {
+      tree.update(<TestHarness incomingUrl={url} router={router} showToast={showToast} />);
+    });
+
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith({
+      pathname: '/focus',
+      params: expect.objectContaining({ taskId: 'task-1', taskTab: 'view' }),
+    });
+  });
+
+  it('holds a share while the app is locked (#1475)', () => {
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<TestHarness hasShareIntent incomingUrl={null} locked router={router} shareText="Shared note" showToast={showToast} />);
+    });
+    expect(router.replace).not.toHaveBeenCalled();
+
+    act(() => {
+      tree.update(<TestHarness hasShareIntent incomingUrl={null} router={router} shareText="Shared note" showToast={showToast} />);
+    });
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith(expect.objectContaining({ pathname: '/capture-modal' }));
   });
 
   // A cold widget tap used to sit on the Inbox until canonical data loaded (#1310).

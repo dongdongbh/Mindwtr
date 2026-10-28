@@ -51,6 +51,12 @@ type UseRootLayoutExternalCaptureParams = {
     hasShareIntent: boolean;
     incomingUrl: string | null;
     incomingUrlKey: number;
+    /**
+     * The app lock covers the app. Links and shares wait for the unlock: iOS unmounts the navigator under the
+     * lock, so a replace then swaps Expo Router's own root route, remounting this layout and replaying the link
+     * in a loop; Android would open the task editor above the lock screen (#1475).
+     */
+    locked?: boolean;
     providerReady: boolean;
     resolveText: ResolveText;
     resetShareIntent: () => void;
@@ -137,6 +143,7 @@ export function useRootLayoutExternalCapture({
     hasShareIntent,
     incomingUrl,
     incomingUrlKey,
+    locked = false,
     providerReady,
     resolveText,
     resetShareIntent,
@@ -151,6 +158,7 @@ export function useRootLayoutExternalCapture({
     // Keyed per delivery, not per URL string: an Action Button shortcut sends
     // the same capture link every time, and each press must open the sheet.
     const lastHandledKey = useRef<number>(0);
+    const lastHeldKey = useRef<number>(0);
     // The async file-copy branch outlives a render; a dep-identity change
     // mid-copy (language load swaps resolveText, for instance) must not start
     // a second copy of the same share.
@@ -302,7 +310,7 @@ export function useRootLayoutExternalCapture({
     }, [canonicalDataReady, disabled, incomingUrl, incomingUrlKey, providerReady, resolveText, shareError, showToast]);
 
     useEffect(() => {
-        if (disabled) return;
+        if (disabled || locked) return;
         if (!hasShareIntent) return;
         // Cold start: navigating before the root navigator and store are up
         // swallows the replace and the share dies silently (#1117). The provider
@@ -391,12 +399,24 @@ export function useRootLayoutExternalCapture({
                 logIosShareDiagnostic({ stage: 'reset-returned' });
                 shareHandlingRef.current = false;
             });
-    }, [canonicalDataReady, disabled, hasShareIntent, resolveText, resetShareIntent, router, shareFiles, shareSubject, shareText, shareWebUrl, showToast]);
+    }, [canonicalDataReady, disabled, hasShareIntent, locked, resolveText, resetShareIntent, router, shareFiles, shareSubject, shareText, shareWebUrl, showToast]);
 
     useEffect(() => {
         if (!dataReady || disabled) return;
         if (!incomingUrl) return;
         if (lastHandledKey.current === incomingUrlKey) return;
+        if (locked) {
+            // The link stays in its slot (lastHandledKey is not advanced), so the unlock re-runs this effect.
+            if (lastHeldKey.current !== incomingUrlKey) {
+                lastHeldKey.current = incomingUrlKey;
+                void logInfo('Incoming link held until unlock', {
+                    scope: 'routing',
+                    extra: { releaseCheck: 'v1.3.8/app-lock-link-hold', kind: parseEntityOpenUrl(incomingUrl)?.kind ?? 'link' },
+                    force: true,
+                }).catch(() => undefined);
+            }
+            return;
+        }
 
         // An entity link only navigates, so it opens from the startup snapshot when
         // the entity is already there, as a tap on a snapshot row does; waiting for
@@ -479,5 +499,5 @@ export function useRootLayoutExternalCapture({
                 extra: { releaseCheck: 'v1.3.1/shortcut-failure-privacy', stage: 'navigation' },
             });
         }
-    }, [canonicalDataReady, dataReady, disabled, incomingUrl, incomingUrlKey, resolveText, openCaptureConfirmation, router, showToast]);
+    }, [canonicalDataReady, dataReady, disabled, incomingUrl, incomingUrlKey, locked, resolveText, openCaptureConfirmation, router, showToast]);
 }
