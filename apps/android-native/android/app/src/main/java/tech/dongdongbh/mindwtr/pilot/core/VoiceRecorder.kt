@@ -1,7 +1,10 @@
 package tech.dongdongbh.mindwtr.pilot.core
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioRecord
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaRecorder
@@ -14,6 +17,7 @@ import java.util.UUID
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import tech.dongdongbh.mindwtr.androidwidget.QuickCaptureAudioRecorder
+import tech.dongdongbh.mindwtr.androidwidget.QuickCaptureWave
 
 /** RN's two recording formats (decision Q1): the caller passes the one core's resolveQuickCaptureAudioFormat picked. */
 enum class VoiceFormat(val extension: String) {
@@ -25,6 +29,8 @@ enum class VoiceFormat(val extension: String) {
 
 /** One recording in progress. It owns its staged file: [stop] answers it complete; [cancel] and any failure delete it. */
 interface VoiceTake {
+    /** [done] once the microphone records, or with why it could not (then the take has ended and left no file). */
+    fun started(done: (Result<Unit>) -> Unit)
     /** Ends the recording; [done] runs once the recorder is released (RN d596ecce6: stop it before transcribing). */
     fun stop(done: (Result<File>) -> Unit)
     fun cancel(done: () -> Unit)
@@ -51,7 +57,17 @@ class VoiceRecorder(
 ) {
     class Refused(message: String) : IOException(message)
 
+    /**
+     * The microphone could not start in [format]. RN falls back to m4a when its Whisper start fails (use-quick-capture-audio.ts
+     * 'Whisper realtime start failed, falling back to audio recording'); the caller does the same on a WAV one. The device is free.
+     */
+    class StartFailed(val format: VoiceFormat, cause: Throwable) : IOException("The $format recording could not start", cause)
+
+    /** The app left before the microphone started: nothing was recorded, and nothing should be retried. */
+    class Cancelled : IOException("The recording was cancelled")
+
     private class Owner(val id: String, val format: VoiceFormat, val take: VoiceTake) {
+        var starting = true
         var ending = false
     }
 
@@ -66,14 +82,31 @@ class VoiceRecorder(
             takes(format, id)
         } catch (error: Exception) {
             focus.abandon()
-            return@execute reply(Result.failure(error))
+            return@execute reply(Result.failure(StartFailed(format, error)))
         }
-        owner = Owner(id, format, take)
-        reply(Result.success(id))
+        val current = Owner(id, format, take)
+        owner = current
+        // The reply waits for the microphone, so a WAV source that cannot open answers here, not at the stop.
+        take.started { result ->
+            executor.execute {
+                current.starting = false
+                val failure = result.exceptionOrNull()
+                when {
+                    current.ending -> reply(Result.failure(Cancelled()))
+                    failure != null -> {
+                        current.ending = true
+                        if (owner === current) owner = null
+                        focus.abandon()
+                        reply(Result.failure(StartFailed(format, failure)))
+                    }
+                    else -> reply(Result.success(id))
+                }
+            }
+        }
     }
 
     fun stop(id: String, reply: (Result<File>) -> Unit) = executor.execute {
-        val current = owner?.takeIf { it.id == id && !it.ending }
+        val current = owner?.takeIf { it.id == id && !it.starting && !it.ending }
             ?: return@execute reply(Result.failure(Refused("Not the running recording")))
         current.ending = true
         current.take.stop { result ->
@@ -118,7 +151,7 @@ class VoiceRecorder(
             return VoiceRecorder(directory, executor, AndroidAudioFocus(app), { format, id ->
                 when (format) {
                     VoiceFormat.M4A -> M4aTake(directory, id, AndroidM4aSink(app))
-                    VoiceFormat.WAV -> WavTake(directory, id, executor)
+                    VoiceFormat.WAV -> WavTake(directory, id, executor) { AndroidPcmSource() }
                 }
             })
         }
@@ -161,6 +194,9 @@ class M4aTake(directory: File, id: String, private val sink: M4aSink) : VoiceTak
             throw error
         }
     }
+
+    // MediaRecorder.start ran in the constructor: a take that exists records.
+    override fun started(done: (Result<Unit>) -> Unit) = done(Result.success(Unit))
 
     override fun stop(done: (Result<File>) -> Unit) {
         // MediaRecorder.stop throws when nothing was recorded.
@@ -209,31 +245,59 @@ class AndroidM4aSink(private val context: Context) : M4aSink {
 
 /**
  * A WAV recording through the widget's QuickCaptureAudioRecorder, unchanged: it stages `quick-capture-audio/.<id>.wav.tmp` under
- * [directory], deletes it itself when cancelled or failed, and answers on [callbacks].
+ * [directory], deletes it itself when cancelled or failed, and answers on [callbacks]. Its source is wrapped only to tell when the
+ * microphone started; a source that cannot open or start ends the recorder before that.
  */
 class WavTake(
     directory: File,
     id: String,
     callbacks: Executor,
-    sourceFactory: (() -> QuickCaptureAudioRecorder.PcmSource)? = null,
+    sourceFactory: () -> QuickCaptureAudioRecorder.PcmSource,
 ) : VoiceTake {
-    private val recorder = if (sourceFactory == null) {
-        QuickCaptureAudioRecorder(filesDir = directory, idFactory = { id }, callbackExecutor = callbacks)
-    } else {
-        QuickCaptureAudioRecorder(filesDir = directory, sourceFactory = sourceFactory, idFactory = { id }, callbackExecutor = callbacks)
-    }
     private val lock = Any()
+    private var startResult: Result<Unit>? = null
+    private var startWaiting: ((Result<Unit>) -> Unit)? = null
     private var outcome: QuickCaptureAudioRecorder.Outcome? = null
     private var waiting: ((QuickCaptureAudioRecorder.Outcome) -> Unit)? = null
 
+    private inner class Signalled(private val inner: QuickCaptureAudioRecorder.PcmSource) : QuickCaptureAudioRecorder.PcmSource by inner {
+        override fun start() {
+            inner.start()
+            settleStart(Result.success(Unit))
+        }
+    }
+
+    private val recorder = QuickCaptureAudioRecorder(
+        filesDir = directory,
+        sourceFactory = { Signalled(sourceFactory()) },
+        idFactory = { id },
+        callbackExecutor = callbacks,
+    )
+
     init {
         recorder.start { ended ->
+            // An end before the microphone started is the start's answer too.
+            settleStart(Result.failure((ended as? QuickCaptureAudioRecorder.Outcome.Failed)?.error ?: IOException("The recording ended before it started")))
             val next = synchronized(lock) {
                 outcome = ended
                 waiting.also { waiting = null }
             }
             next?.invoke(ended)
         }
+    }
+
+    private fun settleStart(result: Result<Unit>) {
+        val next = synchronized(lock) {
+            if (startResult != null) return
+            startResult = result
+            startWaiting.also { startWaiting = null }
+        }
+        next?.invoke(result)
+    }
+
+    override fun started(done: (Result<Unit>) -> Unit) {
+        val result = synchronized(lock) { startResult.also { if (it == null) startWaiting = done } }
+        result?.let(done)
     }
 
     // The recorder answers once, possibly before a stop was asked (a failed source): the answer waits for the caller.
@@ -260,6 +324,46 @@ class WavTake(
             done()
         }
     }
+}
+
+/**
+ * The widget recorder's own microphone source (QuickCaptureAudioRecorder.AndroidPcmSource is private to :widget), with the same
+ * settings: voice recognition, 16 kHz mono 16-bit PCM, a buffer of at least 4 KiB.
+ */
+class AndroidPcmSource : QuickCaptureAudioRecorder.PcmSource {
+    override val bufferSize: Int = maxOf(
+        4_096,
+        AudioRecord.getMinBufferSize(QuickCaptureWave.SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT),
+    )
+
+    @SuppressLint("MissingPermission")
+    private val recorder = AudioRecord(
+        MediaRecorder.AudioSource.VOICE_RECOGNITION,
+        QuickCaptureWave.SAMPLE_RATE,
+        AudioFormat.CHANNEL_IN_MONO,
+        AudioFormat.ENCODING_PCM_16BIT,
+        bufferSize,
+    ).also {
+        if (it.state != AudioRecord.STATE_INITIALIZED) {
+            it.release()
+            throw IOException("Could not initialize audio recorder")
+        }
+    }
+
+    override fun start() {
+        recorder.startRecording()
+        if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+            throw IOException("Could not start audio recorder")
+        }
+    }
+
+    override fun read(target: ByteArray, length: Int): Int = recorder.read(target, 0, length)
+
+    override fun stop() {
+        if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
+    }
+
+    override fun release() = recorder.release()
 }
 
 /** Transient focus that lets other audio duck (RN's interruptionModeAndroid 'duckOthers'); a refusal still records, as RN does. */

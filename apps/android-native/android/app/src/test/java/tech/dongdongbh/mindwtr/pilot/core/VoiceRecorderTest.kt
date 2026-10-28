@@ -51,6 +51,7 @@ class VoiceRecorderTest {
         var finish: (() -> Unit)? = null
         var cancelled = false
         init { staged.parentFile.mkdirs(); staged.writeBytes(ByteArray(8)) }
+        override fun started(done: (Result<Unit>) -> Unit) = done(Result.success(Unit))
         override fun stop(done: (Result<File>) -> Unit) { finish = { done(Result.success(staged)) } }
         override fun cancel(done: () -> Unit) { cancelled = true; staged.delete(); done() }
     }
@@ -94,6 +95,39 @@ class VoiceRecorderTest {
         assertEquals(File(dir, "$id.wav"), kept.get().getOrThrow())
         assertTrue(QuickCaptureWave.isValid(kept.get().getOrThrow()))
         assertEquals(listOf("$id.wav"), filesUnder(dir))
+        worker.shutdown()
+    }
+
+    // RN's m4a fallback when its Whisper start fails: the caller learns it at the start, and the device is free for m4a.
+    @Test fun aWavStartWhoseMicrophoneCannotOpenOrStartAnswersStartFailedAndFreesTheDevice() {
+        val dir = folder()
+        val worker = Executors.newSingleThreadExecutor()
+        val focus = FakeFocus()
+        val sources = ArrayDeque<() -> QuickCaptureAudioRecorder.PcmSource>(listOf(
+            { throw IOException("Could not initialize audio recorder") },
+            { StartFailsSource() },
+        ))
+        var next = 0
+        val recorder = VoiceRecorder(dir, worker, focus, { format, id ->
+            when (format) {
+                VoiceFormat.WAV -> { val source = sources.removeFirst(); WavTake(dir, id, worker) { source() } }
+                VoiceFormat.M4A -> M4aTake(dir, id, FakeSink())
+            }
+        }, { "0123456${++next}-89ab-cdef-0123-456789abcdef" })
+        fun start(format: VoiceFormat): Result<String> {
+            val result = AtomicReference<Result<String>>()
+            val answered = CountDownLatch(1)
+            recorder.start(format) { result.set(it); answered.countDown() }
+            assertTrue(answered.await(2, TimeUnit.SECONDS))
+            return result.get()
+        }
+        for (attempt in 1..2) {
+            val failure = start(VoiceFormat.WAV).exceptionOrNull()
+            assertTrue("attempt $attempt: $failure", failure is VoiceRecorder.StartFailed && failure.format == VoiceFormat.WAV)
+        }
+        assertEquals(emptyList<String>(), filesUnder(dir))
+        assertEquals(2, focus.abandoned)
+        assertTrue(start(VoiceFormat.M4A).isSuccess)
         worker.shutdown()
     }
 
@@ -200,6 +234,14 @@ class VoiceRecorderTest {
         assertEquals(128_000, ExpoHighQuality.BIT_RATE)
         assertEquals(".m4a", VoiceFormat.M4A.extension)
         assertEquals(".wav", VoiceFormat.WAV.extension)
+    }
+
+    private class StartFailsSource : QuickCaptureAudioRecorder.PcmSource {
+        override val bufferSize = 6_400
+        override fun start() { throw IOException("Could not start audio recorder") }
+        override fun read(target: ByteArray, length: Int): Int = -1
+        override fun stop() = Unit
+        override fun release() = Unit
     }
 
     /** One 0.2 s chunk of PCM, then silence until the recorder stops it. */
