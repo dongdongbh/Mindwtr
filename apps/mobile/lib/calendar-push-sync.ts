@@ -23,6 +23,25 @@ export { CALENDAR_PUSH_COLOR_OPTIONS, type CalendarPushTargetCalendar } from '@m
 
 const PLATFORM = Platform.OS;
 
+/**
+ * expo-calendar on Android never reports a missing event (CalendarModule.kt): an update of one writes no row and
+ * resolves, and a delete rejects "could not be deleted", as any failed delete does. Its event read rejects
+ * E_EVENT_NOT_FOUND for an event that is gone (or marked deleted), so the binding reads the event and answers the
+ * text core takes as missing: core then pushes the task again, or forgets the row.
+ */
+const isEventGone = (eventId: string): Promise<boolean> => Calendar.getEventAsync(eventId).then(
+    () => false,
+    (error: unknown) => (error as { code?: unknown } | null)?.code === 'E_EVENT_NOT_FOUND',
+);
+
+const missingEvent = (outcome: 'recreated' | 'cleared'): Error => {
+    void logInfo('Calendar push found a missing event', {
+        scope: 'calendar-push',
+        extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome },
+    });
+    return new Error('Calendar event not found');
+};
+
 let service: CalendarPushService | null = null;
 const getService = (): CalendarPushService => {
     service ??= createCalendarPushService({
@@ -48,8 +67,18 @@ const getService = (): CalendarPushService => {
             },
             deleteCalendar: (calendarId) => Calendar.deleteCalendarAsync(calendarId),
             createEvent: (calendarId, details) => Calendar.createEventAsync(calendarId, details),
-            updateEvent: (eventId, details) => Calendar.updateEventAsync(eventId, details),
-            deleteEvent: (eventId) => Calendar.deleteEventAsync(eventId),
+            updateEvent: async (eventId, details) => {
+                if (Platform.OS === 'android' && await isEventGone(eventId)) throw missingEvent('recreated');
+                return Calendar.updateEventAsync(eventId, details);
+            },
+            deleteEvent: async (eventId) => {
+                try {
+                    return await Calendar.deleteEventAsync(eventId);
+                } catch (error) {
+                    if (Platform.OS === 'android' && await isEventGone(eventId)) throw missingEvent('cleared');
+                    throw error;
+                }
+            },
         },
         syncEntries: {
             ensureReady: () => ensureCalendarSyncStorageReady(),

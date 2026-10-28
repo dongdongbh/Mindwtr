@@ -30,6 +30,7 @@ const {
     mockCreateEventAsync,
     mockUpdateEventAsync,
     mockDeleteEventAsync,
+    mockGetEventAsync,
     mockGetCalendarSyncEntry,
     mockUpsertCalendarSyncEntry,
     mockDeleteCalendarSyncEntry,
@@ -64,7 +65,8 @@ const {
     mockDeleteCalendarAsync: vi.fn(async (_id: string) => {}),
     mockCreateEventAsync: vi.fn(async () => 'evt-1'),
     mockUpdateEventAsync: vi.fn(async () => 'evt-1'),
-    mockDeleteEventAsync: vi.fn(async () => {}),
+    mockDeleteEventAsync: vi.fn(async (_id?: string) => {}),
+    mockGetEventAsync: vi.fn(async (id: string) => ({ id })),
     mockGetCalendarSyncEntry: vi.fn<(taskId: string, platform: string) => Promise<MockCalendarSyncEntry | null>>(async () => null),
     mockUpsertCalendarSyncEntry: vi.fn<(entry: MockCalendarSyncEntry) => Promise<void>>(async () => {}),
     mockDeleteCalendarSyncEntry: vi.fn<(taskId: string, platform: string) => Promise<void>>(async () => {}),
@@ -130,6 +132,7 @@ vi.mock('expo-calendar', () => ({
     createEventAsync: mockCreateEventAsync,
     updateEventAsync: mockUpdateEventAsync,
     deleteEventAsync: mockDeleteEventAsync,
+    getEventAsync: mockGetEventAsync,
     getCalendarPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
     requestCalendarPermissionsAsync: vi.fn(async () => ({ status: 'granted' })),
 }));
@@ -1504,5 +1507,102 @@ describe('startCalendarPushSync', () => {
             title: 'Second task updated',
             allDay: true,
         }));
+    });
+});
+
+describe('Android: expo-calendar never reports a missing event, so the binding reads it back', () => {
+    // expo-calendar 15's Android codes (CalendarModule.kt): getEventByIdAsync on a deleted row, deleteEventAsync on zero rows.
+    const notFound = (id: string) => Object.assign(new Error(`Event with id ${id} could not be found`), { code: 'E_EVENT_NOT_FOUND' });
+    const notDeleted = (id: string) => Object.assign(new Error(`Event with id ${id} could not be deleted`), { code: 'E_EVENT_NOT_DELETED' });
+    const androidCalendars = () => mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', accessLevel: 'owner', allowsModifications: true }]);
+    // A full push tries a done task's delete twice (its own pass, then the stale pass), so each refusal stays for the whole run.
+    afterEach(() => {
+        mockDeleteEventAsync.mockImplementation(async () => {});
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id }));
+    });
+
+    it('recreates an event the user deleted in the calendar app, where expo\'s update succeeds on a missing row (RN bug 1)', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-gone', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockRejectedValue(notFound('evt-gone'));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
+        expect(mockUpsertCalendarSyncEntry).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.id, calendarEventId: 'evt-1' }));
+        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({
+            extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome: 'recreated' },
+        }));
+    });
+
+    it('pushes again to a new calendar after the user deleted the old one in the system app (RN bug 2)', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        // The row points at the deleted calendar; its event went with it.
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-gone', calendarId: 'cal-deleted', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-gone'));
+        mockGetEventAsync.mockRejectedValue(notFound('evt-gone'));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteEventAsync).toHaveBeenCalledWith('evt-gone');
+        expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
+        expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarId: 'cal-1', calendarEventId: 'evt-1' }));
+        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({
+            extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome: 'cleared' },
+        }));
+    });
+
+    it('clears the row of a done task whose event is already gone (RN bug 2)', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-gone', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-gone'));
+        mockGetEventAsync.mockRejectedValue(notFound('evt-gone'));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(task.id, 'ios');
+    });
+
+    it('keeps the row when a delete fails and the event is still there', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-kept', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-kept'));
+
+        await runFullCalendarSync();
+
+        expect(mockGetEventAsync).toHaveBeenCalledWith('evt-kept');
+        expect(mockDeleteCalendarSyncEntry).not.toHaveBeenCalled();
+    });
+
+    it('keeps the row when the read-back itself fails for another reason', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-kept', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockDeleteEventAsync.mockRejectedValue(notDeleted('evt-kept'));
+        mockGetEventAsync.mockRejectedValue(new Error('CALENDAR permission is required to do this operation.'));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteCalendarSyncEntry).not.toHaveBeenCalled();
     });
 });
