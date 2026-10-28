@@ -65,6 +65,13 @@ data class FocusView(val revision: String, val dateLabel: String, val sections: 
 
     fun section(key: String) = sections.firstOrNull { it.key == key }
 
+    /** Whether [other] draws the same as this: everything but the revision, core's JSON parts by their text. */
+    fun sameShown(other: FocusView): Boolean = dateLabel == other.dateLabel && reviewProjects == other.reviewProjects
+        && controls?.toString() == other.controls?.toString() && sections.size == other.sections.size
+        && sections.zip(other.sections).all { (mine, theirs) ->
+            mine.copy(groups = emptyList()) == theirs.copy(groups = emptyList()) && mine.groups.map { it.toString() } == theirs.groups.map { it.toString() }
+        }
+
     /** Adds one getFocusSectionWindow reply after the rows (and group headings) its section already has. */
     fun append(window: JSONObject): FocusView {
         check(window.getInt("version") == 1 && window.getString("revision") == revision) { "Unexpected Focus window" }

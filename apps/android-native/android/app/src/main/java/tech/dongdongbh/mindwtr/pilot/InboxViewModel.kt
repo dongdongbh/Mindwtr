@@ -206,6 +206,12 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var screen by mutableStateOf(Screen.entries.firstOrNull { it.name == saved.get<String>("screen") }
         ?: if (harnessStart == "inbox") Screen.Inbox else Screen.Focus); private set
     var focus by mutableStateOf<FocusView?>(null); private set
+    /**
+     * The revision of the latest Focus read, for everything that pages or searches at it (Load more, the filter sheet, the
+     * Pomodoro picker). [focus] changes only when what it shows changed; a read with the same content (a resume, a new
+     * minute, a sync that brought nothing) updates only this, so the list is not drawn again.
+     */
+    var focusRevision by mutableStateOf(""); private set
     var projects by mutableStateOf<ProjectsView?>(null); private set
     /** The project whose detail shows on the Projects tab; its rows reload from core after process death. */
     var openProjectId by mutableStateOf(saved.get<String>("project")); private set
@@ -627,6 +633,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         // The open list (the Inbox tab's too) as it was: no read runs while the retry is owed.
         pending.menuPage?.let(menu::restorePage)
         focus = pending.focus
+        focusRevision = pending.focus?.revision.orEmpty()
         projects = pending.projects
         keepProject(pending.project?.projectId)
         project = pending.project
@@ -1104,7 +1111,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** The next window of one section at the loaded revision. */
     fun loadMoreFocus(key: String) {
-        val view = focus ?: return
+        val view = focus?.copy(revision = focusRevision) ?: return
         val depth = view.depth() + (key to (view.section(key)?.rows?.size ?: 0) + PAGE)
         val mine = ++issued
         perform { runtime ->
@@ -1126,6 +1133,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** Core's Focus on screen, and its control state becomes the screen's (FocusModel.adopt). */
     private fun showFocus(view: FocusView?) {
+        focusRevision = view?.revision.orEmpty()
+        // The same content as shown: no redraw, and no card read (the card reads on its own resume and phase end).
+        if (view != null && focus?.sameShown(view) == true) return
         focus = view
         view?.let(menu.focusControls::adopt)
         // RN's card reads with every Focus read.
@@ -1133,7 +1143,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     /** The Focus read's revision, for the Pomodoro picker's task windows (core pages the Focus lists at one revision). */
-    internal fun focusRevision(): String = focus?.revision.orEmpty()
+    internal fun focusRevision(): String = focusRevision
 
     private fun FocusView?.depth(): Map<String, Int> = this?.sections?.associate { it.key to it.rows.size }.orEmpty()
 

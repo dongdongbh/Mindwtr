@@ -90,7 +90,7 @@ class FocusModel(private val menu: MenuModel, private val saved: SavedStateHandl
      * new revision runs the search again (the sheet's LaunchedEffect), so a typed search never stays unanswered.
      */
     fun searchPicker(name: String, query: String, depth: Int = WINDOW) {
-        val revision = shell.focus?.revision ?: return
+        val revision = shell.focus?.let { shell.focusRevision } ?: return
         if (query.isBlank()) { pickerFound = null; return }
         val sent = state.toString()
         shell.background(listOf(Part.MenuDialog), { runtime ->

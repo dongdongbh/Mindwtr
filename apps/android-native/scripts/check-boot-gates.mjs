@@ -1052,7 +1052,7 @@ assert.match(model, /PendingFailure\(failed, message, menu\.page, editor, screen
 assert.match(model, /pending\.menuPage\?\.let\(menu::restorePage\)/, 'a new screen shows the failed command\'s list page again');
 assert.match(model, /pending\.editor\?\.let\(::keepEditor\)/);
 // ...and a failure on Focus reopens Focus with its rows, since reads wait for the retry.
-assert.match(model, /focus = pending\.focus\s+projects = pending\.projects\s+keepProject\(pending\.project\?\.projectId\)\s+project = pending\.project\s+show\(pending\.screen\)/);
+assert.match(model, /focus = pending\.focus\s+focusRevision = pending\.focus\?\.revision\.orEmpty\(\)\s+projects = pending\.projects\s+keepProject\(pending\.project\?\.projectId\)\s+project = pending\.project\s+show\(pending\.screen\)/);
 // Both also start storing the last screen (pass O2b review P3-3).
 assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\); keepRoutes\(\) \}/g).length, 2);
 assert.match(model, /runtime\.completeTask\(id, taskRevision\)\s+acknowledged\(action\)/);
@@ -2833,7 +2833,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // the open sheet and reorder mode ride the Bundle; reorder mode ends once core no longer offers it.
     for (const key of ['focusControls', 'focusDialog', 'focusReorder']) assert.match(focusModelKt, new RegExp(`saved(\\.get<\\w+>\\("${key}"\\)|\\["${key}"\\])`), `${key} rides the Bundle`);
     assert.match(focusModelKt, /keepState\(controls\.getJSONObject\("state"\)\)\s+if \(reordering && controls\.isNull\("reorder"\)\) keepReordering\(false\)/);
-    assert.match(model, /private fun showFocus\(view: FocusView\?\) \{\s+focus = view\s+view\?\.let\(menu\.focusControls::adopt\)/);
+    assert.match(model, /private fun showFocus\(view: FocusView\?\) \{[\s\S]{0,400}?\n\s+focus = view\s+view\?\.let\(menu\.focusControls::adopt\)/);
     assert.match(focusControlsUi, /if \(to != index\) reorderTo\(ids\.toMutableList\(\)\.apply \{ add\(to, removeAt\(index\)\) \}, revisions\)/, 'a drop that moves nothing sends nothing; a move sends one reorderFocus');
     // reorderFocus sends each reorder row's taskRevision as core showed it.
     assert.match(focusControlsUi, /val revisions = JSONObject\(\)\.apply \{ rows\.forEach \{ put\(it\.getString\("id"\), it\.optString\("taskRevision"\)\) \} \}/);
@@ -10194,5 +10194,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(settingsKt, /if \(settings\.screen == "gtd-capture"\) GmailLabelPicker\(model\)/);
     // Back leaves the section (RN unmounts it): an answer on its way counts for nothing.
     assert.match(source('SettingsModel.kt'), /if \(screen == "gtd-capture"\) gmail\.leave\(\)/);
+}
+// A Focus read that draws the same as shown moves only the revision every pager and search uses (focusRevision); the list
+// is not drawn again and the Pomodoro card is not read again.
+{
+    const viewModelKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt'), 'utf8');
+    assert.match(viewModelKt, /private fun showFocus\(view: FocusView\?\) \{\s+focusRevision = view\?\.revision\.orEmpty\(\)\s+(?:\/\/[^\n]*\n\s+)*if \(view != null && focus\?\.sameShown\(view\) == true\) return/);
+    assert.match(viewModelKt, /val view = focus\?\.copy\(revision = focusRevision\) \?: return/);
+    for (const name of ['FocusControls.kt', 'FocusModel.kt', 'Pomodoro.kt', 'InboxViewModel.kt']) {
+        assert.doesNotMatch(readFileSync(resolve(app, `android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/${name}`), 'utf8'), /focus\?\.revision(?!\.orEmpty\(\)\s*$)/m, `${name} pages at focusRevision`);
+    }
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

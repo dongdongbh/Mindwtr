@@ -131,7 +131,7 @@ private fun HeaderButton(icon: ImageVector, label: String, tinted: Boolean, badg
 fun FocusFilterRows(model: InboxViewModel, controls: JSONObject) = with(model.menu.focusControls) {
     val c = LocalTheme.current.colors
     val idle = model.menu.idle
-    val revision = model.focus?.revision ?: return
+    val revision = model.focus?.let { model.focusRevision } ?: return
     Column {
         controls.optJSONObject("savedFilters")?.let { saved ->
             Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -420,7 +420,7 @@ private fun FocusFilterSheet(model: InboxViewModel, controls: JSONObject, open: 
     val summaries = sheet.getJSONObject("summaries")
     val all = text.getString("all")
     val picker = open.menuText("page")
-    val revision = model.focus?.revision ?: return
+    val revision = model.focus?.let { model.focusRevision } ?: return
     val idle = model.menu.idle
     FocusSheet(model, tall = picker != null) {
         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
