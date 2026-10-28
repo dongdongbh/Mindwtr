@@ -46,6 +46,10 @@ const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
 const rnApp = JSON.parse(readFileSync(resolve(app, '../mobile/app.json'), 'utf8')).expo;
 const VERSION = rnApp.version;
 const NEWER = '9.9.9';
+// What the stub's GitHub reports: this version until (c) asks. The startup update reminder (core's buildMobileStartupPromptDescriptors,
+// RN's and this app's) asks the same GitHub at launch and shows "Update available" over the screens when the release is newer
+// and its week-long cooldown has passed; this version keeps it closed, as RN keeps it closed when no newer release exists.
+let latest = VERSION;
 
 // ---- The stub: GitHub's latest release, the feedback endpoint and the heartbeat, each request kept ----
 const requests = [];
@@ -56,7 +60,7 @@ const stub = createServer((request, response) => {
         requests.push({ method: request.method, url: request.url, headers: request.headers, body });
         if (request.url === '/github/releases/latest') {
             response.writeHead(200, { 'content-type': 'application/json' });
-            response.end(JSON.stringify({ tag_name: `v${NEWER}`, html_url: `https://github.com/dongdongbh/Mindwtr/releases/tag/v${NEWER}`, body: 'Stub notes' }));
+            response.end(JSON.stringify({ tag_name: `v${latest}`, html_url: `https://github.com/dongdongbh/Mindwtr/releases/tag/v${latest}`, body: 'Stub notes' }));
             return;
         }
         response.writeHead(request.url === '/feedback' || request.url === '/heartbeat' ? 200 : 404, { 'content-type': 'application/json' });
@@ -163,6 +167,11 @@ try {
         && beat.device_class === 'phone' && beat.os_major === `android-${release.match(/\d+/)[0]}` && /^[a-z]{2}(-[A-Z]{2})?/.test(beat.locale),
         `(a) RN's values: ${JSON.stringify({ ...beat, distinct_id: '…', profile_id: '…' })}`);
     check(beats[0].headers['content-type'] === 'application/json', '(a) sent as JSON');
+    // RN's startup reminder waits 1.75 s (UPDATE_REMINDER_STARTUP_DELAY_MS) and then reads GitHub: with no newer release it
+    // stays closed.
+    await sleep(5000);
+    const launchCard = texts(await screen()).includes(en['updateReminder.title']);
+    check(!launchCard, `(a) no launch update reminder while GitHub reports this version (startup asked GitHub ${seen('/github/releases/latest', 'GET').length} time(s))`);
 
     // (b) Settings › About: RN's header and rows; the silent check asks once.
     let nodes = await openSettings();
@@ -189,6 +198,7 @@ try {
     console.log(`info - the silent check asked GitHub ${silentGithub} time(s) (a sideloaded install asks GitHub; a Play install asks Play first)`);
 
     // (c) Check for updates: the stub's newer release, RN's alert; Later; the menu's dot.
+    latest = NEWER;
     nodes = await screen();
     nodes = await tapExpecting(tagged(nodes, 'about-checkForUpdates') ?? fail('no Check for updates row'),
         (current) => texts(current).includes(words.update), 'the update alert', 20_000);
