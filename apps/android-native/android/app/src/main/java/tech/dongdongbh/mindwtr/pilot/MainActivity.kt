@@ -117,6 +117,8 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import tech.dongdongbh.mindwtr.pilot.core.CalendarPermissionPrompt
+import tech.dongdongbh.mindwtr.pilot.core.MicrophonePermissionPrompt
+import tech.dongdongbh.mindwtr.pilot.core.VoiceCapture
 import tech.dongdongbh.mindwtr.pilot.core.GmailConsentPrompt
 
 /**
@@ -136,6 +138,8 @@ class MainActivity : FragmentActivity() {
     /** expo-calendar's prompt for the calendar pair (HostCalendars); its answer is read again as a status by the call that asked. */
     private val calendarPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { CalendarPermissionPrompt.answered() }
     private val askCalendar: (Array<String>) -> Unit = { calendarPermission.launch(it) }
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { MicrophonePermissionPrompt.answered(it) }
+    private val askMicrophone: () -> Unit = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) }
     /** RN's Gmail module's account picker and Google's consent screen (GmailAuthorization): answered on this Activity or the next. */
     private val gmailPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         GmailConsentPrompt.answered("picker", it.resultCode, it.data)
@@ -161,6 +165,7 @@ class MainActivity : FragmentActivity() {
             }
         }
         CalendarPermissionPrompt.launcher = askCalendar
+        MicrophonePermissionPrompt.launcher = askMicrophone
         GmailConsentPrompt.picker = pickGmail
         GmailConsentPrompt.consent = consentGmail
         // A recreated screen registers its own launcher (the prompt's answer reaches it); a finished one answers any prompt left
@@ -170,6 +175,12 @@ class MainActivity : FragmentActivity() {
                 CalendarPermissionPrompt.launcher = null
                 if (isFinishing) CalendarPermissionPrompt.answered()
             }
+            if (event == Lifecycle.Event.ON_DESTROY && MicrophonePermissionPrompt.launcher === askMicrophone) {
+                MicrophonePermissionPrompt.launcher = null
+                if (isFinishing) MicrophonePermissionPrompt.answered(false)
+            }
+            // Leaving the app ends a recording without saving (no foreground service, as RN); a rotation keeps it.
+            if (event == Lifecycle.Event.ON_STOP && !isChangingConfigurations) VoiceCapture.recorder?.leave()
             if (event == Lifecycle.Event.ON_DESTROY && GmailConsentPrompt.picker === pickGmail) {
                 GmailConsentPrompt.picker = null
                 GmailConsentPrompt.consent = null
