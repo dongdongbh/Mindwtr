@@ -12,6 +12,7 @@
 // capture popup (empty, with text and core's preview, and with the contexts picker open),
 // (PARITY_ONLY=d1b shoots only pass D1b's: Settings › Data with the Backup fold's end (Getting Started), the Import fold open,
 // and in light mode the Todoist question and the invalid-import warning.)
+// (PARITY_ONLY=gtd-hub shoots only Settings › GTD in light mode, scrolled to RN's "Include start dates in Today" switch, #1325.)
 // (PARITY_ONLY=s5 shoots only pass S5's: Settings › Sync with File chosen, at its top and at the folder card.)
 // (PARITY_ONLY=r2b shoots only pass R2b's Pomodoro card on Focus, in light mode, with the Pomodoro feature and Link task on in the
 // fixture: idle with Timer only, the task picker, a linked task, running, paused, the break, and folded. RN's run ends back at
@@ -68,6 +69,7 @@ const D1B_ONLY = process.env.PARITY_ONLY === 'd1b';
 const S5_ONLY = process.env.PARITY_ONLY === 's5';
 const R2B_ONLY = process.env.PARITY_ONLY === 'r2b';
 const A13_ONLY = process.env.PARITY_ONLY === '13a';
+const GTD_HUB_ONLY = process.env.PARITY_ONLY === 'gtd-hub';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -795,6 +797,32 @@ const shootR2 = async (prefix, suffix, rn) => {
         await sleep(900);
     }
 };
+/** PARITY_ONLY=gtd-hub: Settings › GTD from the Menu sheet with the "Include start dates in Today" switch on screen, then Back to the tabs. */
+const shootGtdHub = async (prefix, rn) => {
+    if (rn) openLink('focus');
+    else {
+        const tabs = await waitFor('the native tabs', (current) => Boolean(tab(current, 'Focus')), 60_000);
+        if (!tabSelected(tabs, 'Focus')) await tap(tab(tabs, 'Focus'));
+    }
+    const menu = await waitFor('the Menu tab', (current) => Boolean(rn ? current.find((node) => node['content-desc'] === 'Menu') : tab(current, 'Menu')), 30_000);
+    await tap(rn ? menu.find((node) => node['content-desc'] === 'Menu') : tab(menu, 'Menu'));
+    const sheet = await waitFor('the Settings tile', (current) => Boolean(withDescription(current, en['nav.settings'])), 15_000);
+    await tap(withDescription(sheet, en['nav.settings']));
+    const label = `${en['settings.gtd']}. ${en['settings.menuDesc.gtd']}`;
+    const rows = await waitFor('the GTD row', (current) => Boolean(withDescription(current, label)), 30_000);
+    await tap(withDescription(rows, label));
+    let nodes = await waitFor('Settings › GTD', (current) => hasText(current, en['settings.featurePomodoro']), 30_000);
+    if (!hasText(nodes, en['settings.focusIncludeStartDatesDesc'])) nodes = await device.swipe(nodes, 'down');
+    await shoot(`${prefix}-settings-gtd-start-dates-light`, (current) => hasText(current, en['settings.focusIncludeStartDates']) && hasText(current, en['settings.focusIncludeStartDatesDesc']));
+    for (let step = 0; step < 4; step += 1) {
+        const current = await screen();
+        if (rn ? current.some((node) => node['content-desc'] === 'Menu') && !hasText(current, en['settings.featurePomodoro'])
+            : Boolean(tab(current, 'Inbox')) && !hasText(current, en['settings.featurePomodoro'])) break;
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(900);
+    }
+};
 /** Pass S5 only: Settings › Sync from the Menu sheet, the File panel's two shots, then Back to the tabs. */
 const shootS5 = async (prefix, suffix, rn) => {
     if (rn) openLink('focus');
@@ -1099,6 +1127,7 @@ try {
             device.launch(RN_ACTIVITY);
         }
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('rn', true); continue; }
+        if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('rn', true); continue; }
         if (A13_ONLY) { if (mode === 'no') await shoot13a('rn', true); continue; }
         if (R2_ONLY) { await shootR2('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (S5_ONLY) { await shootS5('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
@@ -1144,6 +1173,7 @@ try {
     for (const mode of c3FixesOnly ? [] : ['no', 'yes']) {
         if (mode === 'yes') await setNight('yes');
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('native', false); continue; }
+        if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('native', false); continue; }
         if (A13_ONLY) { if (mode === 'no') await shoot13a('native', false); continue; }
         if (R2_ONLY) { await shootR2('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (S5_ONLY) { await shootS5('native', mode === 'yes' ? 'dark' : 'light', false); continue; }

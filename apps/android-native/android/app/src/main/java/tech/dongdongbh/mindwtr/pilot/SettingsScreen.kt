@@ -820,8 +820,10 @@ private fun GtdHub(model: InboxViewModel, hub: JSONObject) = with(model.menu.set
                 JSONObject().put("type", "defaultScheduleTime").put("value", typed)
             }
         }
-        for (name in listOf("focusTaskLimit", "defaultProjectFlowMode")) {
+        for (name in listOf("focusTaskLimit", "focusIncludeStartDates", "defaultProjectFlowMode")) {
             val control = hub.getJSONObject(name)
+            // RN's "Include start dates in Today" switch (#1325) between the two segmented rows.
+            if (name == "focusIncludeStartDates") { ToggleRow(model, control, true, write = { gtd(it) }); continue }
             Column(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column {
                     Text(control.getString("label"), style = rnText(16, 500, 21), color = c.text)
