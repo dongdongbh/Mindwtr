@@ -10125,6 +10125,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // RN's receipts file, in place: the same folder and name, so an RN user who upgrades keeps every receipt.
     assert.match(source('ProcessCoreHost.kt'), /gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\)/);
     assert.match(receiptsKt, /BundledSQLiteDriver\(\)\.open\(file\.path\)/);
+    // minSdk 24 with no library desugaring: an API 26 call (java.nio.file, java.time, File.toPath) throws NoSuchMethodError on
+    // Android 7, so a receipts reset there would fail every start (review rgmail, medium). A rename never replaces a file.
+    for (const [name, text] of [['GmailAuthorization.kt (Play)', play], ['GmailAuthorization.kt (FOSS)', foss], ['HostGmailReceipts.kt', receiptsKt],
+        ['GmailConsentPrompt.kt', readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/GmailConsentPrompt.kt'), 'utf8')],
+        ['GmailCapture.kt', source('GmailCapture.kt')]]) {
+        assert.doesNotMatch(text, /java\.nio\.file|java\.time|\.toPath\(\)/, `${name} calls no API 26 class on a minSdk 24 build`);
+    }
+    assert.match(receiptsKt, /"rename" -> named\(to\)\.let \{ target -> check\(!target\.exists\(\) && file\.renameTo\(target\)\)/);
     assert.doesNotMatch(receiptsKt, /android\.database/);
     const gmailTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-gmail.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(gmailTested.status, 0, `bundle/host-gmail.test.ts: ${gmailTested.stderr.slice(-1500)}`);

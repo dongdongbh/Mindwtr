@@ -6,7 +6,6 @@ import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.nio.file.Files
 
 /**
  * Core's Gmail receipt store on this host (gmail-receipt-store.ts GmailReceiptFiles, bundle/host-gmail.ts): RN's file
@@ -45,7 +44,8 @@ class HostGmailReceipts(private val folder: File) {
             "size" -> return file.length().toString()
             // The folder comes with the first file, as RN makes it only when it opens the store.
             "create" -> check(folder.mkdirs() || folder.isDirectory) { "No Gmail receipts folder" }.also { check(file.createNewFile()) { "The file exists" } }
-            "rename" -> Files.move(file.toPath(), named(to).toPath())
+            // File.renameTo, not Files.move (API 26; minSdk is 24). It would replace a file on Linux, so a target is refused first.
+            "rename" -> named(to).let { target -> check(!target.exists() && file.renameTo(target)) { "The file was not renamed" } }
             "remove" -> check(!file.exists() || file.delete()) { "The file was not removed" }
             "open" -> {
                 require(DATABASES.matches(name)) { "Not a Gmail receipts database" }
