@@ -1,20 +1,21 @@
 import {
     ANDROID_QUICK_CAPTURE_SOURCE,
-    DEFAULT_GEMINI_STT_MODEL,
-    runRemoteSpeechToTaskCapture,
+    dispatchSpeechCapture,
+    resolveSpeechToTextRuntimeSettings,
     type AIProviderId,
     type AppData,
     type PendingAudioCapture,
     type PendingCaptureAudioPort,
 } from '@mindwtr/core';
+import { createNativeSpeechPorts, speechConfigFor } from './host-voice';
 
 /**
  * The home-screen widget's queued recordings on this host (core's ingestPendingAudio): RN's audio port
  * (apps/mobile/lib/pending-captures.ts resolveSafeAndroidQuickCaptureAudioPath, apps/mobile/lib/watch-audio.ts
  * transcribePendingAudio). A recording becomes a task only once it has a transcript; with none it stays queued, as in RN.
- * This host reaches Gemini (JSON with inline audio over the polyfill's fetch). OpenAI and OpenAI-compatible servers need a
- * multipart upload and local Whisper needs whisper.cpp; both come with the voice capture passes (V3, V4), so they answer no
- * transcript yet and the recording waits.
+ * The provider is core's (resolveSpeechToTextRuntimeSettings) and so is the dispatch: Gemini, OpenAI and OpenAI-compatible
+ * servers over the polyfill's fetch (OpenAI's multipart through its FormData). Local Whisper needs whisper.cpp (voice pass V4),
+ * so a Whisper recording answers no transcript yet and waits.
  */
 export type WidgetAudioBindings = {
     /** expo-file-system's documentDirectory form of the app's files folder: `file:///…/files/`. */
@@ -48,27 +49,17 @@ export function createWidgetAudioPort(bindings: WidgetAudioBindings): PendingCap
             bindings.deleteFile(`files/${audioPath.slice(documents.length)}`);
         },
         transcribe: async (audioPath: string, settings: AppData['settings']) => {
-            // RN's resolveSpeechToTextRuntimeSettings and transcribePendingAudio.
-            const speech = settings.ai?.speechToText;
-            const provider = bindings.isFossBuild ? 'whisper' : speech?.provider ?? 'gemini';
-            const enabled = speech?.enabled === true && provider !== 'parakeet';
-            if (!enabled) { bindings.logWaiting('not-configured'); return null; }
-            if (provider !== 'gemini') { bindings.logWaiting('provider-unsupported'); return null; }
-            const apiKey = await bindings.loadKey('gemini').catch(() => '');
-            if (!apiKey) { bindings.logWaiting('not-configured'); return null; }
+            // RN's transcribePendingAudio over core's resolver: FOSS forces Whisper, Parakeet is off, no provider means Gemini.
+            const runtime = resolveSpeechToTextRuntimeSettings(settings.ai?.speechToText, { isFossBuild: bindings.isFossBuild });
+            if (!runtime.enabled) { bindings.logWaiting('not-configured'); return null; }
+            if (runtime.provider === 'whisper') { bindings.logWaiting('provider-unsupported'); return null; }
+            const apiKey = await bindings.loadKey(runtime.provider).catch(() => '');
+            if (!apiKey && !runtime.baseUrl) { bindings.logWaiting('not-configured'); return null; }
             let transcript: string | undefined;
             try {
-                const result = await runRemoteSpeechToTaskCapture({
-                    provider: 'gemini',
-                    apiKey,
-                    model: speech?.model || DEFAULT_GEMINI_STT_MODEL,
-                    language: speech?.language,
-                    mode: speech?.mode ?? 'smart_parse',
-                    fieldStrategy: speech?.fieldStrategy ?? 'smart',
-                    now: new Date(),
-                }, {
-                    readBytes: async () => ({ bytes: await bindings.readBytes(audioPath), mimeType: 'audio/wav' }),
-                }, bindings.fetcher ? { fetcher: bindings.fetcher } : {});
+                const ports = { ...createNativeSpeechPorts(bindings, audioPath, 'audio/wav', () => undefined),
+                    ...(bindings.fetcher ? { fetcher: bindings.fetcher } : {}) };
+                const result = await dispatchSpeechCapture(speechConfigFor(runtime, apiKey, settings, new Date()), runtime.isFossBuild, ports);
                 transcript = result.transcript?.trim();
             } catch (error) {
                 // Core keeps the item and its recording for a later run; the error's text may hold the provider's answer.

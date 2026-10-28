@@ -112,6 +112,7 @@ export const ANDROID_HOST_METHODS = [
     'taskView',
     'theme',
     'update',
+    'voiceRequest',
     'widgetsRefresh',
     'saveWarm',
     'window',

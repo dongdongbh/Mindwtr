@@ -591,7 +591,146 @@
     var bytesOf = function (body) {
         if (body instanceof ArrayBuffer) return new Uint8Array(body);
         if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-        throw new TypeError('Unsupported body: text, URLSearchParams, ArrayBuffer or a typed array only');
+        if (typeof global.Blob === 'function' && body instanceof global.Blob) return body._bytes;
+        throw new TypeError('Unsupported body: text, URLSearchParams, FormData, Blob, ArrayBuffer or a typed array only');
+    };
+
+    // --- Blob and FormData --------------------------------------------------
+    // Core's OpenAI speech upload (speech-to-task.ts transcribeRemoteOpenAI) posts a FormData with a Blob file part. The
+    // whole Blob sits in memory: its parts' bytes, copied, with strings as UTF-8.
+    if (typeof global.Blob !== 'function') {
+        global.Blob = function Blob(parts, options) {
+            mark('Blob');
+            var chunks = [];
+            var size = 0;
+            (parts || []).forEach(function (part) {
+                var bytes = part instanceof global.Blob ? part._bytes
+                    : part instanceof ArrayBuffer || ArrayBuffer.isView(part) ? bytesOf(part)
+                        : new global.TextEncoder().encode(String(part));
+                chunks.push(bytes);
+                size += bytes.length;
+            });
+            // A sole Blob part shares its bytes: a Blob never changes them.
+            if (chunks.length === 1 && parts[0] instanceof global.Blob) {
+                this._bytes = chunks[0];
+            } else {
+                this._bytes = new Uint8Array(size);
+                for (var i = 0, at = 0; i < chunks.length; at += chunks[i].length, i += 1) this._bytes.set(chunks[i], at);
+            }
+            // The File API: a type with a character outside U+0020-U+007E is empty, any other is lower-cased.
+            var type = options && options.type !== undefined ? String(options.type) : '';
+            this.type = /^[\x20-\x7e]*$/.test(type) ? type.toLowerCase() : '';
+            this.size = this._bytes.length;
+        };
+        var blobProto = global.Blob.prototype;
+        blobProto.arrayBuffer = function () {
+            var bytes = this._bytes;
+            return Promise.resolve(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+        };
+        blobProto.bytes = function () { return Promise.resolve(this._bytes.slice()); };
+        blobProto.text = function () { return Promise.resolve(new global.TextDecoder('utf-8', { fatal: false }).decode(this._bytes)); };
+        // subarray clamps negative and out-of-range offsets as Blob.slice does.
+        blobProto.slice = function (start, end, type) {
+            var blob = new global.Blob([], { type: type });
+            blob._bytes = this._bytes.subarray(start === undefined ? 0 : start, end === undefined ? this.size : end);
+            blob.size = blob._bytes.length;
+            return blob;
+        };
+    }
+
+    if (typeof global.FormData !== 'function') {
+        // An entry's value is a string or a Blob carrying its filename (`name`, as the File the platform makes).
+        var formEntry = function (name, value, filename) {
+            if (!(value instanceof global.Blob)) return [String(name), String(value)];
+            var file = new global.Blob([value], { type: value.type });
+            file.name = filename !== undefined ? String(filename) : typeof value.name === 'string' ? value.name : 'blob';
+            return [String(name), file];
+        };
+        global.FormData = function FormData() {
+            mark('FormData');
+            this._entries = [];
+        };
+        var formProto = global.FormData.prototype;
+        formProto.append = function (name, value, filename) { this._entries.push(formEntry(name, value, filename)); };
+        formProto.set = function (name, value, filename) {
+            var entry = formEntry(name, value, filename);
+            var at = -1;
+            this._entries = this._entries.filter(function (pair, index) {
+                if (pair[0] !== entry[0]) return true;
+                if (at < 0) at = index;
+                return false;
+            });
+            if (at < 0) this._entries.push(entry); else this._entries.splice(at, 0, entry);
+        };
+        formProto.get = function (name) {
+            var key = String(name);
+            for (var i = 0; i < this._entries.length; i += 1) if (this._entries[i][0] === key) return this._entries[i][1];
+            return null;
+        };
+        formProto.getAll = function (name) {
+            var key = String(name);
+            return this._entries.filter(function (pair) { return pair[0] === key; }).map(function (pair) { return pair[1]; });
+        };
+        formProto.has = function (name) { return this.get(name) !== null; };
+        formProto.delete = function (name) {
+            var key = String(name);
+            this._entries = this._entries.filter(function (pair) { return pair[0] !== key; });
+        };
+        formProto.forEach = function (fn, thisArg) {
+            var self = this;
+            this._entries.slice().forEach(function (pair) { fn.call(thisArg, pair[1], pair[0], self); });
+        };
+        formProto.entries = function () { return this._entries.map(function (pair) { return [pair[0], pair[1]]; })[Symbol.iterator](); };
+        formProto.keys = function () { return this._entries.map(function (pair) { return pair[0]; })[Symbol.iterator](); };
+        formProto.values = function () { return this._entries.map(function (pair) { return pair[1]; })[Symbol.iterator](); };
+        formProto[Symbol.iterator] = formProto.entries;
+    }
+
+    // A FormData body as RN's Android app sends it (React Native 0.81.5, OkHttp 4.x), boundary aside:
+    // - RN's FormData.getParts (Libraries/Network/FormData.js:83-104) gives each part the header
+    //   `content-disposition: form-data; name="<name>"` (the name as is, not escaped), and a file part
+    //   `; filename="<encodeURIComponent(filename with each / as _)>"` (encodeFilename, lines 36-38) and a `content-type`
+    //   of the file's type. A text part has no content-type.
+    // - RCTNetworking.android.js:25-31,72-77 turns those headers into [name, value] pairs, in that order, names lower-case.
+    // - NetworkingModule.kt:685-765 (constructMultipartBody) takes the content-type out of the part headers (lines 719-725)
+    //   and gives it to OkHttp as the part body's MediaType. extractHeaders (lines 770-801) adds no User-Agent:
+    //   MainReactPackage.kt:123 builds NetworkingModule(reactContext), so defaultUserAgent is null. A text part is
+    //   RequestBody.create(null, value): UTF-8 bytes, a known length, no media type (OkHttp's
+    //   RequestBody.Companion.create(String, MediaType) appends "; charset=utf-8" only to a non-null type). A file part is
+    //   RequestBodyUtil.create (RequestBodyUtil.kt:134-158); its length is the stream's available(), the file's size.
+    // - OkHttp's MultipartBody.writeOrCountBytes (okhttp-4.12.0.jar in ~/.gradle/caches/modules-2, read with javap -c; RN's
+    //   own pin is 4.9.2, same code) writes per part: "--" boundary CRLF; each part header as `name: value` CRLF, in order,
+    //   names as given (so lower-case); `Content-Type: <type>` CRLF when the body has a type; `Content-Length: <n>` CRLF
+    //   when the length is known; CRLF; the body; CRLF. Then "--" boundary "--" CRLF. No preamble, no epilogue.
+    // - The request's content-type: NetworkingModule.kt:453-464 types the body multipart/form-data when the caller set
+    //   none, and OkHttp's MultipartBody.contentType() is `<type>; boundary=<boundary>`, the boundary a
+    //   UUID.randomUUID() string (MultipartBody.Builder).
+    // RN never sends a Blob part on Android: its Blob throws on ArrayBuffer parts (BlobManager.js:70-74), so
+    // speech-to-text.helpers.ts buildMultipartAudioPart falls back to a { uri, name, type } part (and a Blob part would reach
+    // constructMultipartBody with neither `string` nor `uri`: "Unrecognized FormData part."). A Blob part here takes that
+    // uri part's layout, with the Blob's bytes. A Blob with no type, which RN refuses ("Binary FormData part needs a
+    // content-type header."), goes as application/octet-stream, as browsers send it.
+    var multipartOf = function (form, boundary) {
+        var encoder = new global.TextEncoder();
+        var chunks = [];
+        form._entries.forEach(function (pair) {
+            var value = pair[1];
+            var file = typeof value !== 'string';
+            var body = file ? value._bytes : encoder.encode(value);
+            var head = '--' + boundary + '\r\ncontent-disposition: form-data; name="' + pair[0] + '"';
+            if (file) {
+                head += '; filename="' + encodeURIComponent(value.name.replace(/\//g, '_')) + '"\r\n'
+                    + 'Content-Type: ' + (value.type || 'application/octet-stream');
+            }
+            head += '\r\nContent-Length: ' + body.length + '\r\n\r\n';
+            chunks.push(encoder.encode(head), body, encoder.encode('\r\n'));
+        });
+        chunks.push(encoder.encode('--' + boundary + '--\r\n'));
+        var size = 0;
+        chunks.forEach(function (chunk) { size += chunk.length; });
+        var bytes = new Uint8Array(size);
+        for (var i = 0, at = 0; i < chunks.length; at += chunks[i].length, i += 1) bytes.set(chunks[i], at);
+        return bytes;
     };
 
     var HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
@@ -734,7 +873,17 @@
                             ? 'text/plain;charset=UTF-8' : 'application/x-www-form-urlencoded;charset=UTF-8');
                     }
                     payload.text = typeof body === 'string' ? body : body.toString();
+                } else if (body instanceof global.FormData) {
+                    // OkHttp types the body `<the caller's type, else multipart/form-data>; boundary=<uuid>` and that replaces
+                    // the request's content-type (BridgeInterceptor). A boundary the caller set is kept and used.
+                    var formType = request.headers.get('content-type') || 'multipart/form-data';
+                    var callerBoundary = /;\s*boundary="?([^";]+)"?/i.exec(formType);
+                    var boundary = callerBoundary ? callerBoundary[1] : global.crypto.randomUUID();
+                    if (!callerBoundary) request.headers.set('content-type', formType + '; boundary=' + boundary);
+                    payload.base64 = toBase64(multipartOf(body, boundary));
                 } else if (body !== null) {
+                    // RN's fetch (whatwg-fetch) types a Blob body with its type.
+                    if (body instanceof global.Blob && body.type && !request.headers.has('content-type')) request.headers.set('content-type', body.type);
                     payload.base64 = toBase64(bytesOf(body));
                 }
                 payload.headers = [];
@@ -903,6 +1052,19 @@
         global.__mindwtrGmailCall = function (request) {
             return new Promise(function (resolve, reject) {
                 startIo(hostCall(native().gmailCall(JSON.stringify(request))), function (answer) {
+                    if (answer.error !== undefined) reject(new Error(answer.error));
+                    else resolve(answer.value);
+                });
+            });
+        };
+    }
+    // Voice capture's microphone (HostVoice.kt, host-voice.ts): the permission prompt and the recorder answer from their own
+    // threads, so a call is only started here and settled by the pump, as a fetch. Never refused or cancelled by a host
+    // deadline: a recording the recorder started must reach its owner, or the microphone stays held until the app leaves.
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.voiceCall === 'function') {
+        global.__mindwtrVoiceCall = function (request) {
+            return new Promise(function (resolve, reject) {
+                startIo(hostCall(native().voiceCall(JSON.stringify(request))), function (answer) {
                     if (answer.error !== undefined) reject(new Error(answer.error));
                     else resolve(answer.value);
                 });

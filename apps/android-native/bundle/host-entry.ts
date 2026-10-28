@@ -145,6 +145,7 @@ import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundl
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
 import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
 import { createNativeGmail } from './host-gmail';
+import { createNativeVoice, type VoiceCaptureLine } from './host-voice';
 import { createWidgetAudioPort } from './host-widget-audio';
 import { createAIKeyStore } from '../../../packages/core/src/ai-config';
 import { createSyncSecretVault } from '../../../packages/core/src/sync-secret-storage';
@@ -750,6 +751,69 @@ const widgetAudioPort = (() => {
                     context: { releaseCheck: 'v1.3.8/native-widget-audio-ingest', outcome } });
             } catch { /* a diagnostic line never changes the drain */ }
         },
+    });
+})();
+/**
+ * Voice capture (host-voice.ts, voice pass V3): Kotlin's microphone (HostVoice.kt over `__mindwtrVoiceCall`), the AI keys, the
+ * attachment port and the capture contract's audio save, on Android. The capture popup (V5) sends CoreHost.voiceRequest.
+ */
+const nativeVoice = (() => {
+    const call = (globalThis as { __mindwtrVoiceCall?: (request: Record<string, unknown>) => Promise<unknown> }).__mindwtrVoiceCall;
+    const channels = nativeAI && nativeSync && call ? nativeFileChannels() : null;
+    const host = attachmentsHost;
+    if (!channels || !nativeAI || !call || !host) return null;
+    const ai = nativeAI;
+    const keys = createAIKeyStore({
+        storage: ai.storage,
+        secrets: { getItem: (key) => ai.secrets.get(key), setItem: (key, value) => ai.secrets.set(key, value), deleteItem: (key) => ai.secrets.delete(key) },
+        vault: createSyncSecretVault({ isAvailable: async () => true }),
+    });
+    const documents = channels.directories.document;
+    // core's ATTACHMENTS_DIR_NAME under the documents folder, as RN's getAttachmentsDir.
+    const managed = `${documents}attachments/`;
+    const recordings = `${documents}voice-captures/`;
+    const voiceLine = (line: VoiceCaptureLine) => {
+        try {
+            if (line.kind === 'capture') {
+                logInfo('Native Android voice capture', { scope: 'capture', context: { releaseCheck: 'v1.3.8/native-voice-capture',
+                    outcome: line.outcome, provider: line.provider, ...(line.durationMs ? { durationMs: line.durationMs } : {}) } });
+            } else {
+                (line.outcome === 'failed' ? logWarn : logInfo)('Native Android voice transcription', { scope: 'capture',
+                    context: { releaseCheck: 'v1.3.8/native-voice-transcribe', outcome: line.outcome, provider: line.provider,
+                        ...(line.errorKind ? { errorKind: line.errorKind } : {}) } });
+            }
+        } catch { /* a diagnostic line never changes a capture */ }
+    };
+    return createNativeVoice({
+        recorder: {
+            permission: async () => (await call({ op: 'permission' }) === 'granted' ? 'granted' : 'denied'),
+            start: async (format) => await call({ op: 'start', format }) as { id: string },
+            stop: async (id) => await call({ op: 'stop', id }) as { uri: string; size: number },
+            cancel: async (id) => { await call({ op: 'cancel', id }); },
+        },
+        settings: () => useTaskStore.getState().settings,
+        store: useTaskStore,
+        isFossBuild,
+        loadKey: (provider) => keys.load(provider),
+        // Local Whisper comes with voice pass V4.
+        whisperModelReady: () => false,
+        persistAttachment: async (attachment) => {
+            // RN's cacheAudioAttachmentOrThrow: the copy is a file in managed storage before the task saves (#788).
+            const cached = await host.persistAttachmentLocally(attachment);
+            const info = await channels.files({ op: 'getInfo', uri: cached.uri }) as { exists?: boolean; isDirectory?: boolean } | null;
+            if (!cached.uri.startsWith(managed) || info?.exists !== true || info.isDirectory) throw new Error('Audio attachment was not cached into managed storage');
+            return cached;
+        },
+        submit: (input) => contract.submitQuickCaptureAudio(input),
+        readBytes: async (uri) => await channels.files({ op: 'readBytes', uri }) as Uint8Array,
+        deleteFile: (uri) => {
+            // A managed copy through the attachment port; the recorder's own file (VoiceRecorder.DIRECTORY) through HostFiles.delete.
+            if (uri.startsWith(managed)) void channels.files({ op: 'delete', uri }).catch(() => undefined);
+            else if (uri.startsWith(recordings) && !uri.slice(recordings.length).includes('/')) checked(native().fileDelete(`files/${uri.slice(documents.length)}`));
+        },
+        label: () => unwrap(contract.getStrings({ keys: ['quickAdd.audioNoteTitle'] })).strings['quickAdd.audioNoteTitle'] ?? 'Audio note',
+        newId: generateUUID,
+        log: voiceLine,
     });
 })();
 /** Gmail follows the sync start and RN's AppState; a failure there never fails sync's. */
@@ -5522,6 +5586,17 @@ globalThis.MindwtrHost = {
         return submit(async () => {
             if (!nativeGmail) throw new Error('Gmail capture is not available on this host');
             return nativeGmail.request(name, JSON.parse(json) as { labelId?: string; enabled?: boolean });
+        });
+    },
+    /**
+     * The capture popup's voice calls (host-voice.ts): `name` is open, close, start, stop or state, `json` its input. A start waits
+     * on the permission prompt and the microphone, a stop on the save, so CoreHost.voiceRequest waits without holding the engine.
+     * The transcript reaches the saved task later, apart from this call. A save retries by its capture ID.
+     */
+    voiceRequest(name: string, json: string): string {
+        return submit(async () => {
+            if (!nativeVoice) throw new Error('Voice capture is not available on this host');
+            return nativeVoice.request(name, JSON.parse(json) as Record<string, unknown>);
         });
     },
     /** `json` is the device's network state (`{ isConnected, isInternetReachable }`, as expo-network reads it). */

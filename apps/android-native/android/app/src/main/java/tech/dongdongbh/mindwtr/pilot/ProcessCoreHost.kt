@@ -17,6 +17,7 @@ import tech.dongdongbh.mindwtr.pilot.core.HostCalendars
 import tech.dongdongbh.mindwtr.pilot.core.HostGmailReceipts
 import tech.dongdongbh.mindwtr.pilot.core.HostDocuments
 import tech.dongdongbh.mindwtr.pilot.core.HostSyncLock
+import tech.dongdongbh.mindwtr.pilot.core.HostVoice
 import tech.dongdongbh.mindwtr.pilot.core.HostFiles
 import tech.dongdongbh.mindwtr.pilot.core.HostInstaller
 import tech.dongdongbh.mindwtr.pilot.core.HostIo
@@ -134,7 +135,8 @@ internal object ProcessCoreHost {
             backups = BackupOperations(File(app.noBackupFilesDir, "backup-operations"), File(app.filesDir, "snapshots"), maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
             calendars = HostCalendars(app), documents = HostDocuments(app), syncLock = HostSyncLock(app),
             appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)),
-            gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(File(app.filesDir, "GmailCapture")))
+            gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(File(app.filesDir, "GmailCapture")),
+            voice = HostVoice.forApp(app)::call)
         try {
             runtime.start(coreBundle(app), legacy?.bootState ?: "", legacy?.backup ?: "", legacy?.preflight == true)
             // After the boot, so the line reaches RN's diagnostics log with the settings loaded.

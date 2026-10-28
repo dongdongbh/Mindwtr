@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import type { AppData, PendingAudioCapture } from '@mindwtr/core';
 import { createWidgetAudioPort, type WidgetAudioBindings } from './host-widget-audio';
 
-// The widget's queued recordings on the native host (widget-audio-20261028-05): RN's audio port, with Gemini the one provider
-// this host reaches before the voice capture passes; any other leaves the recording queued, as RN does without speech.
+// The widget's queued recordings on the native host (widget-audio-20261028-05): RN's audio port over core's speech resolver and
+// dispatch (voice pass V3): Gemini, OpenAI and OpenAI-compatible servers; local Whisper (V4) leaves the recording queued.
 
 const DOCS = 'file:///data/user/0/tech.dongdongbh.mindwtr.nativeclient.dev/files/';
 const ID = '22222222-2222-4abc-8def-222222222222';
@@ -60,14 +60,14 @@ describe('the widget audio port', () => {
         expect(waiting).toEqual([]);
     });
 
-    it('answers no transcript, so the recording stays queued, without speech, without a key, or for a provider this host cannot reach yet', async () => {
+    it('answers no transcript, so the recording stays queued, without speech, without a key, or for local Whisper', async () => {
         const path = `${DOCS}quick-capture-audio/${ID}.wav`;
         const cases: Array<[Partial<WidgetAudioBindings>, Record<string, unknown> | undefined, string]> = [
             [{}, undefined, 'not-configured'],
             [{}, { enabled: false, provider: 'gemini' }, 'not-configured'],
             [{ loadKey: async () => '' }, { enabled: true, provider: 'gemini' }, 'not-configured'],
-            [{}, { enabled: true, provider: 'openai' }, 'provider-unsupported'],
-            [{}, { enabled: true, provider: 'openai', baseUrl: 'http://192.168.1.2:8000' }, 'provider-unsupported'],
+            // RN's transcribePendingAudio: no key and no server, no transcript.
+            [{}, { enabled: true, provider: 'openai' }, 'not-configured'],
             [{}, { enabled: true, provider: 'whisper' }, 'provider-unsupported'],
             // A FOSS build uses local Whisper whatever is stored, as RN's.
             [{ isFossBuild: true }, { enabled: true, provider: 'gemini' }, 'provider-unsupported'],
@@ -78,6 +78,38 @@ describe('the widget audio port', () => {
             expect(await port.transcribe!(path, settings(speech))).toBeNull();
             expect([JSON.stringify(speech), requests.length, waiting]).toEqual([JSON.stringify(speech), 0, [outcome]]);
         }
+        const empty = harness({}, { transcript: '   ' });
+        expect(await empty.port.transcribe!(path, settings({ enabled: true, provider: 'gemini' }))).toBeNull();
+        expect(empty.waiting).toEqual(['empty']);
+    });
+
+    it('reads Parakeet as speech off through core\'s resolver, even with a key on hand', async () => {
+        const path = `${DOCS}quick-capture-audio/${ID}.wav`;
+        const { port, requests, waiting } = harness({ loadKey: async () => 'any-key' });
+        expect(await port.transcribe!(path, settings({ enabled: true, provider: 'parakeet', model: 'parakeet-tdt-0.6b-v3-int8' }))).toBeNull();
+        expect([requests.length, waiting]).toEqual([0, ['not-configured']]);
+    });
+
+    it('reaches a self-hosted OpenAI-compatible server with a multipart upload of the WAV', async () => {
+        const path = `${DOCS}quick-capture-audio/${ID}.wav`;
+        const requests: Array<{ url: string; init: RequestInit }> = [];
+        const { port } = harness({
+            fetcher: (async (url: string, init: RequestInit) => {
+                requests.push({ url, init });
+                return new Response(JSON.stringify(url.endsWith('/audio/transcriptions') ? { text: 'Call the bank' }
+                    : { choices: [{ message: { content: JSON.stringify({ transcript: 'Call the bank', title: 'Call the bank' }) } }] }), { status: 200 });
+            }) as never,
+        });
+        expect(await port.transcribe!(path, settings({ enabled: true, provider: 'openai', baseUrl: 'http://192.168.1.2:8000/v1' }))).toBe('Call the bank');
+        const upload = requests.find((request) => request.url.endsWith('/audio/transcriptions'))!;
+        expect(upload.url.startsWith('http://192.168.1.2:8000/v1')).toBe(true);
+        const form = upload.init.body as FormData;
+        expect(form.get('file')).toBeInstanceOf(Blob);
+        expect((form.get('file') as Blob).type).toBe('audio/wav');
+    });
+
+    it('keeps the empty-transcript case', async () => {
+        const path = `${DOCS}quick-capture-audio/${ID}.wav`;
         const empty = harness({}, { transcript: '   ' });
         expect(await empty.port.transcribe!(path, settings({ enabled: true, provider: 'gemini' }))).toBeNull();
         expect(empty.waiting).toEqual(['empty']);

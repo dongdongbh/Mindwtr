@@ -954,7 +954,7 @@ const kotlinFiles = [activity, model, owner, editorUi, focusUi, projectsUi, labe
 assert.equal(kotlinFiles.join('\n').match(/(?<!class )CoreHost\(/g).length, 1);
 // The dev build keeps its own database. The upgradetest build gets the RN database and RN's state
 // only from the guard, before CoreHost exists: before any open of it, the checkpoint, and any core write.
-assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app, keyValue\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\)\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
+assert.match(owner, /val legacy = if \(BuildConfig\.RN_STORAGE\) \{\s*LegacyRnStoreGuard\.requireClear\(app\.dataDir, File\(app\.cacheDir, "legacy-rn-guard"\)\)\s*\} else \{\s*null\s*\}\s*val installer = HostInstaller\(app\.filesDir, app\.cacheDir\)\s*val keyValue = RnKeyValue\(app\.getDatabasePath\("RKStorage"\)\)\s*val runtime = CoreHost\(legacy\?\.database \?: File\(app\.filesDir, "mindwtr-native-dev\.db"\), legacy\?\.let \{ app\.dataDir \}, HostIo\(app\),\s*File\(app\.filesDir, "journal"\), deviceStore\(app, keyValue\),\s*File\(app\.filesDir, DiagnosticsLogFile\.RELATIVE_PATH\),\s*keyValue, HostFiles\(app\.filesDir, app\.cacheDir, content = AndroidContentSource\(app\)\), installer,\s*ReminderAlarms\(app, keyValue, checkpointRnState = \{ if \(legacy != null\) LegacyRnStoreGuard\.checkpointRnState\(app\.dataDir\) \}\),\s*HostWidgets\(app\) \{ appState \},\s*scheduleBackgroundSync = \{ on -> CoreWork\.scheduleSyncStored\(app, on\) \}, appInfo = aboutAppInfo\(\),\s*backups = BackupOperations\(File\(app\.noBackupFilesDir, \"backup-operations\"\), File\(app\.filesDir, \"snapshots\"\), maxPlanBytes = DataTransferLimits\.MAX_PLAN_BYTES\),\s*calendars = HostCalendars\(app\), documents = HostDocuments\(app\), syncLock = HostSyncLock\(app\),\s*appSearch = HostAppSearch\(app, app\.getString\(R\.string\.mindwtr_link_scheme\)\),\s*gmail = \(gmail \?: GmailAuthorization\(app\)\.also \{ gmail = it \}\)::call, gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\),\s*voice = HostVoice\.forApp\(app\)::call\)\s*try \{\s*runtime\.start\([^\n]*, legacy\?\.bootState \?: "", legacy\?\.backup \?: "", legacy\?\.preflight == true\)/);
 // Once the guard passes, it copies RN's RKStorage before it returns, so before RnKeyValue (or anything) opens it: an open can
 // checkpoint RN's WAL away when it closes.
 assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S])*?\n\s*checkpointRnState\(dataDir\)\n(?:(?!fun )[\s\S])*?return Opened\(/);
@@ -1102,7 +1102,7 @@ assert.match(model, /ProcessCoreHost\.get\(/);
 // Storage exceptions never cross the QuickJS JNI boundary.
 assert.equal(coreHost.match(/JSCallFunction \{/g).length, 1, 'the only JS callback constructor is guarded');
 const bridgeCallbacks = coreHost.match(/bridge\.setProperty\([^\n]*/g);
-assert.equal(bridgeCallbacks.length, 54, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5), and Gmail\'s authorization call, receipts file call and receipts SQL (G2): each guarded');
+assert.equal(bridgeCallbacks.length, 55, 'the SQL calls, trace, nowMs, randomBytes, rnStateCommit, collationKey, dateTimeFormat, log, the fetch, secret and sync crypto calls, logFile, the key-value calls, hostEvent, the queue\'s file calls, Settings › Data\'s three channel calls, its debug property and memory probe (D1c), the attachment file, delete, abort and installer calls and the reminder alarms\' calls: and the widgets\' three calls, the background sync\'s schedule, the device calendar call, system search\'s info and call (O2d), and File Sync\'s document and lock calls (S5), Gmail\'s authorization call, receipts file call and receipts SQL (G2), and voice capture\'s microphone call (V3): each guarded');
 // G2: Gmail's authorization call only starts on the engine thread (GmailAuthorization runs it on its own pool or the main thread);
 // the receipts file calls and SQL run at once, as op-sqlite's executeSync does on RN's JS thread.
 assert(bridgeCallbacks.includes('bridge.setProperty("gmailCall", guarded { args -> io.gmail(args[0] as String, authorization) }) }'));
@@ -1555,8 +1555,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // only an unjournaled write or a read, so no journaled write can skip the journal through it.
         assert.match(journalKt, /fun unjournaled\(method: String, args: List<Any\?>\): Boolean = method in WRITES && key\(method, args\) in UNJOURNALED/);
         assert.match(coreHost, /private fun callLong\(method: String, vararg args: Any\?, handle: LongCall = LongCall\(\)\): JSONObject \{\s+require\(method !in WriteJournal\.WRITES \|\| WriteJournal\.unjournaled\(method, args\.toList\(\)\)\)/);
-        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['ingestAudio', 'backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest'],
-            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s and Gmail\'s requests and the widget\'s recordings take the long path');
+        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['ingestAudio', 'backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest', 'voiceRequest'],
+            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s, Gmail\'s and voice capture\'s requests and the widget\'s recordings take the long path');
         // O1: About's requests (an update check, a feedback send, the heartbeat, the prompts) are reads of core: never journaled.
         assert(!writes.includes('aboutRequest'), 'an About request is no journaled write');
         assert.match(coreHost, /fun calendarRequest\(name: String, json: String\): JSONObject = callLong\("calendarRequest", name, json\)/);
@@ -4777,7 +4777,7 @@ export function setSha256HexProvider() {
 const hostSyncTs = readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-attachments.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-reminders.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-widgets.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8')
-    + readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8');
+    + readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-voice.ts'), 'utf8');
 const syncOnly = [...new Set([...hostSyncTs.matchAll(/^import \{([\s\S]*?)\} from '@mindwtr\/core';/gm)].flatMap((m) => [...m[1].matchAll(/^\s+(\w+),$/gm)].map((n) => n[1])))]
     .filter((name) => !new RegExp(`export (?:async )?(?:function|const|class) ${name}\\b|export \\{[^}]*\\b${name}\\b`).test(fakeCore));
 assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('createMobileSyncTriggers'), 'host-sync.ts\'s core imports parsed');
@@ -10228,9 +10228,33 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(source('core/WidgetAudioDrain.kt'), /val ended = awaitQuiet\(\)\s*if \(ended != "left"\) ingest\(\)/);
     assert.match(source('core/WidgetAudioDrain.kt'), /queue\.listFiles \{ file -> file\.name\.endsWith\(".json"\) \}\s*\?\.any \{ item -> runCatching \{ JSONObject\(item\.readText\(\)\)\.optString\("kind"\) == "audio" \}/);
     assert.doesNotMatch(processHost, /AUDIO_DIRECTORY/, 'the WAV folder never starts a drain');
-    assert.match(audioTs, /if \(provider !== 'gemini'\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}/);
+    // Voice pass V3: the provider is core's resolver (no inline copy), the dispatch core's; only local Whisper waits (V4).
+    assert.match(audioTs, /const runtime = resolveSpeechToTextRuntimeSettings\(settings\.ai\?\.speechToText, \{ isFossBuild: bindings\.isFossBuild \}\);/);
+    assert.match(audioTs, /if \(runtime\.provider === 'whisper'\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}/);
+    assert.doesNotMatch(audioTs, /speech\?\.provider \?\? 'gemini'|provider !== 'parakeet'/, 'no inline provider resolution');
     assert.doesNotMatch(audioTs.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /logWaiting\([^)]*transcript/, 'no transcript text in a log line');
     const audioTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-widget-audio.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(audioTested.status, 0, `bundle/host-widget-audio.test.ts: ${audioTested.stderr.slice(-1500)}`);
+}
+// voice-v3-20261028-15: the capture popup's voice calls (host-voice.ts). Kotlin's microphone answers like a fetch (HostVoice over
+// HostIo.voice, never refused by a host deadline); the popup's requests take the long path; the save is the capture contract's;
+// local Whisper is not ready until V4, so no stored model path counts (RN bug 1 is not carried); the log lines hold fixed fields.
+{
+    const hostEntrySource = readFileSync(resolve(app, 'bundle/host-entry.ts'), 'utf8');
+    const polyfills = readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8');
+    const voiceTs = readFileSync(resolve(app, 'bundle/host-voice.ts'), 'utf8');
+    assert.match(coreHost, /voice\?\.let \{ call -> bridge\.setProperty\("voiceCall", guarded \{ args -> io\.voice\(args\[0\] as String, call\) \}\) \}/);
+    assert.match(coreHost, /fun voiceRequest\(name: String, json: String\): JSONObject = callLong\("voiceRequest", name, json\)/);
+    assert.match(source('ProcessCoreHost.kt'), /voice = HostVoice\.forApp\(app\)::call\)/);
+    assert.match(hostEntrySource, /voiceRequest\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*if \(!nativeVoice\) throw new Error\('Voice capture is not available on this host'\);\s*return nativeVoice\.request\(name, JSON\.parse\(json\) as Record<string, unknown>\);/);
+    assert.match(hostEntrySource, /whisperModelReady: \(\) => false,/);
+    assert.match(hostEntrySource, /submit: \(input\) => contract\.submitQuickCaptureAudio\(input\),/);
+    const voiceCallBlock = polyfills.slice(polyfills.indexOf('global.__mindwtrVoiceCall = function'), polyfills.indexOf('__mindwtrCalendarPushCall'));
+    assert(voiceCallBlock.includes("native().voiceCall(JSON.stringify(request))") && !voiceCallBlock.includes('refuseIfCancelled'), 'a microphone call is never refused by a host deadline');
+    assert.doesNotMatch(voiceTs, /whisperModelPath/, 'no stored Whisper model path counts as ready');
+    const voiceLine = hostEntrySource.slice(hostEntrySource.indexOf('const voiceLine = '), hostEntrySource.indexOf('return createNativeVoice({'));
+    assert.deepEqual([...new Set([...voiceLine.matchAll(/\b(\w+): line\.\w+/g)].map((m) => m[1]))].sort(), ['durationMs', 'errorKind', 'outcome', 'provider'], 'a voice line holds fixed fields only');
+    const voiceTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-voice.test.ts', 'apps/android-native/bundle/host-multipart.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(voiceTested.status, 0, `bundle/host-voice.test.ts: ${voiceTested.stderr.slice(-1500)}`);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

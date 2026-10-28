@@ -211,6 +211,13 @@ class HostIo(context: Context) {
     fun gmail(json: String, run: (String, (Result<Any?>) -> Unit) -> Unit): String =
         replied { reply -> runCatching { run(json, reply) }.onFailure { reply(Result.failure(it)) } }
 
+    /**
+     * Starts a microphone call (HostVoice.call): the permission prompt or the recorder replies, from its own thread. Its answer is
+     * `{ id, value }` or `{ id, error }`, the error a fixed `E_VOICE_<KIND>` code (host-voice.ts reads it).
+     */
+    fun voice(json: String, run: (String, (Result<Any?>) -> Unit) -> Unit): String =
+        replied { reply -> runCatching { run(json, reply) }.onFailure { reply(Result.failure(IOException("E_VOICE_FAILED"))) } }
+
     /** A call answered once through its reply, whichever thread replies; [start] starts it. */
     private fun replied(start: ((Result<Any?>) -> Unit) -> Unit): String {
         val id = (++nextId).toString()

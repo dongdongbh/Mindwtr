@@ -163,6 +163,10 @@ class VoiceRecorder(
 /** The process's recorder, set by the bundle's voice host (pass V3); MainActivity tells it when the app leaves the front. */
 object VoiceCapture {
     @Volatile var recorder: VoiceRecorder? = null
+
+    fun recorderFor(context: Context): VoiceRecorder = recorder ?: synchronized(this) {
+        recorder ?: VoiceRecorder.create(context).also { recorder = it }
+    }
 }
 
 /** RN's m4a settings: expo-audio 1.1.1 RecordingPresets.HIGH_QUALITY (src/RecordingConstants.ts), its Android part. */

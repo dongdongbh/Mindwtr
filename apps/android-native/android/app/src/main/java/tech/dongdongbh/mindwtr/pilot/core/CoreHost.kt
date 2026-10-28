@@ -73,6 +73,8 @@ class CoreHost(
     private val gmail: ((String, (Result<Any?>) -> Unit) -> Unit)? = null,
     /** Core's Gmail receipt store's file calls and SQL (HostGmailReceipts); null with [gmail]. */
     private val gmailReceipts: HostGmailReceipts? = null,
+    /** The capture popup's microphone (HostVoice.call, bundle/host-voice.ts); null: this host records nothing. */
+    private val voice: ((String, (Result<Any?>) -> Unit) -> Unit)? = null,
 ) {
     /**
      * Reminder alarms on the platform (pilot/Reminders.kt): core's plan applied in core's order, the notification permission as RN
@@ -552,6 +554,8 @@ class CoreHost(
             bridge.setProperty("gmailFile", guarded { args -> receipts.file(args[0] as String, args[1] as String, args[2] as String) })
             bridge.setProperty("gmailSql", guarded { args -> receipts.sql(args[0] as String, args[1] as String, args[2] as String) })
         }
+        // Voice capture (host-voice.ts): the microphone's calls, started here and settled by the pump, as a fetch.
+        voice?.let { call -> bridge.setProperty("voiceCall", guarded { args -> io.voice(args[0] as String, call) }) }
         engine.globalObject.setProperty("__mindwtrNative", bridge)
         // The build's flavor (D8): core reads it as RN's isFossBuild.
         engine.globalObject.setProperty("__mindwtrFossBuild", BuildConfig.FOSS)
@@ -1059,6 +1063,12 @@ class CoreHost(
      * ([callLong]). None is a journaled write.
      */
     fun gmailRequest(name: String, json: String): JSONObject = callLong("gmailRequest", name, json)
+
+    /**
+     * The capture popup's voice calls (host-entry.ts voiceRequest: open, close, start, stop, state). A start waits on the permission
+     * prompt and the microphone, a stop on the save, so neither holds the engine ([callLong]); a save retries by its capture ID.
+     */
+    fun voiceRequest(name: String, json: String): JSONObject = callLong("voiceRequest", name, json)
 
     /**
      * A long call's handle: [cancel] frees the thread that waits on it at once and aborts its operation's signal
