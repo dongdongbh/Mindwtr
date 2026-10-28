@@ -45,6 +45,9 @@ tauri-plugin-shell = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-deep-link = "2"
+# Already resolved through Tauri; the app lock away timer sleeps on its runtime
+# on every desktop target, and the Linux portal code uses the rest.
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }
 dirs = "5"
 rusqlite = { version = "0.31", features = ["bundled"] }
 keyring = "2"
@@ -106,7 +109,6 @@ ashpd = "0.11"
 # Portal-backed encrypted storage for Flatpak; 0.5 supports our Rust toolchain.
 oo7 = { version = "0.5", default-features = false, features = ["tokio", "native_crypto"] }
 libloading = "0.8"
-tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "sync", "time"] }
 webkit2gtk = "2"
 # Already resolved through Tauri; used for timestamped X11 Quick Add activation.
 gtk = "0.18"
