@@ -47,6 +47,8 @@ test('an unset adb port defaults to 5038 in the child env and the detached unit;
     const set = withAdbPort({ PATH: '/bin', ANDROID_ADB_SERVER_PORT: '5099' });
     assert.equal(set.ANDROID_ADB_SERVER_PORT, '5099');
     assert.deepEqual(setenvArgs(set), ['--setenv=PATH=/bin', '--setenv=ANDROID_ADB_SERVER_PORT=5099']);
+    // A parity pass's PARITY_ONLY reaches capture-parity-screens in the detached unit.
+    assert.deepEqual(setenvArgs({ PATH: '/bin', PARITY_ONLY: 'small2' }), ['--setenv=PATH=/bin', '--setenv=PARITY_ONLY=small2']);
     // device.mjs's own default is the /opt adb, never the /home/dd/Android/Sdk one (each kills the other's server).
     assert.equal(DEFAULT_ADB, '/opt/android-sdk/platform-tools/adb');
 });

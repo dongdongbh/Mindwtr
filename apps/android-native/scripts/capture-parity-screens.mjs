@@ -36,6 +36,9 @@
 // a completion's "marked Done" toast with Undo and the task back after Undo, a Process Inbox Trash's toast with Undo and the item
 // back in the Inbox, and the Daily Review with seven of the feed's events tomorrow, at its top and scrolled to the last event.
 //
+// PARITY_ONLY=small2 shoots only pass small-2's pull down to sync on Focus, in light mode: two frames right after the pull (RN's
+// bar over a transparent spinner, then its notice; the harness has no sync set up, so RN's red bar and setup notice).
+//
 // PARITY_ONLY=c3-fixes shoots only C3's 10-10 fixes, in light mode: the Calendar's month with today's details while the same
 // range reloads (the feed answers after 15 s: RN's Loading… line over the events kept), and Settings › Calendar's pills at
 // system font scale 2.0 and 1.0 (RN's CompactText 1.2x cap). The font scale is restored at the end.
@@ -48,7 +51,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, chipOn, connect, EDGE_SAFE_X, evidenced, fail, hasText, inEditor, inList, Stopped, switchOn, tab, tabSelected, withDescription } from './device.mjs';
+import { box, button, check, chipOn, connect, EDGE_SAFE_X, evidenced, fail, hasText, inEditor, inList, mainList, Stopped, switchOn, tab, tabSelected, withDescription } from './device.mjs';
 import { icsCalendar, serveCalendar } from './calendar-feed-server.mjs';
 
 const [serial] = process.argv.slice(2);
@@ -70,6 +73,7 @@ const S5_ONLY = process.env.PARITY_ONLY === 's5';
 const R2B_ONLY = process.env.PARITY_ONLY === 'r2b';
 const A13_ONLY = process.env.PARITY_ONLY === '13a';
 const GTD_HUB_ONLY = process.env.PARITY_ONLY === 'gtd-hub';
+const SMALL2_ONLY = process.env.PARITY_ONLY === 'small2';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -848,6 +852,27 @@ const shootS5 = async (prefix, suffix, rn) => {
  * Pass R2b: the Pomodoro card on Focus in each state. Both apps label the card's controls with core's en words (RN as text,
  * native as the node's description). It ends at the idle card with Timer only, as it began.
  */
+/** Pass small-2: Focus pulled down from its top (5bb0ea8f), shot 300 ms and 900 ms after the finger lifts (the bar is brief). */
+const shootSmall2 = async (prefix, rn) => {
+    if (rn) openLink('focus');
+    else {
+        const tabs = await waitFor('the native tabs', (current) => Boolean(tab(current, 'Focus')), 60_000);
+        if (!tabSelected(tabs, 'Focus')) await tap(tab(tabs, 'Focus'));
+    }
+    await waitFor('Focus', (current) => hasText(current, EDITOR_TASK), 45_000);
+    const nodes = await device.toTop();
+    const [x1, y1, x2, y2] = box(mainList(nodes) ?? fail('no Focus list'));
+    const x = Math.round((x1 + x2) / 2);
+    requireAppFront();
+    sh(`input swipe ${x} ${y1 + 60} ${x} ${Math.min(y2 - 40, y1 + 900)} 700`);
+    for (const [at, frame] of [[300, 'a'], [600, 'b']]) {
+        await sleep(at);
+        writeFileSync(resolve(out, `${prefix}-pull-sync-${frame}-light.png`), adbRaw('exec-out', 'screencap', '-p'));
+        shots.push(`${prefix}-pull-sync-${frame}-light`);
+        console.log(`shot ${prefix}-pull-sync-${frame}-light.png`);
+    }
+    await sleep(4000); // the notice leaves before the next screen
+};
 const shootR2b = async (prefix, rn) => {
     const labeled = (nodes, label) => nodes.findLast((node) => node.text === label || node['content-desc'] === label);
     const press = async (label) => {
@@ -1128,6 +1153,7 @@ try {
         }
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('rn', true); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('rn', true); continue; }
+        if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('rn', true); continue; }
         if (A13_ONLY) { if (mode === 'no') await shoot13a('rn', true); continue; }
         if (R2_ONLY) { await shootR2('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (S5_ONLY) { await shootS5('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
@@ -1174,6 +1200,7 @@ try {
         if (mode === 'yes') await setNight('yes');
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('native', false); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('native', false); continue; }
+        if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('native', false); continue; }
         if (A13_ONLY) { if (mode === 'no') await shoot13a('native', false); continue; }
         if (R2_ONLY) { await shootR2('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (S5_ONLY) { await shootS5('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
