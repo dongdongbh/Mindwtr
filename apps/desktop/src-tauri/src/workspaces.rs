@@ -665,7 +665,8 @@ mod tests {
             let start = source
                 .find(signature)
                 .unwrap_or_else(|| panic!("missing {signature}"));
-            let end = source[start..].find("\n}\n").expect("function end") + start;
+            // Windows checkouts use CRLF, so match the column-0 brace only.
+            let end = source[start..].find("\n}").expect("function end") + start;
             &source[start..end]
         }
         let storage = include_str!("storage.rs");
