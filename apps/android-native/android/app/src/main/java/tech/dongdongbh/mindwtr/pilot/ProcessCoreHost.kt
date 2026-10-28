@@ -435,7 +435,9 @@ internal object ProcessCoreHost {
             // wait ends 2 s after the resume, or at once when the app leaves the front, so every resume runs its cycle and the sync
             // trigger behind it never waits longer; alarms stay as planned until it does.
             resumedRuntime()?.let { runtime ->
-                val ended = runtime.awaitQuiet(resumedAt) { appState != "active" }
+                // The resume counts as a call: an idle core at the return would let the cycle run before the screen's first read
+                // was even sent (31 ms ahead of a hot start's Focus read at 5,000 tasks).
+                val ended = runtime.awaitQuiet(resumedAt, quietSince = resumedAt) { appState != "active" }
                 // The tester's line on a process's first resume and whenever the wait did not end quiet (1-6 ms of core each).
                 if (ended != "quiet" || resumeCycleLogged.compareAndSet(false, true)) {
                     val context = JSONObject().put("releaseCheck", "v1.3.8/native-resume-cycle-quiet").put("stage", ended)

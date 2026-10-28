@@ -10019,7 +10019,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 {
     const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
     const processKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
-    assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+(?:\/\/[^\n]*\n\s+)*resumedRuntime\(\)\?\.let \{ runtime ->\s+val ended = runtime\.awaitQuiet\(resumedAt\) \{ appState != "active" \}[\s\S]{0,900}?\}\s+\}\s+runCatching \{ reminders\.resume\(\) \}/);
+    assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+(?:\/\/[^\n]*\n\s+)*resumedRuntime\(\)\?\.let \{ runtime ->\s+(?:\/\/[^\n]*\n\s+)*val ended = runtime\.awaitQuiet\(resumedAt, quietSince = resumedAt\) \{ appState != "active" \}[\s\S]{0,900}?\}\s+\}\s+runCatching \{ reminders\.resume\(\) \}/);
     // The tester's line: a process's first resume, and any wait that did not end quiet; not every quiet resume.
     assert.match(processKt, /if \(ended != "quiet" \|\| resumeCycleLogged\.compareAndSet\(false, true\)\) \{/);
     // Leaving the front ends the wait, so the state is set before the cycle is posted.

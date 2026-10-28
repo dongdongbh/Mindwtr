@@ -73,4 +73,14 @@ class WidgetRefreshGateAwaitTest {
         // The bound counts from the post, so the second resume's wait does not stack on the first's.
         assertTrue(ran.all { it.second <= WidgetRefreshGate.MAX_WAIT_MS })
     }
+
+    /** A resume counts as a call (CoreHost.awaitQuiet's quietSince): an idle core still waits QUIET_MS for the screen's first read. */
+    @Test fun aResumeCountsAsACall() {
+        val clock = Clock()
+        clock.lastCallAt = clock.now - 65_000
+        val resumedAt = clock.now
+        assertEquals("quiet", WidgetRefreshGate.await({ clock.now }, clock::sleep, { maxOf(clock.lastCallAt, resumedAt) }, { false }, askedAt = resumedAt))
+        assertEquals(WidgetRefreshGate.QUIET_MS, clock.sleeps.sum())
+    }
 }
+

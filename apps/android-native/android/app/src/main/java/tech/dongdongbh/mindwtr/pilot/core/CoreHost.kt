@@ -834,11 +834,12 @@ class CoreHost(
     /**
      * Waits on the caller's thread until core is quiet (no call queued, none for [WidgetRefreshGate.QUIET_MS]), at most
      * [WidgetRefreshGate.MAX_WAIT_MS]: work nothing on screen needs yet (the widget build, a resume's reminder cycle) lets the
-     * screen's reads go first. [stop] true ends the wait at once; the bound counts from [askedAt]. Never on the engine thread.
+     * screen's reads go first. [stop] true ends the wait at once; the bound counts from [askedAt]; [quietSince] counts as a call
+     * (a resume, before the screen sent its first read). Never on the engine thread.
      */
-    fun awaitQuiet(askedAt: Long = SystemClock.uptimeMillis(), stop: () -> Boolean = { false }): String {
+    fun awaitQuiet(askedAt: Long = SystemClock.uptimeMillis(), quietSince: Long = 0, stop: () -> Boolean = { false }): String {
         if (Thread.currentThread() === engineThread) return "engine"
-        return WidgetRefreshGate.await(SystemClock::uptimeMillis, Thread::sleep, { lastCallAt }, ::engineBusy, stop, askedAt)
+        return WidgetRefreshGate.await(SystemClock::uptimeMillis, Thread::sleep, { maxOf(lastCallAt, quietSince) }, ::engineBusy, stop, askedAt)
     }
 
     /**
