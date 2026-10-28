@@ -46,6 +46,15 @@ class HostGmailReceiptsTest {
         assertFalse(folder.resolve("../receipts.sqlite").normalize().exists())
     }
 
+    @Test fun aReadMakesNoFolder() = withFolder { folder, receipts ->
+        // RN makes the folder only when it opens the store: Settings' reset check on a build with Gmail off leaves no trace.
+        assertEquals("false", receipts.file("exists", "receipts-reset", ""))
+        assertEquals("[]", receipts.file("list", "", ""))
+        assertFalse(folder.exists())
+        receipts.file("create", "receipts.sqlite", "")
+        assertTrue(folder.isDirectory)
+    }
+
     @Test fun createFailsOverAFileAndRenameNeverReplacesOne() = withFolder { folder, receipts ->
         receipts.file("create", "receipts.sqlite", "")
         assertTrue(File(folder, "receipts.sqlite").isFile)

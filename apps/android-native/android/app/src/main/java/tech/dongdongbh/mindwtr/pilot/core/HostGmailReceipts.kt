@@ -30,7 +30,6 @@ class HostGmailReceipts(private val folder: File) {
 
     private fun named(name: String): File {
         require(NAMES.matches(name)) { "Not a Gmail receipts file" }
-        folder.mkdirs()
         return File(folder, name)
     }
 
@@ -44,7 +43,8 @@ class HostGmailReceipts(private val folder: File) {
         when (op) {
             "exists" -> return file.exists().toString()
             "size" -> return file.length().toString()
-            "create" -> check(file.createNewFile()) { "The file exists" }
+            // The folder comes with the first file, as RN makes it only when it opens the store.
+            "create" -> check(folder.mkdirs() || folder.isDirectory) { "No Gmail receipts folder" }.also { check(file.createNewFile()) { "The file exists" } }
             "rename" -> Files.move(file.toPath(), named(to).toPath())
             "remove" -> check(!file.exists() || file.delete()) { "The file was not removed" }
             "open" -> {
