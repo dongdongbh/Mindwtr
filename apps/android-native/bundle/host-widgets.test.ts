@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, setSystemTime } from 'bun:test';
-import { resetForTests, useTaskStore } from '@mindwtr/core';
+import { consoleLogger, NO_FOCUS_WIDGET_FILTER, resetForTests, setFocusWidgetFilter, setLogger, useTaskStore, type LogPayload } from '@mindwtr/core';
 import { createWidgetPublisher, type WidgetBridge } from './host-widgets';
 
 // The widget publication on leaving the app (ProcessCoreHost's "background"): RN flushes a refresh still waiting; it does not
@@ -126,5 +126,34 @@ describe('native Android widget publisher with nothing changed', () => {
         value.inputs = () => ({ systemColorScheme: 'dark', systemLocale: 'en-US', listSelections: [], stale: true });
         expect(widgets.publish()).toBe(true);
         expect(calls.builds).toBe(4);
+    });
+});
+
+// RN e572040d3 (#1468): the tester's line that a Focus widget's "Available actions" variant was published, and how many rows it added.
+describe('native Android widget publisher and the Focus widget\'s available actions', () => {
+    afterEach(() => { setLogger(consoleLogger); resetForTests(); });
+
+    it('logs RN\'s v1.3.8/widget-focus-available line only when a placed Focus widget adds the section', () => {
+        resetForTests();
+        // An earlier test's Focus filter (priority high) would hide the task.
+        setFocusWidgetFilter(NO_FOCUS_WIDGET_FILTER);
+        const now = new Date().toISOString();
+        const day = new Date(Date.now() - 2 * 86_400_000);
+        const started = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
+        useTaskStore.setState({ _allTasks: [{ id: 't-start', title: 'Started', status: 'next', tags: [], contexts: [], startTime: started,
+            createdAt: now, updatedAt: now }] } as never);
+        const lines: LogPayload[] = [];
+        setLogger((payload) => { lines.push(payload); });
+        const available = () => lines.filter((line) => line.message === 'Focus widget available actions published');
+
+        const plain = bridge();
+        createWidgetPublisher(plain.value).publish();
+        expect(available()).toEqual([]);
+
+        const { value } = bridge();
+        value.inputs = () => ({ systemColorScheme: 'light', systemLocale: 'en-US', listSelections: ['focus:available'] });
+        createWidgetPublisher(value).publish();
+        expect(available()).toEqual([expect.objectContaining({ scope: 'widget', force: true,
+            context: { releaseCheck: 'v1.3.8/widget-focus-available', platform: 'android', count: 1, totalItems: 1 } })]);
     });
 });

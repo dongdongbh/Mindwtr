@@ -8,6 +8,7 @@ import {
     resolveWidgetLanguage,
     setFocusWidgetFilter,
     useTaskStore,
+    WIDGET_FOCUS_AVAILABLE_LIST_ID,
     type FilterCriteria,
     type Language,
     type SortField,
@@ -111,6 +112,14 @@ export const createWidgetPublisher = (bridge: WidgetBridge) => {
             scope: 'widget',
             force: true,
             context: { releaseCheck: 'v1.3.8/widget-snapshot-rollover', platform: 'android', count: publication.lists.upcoming?.items.length ?? 0 },
+        });
+        // RN's logFocusAvailablePublished (#1468): a placed Focus widget with "Include available actions" on got its variant.
+        const available = publication.lists[WIDGET_FOCUS_AVAILABLE_LIST_ID];
+        if (available) logInfo('Focus widget available actions published', {
+            scope: 'widget',
+            force: true,
+            context: { releaseCheck: 'v1.3.8/widget-focus-available', platform: 'android',
+                count: available.sections?.find((section) => section.key === 'available')?.items.length ?? 0, totalItems: available.totalCount },
         });
         logInfo('Native Android widget payload published', {
             scope: 'widget',
