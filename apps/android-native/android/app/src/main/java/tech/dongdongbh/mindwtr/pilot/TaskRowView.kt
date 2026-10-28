@@ -84,7 +84,7 @@ private val MENU_STATUSES = listOf("inbox", "next", "waiting", "someday", "done"
  * Done as a custom action. An Upcoming row also shows core's reveal date, and a project row
  * core's sequence cue as [note]; [available] marks core's available next action. A read-only
  * project's rows are not [completable]. [focusHighlight] outlines a starred row, as RN does
- * outside Today's Focus. [starBlocked] is core's reason the star can only refuse (the section's
+ * outside Today's Focus. [starBlocked] is core's reason the star can only refuse (the row's
  * focusBlockedLabel): an unstarred row's star is then drawn disabled with that label, as RN does.
  * [details] shows core's detail parts too, where RN's list does (Waiting, and Someday's Details toggle).
  * [actions] is a list whose own contract writes its rows (Contexts, Review, the Weekly and Daily Review): see [RowActions].

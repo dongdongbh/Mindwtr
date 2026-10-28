@@ -23,7 +23,7 @@ import {
 } from './project-task-list-model';
 import { buildProjectTaskReorderModel, projectTaskOrderIdentities, projectTaskOrderToken } from './project-task-reorder';
 import { buildProjectGroups, type ProjectAreaGroup, type ProjectTagFilter } from './project-grouping';
-import { resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime } from './task-utils';
+import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime } from './task-utils';
 import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
 import { createTaskDraft, isTaskDraftDateInputBaseline, resolveTaskDraftTitle, serializeTaskDraftTokens, TASK_DRAFT_FIELD_KEYS, type TaskDraft, type TaskDraftField } from './task-draft';
@@ -479,6 +479,11 @@ export type NativeTaskRow = Pick<Task, 'id' | 'title' | 'status'> & {
     laterToday: boolean;
     /** Focus Today footer, already formatted with the user's clock preference. */
     laterTodayLabel?: string | null;
+    /**
+     * Focus rows only: why this row's star can only refuse (an Upcoming row that is not a future-start Next action, RN's
+     * `!isTaskFutureFocusCandidate`, #1277); null where the star works.
+     */
+    focusBlockedLabel?: string | null;
     /** The task's revision: send it with a command that writes this task (compare-and-set). */
     taskRevision: string;
     /**
@@ -531,7 +536,6 @@ export type NativeFocusSection = {
     countLabel?: string;
     hiddenByAreaLabel?: string | null;
     rows: NativeTaskRow[];
-    focusBlockedLabel: string | null;
     /**
      * Visible rows to page through. Present with `controls`, and for Focus when
      * its global occupied count differs from its visible rows. Under grouping
@@ -1385,6 +1389,9 @@ export function createNativeHostContract(options: {
 
     const focusRows = (section: CachedFocusSection, offset: number, limit: number, now: Date): NativeTaskRow[] => {
         const formatDate = createDateFormatter(dateFormatting());
+        const blockedLabel = section.key === 'upcoming'
+            ? getFocusStarBlockedText(translate, { blockedReason: 'deferred' }, normalizeFocusTaskLimit(useTaskStore.getState().settings.gtd?.focusTaskLimit))
+            : null;
         return section.items.slice(offset, offset + limit).map((task) => {
             const appearsAt = section.key === 'upcoming' ? cachedRevealDates.get(task.id) : undefined;
             const laterToday = section.key === 'schedule' && cachedLaterTodayIds.has(task.id);
@@ -1399,6 +1406,7 @@ export function createNativeHostContract(options: {
                 revealLabel: appearsAt ? formatDate(appearsAt, 'P') : null,
                 laterToday,
                 laterTodayLabel: laterToday ? formatDate(task.startTime, 'p') : null,
+                focusBlockedLabel: blockedLabel && !isTaskFutureFocusCandidate(task, now) ? blockedLabel : null,
             };
         });
     };
@@ -2450,9 +2458,6 @@ export function createNativeHostContract(options: {
                     hiddenByAreaLabel: getFocusHiddenByAreaLabel(model.selection, translate),
                 } : {}),
                 rows: focusRows(section, 0, input.limit, now),
-                focusBlockedLabel: section.key === 'upcoming'
-                    ? getFocusStarBlockedText(translate, { blockedReason: 'deferred' }, normalizeFocusTaskLimit(useTaskStore.getState().settings.gtd?.focusTaskLimit))
-                    : null,
                 ...(controls || (section.key === 'focus' && section.total !== section.items.length) ? { rowTotal: section.items.length, groups: windowGroups(section, 0, input.limit) } : {}),
             }));
             // The derived project summaries (a pass over every task) serve only the review projects' rows.

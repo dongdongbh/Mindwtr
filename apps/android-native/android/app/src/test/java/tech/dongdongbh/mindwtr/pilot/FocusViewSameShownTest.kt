@@ -10,13 +10,15 @@ import org.junit.Test
  * (InboxViewModel.showFocus): only its revision moves. Anything the screen draws differing makes it a new view.
  */
 class FocusViewSameShownTest {
-    private fun row(tone: String?) = TaskRow("t", "Pay rent", "next", false, RowMeta(
-        listOf(MetaPart("due", "Today", false, tone = tone)), null, null, true, RowSwipe("done", "Done", "done"), false, "Pay rent"))
+    private fun row(tone: String?, blocked: String?) = TaskRow("t", "Pay rent", "next", false, RowMeta(
+        listOf(MetaPart("due", "Today", false, tone = tone)), null, null, true, RowSwipe("done", "Done", "done"), false, "Pay rent"),
+        focusBlockedLabel = blocked)
 
     private fun view(revision: String = "r1", title: String = "Next actions", group: String = """{"id":"g","title":"Home"}""",
-                     controls: String? = """{"state":{"sortBy":"default"}}""", date: String = "Tuesday", tone: String? = "soon") = FocusView(
+                     controls: String? = """{"state":{"sortBy":"default"}}""", date: String = "Tuesday", tone: String? = "soon",
+                     blocked: String? = null) = FocusView(
         revision, date,
-        listOf(FocusSection("next", title, 3, listOf(row(tone)), null, groups = listOf(JSONObject(group)))),
+        listOf(FocusSection("next", title, 3, listOf(row(tone, blocked)), groups = listOf(JSONObject(group)))),
         listOf(ReviewProject("p", "Project", "active", null, null)),
         controls?.let(::JSONObject),
     )
@@ -33,5 +35,7 @@ class FocusViewSameShownTest {
         assertFalse(view().sameShown(view(date = "Wednesday")))
         // The clock moved a row's urgency tone across a threshold (the due time passed): drawn again.
         assertFalse(view().sameShown(view(revision = "r2", tone = "overdue")))
+        // #1277: the star's block is per row; midnight can lift it from one row.
+        assertFalse(view().sameShown(view(revision = "r2", blocked = "This task is deferred")))
     }
 }

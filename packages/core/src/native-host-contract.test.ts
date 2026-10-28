@@ -2660,9 +2660,13 @@ describe('native host contract', () => {
         configureDateFormatting();
     });
 
-    it('matches React Native Upcoming blocked star text in English and Chinese', async () => {
+    // #1277 (9c499f0f7): RN blocks an Upcoming star only for a row that is not a future Focus candidate
+    // (focus.tsx: section.type === 'upcoming' && !isTaskFutureFocusCandidate(task)), so a future-start Next action can be starred.
+    it('matches React Native Upcoming blocked star text in English and Chinese, per row', async () => {
         const host = await activateWith([task('upcoming', '2026-09-01T00:00:00.000Z', {
             status: 'next', startTime: '2026-09-24',
+        }), task('recurring-due', '2026-09-01T00:00:00.000Z', {
+            status: 'next', dueDate: '2026-09-25', recurrence: { rule: 'daily' },
         })]);
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 8, 23, 10));
@@ -2673,8 +2677,12 @@ describe('native host contract', () => {
             if (!result.ok) throw new Error('Focus query failed');
             const rnLabel = getFocusStarBlockedText(getTranslator(expected.language), { blockedReason: 'deferred' }, normalizeFocusTaskLimit(99));
             expect(rnLabel).toBe(expected.focusBlockedLabel);
-            expect(result.value.sections.find(({ key }) => key === 'upcoming')?.focusBlockedLabel).toBe(rnLabel);
-            expect(result.value.sections.filter(({ key }) => key !== 'upcoming').every(({ focusBlockedLabel }) => focusBlockedLabel === null)).toBe(true);
+            const upcoming = result.value.sections.find(({ key }) => key === 'upcoming')!;
+            expect(Object.fromEntries(upcoming.rows.map((row) => [row.id, row.focusBlockedLabel])))
+                .toEqual({ upcoming: null, 'recurring-due': rnLabel });
+            expect(result.value.sections.filter(({ key }) => key !== 'upcoming')
+                .every(({ rows }) => rows.every(({ focusBlockedLabel }) => focusBlockedLabel === null))).toBe(true);
+            expect(result.value.sections.some((section) => 'focusBlockedLabel' in section)).toBe(false);
         }
     });
 

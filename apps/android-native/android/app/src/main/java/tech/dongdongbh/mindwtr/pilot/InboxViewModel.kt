@@ -61,6 +61,8 @@ data class TaskRow(
     val revealLabel: String? = null,
     val laterToday: Boolean = false,
     val taskRevision: String = "",
+    /** A Focus row's reason its star can only refuse (core's focusBlockedLabel, #1277); null where the star works. */
+    val focusBlockedLabel: String? = null,
 )
 /** The three lists. [label] is the core key of the tab label mobile shows. */
 enum class Screen(val label: String) { Inbox("tab.inbox"), Focus("tab.next"), Projects("nav.projects") }
@@ -125,7 +127,7 @@ fun JSONObject.taskRow() = getJSONObject("meta").let { meta ->
             meta.getJSONObject("swipe").let { RowSwipe(it.getString("target"), it.getString("label"), it.getString("icon")) },
             meta.getString("textDirection") == "rtl", meta.getString("accessibilityLabel"),
             !meta.text("descriptionPreview").isNullOrEmpty(), meta.optBoolean("statusHidden")),
-        text("revealLabel"), getBoolean("laterToday"), optString("taskRevision"))
+        text("revealLabel"), getBoolean("laterToday"), optString("taskRevision"), text("focusBlockedLabel"))
 }
 
 /** Core's `rows` array, in its order. */

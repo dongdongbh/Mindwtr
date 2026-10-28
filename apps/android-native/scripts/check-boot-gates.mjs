@@ -795,7 +795,7 @@ for (const [name, text] of Object.entries({ activity, editorUi, searchUi, proces
 }
 assert.match(rowUi, /failedAction == null \|\| failedAction == completeAction\(task\.id, task\.taskRevision\)/);
 // Every task row carries core's revision (NativeTaskRow.taskRevision), parsed as core sent it; Kotlin never computes one.
-assert.match(model, /text\("revealLabel"\), getBoolean\("laterToday"\), optString\("taskRevision"\)\)/);
+assert.match(model, /text\("revealLabel"\), getBoolean\("laterToday"\), optString\("taskRevision"\), text\("focusBlockedLabel"\)\)/);
 assert.match(model, /fun completeAction\(id: String, taskRevision: String\) = FailedAction\("complete", id, patch = mapOf\("taskRevision" to taskRevision\)\)/);
 // The swipe is core's meta.swipe (RN's getLeftAction moved to core); it and TalkBack's custom action are one command with one enabled rule.
 // Done keeps core's completeTask and its retry; Restore and Next are the status change with theirs. RN draws no Done button.
@@ -1866,13 +1866,13 @@ assert.match(model, /fun JSONObject\.taskRows\(\): List<TaskRow> = getJSONArray\
 assert.match(focusUi, /for \(section in focus\?\.sections\.orEmpty\(\)\) \{/);
 assert.match(focusUi, /section\.rows\.forEachIndexed \{ index, task ->/);
 // Core's row data is the only row data Focus acts on: laterToday places one subheading, revealLabel is shown as text,
-// and the section's focusBlockedLabel disables the star with core's reason.
+// and the row's focusBlockedLabel disables the star with core's reason (#1277: per row).
 assert.match(focusUi, /val laterToday = section\.rows\.indexOfFirst \{ it\.laterToday \}/);
 assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/(?<!"agenda)\.laterToday\b/g).length, 1); // not the label key
 assert.match(rowUi, /task\.revealLabel\?\.let \{ MetaText\(it, c\.secondaryText, 600, Modifier\.padding\(top = 4\.dp\)\) \}/);
 assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/\.revealLabel\b/g).length, 1);
 assert.doesNotMatch(code([focusUi, activity, model, rowUi].join('\n')), /revealDate/);
-assert.match(focusUi, /star = RowStar\.Shown, starBlocked = section\.focusBlockedLabel/);
+assert.match(focusUi, /star = RowStar\.Shown, starBlocked = task\.focusBlockedLabel/);
 assert.doesNotMatch(code(focusUi), /"upcoming"/, 'Focus never names a section to decide a control');
 assert.match(rowUi, /val label = blocked \?: t\(if \(task\.isFocusedToday\) "agenda\.removeFromFocus" else "agenda\.addToFocus"\)/);
 // A stale Load more reads Focus again from offset 0; it is never shown as an error.

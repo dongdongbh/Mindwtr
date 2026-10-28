@@ -43,11 +43,10 @@ import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 /**
- * One Focus section as core sent it. [focusBlockedLabel] is core's reason every star here can only refuse (Upcoming). [rowTotal]
- * is the rows to page through (under a grouping a task in two groups is listed twice), and [groups] core's Next actions headings,
+ * One Focus section as core sent it. [rowTotal] is the rows to page through (under a grouping a task in two groups is listed twice), and [groups] core's Next actions headings,
  * each drawn before the row at its `start`.
  */
-data class FocusSection(val key: String, val title: String, val total: Int, val rows: List<TaskRow>, val focusBlockedLabel: String?,
+data class FocusSection(val key: String, val title: String, val total: Int, val rows: List<TaskRow>,
                         val rowTotal: Int = total, val groups: List<JSONObject> = emptyList(),
                         val countLabel: String = total.toString(), val hiddenByAreaLabel: String? = null)
 /** One of core's "Projects to review" rows: the project, its status, and core's review date text. */
@@ -90,7 +89,6 @@ data class FocusView(val revision: String, val dateLabel: String, val sections: 
             return FocusView(json.getString("revision"), json.getString("dateLabel"), List(items.length()) { index ->
                 items.getJSONObject(index).let {
                     FocusSection(it.getString("key"), it.getString("title"), it.getInt("total"), it.taskRows(),
-                        if (it.isNull("focusBlockedLabel")) null else it.getString("focusBlockedLabel"),
                         it.optInt("rowTotal", it.getInt("total")), it.menuObjects("groups"),
                         it.optString("countLabel", it.getInt("total").toString()),
                         if (it.isNull("hiddenByAreaLabel")) null else it.getString("hiddenByAreaLabel"))
@@ -217,7 +215,7 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                     item(key = "${section.key}:${group}:${task.id}") {
                         Box(Modifier.padding(bottom = 8.dp)) { GroupedRow(grouped) {
                             TaskRowItem(model, task, status = if (section.key == "reviewDue") RowStatus.Badge else RowStatus.Hidden,
-                                star = RowStar.Shown, starBlocked = section.focusBlockedLabel, focusHighlight = section.key != "focus",
+                                star = RowStar.Shown, starBlocked = task.focusBlockedLabel, focusHighlight = section.key != "focus",
                                 details = focusView.showDetails)
                         } }
                     }
