@@ -67,6 +67,13 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -175,12 +182,14 @@ class MainActivity : FragmentActivity() {
         // A link, share or assistant note that launched the app (a recreated screen already has it: EntryRouter keeps it).
         if (savedInstanceState == null) model.entries.receive(intent)
         setContent {
+            // RN's one failure banner over every screen (FailureBannerHost below).
+            val banners = remember { FailureBannerSlot<FailureBannerContent>() }
             // Time to first content (scripts/measure-startup-device.mjs): the first screen's data is drawn, whatever that screen is
             // (Focus on a fresh start, as RN's; a restored last screen).
             ReportDrawnWhen { model.firstContentReady() }
             // Core resolves RN's theme during the boot; until it ends, RN's default follows the system.
             // RN's app lock gate (AppLock.kt) replaces the screens while locked.
-            MindwtrTheme(if (model.loading) null else ThemeChoice.current) { AppLockGate(model) { with(model) {
+            MindwtrTheme(if (model.loading) null else ThemeChoice.current) { AppLockGate(model) { CompositionLocalProvider(LocalFailureBanners provides banners) { with(model) {
                 val theme = LocalTheme.current
                 val c = theme.colors
                 LaunchedEffect(c.bg, theme.isDark) { window.applySystemBars(c.bg.toArgb(), theme.isDark) }
@@ -225,7 +234,7 @@ class MainActivity : FragmentActivity() {
                         // RN's quick-access tab titles its header with the view it holds (Review, Contexts, or Projects).
                         val quick = screen == Screen.Projects && menu.quickView != "projects"
                         if ((screen != Screen.Projects || openProjectId == null || quick) && !landscape) TopBar(model, t(if (screen == Screen.Projects) menu.quickLabel else screen.label))
-                        // A failure stays in view above the list. A failed read offers Try again; a failed command only its exact retry.
+                        // A failure floats over the screen (FailureBannerHost). A failed read offers Try again; a failed command only its exact retry.
                         error?.let { message ->
                             FailureBanner(message) {
                                 if (failedAction == null) RetryButton({ refresh() }, !busy, "read-retry")
@@ -260,6 +269,8 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                 }
+                // RN's failure banner floats over the screen, under the overlays that stand for RN's modals.
+                FailureBannerHost(banners)
                 // The Pomodoro card's task picker over the whole screen, as RN's Modal (its scrim dims the bars too).
                 if (writable && screen == Screen.Focus && modal == null && open == null && flow == null && searching == null && listed == null) PomodoroPicker(model)
                 // The attachments' alert, link sheet, image preview and audio player (the editor's and the project card's), over the screen.
@@ -268,7 +279,7 @@ class MainActivity : FragmentActivity() {
                 if (writable && openProjectId != null && projectDetails.projectId == openProjectId) ProjectDetailsDialogs(model)
                 // RN's startup prompts (the welcome sheet, the announcement window), over everything, as RN's root modals.
                 if (writable) StartupPromptOverlays(model)
-            } } }
+            } } } }
         }
     }
 
@@ -326,19 +337,62 @@ private fun TopBar(model: InboxViewModel, title: String) {
 }
 
 /**
- * The failure, pinned above the list. It is drawn above the list (zIndex), so a
- * partly scrolled-out row can never cover it in the accessibility tree; TalkBack
- * hears it at once (live region) and reaches it first (traversal index).
+ * RN's one PersistenceFailureBanner, floated over the screen (its root, absolute at the top, zIndex 100). Each screen's
+ * [FailureBanner] puts its message and action here while it shows; the root's [FailureBannerHost] draws the newest, and a screen
+ * that leaves gives the one under it back. Main thread (snapshot state).
+ */
+class FailureBannerSlot<T> {
+    private val entries = mutableStateListOf<T>()
+    val shown: T? get() = entries.lastOrNull()
+    /** Shows [entry]; the answer takes it away again (once; a second call does nothing). */
+    fun put(entry: T): () -> Unit {
+        entries.add(entry)
+        return { entries.removeAll { it === entry } }
+    }
+}
+
+/** A screen's failure as the root's banner shows it: kept current while the screen recomposes. */
+class FailureBannerContent(message: String, action: @Composable RowScope.() -> Unit) {
+    var message by mutableStateOf(message)
+    var action by mutableStateOf(action)
+}
+
+val LocalFailureBanners = staticCompositionLocalOf<FailureBannerSlot<FailureBannerContent>?> { null }
+
+/**
+ * A screen's failure (a failed read with Try again, or an owed command's exact retry). It floats over the screen as RN's banner
+ * does, drawn by the root ([FailureBannerHost]); with no root slot (a preview) it draws in place.
  */
 @Composable
 fun FailureBanner(message: String, action: @Composable RowScope.() -> Unit) {
+    val slot = LocalFailureBanners.current ?: return FailureBannerCard(message, action)
+    val content = remember { FailureBannerContent(message, action) }
+    SideEffect { content.message = message; content.action = action }
+    DisposableEffect(slot, content) { val remove = slot.put(content); onDispose(remove) }
+}
+
+/**
+ * RN's banner position: across the top, under the status bar (its SafeAreaView's top edge), over the screen's header and rows
+ * (zIndex 100), touching nothing outside the card. TalkBack hears it at once (live region) and reaches it first (traversal
+ * index, as RN's banner comes first in its root); its tags stay readable by the device checks.
+ */
+@Composable
+fun FailureBannerHost(slot: FailureBannerSlot<FailureBannerContent>) {
+    val shown = slot.shown ?: return
+    Box(Modifier.fillMaxWidth().zIndex(100f).windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+        .semantics { testTagsAsResourceId = true; isTraversalGroup = true; traversalIndex = -1f }) {
+        FailureBannerCard(shown.message, shown.action)
+    }
+}
+
+@Composable
+private fun FailureBannerCard(message: String, action: @Composable RowScope.() -> Unit) {
     val c = LocalTheme.current.colors
     // RN's persistence-failure-banner card: 12 from the sides and 8 below the bar, radius 12, a 1 dp danger border, its shadow.
     val shape = RoundedCornerShape(12.dp)
     Row(
-        Modifier.fillMaxWidth().zIndex(1f).padding(start = 12.dp, end = 12.dp, top = 8.dp)
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 8.dp)
             .shadow(8.dp, shape).clip(shape).background(c.cardBg).rnBorder(1.dp, c.danger, shape)
-            .semantics { isTraversalGroup = true; traversalIndex = -1f }
             .padding(horizontal = 12.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
     ) {

@@ -107,7 +107,7 @@ fun CaptureModalScreen(model: InboxViewModel, modal: CaptureModal) = with(model.
     Box(Modifier.fillMaxSize().background(c.bg).imePadding().semantics { testTagsAsResourceId = true }.testTag("capture-modal")) {
         Column(Modifier.fillMaxSize()) {
             // An owed failure (this screen's save, or any other command) shows the app's failure banner with its exact retry.
-            if (model.failedAction != null) Box(Modifier.statusBarsPadding()) { FailureBanner(model.error.orEmpty()) { OwedRetry(model) } }
+            if (model.failedAction != null) FailureBanner(model.error.orEmpty()) { OwedRetry(model) }
             // RN's ScrollView: the card centered while it fits, scrolled once it does not (the keyboard up, a long description).
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 Column(Modifier.verticalScroll(rememberScrollState()).heightIn(min = maxHeight).padding(16.dp), verticalArrangement = Arrangement.Center) {

@@ -2031,12 +2031,20 @@ assert.doesNotMatch(code(activity + model), /CaptureSheet|createInboxTask|showCa
 const tabBar = activity.slice(activity.indexOf('private fun TabBar('), activity.indexOf('private fun RowScope.TabItem('));
 assert.deepEqual([...tabBar.matchAll(/TabItem\(model, Screen\.(\w+)|CaptureButton\(model\)|MenuTab\(model\)/g)]
     .map(([whole, tab]) => tab ?? (whole.startsWith('Capture') ? 'capture' : 'menu')), ['Focus', 'Inbox', 'capture', 'Projects', 'menu']);
-// The failure text stays in the accessibility tree: drawn above the list, a live region, reached first, and the list is clipped.
-const banner = activity.slice(activity.indexOf('fun FailureBanner('), activity.indexOf('private fun TabBar('));
-assert.match(banner, /\.zIndex\(1f\)/);
-assert.match(banner, /isTraversalGroup = true; traversalIndex = -1f/);
+// The failure floats over the screen as RN's PersistenceFailureBanner does (absolute at the top, under the status bar, zIndex 100):
+// a screen's FailureBanner only puts its message and action in the root's slot, and FailureBannerHost draws the newest over every
+// screen and under the overlays that stand for RN's modals. It stays in the accessibility tree: a live region, reached first,
+// its tags readable by the device checks, and the list under it is clipped.
+const banner = activity.slice(activity.indexOf('class FailureBannerSlot'), activity.indexOf('private fun TabBar('));
+assert.match(banner, /fun FailureBanner\(message: String, action: @Composable RowScope\.\(\) -> Unit\) \{\s*val slot = LocalFailureBanners\.current \?: return FailureBannerCard\(message, action\)[\s\S]{0,400}DisposableEffect\(slot, content\) \{ val remove = slot\.put\(content\); onDispose\(remove\) \}/);
+assert.match(banner, /fun FailureBannerHost\(slot: FailureBannerSlot<FailureBannerContent>\) \{\s*val shown = slot\.shown \?: return\s*Box\(Modifier\.fillMaxWidth\(\)\.zIndex\(100f\)\.windowInsetsPadding\(WindowInsets\.safeDrawing\.only\(WindowInsetsSides\.Top\)\)\s*\.semantics \{ testTagsAsResourceId = true; isTraversalGroup = true; traversalIndex = -1f \}/);
 assert.match(banner, /Text\(message,[\s\S]*?liveRegion = LiveRegionMode\.Assertive/);
-assert(activity.indexOf('FailureBanner(message)') < activity.indexOf('Screen.Inbox -> InboxList('), 'the banner sits above the lists');
+{
+    const root = activity.slice(activity.indexOf('setContent {'), activity.indexOf('override fun onResume()'));
+    assert.match(root, /CompositionLocalProvider\(LocalFailureBanners provides banners\)/);
+    const order = ['MenuScreenHost(model, listed)', 'Screen.Inbox -> InboxList(', 'FailureBannerHost(banners)', 'PomodoroPicker(model)', 'StartupPromptOverlays(model)'].map((text) => root.indexOf(text));
+    assert(order.every((index, i) => index > (i ? order[i - 1] : -1)), `the banner floats over every screen and under RN's modals ${order}`);
+}
 assert.match(activity, /Box\(Modifier\.weight\(1f\)\.fillMaxWidth\(\)\.background\(c\.bg\)\.clipToBounds\(\)\)/);
 // Section titles draw RN's capitals but expose core's own title and count.
 assert.match(activity, /clearAndSetSemantics \{ text = AnnotatedString\(spoken\); heading\(\) \}/);
@@ -3090,7 +3098,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockKt, /val on = runtime\.appLock\(\)\.getBoolean\("value"\)\s+shell\.ui \{ enabled = on; locked = on \}/);
     // The gate wraps every screen inside the one theme; while locked the lock screen replaces them (RN's gate renders it instead of
     // its children), and the screens' saved state waits for the unlock.
-    assert.match(activity, /MindwtrTheme\(if \(model\.loading\) null else ThemeChoice\.current\) \{ AppLockGate\(model\) \{ with\(model\) \{/);
+    assert.match(activity, /MindwtrTheme\(if \(model\.loading\) null else ThemeChoice\.current\) \{ AppLockGate\(model\) \{ CompositionLocalProvider\(LocalFailureBanners provides banners\) \{ with\(model\) \{/);
     assert.match(lockKt, /if \(model\.lock\.locked && !model\.loading\) AppLockScreen\(model\) else screens\.SaveableStateProvider\("app", content\)/);
     // RN locks when AppState leaves active (Android's onPause), not for a rotation, not while its own prompt is up; each lock
     // prompts by itself once, 250 ms after the app is active.
@@ -3803,7 +3811,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(code(model + modalKt), /openEditor\(id, "task"\)/, 'Save & edit never opens the editor over the screen it was on');
     // An owed failure (the screen's own save's, or any other command's) shows the app's failure banner with its exact retry, as
     // every screen's does: without it every control stayed disabled with no Try again.
-    assert.match(captureModalUi, /if \(model\.failedAction != null\) Box\(Modifier\.statusBarsPadding\(\)\) \{ FailureBanner\(model\.error\.orEmpty\(\)\) \{ OwedRetry\(model\) \} \}/);
+    assert.match(captureModalUi, /if \(model\.failedAction != null\) FailureBanner\(model\.error\.orEmpty\(\)\) \{ OwedRetry\(model\) \}/);
     // RN's multi-line text keeps the font's own line pitch (font padding adds space only above the first line and below the last):
     // the syntax help, the title and the description lines match RN's on the S23 with no line height set (parity pair modal-help).
     assert.match(captureModalUi, /view\.getJSONObject\("help"\)\.text\("text"\)\?\.let \{ Text\(it, style = rnText\(12, 400\), color = c\.secondaryText\) \}/);
@@ -9221,7 +9229,7 @@ console.log('Editor: core\'s model and suggestions in, saveTaskDraft out through
 console.log('Focus: reads only through CoreHost, core order and flags only, stale windows restart, blocked after a failed save');
 console.log('Labels: every UI word from core getStrings, one key map filled after setLanguage, debug-only language override');
 console.log('Theme: one Kotlin theme object equal to RN\'s palettes, no color elsewhere, core resolves the mode and owns its hues');
-console.log('Accessibility: the failure banner sits above the list (zIndex, live region, first in traversal); sections expose core\'s text');
+console.log('Accessibility: the failure banner floats over the screen (zIndex, live region, first in traversal); sections expose core\'s text');
 console.log('Projects: reads only through CoreHost, core order and groups only, stale windows restart, blocked after a failed save');
 console.log('RN legacy import: after the validated load, confirmed by a re-read before RN state changes; RKStorage checkpointed first');
 console.log('Search and Process Inbox: core reads in the background with freshness, answers and saves through perform with exact, persisted requests');
@@ -10061,7 +10069,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 // the sides and 8 below the bar, the 20 dp warning glyph, the message in the text color, and RN's filled tint Retry (radius 8).
 {
     const activity = source('MainActivity.kt');
-    assert.match(activity, /fun FailureBanner\(message: String, action: @Composable RowScope\.\(\) -> Unit\) \{[\s\S]{0,900}\.shadow\(8\.dp, shape\)\.clip\(shape\)\.background\(c\.cardBg\)\.rnBorder\(1\.dp, c\.danger, shape\)/);
+    assert.match(activity, /fun FailureBannerCard\(message: String, action: @Composable RowScope\.\(\) -> Unit\) \{[\s\S]{0,900}\.shadow\(8\.dp, shape\)\.clip\(shape\)\.background\(c\.cardBg\)\.rnBorder\(1\.dp, c\.danger, shape\)/);
     assert.match(activity, /fun RetryButton\(onClick: \(\) -> Unit, enabled: Boolean, tag: String\? = null\)/);
     const all = ['MainActivity.kt', 'DailyReviewScreen.kt', 'MenuWidgets.kt', 'MindSweep.kt', 'TaskEditor.kt', 'WeeklyReviewScreen.kt'].map(source).join('\n');
     assert.doesNotMatch(all, /TextButton\([^\n]*\) \{ Text\(t\("common\.retry"\)\) \}/);
