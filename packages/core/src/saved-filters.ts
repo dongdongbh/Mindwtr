@@ -263,6 +263,7 @@ const matchesTokens = (
         : matchesAnyToken(selected, actual, field)
 );
 
+// Clock: midnight (day, week and month presets; overdue_next_7_days' date < now only matters for dates before today). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 const matchesDateRange = (
     value: string | undefined,
     range: DateRange | undefined,

@@ -374,6 +374,7 @@ const compareProjectDeadlineBoosts = (
     return compareProjectDeadlineBoostTasks(taskA, taskB);
 };
 
+// Clock: midnight (today's bounds). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function getProjectDeadlineBoosts(
     tasks: readonly Task[],
     projects: readonly Project[],
@@ -647,6 +648,7 @@ export function getTaskDeferUntilSource(
         .find((value) => safeParseDate(value)?.getTime() === date.getTime()) ?? null;
 }
 
+// Clock: midnight (the end of today). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function isTaskFutureStart(
     task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
     now: Date = new Date(),
@@ -696,6 +698,7 @@ export function isTaskFutureFocusCandidate(task: Task, now: Date = new Date()): 
     return task.status === 'next' && Boolean(task.startTime) && isTaskFutureStart(task, now);
 }
 
+// Clock: midnight (isTaskFutureStart). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function isTaskFocusedNow(task: Task, now: Date = new Date()): boolean {
     return task.isFocusedToday === true && !isTaskFutureStart(task, now);
 }
@@ -716,6 +719,7 @@ export const UPCOMING_DEFERRED_WINDOW_DAYS = 7;
  * belongs to the Today section instead (it is today's business, just later),
  * so it is excluded here even though Next Actions hides it until its time.
  */
+// Clock: midnight (the end of today, a window counted in days). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function getUpcomingDeferredTasks(
     tasks: readonly Task[],
     options: { now?: Date; windowDays?: number } = {},
@@ -749,6 +753,7 @@ export function getUpcomingDeferredTasks(
     ));
 }
 
+// Clock: a timed start (granularity 'time'); its day check is isTaskFutureStart's midnight. A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function shouldShowTaskForStart(
     task: Pick<Task, 'startTime'> & Partial<Pick<Task, 'dueDate' | 'recurrence' | 'reviewAt'>>,
     options: TaskStartVisibilityOptions = {},
@@ -769,6 +774,7 @@ export function shouldShowTaskForStart(
  * Split already-selected Today rows for display without changing eligibility.
  * Date-only starts remain in the main list; later timed starts get a subgroup.
  */
+// Clock: a timed start, and midnight (the end of today). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function splitTodayTasksByStartTime<T extends Pick<Task, 'startTime'>>(
     tasks: readonly T[],
     now: Date = new Date(),
@@ -861,6 +867,7 @@ export function isFocusSequentialCandidate(
         : isDueForReview(task.reviewAt, options.now);
 }
 
+// Clock: midnight (the end of today); its review check is isDueForReview's. A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 function getFocusSequentialScheduleKey(
     task: Pick<Task, 'dueDate' | 'isFocusedToday' | 'reviewAt' | 'status'>,
     now: Date,
@@ -1518,6 +1525,7 @@ export function sortTasksBySavedPreference<T extends Task>(
     return [...tasks].sort((a, b) => direction * compare(a, b));
 }
 
+// Clock: a due instant less the due-soon window (getFocusNextActionBucket flips at due <= now + window). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function sortFocusNextActions(tasks: Task[], options: SortFocusNextActionsOptions = {}): Task[] {
     const nowMs = (options.now ?? new Date()).getTime();
     const dueSoonWindowDays = Number.isFinite(options.dueSoonWindowDays)

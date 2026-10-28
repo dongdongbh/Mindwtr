@@ -76,6 +76,7 @@ import { collectFocusEligibilityTasks, getFocusStarBlockedText, resolveTaskEdito
 import { normalizeFocusTaskLimit } from './focus-utils';
 import {
     buildFocusTaskSections,
+    getFocusModelValidUntil,
     type FocusTaskSection,
     type FocusTaskSectionKey,
 } from './focus-sections';
@@ -1049,6 +1050,8 @@ export function createNativeHostContract(options: {
     replayTokens?: NativeReplayTokens;
     /** Android's persistent capture switch in RN's device store (Settings › Notifications). */
     persistentCapture?: NativePersistentCaptureHost;
+    /** Tests only: false rebuilds the Focus model on every read, the reference the cached model must equal. */
+    focusModelCache?: boolean;
 } = {}) {
     // A new host: request IDs an earlier one held in memory are not this one's (its disk receipts stay).
     startNativeRequestSession();
@@ -1071,6 +1074,11 @@ export function createNativeHostContract(options: {
     let cachedInbox: Task[] = [];
     let cachedProjectTitles = new Map<string, string>();
     let cachedFocusKey = '';
+    // The Focus model's clock window: built at builtAt, the same until validUntil (getFocusModelValidUntil).
+    // ponytail: one control state kept at a time (the Focus screen sends one); reads that alternate controls rebuild each
+    // read, a small map keyed by controls if a second caller ever does.
+    let cachedFocusBuiltAt = 0;
+    let cachedFocusValidUntil = 0;
     let cachedFocusSections: CachedFocusSection[] = [];
     let cachedFocusModel: FocusControlsModel | null = null;
     let cachedFocusProjectTitles = new Map<string, string>();
@@ -1260,9 +1268,16 @@ export function createNativeHostContract(options: {
     // `controls`: the default state, and Next actions stays flat whatever grouping is
     // stored, as it was before controls existed (a caller keying rows by task ID must
     // never see a task twice).
-    const focusSections = (currentRevision: string, now: Date, controls: FocusControlState | null): CachedFocusSection[] => {
-        const key = `${currentRevision}\u0000${controls ? paramsKey(controls) : 'flat'}`;
-        if (cachedFocusKey !== key) {
+    /**
+     * The Focus sections and model, built again only when the store, settings, language or controls changed, or the clock
+     * reached the next instant the model can change (a midnight, a timed start, a due or review instant). The rows' labels
+     * still read the clock on every read (focusRows). Any doubt (no valid window, a clock that went back) rebuilds.
+     */
+    const focusSections = (now: Date, controls: FocusControlState | null): CachedFocusSection[] => {
+        const key = `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}\u0000${controls ? paramsKey(controls) : 'flat'}`;
+        const nowMs = now.getTime();
+        if (options.focusModelCache === false || cachedFocusKey !== key
+            || !(nowMs >= cachedFocusBuiltAt && nowMs < cachedFocusValidUntil)) {
             const state = useTaskStore.getState();
             const formatDate = createDateFormatter(dateFormatting());
             const model = buildFocusControlsModel({
@@ -1310,6 +1325,9 @@ export function createNativeHostContract(options: {
             cachedFocusProjectTitles = new Map(state.projects.map((project) => [project.id, project.title]));
             cachedRevealDates = new Map(model.pools.upcoming.map(({ task, appearsAt }) => [task.id, appearsAt]));
             cachedFocusModel = model;
+            const validUntil = getFocusModelValidUntil({ tasks: state.tasks, projects: state.projects, now });
+            cachedFocusBuiltAt = nowMs;
+            cachedFocusValidUntil = validUntil ?? nowMs;
             cachedFocusKey = key;
         }
         return cachedFocusSections;
@@ -1322,7 +1340,7 @@ export function createNativeHostContract(options: {
      */
     const focusModel = (controls: FocusControlState | null, now: Date): { model: FocusControlsModel; revision: string } => {
         const currentRevision = focusRevision(now);
-        focusSections(currentRevision, now, controls);
+        focusSections(now, controls);
         const model = cachedFocusModel as FocusControlsModel;
         return { model, revision: controls ? `${currentRevision}:${paramsKey(model.filter.state)}` : currentRevision };
     };
@@ -2409,7 +2427,7 @@ export function createNativeHostContract(options: {
             if (model.selection.hiddenByAreaCount) void logInfo('Focus area selection projected', {
                 scope: 'focus', force: true, context: { releaseCheck: 'v1.3.7/focus-area-selection', ...model.selection },
             });
-            const sections = focusSections(focusRevision(now), now, controls).map((section) => ({
+            const sections = focusSections(now, controls).map((section) => ({
                 key: section.key,
                 title: section.title,
                 total: section.total,
@@ -2858,7 +2876,7 @@ export function createNativeHostContract(options: {
             const now = new Date();
             const { revision: currentRevision } = focusModel(controls, now);
             if (input.revision !== currentRevision) return fail('STALE_REVISION', 'Focus changed; restart paging');
-            const section = focusSections(focusRevision(now), now, controls).find(({ key }) => key === input.key);
+            const section = focusSections(now, controls).find(({ key }) => key === input.key);
             if (!section) return fail('INVALID_INPUT', 'Focus section is not available');
             return {
                 ok: true,

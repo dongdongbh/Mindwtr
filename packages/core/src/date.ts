@@ -835,6 +835,7 @@ export function safeParseDueDate(dateStr: string | undefined | null): Date | nul
 /**
  * Returns true when the review date is set and due at or before the provided time.
  */
+// Clock: a review instant. A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function isDueForReview(reviewAt: string | Date | undefined | null, now: Date = new Date()): boolean {
     if (!reviewAt) return false;
     const date = typeof reviewAt === 'string' ? safeParseDate(reviewAt) : reviewAt;

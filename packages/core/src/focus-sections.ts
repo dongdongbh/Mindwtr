@@ -13,7 +13,7 @@
  * take `now` as a parameter, never `Date.now()`, so one render sees one
  * instant and tests are deterministic.
  */
-import { isDueForReview, safeParseDate, safeParseDueDate } from './date';
+import { hasTimeComponent, isDueForReview, safeParseDate, safeParseDueDate } from './date';
 import { applyFilter } from './saved-filters';
 import { isTaskCountedAsFocused } from './store-helpers';
 import {
@@ -21,6 +21,7 @@ import {
     getTaskSequencing,
     isTaskSequenceBlocked,
     getProjectDeadlineBoosts,
+    FOCUS_NEXT_DUE_SOON_WINDOW_DAYS,
     getUpcomingDeferredTasks,
     isTaskFocusedNow,
     PRIORITY_RANK,
@@ -37,6 +38,7 @@ import type { FilterCriteria, Project, Section, SortField, Task, TaskPriority } 
 export const DEFAULT_FOCUS_SORT_BY: SortField = 'default';
 
 /** The calendar day `now` falls in, as the half-open pair every Today rule reads. */
+// Clock: midnight. A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function getTodayBounds(now: Date): { startOfToday: Date; endOfToday: Date } {
     return {
         startOfToday: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0),
@@ -53,6 +55,7 @@ export function getTodayBounds(now: Date): { startOfToday: Date; endOfToday: Dat
  * tasks against one `now` passes it so the two `Date` objects are built once for
  * the loop instead of once per task. Leaving it out is exactly as before.
  */
+// Clock: midnight (today's bounds). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function isTodayScheduleCandidate(
     task: Task,
     now: Date,
@@ -143,6 +146,7 @@ export function buildFocusPools({
 export type FocusSelection = { globalCount: number; hiddenByAreaCount: number };
 
 /** Counts precede search and criteria: only the area selector can hide an area slot. */
+// Clock: midnight (isTaskCountedAsFocused). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function getFocusSelection(tasks: readonly Task[], visibleTasks: readonly Task[], now: Date,
     isAreaVisible?: (task: Task) => boolean): FocusSelection {
     const visibleIds = new Set(visibleTasks.map((task) => task.id));
@@ -323,6 +327,7 @@ export function buildFocusTaskSections(
  * non-archived projects whose review date has come, earliest review first,
  * then by title. Pass the projects the screen's area filter keeps.
  */
+// Clock: a review instant (isDueForReview). A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
 export function getReviewDueProjects(projects: readonly Project[], now: Date): Project[] {
     return projects
         .filter((project) => project.status !== 'archived' && isDueForReview(project.reviewAt, now))
@@ -333,3 +338,62 @@ export function getReviewDueProjects(projects: readonly Project[], now: Date): P
             return a.title.localeCompare(b.title);
         });
 }
+
+/**
+ * Every function a Focus model build (buildFocusControlsModel, and the native contract's splitTodayTasksByStartTime) reads the
+ * clock in, with the boundary it changes at. getFocusModelValidUntil covers each kind; a function that reads the clock and is
+ * not here fails focus-model-clock.test.ts. Adding one: name its boundary here and in getFocusModelValidUntil, or the cache is wrong.
+ */
+export const FOCUS_MODEL_CLOCK_READERS: Record<string, 'midnight' | 'timed start' | 'due' | 'review'> = {
+    // Day: the end of today, today's bounds, a window counted in days, the saved-filter presets (day, week, month; their
+    // overdue part compares dates before today, already before now).
+    isTaskFutureStart: 'midnight',
+    isTaskFocusedNow: 'midnight',
+    isTaskCountedAsFocused: 'midnight',
+    getFocusSelection: 'midnight',
+    getUpcomingDeferredTasks: 'midnight',
+    getTodayBounds: 'midnight',
+    isTodayScheduleCandidate: 'midnight',
+    getProjectDeadlineBoosts: 'midnight',
+    getFocusSequentialScheduleKey: 'midnight',
+    matchesDateRange: 'midnight',
+    // A timed start passing: shouldShowTaskForStart at time granularity (its day check is isTaskFutureStart's), later today.
+    shouldShowTaskForStart: 'timed start',
+    splitTodayTasksByStartTime: 'timed start',
+    // The due-soon window before a due instant (getFocusNextActionBucket).
+    sortFocusNextActions: 'due',
+    // isDueForReview: a task's or project's review instant.
+    isDueForReview: 'review',
+    getReviewDueProjects: 'review',
+};
+
+/**
+ * The first instant (epoch ms) after `now` at which a Focus model built at `now` can differ, for the same store and settings:
+ * the next local midnight, each task's timed start, each due instant less the due-soon window, each task's and project's
+ * review instant (FOCUS_MODEL_CLOCK_READERS). Each predicate flips at its instant (start > now, review <= now, due <= now +
+ * window). The due instant itself is kept as a conservative extra: today's due checks compare with the end of today. Dates parse with the predicates' own parsers, so a value they
+ * ignore is ignored here too. Null when it cannot be worked out: the caller rebuilds.
+ */
+export function getFocusModelValidUntil(input: { tasks: readonly Task[]; projects: readonly Project[]; now: Date }): number | null {
+    const nowMs = input.now.getTime();
+    if (!Number.isFinite(nowMs)) return null;
+    // DST-safe: the first instant of tomorrow, as getTodayBounds' end of today plus 1 ms.
+    let next = new Date(input.now.getFullYear(), input.now.getMonth(), input.now.getDate() + 1).getTime();
+    const dueSoonWindowMs = FOCUS_NEXT_DUE_SOON_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+    const consider = (at: number | undefined) => {
+        if (at !== undefined && at > nowMs && at < next) next = at;
+    };
+    for (const task of input.tasks) {
+        if (hasTimeComponent(task.startTime)) consider(safeParseDate(task.startTime)?.getTime());
+        const due = safeParseDueDate(task.dueDate)?.getTime();
+        if (due !== undefined) {
+            consider(due - dueSoonWindowMs);
+            // Conservative: no predicate flips at a due instant today; kept so a future due-time rule cannot go stale.
+            consider(due);
+        }
+        consider(safeParseDate(task.reviewAt)?.getTime());
+    }
+    for (const project of input.projects) consider(safeParseDate(project.reviewAt)?.getTime());
+    return Number.isFinite(next) && next > nowMs ? next : null;
+}
+
