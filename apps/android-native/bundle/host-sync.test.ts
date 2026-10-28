@@ -1213,3 +1213,23 @@ describe('a keystore error, then a restart', () => {
         }
     }, 60_000);
 });
+
+// Kotlin reads every list again after a finished cycle only when the cycle changed the store's sync content (contentRevision):
+// a cycle that changed nothing (no backend, nothing new) leaves the screens as drawn, one that changed the store reads them.
+it('counts a finished cycle as new content only when the store sync content changed', async () => {
+    resetForTests();
+    globals.__mindwtrHostPlatform = 'android';
+    core.useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} } as never);
+    const { sync } = host({ [SYNC_BACKEND_KEY]: 'off' }, false, undefined, async () => false);
+    const before = sync.state();
+    expect(await sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
+    expect(sync.state()).toMatchObject({ cycles: before.cycles + 1, contentRevision: before.contentRevision });
+    // A cycle during which the store's content changed (a merge brought a task): new content.
+    const AT = '2026-01-01T00:00:00.000Z';
+    const running = sync.settingsHost.performSync(undefined, { manual: true });
+    core.useTaskStore.setState({ _allTasks: [{ id: 't1', title: 'Merged', status: 'inbox', tags: [], contexts: [], createdAt: AT, updatedAt: AT }],
+        lastDataChangeAt: 1 } as never);
+    expect(await running).toMatchObject({ success: true });
+    expect(sync.state()).toMatchObject({ cycles: before.cycles + 2, contentRevision: before.contentRevision + 1 });
+    resetForTests();
+});

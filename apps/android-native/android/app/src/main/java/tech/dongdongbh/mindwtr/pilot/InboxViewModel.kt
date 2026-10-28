@@ -304,6 +304,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** A sync is running now (core's activity state, not a pending write): Settings › Data's rows wait for it, as RN's do. */
     var syncActive by mutableStateOf(ProcessCoreHost.syncState?.optBoolean("active") == true); private set
     private var syncCycles = ProcessCoreHost.syncState?.optInt("cycles") ?: 0
+    /** Core's count of cycles that changed the store's sync content (host-sync.ts contentRevision); the lists read it last. */
+    private var syncContent = ProcessCoreHost.syncState?.optInt("contentRevision") ?: 0
     /** The JS host's events arrive on the engine thread; each is handed to the main thread. */
     private val syncListener: (JSONObject) -> Unit = { event -> ui { syncEvent(event) } }
     /** The last Gmail capture cycle whose mail the lists read (gmailCycleToShow); main thread. */
@@ -321,11 +323,18 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 syncBadge = badgeOf(event)
                 syncActive = event.optBoolean("active")
                 val cycles = event.optInt("cycles")
-                if (cycles != syncCycles) {
+                val content = event.optInt("contentRevision", syncContent + 1)
+                if (cycles != syncCycles && content != syncContent) {
                     syncCycles = cycles
+                    syncContent = content
                     // A read refused while a user action runs would leave the lists stale until the next resume: wait for idle.
                     menu.whenIdle { if (writable) refreshAll(synced = true) }
-                } else if (menu.list == "settings") menu.settings.refresh()
+                } else {
+                    // A cycle that changed no sync content (no backend, nothing new) leaves the lists as drawn; Settings shows
+                    // the cycle's time and status.
+                    syncCycles = cycles
+                    if (menu.list == "settings") menu.settings.refresh()
+                }
             }
             // A screen's external calendars finished loading (host-calendar.ts): the screen showing them reads again.
             "calendarFeed" -> if (menu.list == FEED_LISTS[event.optString("slot")]) menu.whenIdle { if (writable) menu.refresh() }

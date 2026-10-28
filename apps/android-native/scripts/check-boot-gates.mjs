@@ -8775,7 +8775,10 @@ assert.deepEqual(ready.languageInputs, ['{"storedLanguage":null,"systemLocale":"
     const viewModelKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt'), 'utf8');
     assert.match(settingsKt, /fun applySyncedChoices\(runtime: CoreHost, prefs: SharedPreferences\) \{[\s\S]*?runtime\.languageSaved\([\s\S]*?ThemeChoice\.load\(runtime\.theme\(/);
     assert.match(viewModelKt, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)/, 'boot applies synced choices after the device ones');
-    assert.match(viewModelKt, /if \(cycles != syncCycles\) \{[\s\S]{0,400}?refreshAll\(synced = true\)/, 'a finished sync cycle applies synced choices');
+    assert.match(viewModelKt, /if \(cycles != syncCycles && content != syncContent\) \{[\s\S]{0,400}?refreshAll\(synced = true\)/, 'a finished sync cycle that changed the store content applies synced choices');
+    // A cycle that changed no sync content (host-sync.ts contentRevision) reads no list again; an event without the count does.
+    assert.match(viewModelKt, /val content = event\.optInt\("contentRevision", syncContent \+ 1\)/);
+    assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /if \(contentBefore === null \|\| contentAfter === null \|\| contentAfter !== contentBefore\) contentRevision \+= 1;/);
     assert.match(viewModelKt, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\);/);
     // The labels follow core's language, not only a device key write: languageSaved can switch core's language with none.
     assert.match(settingsKt, /if \(reply\.optString\("language"\) != Labels\.language\) Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);

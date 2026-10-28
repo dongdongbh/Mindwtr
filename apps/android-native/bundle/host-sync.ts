@@ -521,6 +521,12 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     let configured = false;
     let cycles = 0;
+    // Cycles that ended with different sync content in the store (the change fingerprint, device bookkeeping left out): Kotlin
+    // reads its lists again only for those. A cycle that changed nothing (no backend, nothing new) leaves the screens as drawn.
+    let contentRevision = 0;
+    const contentFingerprint = (): string | null => {
+        try { return getInMemorySyncChangeFingerprint(); } catch { return null; }
+    };
     let lastEvent = '';
     let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
     // A saved change still waiting for its upload keeps the badge off green (#1431).
@@ -541,7 +547,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         // `active`: a sync runs now (Settings › Data's rows wait for it, as RN's isSyncing does); the badge's own "syncing" also
         // covers a pending write.
         return { type: 'sync', badge: current, color: current === 'hidden' ? null : SETTINGS_SYNC_BADGE_COLORS[current], cycles,
-            active: service.getMobileSyncActivityState() === 'syncing' };
+            contentRevision, active: service.getMobileSyncActivityState() === 'syncing' };
     };
     const emitState = () => {
         if (fatalCleanupError) return;
@@ -604,6 +610,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
         // A record from before this call (a running cycle's, or an unlogged follow-up's) is not this call's to log.
         const earlier = fileCycle;
+        const contentBefore = contentFingerprint();
         let succeeded = false;
         let requeued = false;
         try {
@@ -634,6 +641,9 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 } });
             }
             if (!fatalCleanupError) {
+                // Any doubt (no fingerprint) counts as changed.
+                const contentAfter = contentFingerprint();
+                if (contentBefore === null || contentAfter === null || contentAfter !== contentBefore) contentRevision += 1;
                 cycles += 1;
                 if (platform === 'ios') await refreshConfigured();
                 else void refreshConfigured();
