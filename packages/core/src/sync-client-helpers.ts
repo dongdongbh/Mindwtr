@@ -198,16 +198,27 @@ export const applySyncedDataToStore = (
  * cloning + fingerprinting the whole payload instead cost seconds per store
  * change on large Android libraries (#766).
  */
+let lastChangeFingerprint: { inputs: unknown[]; fingerprint: string } | null = null;
+
 export const getInMemorySyncChangeFingerprint = (): string => {
     const state = useTaskStore.getState();
-    return computeSyncChangeFingerprint({
+    const data = {
         tasks: state._allTasks ?? state.tasks ?? [],
         projects: state._allProjects ?? state.projects ?? [],
         sections: state._allSections ?? state.sections ?? [],
         areas: state._allAreas ?? state.areas ?? [],
         people: state._allPeople ?? state.people ?? [],
         settings: state.settings ?? {},
-    });
+    };
+    // The store replaces its collections and settings, never changes them in place: the same six references and the same
+    // last data change, the same fingerprint (about 49 ms at 5,000 tasks on the S23, asked twice on every resume).
+    const inputs = [data.tasks, data.projects, data.sections, data.areas, data.people, data.settings, state.lastDataChangeAt];
+    if (lastChangeFingerprint && inputs.every((input, index) => input === lastChangeFingerprint!.inputs[index])) {
+        return lastChangeFingerprint.fingerprint;
+    }
+    const fingerprint = computeSyncChangeFingerprint(data);
+    lastChangeFingerprint = { inputs, fingerprint };
+    return fingerprint;
 };
 
 export const shouldRunAttachmentCleanup = (
