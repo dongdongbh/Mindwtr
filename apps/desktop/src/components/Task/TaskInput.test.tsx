@@ -249,6 +249,23 @@ describe('TaskInput autocomplete', () => {
         });
     });
 
+    it('suggests projects and contexts typed after a slash command value (#1259)', () => {
+        const { getByRole, getAllByRole, rerender } = render(
+            <TaskInput value="Sample task /start:next friday +La" onChange={vi.fn()} projects={[buildProject('Launch')]} contexts={['@phone']} />
+        );
+        const input = getByRole('combobox') as HTMLInputElement;
+        const open = () => {
+            input.focus();
+            input.setSelectionRange(input.value.length, input.value.length);
+            fireEvent.click(input);
+            return getAllByRole('option').map((option) => option.textContent);
+        };
+        expect(open()).toEqual(['Launch', 'Create Project "La"']);
+
+        rerender(<TaskInput value="Sample task /due:tomorrow @ph" onChange={vi.fn()} projects={[]} contexts={['@phone']} />);
+        expect(open()).toContain('@phone');
+    });
+
     it('keeps a value with spaces and slashes inside one slash command', () => {
         const { getByRole, getAllByRole } = render(<TaskInputHarness initialValue="/start:next fri" />);
         const input = getByRole('combobox') as HTMLInputElement;

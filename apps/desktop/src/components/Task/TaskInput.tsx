@@ -192,8 +192,9 @@ function getTrigger(text: string, caret: number): TriggerState | null {
     if (caret < 0) return null;
     const before = text.slice(0, caret);
     // A value may hold spaces ("/start:next friday"), but it ends where the next
-    // command starts, or "/start:now /no" would still be the /start trigger (#1259).
-    const commandMatch = /(?:^|\s)\/(\*|[a-z-]*)(?::((?:(?!\s\/(?:\*|[a-z-]*)(?::|$))[\s\S])*))?$/i.exec(before);
+    // command or a +project / @context / #tag / !area / %person token starts, as in
+    // the parser; otherwise "/start:now +La" would still be the /start trigger (#1259).
+    const commandMatch = /(?:^|\s)\/(\*|[a-z-]*)(?::((?:(?!\s(?:\/(?:\*|[a-z-]*)(?::|$)|[+@#!%]))[\s\S])*))?$/i.exec(before);
     if (commandMatch) {
         const rawMatch = commandMatch[0] ?? '';
         const slashOffset = rawMatch.indexOf('/');
