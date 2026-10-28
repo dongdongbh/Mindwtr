@@ -1753,8 +1753,23 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            // A package that ships its own mindwtr:// desktop entry (Nix, distro packages) sets this in
+            // its launcher so Mindwtr does not write a second handler pointing at a versioned path (#1377).
+            #[cfg(target_os = "linux")]
+            let package_registers_links = std::env::var_os("MINDWTR_SKIP_LINK_REGISTRATION")
+                .is_some_and(|value| !value.is_empty() && value != "0");
+            #[cfg(target_os = "windows")]
+            let package_registers_links = false;
+            #[cfg(target_os = "linux")]
+            if package_registers_links && !is_flatpak() {
+                let diagnostic = format!(
+                    "Linux task link handler left to the package extra.releaseCheck=v1.3.8/linux-link-registration-opt-out outcome=skipped"
+                );
+                log::info!("{diagnostic}");
+                append_native_log_line(app.handle(), &diagnostic);
+            }
             #[cfg(any(target_os = "linux", target_os = "windows"))]
-            if !is_flatpak() {
+            if !is_flatpak() && !package_registers_links {
                 let registered = app.deep_link().register_all();
                 #[cfg(target_os = "linux")]
                 let corrected = linux_deep_link::correct_registered_handler(app);
