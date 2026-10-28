@@ -1369,6 +1369,8 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     },
     somedaySections: (input) => contract.getSomedaySections(input),
     dataSettings: () => contract.getDataSettings(),
+    // Data's Archive retention Save: what a shorter period removes now (RN's confirm card), or null to save at once.
+    archiveRetentionReview: (input) => contract.getArchiveRetentionReview(input),
     // Settings › About (native-host-contract-about.ts): the screen, and the feedback modal's state for the draft as typed.
     aboutInstallerSource: (input) => contract.getAboutInstallerSource(input),
     aboutSettings: (input) => contract.getAboutSettings(input),
@@ -5617,6 +5619,18 @@ globalThis.MindwtrHost = {
                 isInternetReachable: typeof next.isInternetReachable === 'boolean' ? next.isInternetReachable : null,
             };
             return requireSync().network(networkState);
+        });
+    },
+    /**
+     * RN's automatic Archive retention (use-root-layout-archive-retention.ts; core's runArchiveRetention): InboxViewModel calls it
+     * at start, on each resume and every 15 minutes in front, off the engine thread once core is quiet. `editorOpen`: a task editor
+     * or a project is open (RN's lockEditing), so nothing runs. A backend that cannot be read counts as selected (waiting is safe).
+     */
+    archiveRetention(editorOpen: boolean): string {
+        return submit(async () => {
+            const selectedBackend = editorOpen ? 'off' : await Promise.resolve().then(() => requireSync().selectedBackend())
+                .then((backend): string | null => backend, () => null);
+            return unwrap(await contract.runArchiveRetention({ editorOpen, selectedBackend }));
         });
     },
     /** The badge and the finished-cycle count now. */

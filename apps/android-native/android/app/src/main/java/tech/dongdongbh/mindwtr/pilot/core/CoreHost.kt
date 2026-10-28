@@ -758,6 +758,13 @@ class CoreHost(
     fun ingestPendingAudio(): JSONObject = callLong("ingestAudio")
 
     /**
+     * RN's automatic Archive retention (host-entry.ts archiveRetention, core's runArchiveRetention): nothing runs while
+     * [editorOpen], or before this session synced while a backend is selected. `{ outcome, purged, skipped }`. Not journaled: a
+     * run that did not finish runs again from the latest store.
+     */
+    fun archiveRetention(editorOpen: Boolean): JSONObject = callAsync("archiveRetention", editorOpen)
+
+    /**
      * A line of the runner's (CoreWork, the queue drain) through core's logger: logcat, and RN's diagnostics log file while Debug
      * logging is on, its fields in [context]. It never fails its caller: a line that cannot go through core goes to logcat.
      */

@@ -79,16 +79,24 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
 
     runArchiveRetention: async ({ syncConfigured }) => {
         let result: StoreActionResult = { success: true };
+        let skipped: 'off' | 'not-ready' | 'waiting-for-sync' | undefined;
         let purged = { tasks: 0, projects: 0, sections: 0 };
         let changed = false;
         let deferred = false;
         set((state) => {
             // Automatic calls before hydration or during an editor/save failure are safe no-ops.
-            if (!canWrite(state)) return state;
+            if (!canWrite(state)) {
+                skipped = 'not-ready';
+                return state;
+            }
             const days = state.settings.gtd?.archiveRetentionDays;
-            if (!isArchiveRetentionDays(days) || days === 0) return state;
+            if (!isArchiveRetentionDays(days) || days === 0) {
+                skipped = 'off';
+                return state;
+            }
             if (syncConfigured && !syncCompletedThisSession) {
                 deferred = true;
+                skipped = 'waiting-for-sync';
                 return state;
             }
             const nowMs = Date.now();
@@ -129,7 +137,7 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
                 releaseCheck: 'v1.3.5/archive-retention-after-sync',
             } });
         }
-        if (!result.success || !changed) return result;
+        if (!result.success || !changed) return skipped ? { ...result, skipped } : result;
         try { await flushPendingSave(); } catch (error) { return saveFailure(error); }
         if (purged.tasks || purged.projects || purged.sections) {
             logInfo('Archive retention cleanup saved', { scope: 'store', category: 'storage', context: {
@@ -137,6 +145,6 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
                 taskCount: purged.tasks, projectCount: purged.projects, sectionCount: purged.sections,
             } });
         }
-        return result;
+        return { ...result, purged };
     },
 });

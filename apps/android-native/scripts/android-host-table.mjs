@@ -19,6 +19,7 @@ export const ANDROID_HOST_METHODS = [
     'appSearchApply',
     'appSearchIds',
     'appSearchStart',
+    'archiveRetention',
     'areaFilter',
     'attachmentRequest',
     'backgroundSync',

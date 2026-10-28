@@ -918,6 +918,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         prepareAttachmentAvailableDetailed: attachments?.prepareAttachmentAvailableDetailed ?? null,
         /** The badge and cycle count now. */
         state,
+        /** The backend the user selected, before this build's capability check (a680d9594): archive retention waits while one is. */
+        selectedBackend: () => service.getMobileSelectedSyncBackend(),
         /**
          * After the boot's validated load and journal replay: the triggers start, and the app's first sync is asked for
          * (RN's startup requestSync(0)). [appState] is 'active' or 'background'.

@@ -651,8 +651,14 @@ export interface TaskStore {
 
     /** Set the synced Archive expiration policy; zero disables it. */
     setArchiveRetentionDays: (days: number) => Promise<StoreActionResult>;
-    /** Expire eligible Archive records from the latest store state. With sync configured, waits until this session has completed a sync (R-2). */
-    runArchiveRetention: (options: { syncConfigured: boolean }) => Promise<StoreActionResult>;
+    /**
+     * Expire eligible Archive records from the latest store state. With sync configured, waits until this session has completed a sync (R-2).
+     * `skipped` says why nothing ran ('off', 'not-ready', 'waiting-for-sync'); `purged` what a run removed.
+     */
+    runArchiveRetention: (options: { syncConfigured: boolean }) => Promise<StoreActionResult & {
+        skipped?: 'off' | 'not-ready' | 'waiting-for-sync';
+        purged?: { tasks: number; projects: number; sections: number };
+    }>;
 
     // Actions
     /** Load all data from storage, or apply an already-persisted snapshot without re-reading storage */

@@ -167,6 +167,8 @@ const val WAITING_PROMPT = "waitingFor"
 private const val SUGGESTIONS = 4
 /** The boot's sync start waits at most this long after the boot for the Inbox's first rows (ProcessCoreHost.startDeferredSync). */
 private const val SYNC_FALLBACK_MS = 3_000L
+/** RN's Archive retention interval (use-root-layout-archive-retention.ts). */
+private const val ARCHIVE_RETENTION_MS = 15 * 60 * 1000L
 /** The start screen waits at most this long for the first screen (InboxViewModel.holdSplash), then lets a slow start show. */
 private const val SPLASH_CAP_MS = 10_000L
 /** Core windows the View tab's checklist by NATIVE_HOST_MAX_WINDOW. */
@@ -363,6 +365,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** RN's AppState for core's sync triggers and the reminder alarms: "active" on resume, "background" on leaving (MainActivity). */
     fun appState(state: String) {
+        active = state == "active"
         if (state == "active") resumes += 1
         // RN stores the last screen again on leaving, so its time is the moment the app was left.
         if (state == "background") keepLastRoute(force = true)
@@ -371,6 +374,36 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         if (state == "active") pomodoro.refresh(planAlarms = true)
         // RN's Calendar reloads its external calendars on a return to the app (shouldRefreshExternalCalendarOnAppStateChange).
         if (state == "active" && resumes > 1 && menu.list == "calendar") menu.calendarFeed("calendar")
+        if (state == "active") runArchiveRetention()
+    }
+
+    /** In front (MainActivity resumed): Archive retention runs only then, as RN's skips a background or inactive app. */
+    @Volatile private var active = false
+    private val retentionRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * RN's Archive retention runner (use-root-layout-archive-retention.ts): once the boot's lists are drawn, on each resume, and
+     * every 15 minutes in front. Core decides (runArchiveRetention): nothing while the editor or a project is open (RN's
+     * lockEditing), nothing before this session synced while a backend is selected. One at a time, never during a user action or
+     * an owed retry; it waits for core to be quiet so a screen's read goes first. A purge reads the lists again.
+     */
+    private fun runArchiveRetention() {
+        val runtime = host ?: return
+        if (!active || busy || failedAction != null || !retentionRunning.compareAndSet(false, true)) return
+        val askedAt = SystemClock.uptimeMillis()
+        Thread({
+            try {
+                runtime.awaitQuiet(askedAt) { !active }
+                if (!active) return@Thread
+                if (runtime.archiveRetention(editor != null || openProjectId != null).optString("outcome") == "purged") {
+                    ui { menu.whenIdle { if (writable) refreshAll() } }
+                }
+            } catch (failure: Throwable) {
+                Log.w(CoreHost.TAG, "Native Android archive retention failed ${failureForLog(failure)}")
+            } finally {
+                retentionRunning.set(false)
+            }
+        }, "mindwtr-archive-retention").start()
     }
 
     /** Where the editor returns: a tab; the quick-access Calendar regains focus (RN's focus reload). */
@@ -411,6 +444,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     init {
         saved["started"] = true
         ProcessCoreHost.listenSync(syncListener)
+        viewModelScope.launch { while (true) { kotlinx.coroutines.delay(ARCHIVE_RETENTION_MS); runArchiveRetention() } }
         saved["projectRequestId"] = projectRequestId
         val at = depth()
         val savedDraft = editorKey?.let(drafts::read)
@@ -466,6 +500,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     // first, then answers the prompt to open (the activity has no second writer: review O2e P3-A).
                     ProcessCoreHost.aboutStartup(runtime)
                     prompts.start(runtime)
+                    runArchiveRetention()
                     if (screen != Screen.Inbox) ProcessCoreHost.startDeferredSync()
                     main.postDelayed({ ProcessCoreHost.startDeferredSync("boot-timeout") }, SYNC_FALLBACK_MS)
                     restored?.let { resumeEditor(it, savedDraft.optJSONObject("pending")) }

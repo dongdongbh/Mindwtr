@@ -422,8 +422,19 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     /** A Notifications control's edit (core's `edit`, or a time row's `{ type, value: 'HH:MM' }`), with a new request UUID. */
     fun notifications(edit: JSONObject) = menu.command("notificationsSetting", JSONObject().put("edit", edit))
 
-    /** Data's Debug logging switch: core's edit, with a new request UUID. */
+    /** Data's Debug logging switch and Archive retention's Save and Never: core's edit, with a new request UUID. */
     fun data(edit: JSONObject) = menu.command("dataSetting", JSONObject().put("edit", edit))
+
+    /**
+     * Archive retention's Save of [days] (RN's save): core's review first when it removes sooner (the confirm card, kept in [local]
+     * so a rotation keeps it open), else core's edit at once.
+     */
+    fun archiveRetention(days: Int) {
+        shell.background(emptyList(), { runtime -> runtime.menuRead("archiveRetentionReview", JSONObject().put("days", days).toString()) }) { reply, _ ->
+            val review = reply.optJSONObject("review")
+            if (review == null) data(reply.getJSONObject("edit")) else editLocal { put("archiveReview", review) }
+        }
+    }
 
     /** Data's made log file, waiting for the Data screen to open the share sheet from its activity (a rotation keeps it). */
     var logToShare by mutableStateOf<String?>(null); private set

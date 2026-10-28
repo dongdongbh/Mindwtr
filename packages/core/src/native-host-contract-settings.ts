@@ -77,7 +77,16 @@ import { buildTaskNotesExportZip } from './tasknotes-export';
 import { getInMemoryAppDataSnapshot } from './sync-client-helpers';
 import { isSandboxMode, isWorkspaceTransitionActive } from './sandbox';
 import { canUseJalaliCalendar, createDateFormatter, getSystemWeekStart, normalizeClockTimeInput, type DateFormattingConfig } from './date';
-import { buildDataSettingsModel, buildDataSettingsUpdate, isDataSettingStored, type DataSettingsEdit, type DataSettingsModel } from './data-settings-model';
+import { isArchiveRetentionDays } from './archive-retention';
+import {
+    buildArchiveRetentionReview,
+    buildDataSettingsModel,
+    buildDataSettingsUpdate,
+    isDataSettingStored,
+    type ArchiveRetentionReview,
+    type DataSettingsEdit,
+    type DataSettingsModel,
+} from './data-settings-model';
 import {
     buildNotificationsSettingsModel,
     buildNotificationsSettingsUpdate,
@@ -408,14 +417,24 @@ const persistentCaptureOn = (capture: NativePersistentCaptureHost): boolean => {
 };
 
 /** A Data edit as a host sends it back; the analytics switch only in a build with the heartbeat. */
-const readDataEdit = (value: unknown, analyticsAvailable: boolean): DataSettingsEdit | null => (
-    isObjectRecord(value) && Object.keys(value).length === 2 && typeof value.value === 'boolean'
-        && (value.type === 'debugLogging' || (value.type === 'analyticsOptOut' && analyticsAvailable))
+const readDataEdit = (value: unknown, analyticsAvailable: boolean): DataSettingsEdit | null => {
+    if (!isObjectRecord(value) || Object.keys(value).length !== 2) return null;
+    if (value.type === 'archiveRetentionDays') return isArchiveRetentionDays(value.value) ? { type: value.type, value: value.value } : null;
+    return typeof value.value === 'boolean' && (value.type === 'debugLogging' || (value.type === 'analyticsOptOut' && analyticsAvailable))
         ? { type: value.type, value: value.value }
-        : null
-);
+        : null;
+};
+
+/** The automatic run's answer (runArchiveRetention): what it removed, or why it did not run. */
+export type NativeArchiveRetentionRun = {
+    outcome: 'purged' | 'unchanged' | 'skipped' | 'failed';
+    purged: { tasks: number; projects: number; sections: number };
+    skipped: 'editor-open' | 'off' | 'not-ready' | 'waiting-for-sync' | null;
+};
 
 export function createSettingsMethods(deps: SettingsDeps) {
+    /** The last automatic Archive retention outcome logged, so a 15-minute run that changed nothing logs nothing. */
+    let lastRetentionLine = '';
     const durableSave = async (): Promise<NativeHostResult<null>> => {
         try {
             if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
@@ -1140,6 +1159,55 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return { ok: true, value: { version: NATIVE_HOST_CONTRACT_VERSION, revision: manageRevision(), ...model } };
         },
 
+        /**
+         * RN's Archive retention review for a Save of `days` (archive-retention-section.tsx): `review` null sends `edit` at once,
+         * else the review's Apply sends it.
+         */
+        getArchiveRetentionReview(input: { days: number }): NativeHostResult<{ review: ArchiveRetentionReview | null; edit: DataSettingsEdit }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || !isArchiveRetentionDays(input.days)) {
+                return fail('INVALID_INPUT', 'Archive retention must be an integer from 0 to 36500 days');
+            }
+            const state = useTaskStore.getState();
+            return { ok: true, value: { review: buildArchiveRetentionReview(
+                { tasks: state._allTasks, projects: state._allProjects, sections: state._allSections, settings: state.settings },
+                input.days, deps.t()), edit: { type: 'archiveRetentionDays', value: input.days } } };
+        },
+
+        /**
+         * RN's automatic Archive retention (use-root-layout-archive-retention.ts), which the host calls at start, on each resume and
+         * every 15 minutes in front. Never while an editor is open (`editorOpen`, RN's lockEditing). Any selected backend counts as
+         * sync configured, and so does one the host could not read (`selectedBackend` null, a680d9594): core's run then waits for
+         * this session's first sync (afa31ae1b). One log line per new outcome, and one for every purge.
+         */
+        async runArchiveRetention(input: { editorOpen: boolean; selectedBackend: string | null }): Promise<NativeHostResult<NativeArchiveRetentionRun>> {
+            if (!isObjectRecord(input) || typeof input.editorOpen !== 'boolean'
+                || (input.selectedBackend !== null && typeof input.selectedBackend !== 'string')) {
+                return fail('INVALID_INPUT', 'An editor state and a selected sync backend are required');
+            }
+            const none = { tasks: 0, projects: 0, sections: 0 };
+            let run: NativeArchiveRetentionRun;
+            if (input.editorOpen) run = { outcome: 'skipped', purged: none, skipped: 'editor-open' };
+            else if (!deps.readiness().ok) run = { outcome: 'skipped', purged: none, skipped: 'not-ready' };
+            else {
+                const result = await useTaskStore.getState().runArchiveRetention({ syncConfigured: input.selectedBackend !== 'off' });
+                const purged = result.purged ?? none;
+                run = !result.success ? { outcome: 'failed', purged: none, skipped: null }
+                    : result.skipped ? { outcome: 'skipped', purged: none, skipped: result.skipped }
+                        : { outcome: purged.tasks || purged.projects || purged.sections ? 'purged' : 'unchanged', purged, skipped: null };
+            }
+            const logged = `${run.outcome}/${run.skipped}`;
+            if (run.outcome === 'purged' || logged !== lastRetentionLine) {
+                lastRetentionLine = logged;
+                logInfo('Native archive retention ran', { scope: 'store', category: 'storage', context: {
+                    releaseCheck: 'v1.3.8/native-archive-retention', outcome: run.outcome, skipped: run.skipped ?? 'none',
+                    taskCount: run.purged.tasks, projectCount: run.purged.projects, sectionCount: run.purged.sections,
+                } });
+            }
+            return { ok: true, value: run };
+        },
+
         /** RN's export snapshot and serializers. Never flushes or acknowledges an owed save. */
         getDataBackup(format: 'json' | 'csv' | 'tasknotes' = 'json'): NativeHostResult<{ fileName: string; content: string; encoding: 'utf8' | 'base64' }> {
             if (format !== 'json' && format !== 'csv' && format !== 'tasknotes') return fail('INVALID_INPUT', 'Unsupported export format');
@@ -1226,6 +1294,10 @@ export function createSettingsMethods(deps: SettingsDeps) {
             return receipts.run<NativeSettingsWriteResult>(input.requestId, JSON.stringify(['data', edit]), async () => {
                 const settings = useTaskStore.getState().settings;
                 if (isDataSettingStored(settings, edit)) return { ok: true, value: { changed: false, deviceWrites: [] } };
+                // RN's Archive retention Save and Never: the store's own action, which also dates archived items that have no date.
+                if (edit.type === 'archiveRetentionDays') {
+                    return settleWrite(await runStoreWrite(() => useTaskStore.getState().setArchiveRetentionDays(edit.value)), { changed: true, deviceWrites: [] });
+                }
                 const written = await runStoreWrite(() => useTaskStore.getState().updateSettings(buildDataSettingsUpdate(settings, edit)));
                 if (written.ok && edit.type === 'debugLogging' && edit.value) logInfo('Debug logging enabled', { scope: 'diagnostics', force: true });
                 // RN's analytics switch, after the setting saved: turning the heartbeat on clears the opt-out marker; opting out

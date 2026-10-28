@@ -41,6 +41,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -342,8 +346,8 @@ private fun GeneralSettings(model: InboxViewModel, view: JSONObject) = with(mode
 /**
  * RN's Data screen on core's getDataSettings: the Backup fold (SyncBackupSection: the three exports, Restore backup, Merge backup,
  * Getting Started; DataTransfer.kt runs each), the Import fold (the guide link, then the five importers), then the Diagnostics
- * card (SyncDiagnosticsCard): the Debug logging switch sends core's edit; while logging is on, Share log and Clear log. RN's
- * Archive retention, Pending remote deletes and Sandbox rows come with their passes.
+ * card (SyncDiagnosticsCard): the Debug logging switch sends core's edit; while logging is on, Share log and Clear log. Archive
+ * retention's card sits between Import and Diagnostics, as RN's; RN's Pending remote deletes and Sandbox rows come with their passes.
  */
 @Composable
 private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.menu) {
@@ -352,6 +356,7 @@ private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.m
     OnboardingHandoffCard(model)
     BackupCard(model, view.getJSONObject("backup"))
     ImportCard(model, view.getJSONObject("importData"))
+    ArchiveRetentionCard(model, view.getJSONObject("archiveRetention"))
     val diagnostics = view.getJSONObject("diagnostics")
     SectionTitle(diagnostics.getString("title"), top = 24, color = c.text)
     Card {
@@ -371,6 +376,78 @@ private fun DataSettings(model: InboxViewModel, view: JSONObject) = with(model.m
         }
         diagnostics.optJSONObject("clearLog")?.let { clear ->
             ActionRow(clear.getString("label"), null, c.secondaryText, true, "settings-clear-log") { settings.clearLog() }
+        }
+    }
+}
+
+/**
+ * RN's Archive retention card (archive-retention-section.tsx): core's words and the stored days, the days field as typed (RN's
+ * draft, reset when the stored days change), Save (a whole number from 1 to 36500 that differs from the stored days) and Never.
+ */
+@Composable
+private fun ArchiveRetentionCard(model: InboxViewModel, card: JSONObject) = with(model.menu) {
+    val c = LocalTheme.current.colors
+    val days = card.getInt("days")
+    var draft by rememberSaveable(days) { mutableStateOf(if (days > 0) "$days" else "") }
+    // RN's valid: /^[1-9]\d*$/, a safe integer, at most 36500.
+    val typed = draft.takeIf { it.matches(Regex("[1-9][0-9]{0,4}")) }?.toInt()?.takeIf { it <= 36500 }
+    val canSave = typed != null && idle && typed != days
+    val canNever = days != 0 && idle
+    val never = card.getJSONObject("never")
+    val shape = RoundedCornerShape(8.dp)
+    val focus = LocalFocusManager.current
+    Card(top = 16) {
+        Column(Modifier.padding(16.dp)) {
+            Text(card.getString("title"), style = rnText(16, 500, 21), color = c.text)
+            Text(card.getString("description"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
+            Text(card.getString("safety"), style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
+            Text(card.getString("current"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.padding(top = 12.dp))
+            val label = card.getString("daysLabel")
+            Text(label, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 12.dp))
+            BasicTextField(draft, { draft = it }, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = rnText(14, 400).copy(color = c.text),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.padding(top = 6.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(10.dp)
+                    .semantics { contentDescription = label }.testTag("archive-retention-days"))
+            if (draft.isNotEmpty() && typed == null) Text(card.getString("invalid"), style = rnText(14, 400), color = c.text,
+                modifier = Modifier.padding(top = 6.dp).semantics { liveRegion = LiveRegionMode.Polite })
+            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(card.getString("save"), style = rnText(16, 400, 21), color = c.tint, modifier = Modifier.fade(if (canSave) 1f else 0.45f)
+                    .clickable(enabled = canSave, role = Role.Button) { focus.clearFocus(); typed?.let(settings::archiveRetention) }.testTag("archive-retention-save"))
+                Text(never.getString("label"), style = rnText(16, 400, 21), color = c.tint, modifier = Modifier.fade(if (canNever) 1f else 0.45f)
+                    .clickable(enabled = canNever, role = Role.Button) { settings.data(never.getJSONObject("edit")) }.testTag("archive-retention-never"))
+            }
+        }
+    }
+}
+
+/**
+ * RN's Archive retention confirm card (its Modal on pickerOverlay and pickerCard): core's review of what is eligible now, then
+ * Cancel and Apply retention, which sends core's edit. The scrim and Back cancel.
+ */
+@Composable
+private fun ArchiveRetentionReview(model: InboxViewModel, review: JSONObject) = with(model.menu) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val close = { settings.editLocal { remove("archiveReview") } }
+    BackHandler { close() }
+    Box(Modifier.fillMaxSize().background(theme.settingsScrim).pointerInput(Unit) { detectTapGestures { close() } }.padding(20.dp),
+        contentAlignment = Alignment.Center) {
+        val shape = RoundedCornerShape(16.dp)
+        Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * 0.7f).dp).clip(shape).background(c.cardBg)
+            .rnBorder(1.dp, c.border, shape).pointerInput(Unit) { detectTapGestures { } }.padding(16.dp).testTag("archive-retention-review")) {
+            Text(review.getString("title"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+                Text(review.getString("description"), style = rnText(14, 400), color = c.text)
+                for (line in listOf("counts", "legacy", "heading")) Text(review.getString(line), style = rnText(14, 400), color = c.text, modifier = Modifier.padding(top = 12.dp))
+                val lines = review.getJSONArray("lines")
+                for (index in 0 until lines.length()) Text(lines.getString(index), style = rnText(14, 400), color = c.text, modifier = Modifier.padding(top = 6.dp))
+            }
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.End)) {
+                Text(review.getString("cancel"), style = rnText(14, 400), color = c.tint, modifier = Modifier.clickable(role = Role.Button) { close() }.testTag("archive-retention-cancel"))
+                Text(review.getString("confirm"), style = rnText(14, 400), color = c.tint, modifier = Modifier.clickable(role = Role.Button) {
+                    close(); settings.data(review.getJSONObject("edit"))
+                }.testTag("archive-retention-apply"))
+            }
         }
     }
 }
@@ -1116,6 +1193,7 @@ private fun SettingsDialogs(model: InboxViewModel, page: SettingsPage) = with(mo
     }
     if (settings.screen == "ai") AISettingsDialogs(model, page.view)
     if (settings.screen == "data" || settings.screen == "sync") DataTransferQuestion(model)
+    if (settings.screen == "data") settings.local.optJSONObject("archiveReview")?.let { ArchiveRetentionReview(model, it) }
     if (settings.screen == "about") AboutOverlays(model, page.view)
     // Data's analytics question (RN's Alert): Keep enabled closes it; Disable sends the switch's edit.
     if (settings.screen == "data" && settings.local.optBoolean("analyticsConfirm")) page.view.getJSONObject("diagnostics").optJSONObject("analytics")?.let { analytics ->
