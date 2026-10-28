@@ -228,7 +228,12 @@ export const besideRow = (nodes, title, label) => {
     return nodes.find((node) => node['content-desc'] === label && box(node)[1] <= middle && box(node)[3] >= middle);
 };
 
-export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? '/home/dd/Android/Sdk/platform-tools/adb' }) {
+// The /opt adb and the S23's port 5038 (dd 10-09): the /home/dd/Android/Sdk adb is another version, and each kills the other's
+// server. ADB and ANDROID_ADB_SERVER_PORT, when set, win.
+export const DEFAULT_ADB = '/opt/android-sdk/platform-tools/adb';
+
+export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_ADB }) {
+    process.env.ANDROID_ADB_SERVER_PORT ||= '5038';
     const adbRaw = (...args) => execFileSync(adb, ['-s', serial, ...args], { maxBuffer: 64 << 20 });
     const shell = (command) => adbRaw('shell', command).toString('utf8').replace(/\r/g, '').trim();
     /**

@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 export const SERIAL = 'RFCW10JBP0Y';
 const LOCK = '/home/dd/scratch/s23.lock';
 const ADB = '/opt/android-sdk/platform-tools/adb';
+const ADB_PORT = '5038';
 const SDK = '/home/dd/Android/Sdk';
 const LOCK_TIMED_OUT = 75;
 const here = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +67,20 @@ export function defaultChecks(names) {
     return [...known, ...fresh, ...(found.includes(LAST) ? [LAST] : [])];
 }
 
+// The S23's adb server listens on 5038 (dd 10-09): a shell without the port reached another server and failed whole batches
+// (0/N, "rotation=" empty). An unset port defaults to it; a set one wins.
+export function withAdbPort(env) {
+    env.ANDROID_ADB_SERVER_PORT ||= ADB_PORT;
+    return env;
+}
+export const setenvArgs = (env) => ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT'].filter((k) => env[k]).map((k) => `--setenv=${k}=${env[k]}`);
+
+/** The batch's last line when `adb get-state` ([result], a spawnSync result) did not answer "device"; null when it did. */
+export function unreachable(result, port, total) {
+    const state = result.stdout?.trim() || result.stderr?.trim().split('\n').pop() || result.error?.message || `exit ${result.status}`;
+    return state === 'device' ? null : `VERDICT FAIL 0/${total}: not run, ${SERIAL} not reachable on adb port ${port} (${state})`;
+}
+
 export function verdict(results) {
     const failed = results.filter((r) => r.exit !== 0).map((r) => r.check);
     const passed = results.length - failed.length;
@@ -85,6 +100,7 @@ const hhmm = () => new Date().toTimeString().slice(0, 5);
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
 
 function main() {
+    withAdbPort(process.env);
     let opts;
     try {
         opts = parseArgs(process.argv.slice(2));
@@ -106,7 +122,7 @@ function main() {
 
     if (opts.detach) {
         const unit = opts.unit ?? `device-batch-${basename(opts.log)}`.replace(/[^\w.-]/g, '-');
-        const env = ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT'].filter((k) => process.env[k]).map((k) => `--setenv=${k}=${process.env[k]}`);
+        const env = setenvArgs(process.env);
         // KillMode=process: the unit's end must not take down an adb server or Gradle daemon other sessions now use.
         const run = spawnSync('systemd-run', ['--user', `--unit=${unit}`, '--collect', '--property=KillMode=process', `--working-directory=${opts.tree}`, ...env,
             `--property=StandardOutput=append:${opts.log}/runner.out`, `--property=StandardError=append:${opts.log}/runner.out`,
@@ -149,6 +165,12 @@ function main() {
 
     const head = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: opts.tree, encoding: 'utf8' }).stdout.trim();
     say(`start ${new Date().toString()} tree ${opts.tree} head ${head} harness ${opts.harness ?? env.MINDWTR_HARNESS_DIR ?? '(default)'}`);
+    // Before the build: a phone this server cannot see ends the batch now, with its rotation left alone (nothing reaches it).
+    const stop = unreachable(spawnSync(ADB, ['-s', SERIAL, 'get-state'], { encoding: 'utf8' }), process.env.ANDROID_ADB_SERVER_PORT, checks.length);
+    if (stop) {
+        say(stop);
+        process.exit(1);
+    }
     if (opts.build) {
         const steps = [
             ['bundle', process.execPath, [`${scriptsDir}/build-bundle.mjs`]],
