@@ -10217,11 +10217,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // The journaled ingest still passes no audio port: a transcription must never run inside its deadline.
     assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)/);
     assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime, SystemClock\.uptimeMillis\(\)\)/);
-    assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt\) \}/);
-    // The resume path is tuned for hot start: with no recording waiting, a drain costs one folder listing (no store read, no
-    // queue read); with one, it waits behind the same quiet gate as the widget build and the resume reminder cycle.
-    assert.match(processHost, /audioDrainQueued\.set\(false\)\s*WidgetAudioDrain\.run\(\{ !File\(app\.filesDir, PendingCaptureWriter\.AUDIO_DIRECTORY\)\.list\(\)\.isNullOrEmpty\(\) \},\s*\{ runtime\.awaitQuiet\(askedAt\) \{ appState != "active" \} \},\s*\{ runCatching \{ runtime\.ingestPendingAudio\(\) \}/);
+    assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt\) \{ appState != "active" \} \}/);
+    // The resume path is tuned for hot start: with no recording queued, a drain costs the queue's listing and a read of its small
+    // items (no store read, no fingerprint, no core call); with one, it waits behind the same quiet gate as the widget build and the
+    // resume reminder cycle. The queue's audio items, never the WAV folder, start it: an orphan WAV costs nothing (core deletes it).
+    assert.match(processHost, /audioDrainQueued\.set\(false\)\s*WidgetAudioDrain\.run\(\{ WidgetAudioDrain\.hasQueuedRecording\(queue\(app\)\) \}, \{ runtime\.awaitQuiet\(askedAt, stop\) \},\s*\{\s*Log\.i\(CoreHost\.TAG, "Native Android widget audio drain after its quiet wait waitedMs=[^"]*"\)\s*runCatching \{ runtime\.ingestPendingAudio\(\) \}/);
     assert.match(source('core/WidgetAudioDrain.kt'), /val ended = awaitQuiet\(\)\s*if \(ended != "left"\) ingest\(\)/);
+    assert.match(source('core/WidgetAudioDrain.kt'), /queue\.listFiles \{ file -> file\.name\.endsWith\(".json"\) \}\s*\?\.any \{ item -> runCatching \{ JSONObject\(item\.readText\(\)\)\.optString\("kind"\) == "audio" \}/);
+    assert.doesNotMatch(processHost, /AUDIO_DIRECTORY/, 'the WAV folder never starts a drain');
     assert.match(audioTs, /if \(provider !== 'gemini'\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}/);
     assert.doesNotMatch(audioTs.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /logWaiting\([^)]*transcript/, 'no transcript text in a log line');
     const audioTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-widget-audio.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
