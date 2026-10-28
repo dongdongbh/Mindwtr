@@ -521,11 +521,15 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
 
     let configured = false;
     let cycles = 0;
-    // Cycles that ended with different sync content in the store (the change fingerprint, device bookkeeping left out): Kotlin
-    // reads its lists again only for those. A cycle that changed nothing (no backend, nothing new) leaves the screens as drawn.
+    // Cycles that ended with anything in the store replaced (a collection, settings, the last data change): Kotlin reads its
+    // lists again only for those. A cycle that wrote nothing (no backend, nothing new) leaves the screens as drawn. References
+    // only, no content compare: a collection replaced with equal content still counts, as does an attachment's local state
+    // or a sync status written into settings.
     let contentRevision = 0;
-    const contentFingerprint = (): string | null => {
-        try { return getInMemorySyncChangeFingerprint(); } catch { return null; }
+    const storeReferences = (): unknown[] => {
+        const store = useTaskStore.getState();
+        return [store._allTasks, store._allProjects, store._allSections, store._allAreas, store._allPeople, store.settings,
+            store.lastDataChangeAt];
     };
     let lastEvent = '';
     let fatalCleanupError: NativeAttachmentCleanupUnconfirmedError | null = null;
@@ -610,7 +614,7 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         if (platform === 'ios') await readIosForegroundBackend(options.configOverride);
         // A record from before this call (a running cycle's, or an unlogged follow-up's) is not this call's to log.
         const earlier = fileCycle;
-        const contentBefore = contentFingerprint();
+        const contentBefore = storeReferences();
         let succeeded = false;
         let requeued = false;
         try {
@@ -641,9 +645,8 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
                 } });
             }
             if (!fatalCleanupError) {
-                // Any doubt (no fingerprint) counts as changed.
-                const contentAfter = contentFingerprint();
-                if (contentBefore === null || contentAfter === null || contentAfter !== contentBefore) contentRevision += 1;
+                const contentAfter = storeReferences();
+                if (contentAfter.some((reference, index) => reference !== contentBefore[index])) contentRevision += 1;
                 cycles += 1;
                 if (platform === 'ios') await refreshConfigured();
                 else void refreshConfigured();

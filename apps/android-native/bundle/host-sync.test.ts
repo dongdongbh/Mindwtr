@@ -1214,22 +1214,41 @@ describe('a keystore error, then a restart', () => {
     }, 60_000);
 });
 
-// Kotlin reads every list again after a finished cycle only when the cycle changed the store's sync content (contentRevision):
-// a cycle that changed nothing (no backend, nothing new) leaves the screens as drawn, one that changed the store reads them.
-it('counts a finished cycle as new content only when the store sync content changed', async () => {
-    resetForTests();
-    globals.__mindwtrHostPlatform = 'android';
-    core.useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} } as never);
-    const { sync } = host({ [SYNC_BACKEND_KEY]: 'off' }, false, undefined, async () => false);
-    const before = sync.state();
-    expect(await sync.settingsHost.performSync(undefined, { manual: true })).toMatchObject({ success: true });
-    expect(sync.state()).toMatchObject({ cycles: before.cycles + 1, contentRevision: before.contentRevision });
-    // A cycle during which the store's content changed (a merge brought a task): new content.
+// Kotlin reads every list again after a finished cycle only when the cycle replaced anything in the store (contentRevision):
+// a cycle that wrote nothing (no backend) leaves the screens as drawn; a merge, a settings-only write (a sync status or error),
+// and an attachment's local state change each read them again. The sync badge rides every event either way.
+describe('the store content a finished cycle reports', () => {
     const AT = '2026-01-01T00:00:00.000Z';
-    const running = sync.settingsHost.performSync(undefined, { manual: true });
-    core.useTaskStore.setState({ _allTasks: [{ id: 't1', title: 'Merged', status: 'inbox', tags: [], contexts: [], createdAt: AT, updatedAt: AT }],
-        lastDataChangeAt: 1 } as never);
-    expect(await running).toMatchObject({ success: true });
-    expect(sync.state()).toMatchObject({ cycles: before.cycles + 2, contentRevision: before.contentRevision + 1 });
-    resetForTests();
+    const task = { id: 't1', title: 'Task', status: 'inbox', tags: [], contexts: [], createdAt: AT, updatedAt: AT, rev: 1 };
+    const start = () => {
+        resetForTests();
+        globals.__mindwtrHostPlatform = 'android';
+        core.useTaskStore.setState({ _allTasks: [task], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} } as never);
+        return host({ [SYNC_BACKEND_KEY]: 'off' }, false, undefined, async () => false).sync;
+    };
+    // A cycle with [write] landing while it runs: whether it moved contentRevision.
+    const moved = async (sync: ReturnType<typeof start>, write?: () => void) => {
+        const before = sync.state();
+        const running = sync.settingsHost.performSync(undefined, { manual: true });
+        write?.();
+        await running;
+        const after = sync.state();
+        expect(after.cycles).toBe(before.cycles + 1);
+        return after.contentRevision !== before.contentRevision;
+    };
+    afterEach(() => resetForTests());
+
+    it('keeps it for a cycle that wrote nothing', async () => {
+        expect(await moved(start())).toBe(false);
+    });
+    it('moves it for a merge that brought a task', async () => {
+        expect(await moved(start(), () => core.useTaskStore.setState((state) => ({ _allTasks: [...state._allTasks, { ...task, id: 't2' }] }) as never))).toBe(true);
+    });
+    it('moves it for a settings-only write (a sync status or error)', async () => {
+        expect(await moved(start(), () => core.useTaskStore.setState({ settings: { lastSyncStatus: 'error', lastSyncError: 'offline' } } as never))).toBe(true);
+    });
+    it("moves it for an attachment's local state with no revision change", async () => {
+        expect(await moved(start(), () => core.useTaskStore.setState((state) => ({ _allTasks: state._allTasks.map((row) => ({ ...row,
+            attachments: [{ id: 'a', kind: 'file', title: 'a.pdf', uri: 'file:///a.pdf', localStatus: 'available', createdAt: AT, updatedAt: AT }] })) }) as never))).toBe(true);
+    });
 });
