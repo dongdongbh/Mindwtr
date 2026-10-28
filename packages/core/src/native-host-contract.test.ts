@@ -2662,9 +2662,16 @@ describe('native host contract', () => {
             return { total: section.total, rowTotal: section.rowTotal, rows: section.rows.map(({ id }) => id),
                 groups: section.groups?.map(({ id, count, collapsed, axis, start }) => ({ id, count, collapsed, axis, start })) };
         };
-        // A host that sends no folds (iOS) keeps drawing Later today from the rows' laterToday: no Today heading.
+        // A host that sends no folds (iOS) keeps drawing Later today from the rows' laterToday: no Today heading. iOS's
+        // CoreModel.readFocus and InboxScreen read these keys (no exact-key guard); pin them so a change is seen here.
         const plain = host.getFocus({ limit: 20, controls: DEFAULT_FOCUS_CONTROL_STATE });
-        expect(plain.ok && shape(plain.value, 'schedule').groups).toBeUndefined();
+        if (!plain.ok) throw new Error(plain.error.message);
+        expect(plain.value.sections.find(({ key }) => key === 'schedule')!.groups).toBeNull();
+        for (const section of plain.value.sections) {
+            expect(Object.keys(section).every((name) => ['key', 'title', 'total', 'countLabel', 'hiddenByAreaLabel', 'rows', 'rowTotal', 'groups'].includes(name)), section.key).toBe(true);
+        }
+        expect(Object.keys(plain.value.sections.find(({ key }) => key === 'next')!.groups![0]).sort())
+            .toEqual(['axis', 'collapsed', 'count', 'dotColor', 'id', 'muted', 'start', 'title']);
         const open = read([]);
         expect(shape(open, 'schedule')).toEqual({ total: 2, rowTotal: 2, rows: ['due-today', 'later-today'],
             groups: [{ id: 'focus:schedule:later-today', count: 1, collapsed: false, axis: 'schedule', start: 1 }] });
