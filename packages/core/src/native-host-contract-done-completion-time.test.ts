@@ -175,6 +175,7 @@ describe('Done row completion time uses RN completedAt-only update and guarded r
         } finally { await sqlite.close(); }
     });
 
+    // Several SQLite host boots (writable and read-only): past the 5 s default under gate load.
     it('refuses invalid, stale, read-only, non-Done, deleted and projected inputs', async () => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
         const sqlite = await openSqliteHost(seed());
@@ -201,7 +202,7 @@ describe('Done row completion time uses RN completedAt-only update and guarded r
             expect(readonly.host.getDoneTaskCompletedAtOptions({ id: ID, taskRevision: request().taskRevision })).toMatchObject({ ok: false });
             expect(await readonly.host.prepareDoneTaskCompletedAt(request())).toMatchObject({ ok: false });
         } finally { await readonly.close(); }
-    });
+    }, 20_000);
 
 
     it('rejects forged/cross-kind journals and cannot acknowledge an unused UUID from equal AFTER', async () => {

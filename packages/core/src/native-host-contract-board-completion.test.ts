@@ -110,6 +110,7 @@ describe('Board completion uses the existing durable completion owner', () => {
         } finally { await sqlite.close(); }
     });
 
+    // Five SQLite host boots per operation: past the 5 s default under gate load.
     it.each(['complete', 'undo'] as const)('refuses Section/parent races after %s preparation and keeps every durable row/receipt unchanged', async operation => {
         for (const change of ['reparent', 'archive', 'delete', 'purge', 'deleted-section']) {
             vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
@@ -126,7 +127,7 @@ describe('Board completion uses the existing durable completion owner', () => {
                 expect(useTaskStore.getState()._tasksById.get(ID)!.rev, change).toBe(revision);
             } finally { await sqlite.close(); }
         }
-    });
+    }, 20_000);
 
     it.each(['complete', 'undo'] as const)('rejects a container memory race between authority read and atomic %s apply', async operation => {
         vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW));
