@@ -10216,8 +10216,12 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(hostEntry, /ingestAudio\(\): string \{\s*return submit\(async \(\) => \{\s*if \(!widgetAudioPort\) return \{ ingested: 0 \};\s*const result = unwrap\(await contract\.ingestPendingAudio\(\{ queue: pendingCaptureQueue, lastApplied: lastAppliedRecord, audio: widgetAudioPort \}\)\);/);
     // The journaled ingest still passes no audio port: a transcription must never run inside its deadline.
     assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)/);
-    assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime\)/);
-    assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime\) \}/);
+    assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime, SystemClock\.uptimeMillis\(\)\)/);
+    assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt\) \}/);
+    // The resume path is tuned for hot start: with no recording waiting, a drain costs one folder listing (no store read, no
+    // queue read); with one, it waits behind the same quiet gate as the widget build and the resume reminder cycle.
+    assert.match(processHost, /audioDrainQueued\.set\(false\)\s*WidgetAudioDrain\.run\(\{ !File\(app\.filesDir, PendingCaptureWriter\.AUDIO_DIRECTORY\)\.list\(\)\.isNullOrEmpty\(\) \},\s*\{ runtime\.awaitQuiet\(askedAt\) \{ appState != "active" \} \},\s*\{ runCatching \{ runtime\.ingestPendingAudio\(\) \}/);
+    assert.match(source('core/WidgetAudioDrain.kt'), /val ended = awaitQuiet\(\)\s*if \(ended != "left"\) ingest\(\)/);
     assert.match(audioTs, /if \(provider !== 'gemini'\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}/);
     assert.doesNotMatch(audioTs.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /logWaiting\([^)]*transcript/, 'no transcript text in a log line');
     const audioTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-widget-audio.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });

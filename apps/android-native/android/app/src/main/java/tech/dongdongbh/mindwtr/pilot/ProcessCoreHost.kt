@@ -24,6 +24,7 @@ import tech.dongdongbh.mindwtr.pilot.core.HostNetwork
 import tech.dongdongbh.mindwtr.pilot.core.HostWidgets
 import tech.dongdongbh.mindwtr.pilot.core.LegacyRnStoreGuard
 import tech.dongdongbh.mindwtr.pilot.core.RnKeyValue
+import tech.dongdongbh.mindwtr.pilot.core.WidgetAudioDrain
 import tech.dongdongbh.mindwtr.pilot.core.debugProperty
 import tech.dongdongbh.mindwtr.pilot.core.traced
 import java.io.File
@@ -317,7 +318,7 @@ internal object ProcessCoreHost {
             runtime.syncStart(startedWith).put("type", "sync").let { reply -> if (syncState == null) syncState = reply }
             syncHost = runtime
             network.start()
-            drainAudio(app, runtime)
+            drainAudio(app, runtime, SystemClock.uptimeMillis())
             // Resumed or paused while the triggers started.
             appState.takeIf { it != startedWith }?.let { now -> syncThread.execute { runCatching { runtime.syncAppState(now) } } }
             Log.i(CoreHost.TAG, "Native Android sync started appState=$appState")
@@ -480,7 +481,7 @@ internal object ProcessCoreHost {
         }
         val runtime = syncHost ?: return
         syncThread.execute { runCatching { runtime.syncAppState(state) }.onFailure { Log.w(CoreHost.TAG, "Native Android sync app state failed ${failureForLog(it)}") } }
-        if (state == "active") application?.let { drainAudio(it, runtime) }
+        if (state == "active") application?.let { drainAudio(it, runtime, resumedAt) }
     }
 
     private val audioThread = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-widget-audio") }
@@ -489,13 +490,15 @@ internal object ProcessCoreHost {
     /**
      * The widget's queued recordings (core's ingestPendingAudio), as RN's foreground drain: once sync started (after the boot's
      * validated load, replay and queue drain) and on each resume. One at a time; a resume while one runs asks for one more.
+     * The wait and its bound count from [askedAt], the trigger ([WidgetAudioDrain]).
      */
-    private fun drainAudio(app: Application, runtime: CoreHost) {
+    private fun drainAudio(app: Application, runtime: CoreHost, askedAt: Long) {
         if (!audioDrainQueued.compareAndSet(false, true)) return
         audioThread.execute {
             audioDrainQueued.set(false)
-            if (queue(app).list().isNullOrEmpty()) return@execute
-            runCatching { runtime.ingestPendingAudio() }.onFailure { Log.w(CoreHost.TAG, "Native Android widget audio drain failed ${failureForLog(it)}") }
+            WidgetAudioDrain.run({ !File(app.filesDir, PendingCaptureWriter.AUDIO_DIRECTORY).list().isNullOrEmpty() },
+                { runtime.awaitQuiet(askedAt) { appState != "active" } },
+                { runCatching { runtime.ingestPendingAudio() }.onFailure { Log.w(CoreHost.TAG, "Native Android widget audio drain failed ${failureForLog(it)}") } })
         }
     }
 
