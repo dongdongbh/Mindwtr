@@ -26,7 +26,8 @@ describe('getInMemorySyncChangeFingerprint', () => {
         counted.calls = 0;
         const first = getInMemorySyncChangeFingerprint();
         expect(getInMemorySyncChangeFingerprint()).toBe(first);
-        expect(counted.calls).toBe(1);
+        // Under vitest a kept answer is checked against a fresh one (the tripwire): one more computation, the same result.
+        expect(counted.calls).toBe(2);
 
         const replaced = ['_allTasks', '_allProjects', '_allSections', '_allAreas', '_allPeople', 'settings'] as const;
         for (const key of replaced) {
@@ -45,5 +46,15 @@ describe('getInMemorySyncChangeFingerprint', () => {
         useTaskStore.setState((state) => ({ lastDataChangeAt: state.lastDataChangeAt + 1 }));
         expect(getInMemorySyncChangeFingerprint()).not.toBe(first);
         expect(counted.calls).toBe(before + 1);
+    });
+
+    it('throws in test runs when a kept fingerprint no longer matches the store (an in-place change)', () => {
+        useTaskStore.setState({
+            _allTasks: [{ id: 't1', title: 'Task', status: 'inbox', tags: [], contexts: [], createdAt: AT, updatedAt: AT }],
+            _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {},
+        } as never);
+        getInMemorySyncChangeFingerprint();
+        Object.assign(useTaskStore.getState()._allTasks[0]!, { rev: 9, updatedAt: '2026-01-09T00:00:00.000Z' });
+        expect(() => getInMemorySyncChangeFingerprint()).toThrow(/memo is stale/);
     });
 });

@@ -214,6 +214,12 @@ export const getInMemorySyncChangeFingerprint = (): string => {
     // last data change, the same fingerprint (about 49 ms at 5,000 tasks on the S23, asked twice on every resume).
     const inputs = [data.tasks, data.projects, data.sections, data.areas, data.people, data.settings, state.lastDataChangeAt];
     if (lastChangeFingerprint && inputs.every((input, index) => input === lastChangeFingerprint!.inputs[index])) {
+        // Test runs only (vitest): the kept fingerprint must equal a fresh one, so an in-place write anywhere fails the suite
+        // instead of silently skipping a sync.
+        if (typeof process !== 'undefined' && process.env?.VITEST
+            && computeSyncChangeFingerprint(data) !== lastChangeFingerprint.fingerprint) {
+            throw new Error('Sync change fingerprint memo is stale: a store collection or settings object was changed in place');
+        }
         return lastChangeFingerprint.fingerprint;
     }
     const fingerprint = computeSyncChangeFingerprint(data);
