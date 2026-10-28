@@ -129,6 +129,8 @@ export type SpeechCapturePorts = {
     /** Local Whisper's transcript of the recording. */
     transcribeLocal: () => Promise<string>;
     logWarn: SpeechLogWarn;
+    /** The cloud providers' fetch; the global one when unset (RN). */
+    fetcher?: typeof fetch;
 };
 
 /**
@@ -151,6 +153,7 @@ export async function dispatchSpeechCapture(
                 withOpenAIUpload: ports.withOpenAIUpload,
             },
             {
+                ...(ports.fetcher ? { fetcher: ports.fetcher } : {}),
                 onWarn: (message, error) => {
                     void ports.logWarn(message, {
                         scope: 'speech',

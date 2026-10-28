@@ -49,7 +49,7 @@ import { findSelectableProjectByTitleAndArea, isSelectableProjectForTaskAssignme
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { isSandboxMode } from './sandbox';
 import { flushPendingSave, getStorageAdapter, useTaskStore } from './store';
-import type { AppSettings, Project, Task, TaskPriority } from './types';
+import type { AppSettings, Attachment, Project, Task, TaskPriority } from './types';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { buildNewTask } from './task-creation';
 import { buildNewProject } from './store-projects/project-actions';
@@ -957,6 +957,56 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
                     }
                 },
             );
+        },
+
+        /**
+         * A voice capture's save (host-voice.ts, RN's stopRecording): the popup's draft with the recording [attachments], titled
+         * by the draft or else [fallbackTitle] ("Audio note" and the time), as RN's buildTaskProps. The task takes [captureId]
+         * (one per recording), so a retry answers from its task. A date command the draft cannot read refuses: nothing written.
+         */
+        async submitQuickCaptureAudio(input: {
+            text: string;
+            options: QuickCaptureOptions;
+            captureId: string;
+            fallbackTitle: string;
+            attachments: Attachment[];
+        }): Promise<NativeHostResult<NativeQuickCaptureSubmitResult>> {
+            const draft = readDraft(input);
+            if (!draft.ok) return draft;
+            if (!isText(input.fallbackTitle, TEXT_LIMIT) || !input.fallbackTitle.trim() || !Array.isArray(input.attachments)
+                || typeof input.captureId !== 'string' || !deps.requestIdPattern.test(input.captureId)) {
+                return fail('INVALID_INPUT', 'A recording capture needs its UUID, a title and its attachments');
+            }
+            const { text, options } = draft.value;
+            const captureId = input.captureId.toLowerCase();
+            const existing = useTaskStore.getState()._allTasks.find((task) => task.id === captureId);
+            if (existing) return { ok: true, value: { kind: 'saved', taskId: existing.id, projectId: existing.projectId, next: 'close', reset: null } };
+            try {
+                const projects = captureProjects(captureId);
+                const outcome = await saveQuickCapture({
+                    text: text.trim(),
+                    options,
+                    context: context(),
+                    actions: {
+                        addProject: projects.addProject,
+                        addTask: (title, props) => useTaskStore.getState().addTask(title, props, { captureId }),
+                    },
+                    fallbackTitle: input.fallbackTitle.trim(),
+                    extraProps: { attachments: input.attachments },
+                });
+                if (outcome.kind === 'refused') {
+                    return outcome.reason === 'invalid-date-command'
+                        ? { ok: true, value: { kind: 'refused', notice: outcome.notice } }
+                        : notApplied(outcome.error ?? outcome.notice.message);
+                }
+                if (!outcome.taskId) return notApplied('Task creation failed');
+                const saved = await durableSave();
+                if (!saved.ok) return saved;
+                rebuildParseOptions();
+                return { ok: true, value: { kind: 'saved', taskId: outcome.taskId, projectId: outcome.projectId, next: 'close', reset: null } };
+            } catch (error) {
+                return caught(error);
+            }
         },
 
         /**

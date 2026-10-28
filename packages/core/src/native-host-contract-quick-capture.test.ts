@@ -58,6 +58,31 @@ describe('native host contract: the capture popup', () => {
             .toMatchObject({ ok: true });
     });
 
+    // Voice pass V3: a recording saves as RN's stopRecording does, through the popup's draft: the typed text titles it, else
+    // "Audio note" and the time; the recording is its attachment; a retry answers from the task its capture ID made.
+    it('saves a voice capture with its recording, titled by the draft or the fallback, once per capture ID', async () => {
+        const { host } = await openHost();
+        const opened = value(host.openQuickCapture());
+        const attachment = {
+            id: 'att-1', kind: 'file' as const, title: 'Audio note 1', uri: 'file:///docs/attachments/att-1.m4a', mimeType: 'audio/mp4',
+            createdAt: fixture.now, updatedAt: fixture.now, localStatus: 'available' as const,
+        };
+        const captureId = generateUUID();
+        const saved = value(await host.submitQuickCaptureAudio({ text: '  ', options: opened.options, captureId, fallbackTitle: 'Audio note 9:00 AM', attachments: [attachment] }));
+        expect(saved).toMatchObject({ kind: 'saved', taskId: captureId.toLowerCase(), next: 'close' });
+        const task = useTaskStore.getState()._allTasks.find((entry) => entry.id === captureId.toLowerCase())!;
+        expect(task.title).toBe('Audio note 9:00 AM');
+        expect(task.attachments?.map((entry) => entry.uri)).toEqual([attachment.uri]);
+        const count = useTaskStore.getState()._allTasks.length;
+        value(await host.submitQuickCaptureAudio({ text: '', options: opened.options, captureId, fallbackTitle: 'Audio note 9:00 AM', attachments: [attachment] }));
+        expect(useTaskStore.getState()._allTasks.length).toBe(count);
+
+        const typed = value(await host.submitQuickCaptureAudio({ text: 'Call the bank', options: opened.options, captureId: generateUUID(), fallbackTitle: 'Audio note', attachments: [] }));
+        expect(useTaskStore.getState()._allTasks.find((entry) => entry.id === (typed as { taskId: string }).taskId)?.title).toBe('Call the bank');
+        expect(await host.submitQuickCaptureAudio({ text: '', options: opened.options, captureId: 'not-a-uuid', fallbackTitle: 'Audio note', attachments: [] }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     it('offers saved unused contexts and invalidates retained context choices when only settings changes', async () => {
         const { host } = await openHost();
         const opened = value(host.openQuickCapture());

@@ -597,9 +597,14 @@ export async function saveQuickCapture(input: {
     context: QuickCaptureContext;
     actions: CaptureTransactionActions;
     openAfterSave?: boolean;
+    /** A recording's capture (RN's stopRecording buildTaskProps): the title when the text parses empty, and its attachment. */
+    fallbackTitle?: string;
+    extraProps?: Partial<Task>;
 }): Promise<QuickCaptureSaveOutcome> {
     const { context, options } = input;
-    const request = buildQuickCaptureRequest({ text: input.text, fallbackTitle: input.text.trim(), options }, context);
+    const request = buildQuickCaptureRequest({
+        text: input.text, fallbackTitle: input.fallbackTitle ?? input.text.trim(), options, extraProps: input.extraProps,
+    }, context);
     const result = await executeCaptureTransaction(request.input, input.actions, request.options);
     if (!result.success && result.reason === 'invalid-date-command') {
         return { kind: 'refused', reason: 'invalid-date-command', notice: getQuickCaptureInvalidDateNotice(context.t, result.invalidDateCommands) };
