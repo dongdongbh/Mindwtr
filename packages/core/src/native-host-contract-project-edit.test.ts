@@ -335,3 +335,71 @@ describe('runProjectEdit task order', () => {
         expect(live.map((row) => row.id)).toEqual(['t3', 't1', 't2']);
     });
 });
+
+// RN's Flow Mode picker (#1429, d25316cf9): Parallel, Sequential or Per section, each a target state; and the section manager's
+// Parallel/Sequential button while the project is Per section. Native's old two-way toggle turned Per section into Sequential.
+describe('runProjectEdit flow mode (#1429)', () => {
+    const perSection = { isSequential: false, perSectionFlow: true };
+    const flowRead = (host: Awaited<ReturnType<typeof open>>['host']) =>
+        (host.getProjectFlowOptions({ projectId: 'p' }) as { value: { flowMode: string } }).value.flowMode;
+
+    it('reads a Per section project as Per section and writes nothing for the read', async () => {
+        const { host, saves, stored } = await open({ projects: [project('p', perSection)] });
+        const count = saves();
+        expect(flowRead(host)).toBe('perSection');
+        const order = host.getProjectSectionOrderOptions({ projectId: 'p' });
+        expect(order).toMatchObject({ ok: true });
+        expect(saves()).toBe(count);
+        expect(stored()).toMatchObject(perSection);
+    });
+
+    it('stores exactly the mode picked, each once, and a replay writes nothing', async () => {
+        const { host, stored, saves } = await open({ projects: [project('p', perSection)], sections: [section('s1', 0)] });
+        const run = (n: number, mode: string) => host.runProjectEdit({ requestId: uuid(n), projectId: 'p', kind: 'flowMode', mode } as never);
+        expect(await run(80, 'perSection')).toEqual({ ok: true, value: { id: 'p', kind: 'flowMode', outcome: 'unchanged' } });
+        expect(await run(81, 'sequential')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ isSequential: true, perSectionFlow: false });
+        expect(flowRead(host)).toBe('sequential');
+        expect(await run(82, 'parallel')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject({ isSequential: false, perSectionFlow: false });
+        expect(flowRead(host)).toBe('parallel');
+        expect(await run(83, 'perSection')).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(stored()).toMatchObject(perSection);
+        expect(flowRead(host)).toBe('perSection');
+        const count = saves();
+        expect(await run(83, 'perSection')).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+    });
+
+    it('refuses a mode for an archived project and an unknown mode', async () => {
+        const { host } = await open();
+        expect(await host.runProjectEdit({ requestId: uuid(84), projectId: 'archived', kind: 'flowMode', mode: 'perSection' } as never))
+            .toEqual({ ok: true, value: { id: 'archived', kind: 'flowMode', outcome: 'blocked' } });
+        expect(await host.runProjectEdit({ requestId: uuid(85), projectId: 'p', kind: 'flowMode', mode: 'both' } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('stores a section\'s Parallel or Sequential choice in a Per section project, and shows it on the manager rows', async () => {
+        const { host, data } = await open({ projects: [project('p', perSection)], sections: [section('s1', 0), section('s2', 1)] });
+        const rows = () => (host.getProjectSectionOrderOptions({ projectId: 'p' }) as { value: { sections: Array<{ id: string; sequential: boolean | null }> } })
+            .value.sections.map(({ id, sequential }) => ({ id, sequential }));
+        expect(rows()).toEqual([{ id: 's1', sequential: false }, { id: 's2', sequential: false }]);
+        const edit = { requestId: uuid(86), projectId: 'p', kind: 'sectionFlow', sectionId: 's1', sequential: true } as never;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { kind: 'sectionFlow', outcome: 'saved' } });
+        expect(data().sections.find((row) => row.id === 's1')?.isSequential).toBe(true);
+        expect(data().sections.find((row) => row.id === 's2')?.isSequential).toBeUndefined();
+        expect(rows()).toEqual([{ id: 's1', sequential: true }, { id: 's2', sequential: false }]);
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(await host.runProjectEdit({ requestId: uuid(87), projectId: 'p', kind: 'sectionFlow', sectionId: 's1', sequential: false } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(data().sections.find((row) => row.id === 's1')?.isSequential).toBe(false);
+    });
+
+    it('offers no section choice and writes none while the project is not Per section', async () => {
+        const { host, data } = await open({ sections: [section('s1', 0)] });
+        expect((host.getProjectSectionOrderOptions({ projectId: 'p' }) as { value: { sections: Array<{ sequential: unknown }> } }).value.sections[0].sequential).toBeNull();
+        expect(await host.runProjectEdit({ requestId: uuid(88), projectId: 'p', kind: 'sectionFlow', sectionId: 's1', sequential: true } as never))
+            .toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+        expect(data().sections[0].isSequential).toBeUndefined();
+    });
+});

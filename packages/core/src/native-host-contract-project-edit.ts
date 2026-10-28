@@ -12,6 +12,8 @@ import { deterministicHash128 } from './uuid';
 import { ensureDeviceId } from './store-helpers';
 import { getProjectAccentColor } from './task-accent-color';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
+import { getProjectFlowMode } from './task-utils';
+import type { ProjectFlowMode } from './types';
 
 /**
  * One Project details edit as the user made it: the field and its new value (a target state), under the request UUID the
@@ -22,6 +24,8 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'status'; status: 'active' | 'waiting' | 'someday' }
     | { kind: 'type'; sequential: boolean }
     | { kind: 'scope'; scope: 'project' | 'section' }
+    // RN's Flow Mode picker (#1429); 'type' stays for edits journaled before it.
+    | { kind: 'flowMode'; mode: ProjectFlowMode }
     | { kind: 'area'; areaId: string | null }
     | { kind: 'color'; colorOverride: string | null }
     | { kind: 'tag'; tag: string; present: boolean }
@@ -31,6 +35,8 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'sectionRename'; sectionId: string; title: string }
     | { kind: 'sectionDelete'; sectionId: string }
     | { kind: 'sectionMove'; sectionId: string; direction: 'up' | 'down'; order: string[] }
+    // RN's section manager Parallel/Sequential button, shown while the project is Per section (#1429).
+    | { kind: 'sectionFlow'; sectionId: string; sequential: boolean }
     // The header's actions sheet (RN's "..."): Complete, Cancel or Reactivate, Duplicate, Delete and that Delete's Undo.
     | { kind: 'lifecycle'; action: 'complete' | 'cancel' | 'reactivate' }
     | { kind: 'duplicate' }
@@ -70,6 +76,8 @@ const valid = (input: unknown): input is NativeProjectEdit => {
         case 'status': return keys(edit, ['status']) && ['active', 'waiting', 'someday'].includes(edit.status as string);
         case 'type': return keys(edit, ['sequential']) && typeof edit.sequential === 'boolean';
         case 'scope': return keys(edit, ['scope']) && (edit.scope === 'project' || edit.scope === 'section');
+        case 'flowMode': return keys(edit, ['mode']) && ['parallel', 'sequential', 'perSection'].includes(edit.mode as string);
+        case 'sectionFlow': return keys(edit, ['sectionId', 'sequential']) && id(edit.sectionId) && typeof edit.sequential === 'boolean';
         case 'color': return keys(edit, ['colorOverride']) && edit.colorOverride !== undefined && isValidProjectColorOverride(edit.colorOverride);
         case 'area': return keys(edit, ['areaId']) && (edit.areaId === null || id(edit.areaId));
         case 'tag': return keys(edit, ['tag', 'present']) && text(edit.tag) && typeof edit.present === 'boolean';
@@ -190,6 +198,30 @@ export function createProjectEditMethods(deps: {
                 if (edit.kind === 'type' && (flow.isSequential === true) === edit.sequential) return { ok: true, value: { outcome: 'unchanged' } };
                 const action = edit.kind === 'type' ? { kind: 'toggleType' } : { kind: 'setScope', scope: edit.scope };
                 return { ok: true, value: { command: 'ProjectFlow', request: { ...base, action, expected: token(read.value) } } };
+            }
+            case 'flowMode': {
+                const read = await options('getProjectFlowOptions');
+                if (!read.ok) return read;
+                if (read.value.canChange === false) return { ok: true, value: { outcome: 'blocked' } };
+                if (read.value.flowMode === edit.mode) return { ok: true, value: { outcome: 'unchanged' } };
+                // RN's setProjectFlowMode: entering Per section also gives each section without a choice its current flow.
+                return { ok: true, value: { run: async () => {
+                    const result = await useTaskStore.getState().setProjectFlowMode(edit.projectId, edit.mode);
+                    return result.success ? { ok: true, value: {} } : fail('STALE_REVISION', result.error ?? 'Project flow could not be changed');
+                } } };
+            }
+            case 'sectionFlow': {
+                const state = useTaskStore.getState();
+                const current = state._allSections.find((row) => row.id === edit.sectionId);
+                if (!current || current.deletedAt || current.projectId !== edit.projectId) return { ok: true, value: { conflict: 'The Section is no longer there' } };
+                const parent = state._projectsById.get(edit.projectId);
+                if (!parent || parent.deletedAt || parent.purgedAt) return { ok: true, value: { conflict: 'The Project is no longer there' } };
+                if (parent.status === 'archived' || getProjectFlowMode(parent) !== 'perSection') return { ok: true, value: { outcome: 'blocked' } };
+                if ((current.isSequential === true) === edit.sequential) return { ok: true, value: { outcome: 'unchanged' } };
+                return { ok: true, value: { run: async () => {
+                    const result = await useTaskStore.getState().updateSection(edit.sectionId, { isSequential: edit.sequential });
+                    return result.success ? { ok: true, value: {} } : fail('STALE_REVISION', result.error ?? 'The Section is no longer there');
+                } } };
             }
             case 'color': case 'area': {
                 const read = await options('getProjectAreaOptions');

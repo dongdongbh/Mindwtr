@@ -89,4 +89,18 @@ class ProjectDetailsTest {
         assertEquals("date", edit.getString("kind"))
         assertEquals("2026-11-20", edit.getString("value"))
     }
+
+    /**
+     * RN's Flow Mode picker (#1429, d25316cf9): its three choices in RN's order, and a tap stores exactly the mode tapped. The old
+     * two-way toggle sent "not Sequential" from a Per section project, so one tap made it Sequential on every device.
+     */
+    @Test fun aFlowModeTapStoresExactlyThatModeAndTheShownModeSendsNothing() {
+        assertEquals(listOf("parallel", "sequential", "perSection"), PROJECT_FLOW_MODES.map { it.first })
+        assertEquals(listOf("projects.parallel", "projects.sequential", "projects.perSection"), PROJECT_FLOW_MODES.map { it.second })
+        assertEquals(null, flowModeEdit(shown = "perSection", picked = "perSection"))
+        for (picked in listOf("parallel", "sequential")) assertEquals(picked, flowModeEdit(shown = "perSection", picked = picked)?.getString("mode"))
+        assertEquals("perSection", flowModeEdit(shown = "sequential", picked = "perSection")?.getString("mode"))
+        // Opening and closing the details sends no flow edit: only a typed title and notes are stored on leave.
+        assertEquals(emptyList<Pair<String, String>>(), editsOnLeave(title = null, storedTitle = "Old", notes = null, storedNotes = null))
+    }
 }

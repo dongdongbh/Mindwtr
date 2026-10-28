@@ -2054,9 +2054,9 @@ assert.match(banner, /Text\(message,[\s\S]*?liveRegion = LiveRegionMode\.Asserti
     assert(order.every((index, i) => index > (i ? order[i - 1] : -1)), `the banner floats over every screen and under RN's modals ${order}`);
 }
 assert.match(activity, /Box\(Modifier\.weight\(1f\)\.fillMaxWidth\(\)\.background\(c\.bg\)\.clipToBounds\(\)\)/);
-// Section titles draw RN's capitals but expose core's own title and count.
+// Section titles draw RN's capitals but expose core's own title, a Per section project's flow label (#1429) and the count.
 assert.match(activity, /clearAndSetSemantics \{ text = AnnotatedString\(spoken\); heading\(\) \}/);
-assert.match(activity, /val spoken = if \(count == null\) title else "\$title · \$count"/);
+assert.match(activity, /val spoken = listOfNotNull\(title, note, count\?\.toString\(\)\)\.joinToString\(" · "\)/);
 
 // Theme: one Kotlin theme object holds RN's palettes, value for value, and every color the screens draw.
 const mobile = resolve(app, '../mobile');

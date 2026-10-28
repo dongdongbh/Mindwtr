@@ -94,6 +94,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -414,6 +415,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     fun storedNotes(): String = raw?.getJSONObject("notes")?.getJSONObject("project")?.menuText("supportNotes").orEmpty()
     fun status(): String? = raw?.getJSONObject("status")?.getJSONObject("project")?.getString("status")
     fun flow(): JSONObject? = raw?.getJSONObject("flow")?.getJSONObject("project")
+    fun flowMode(): String? = raw?.getJSONObject("flow")?.menuText("flowMode")
 
     /** Core's blocks for the notes as typed (RN previews the unsaved draft), for the preview; a read, it stores nothing. */
     fun readNotes() {
@@ -616,8 +618,15 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         edit(projectId, "status") { put("status", status) }
     }
 
-    /** Type: the other of what the panel shows (Sequential or Parallel), as a target state. */
-    fun setSequential(sequential: Boolean) = edit(projectId, "type") { put("sequential", sequential) }
+    /** RN's Flow Mode pick (#1429): the mode tapped, as a target state; the mode already shown sends nothing. */
+    fun setFlowMode(mode: String) {
+        val fields = flowModeEdit(flowMode(), mode) ?: return
+        edit(projectId, "flowMode") { for (name in fields.keys()) put(name, fields.get(name)) }
+    }
+
+    /** RN's section manager flow button: the other of what the row shows, as a target state; the manager reads again after. */
+    fun setSectionFlow(sectionId: String, shownSequential: Boolean) =
+        edit(projectId, "sectionFlow", answer = { readOrder() }) { put("sectionId", sectionId).put("sequential", !shownSequential) }
 
     fun setScope(scope: String) = edit(projectId, "scope") { put("scope", scope) }
 
@@ -775,10 +784,11 @@ private fun DetailsLabel(text: String, modifier: Modifier = Modifier) =
 
 /** RN's smallButton: a bordered 12/700 label in [color]. */
 @Composable
-internal fun SmallButton(label: String, enabled: Boolean, tag: String? = null, color: Color = LocalTheme.current.colors.tint, onClick: () -> Unit) {
+internal fun SmallButton(label: String, enabled: Boolean, tag: String? = null, color: Color = LocalTheme.current.colors.tint,
+                         modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
-    Text(label, style = rnText(12, 700), color = color, modifier = Modifier.fade(if (enabled) 1f else 0.5f).clip(shape).background(c.cardBg)
+    Text(label, style = rnText(12, 700), color = color, modifier = modifier.fade(if (enabled) 1f else 0.5f).clip(shape).background(c.cardBg)
         .rnBorder(1.dp, c.border, shape).clickable(enabled = enabled, role = Role.Button, onClick = onClick)
         .then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(horizontal = 10.dp, vertical = 6.dp))
 }
@@ -898,17 +908,30 @@ private fun DetailsStatus(model: InboxViewModel, detail: ProjectDetail, metadata
                 }
             }
         }
-        val sequential = flow()?.optBoolean("isSequential") == true
         Row(Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             DetailsLabel(t("projects.projectTypeLabel"), Modifier.weight(1f))
-            val shape = RoundedCornerShape(8.dp)
-            Box(Modifier.fade(if (archived) 0.5f else 1f).heightIn(min = 30.dp).clip(shape).background(if (sequential) c.tint else c.filterBg)
-                .rnBorder(1.dp, if (sequential) c.tint else c.border, shape).clickable(enabled = enabled && flow() != null, role = Role.Button) { setSequential(!sequential) }
-                .testTag("project-type-toggle").padding(horizontal = 10.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
-                Text(metadata.getString("typeLabel"), style = rnText(12, 600), color = if (sequential) c.onTint else c.secondaryText)
+            HelpButton(t("projects.projectTypeHelpLabel")) {
+                help = t("projects.projectTypeHelpLabel") to "${t("projects.projectTypeHelpText")}\n\n${t("projects.perSectionTooltip")}"
             }
-            Spacer(Modifier.size(6.dp))
-            HelpButton(t("projects.projectTypeHelpLabel")) { help = t("projects.projectTypeHelpLabel") to t("projects.projectTypeHelpText") }
+        }
+        // RN's Flow Mode choices (#1429): one tap stores that mode, never the other of two.
+        Choices(PROJECT_FLOW_MODES, flowMode(), archived, enabled && flowMode() != null, "project-flow-mode-", ::setFlowMode)
+    }
+}
+
+/** RN's sequentialScopeOptions row: equal buttons, the [current] one tinted; [onPick] gets the tapped value. */
+@Composable
+private fun Choices(choices: List<Pair<String, String>>, current: String?, archived: Boolean, enabled: Boolean, tagPrefix: String, onPick: (String) -> Unit) {
+    val c = LocalTheme.current.colors
+    Row(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((value, key) in choices) {
+            val on = current == value
+            val shape = RoundedCornerShape(8.dp)
+            Box(Modifier.weight(1f).fade(if (archived) 0.5f else 1f).heightIn(min = 36.dp).clip(shape).background(if (on) c.tint else c.inputBg)
+                .rnBorder(1.dp, if (on) c.tint else c.border, shape).clickable(enabled = enabled, role = Role.Button) { onPick(value) }
+                .semantics { selected = on }.testTag("$tagPrefix$value").padding(8.dp), contentAlignment = Alignment.Center) {
+                Text(t(key), style = rnText(12, 700), color = if (on) c.onTint else c.text, textAlign = TextAlign.Center)
+            }
         }
     }
 }
@@ -925,17 +948,8 @@ private fun DetailsScope(model: InboxViewModel, detail: ProjectDetail, metadata:
             HelpButton(t("projects.sequentialScopeHelpLabel")) { help = t("projects.sequentialScopeHelpLabel") to t("projects.sequentialScopeHelpText") }
         }
         val current = if (flow()?.menuText("sequentialScope") == "section") "section" else "project"
-        Row(Modifier.padding(top = 8.dp).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for ((scope, key) in listOf("project" to "projects.sequentialAcrossSections", "section" to "projects.sequentialWithinSections")) {
-                val on = current == scope
-                val shape = RoundedCornerShape(8.dp)
-                Box(Modifier.weight(1f).fade(if (archived) 0.5f else 1f).heightIn(min = 36.dp).clip(shape).background(if (on) c.tint else c.inputBg)
-                    .rnBorder(1.dp, if (on) c.tint else c.border, shape).clickable(enabled = enabled && flow() != null, role = Role.Button) { setScope(scope) }
-                    .semantics { selected = on }.padding(8.dp), contentAlignment = Alignment.Center) {
-                    Text(t(key), style = rnText(12, 700), color = if (on) c.onTint else c.text, textAlign = TextAlign.Center)
-                }
-            }
-        }
+        Choices(listOf("project" to "projects.sequentialAcrossSections", "section" to "projects.sequentialWithinSections"), current, archived,
+            enabled && flow() != null, "project-scope-") { setScope(it) }
     }
 }
 
@@ -1710,6 +1724,15 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
                                     }
                                 }
                                 Spacer(Modifier.size(2.dp))
+                                // RN's Flow Mode button, only while the project is Per section (#1429): Parallel or Sequential, a tap the other.
+                                if (!section.isNull("sequential")) {
+                                    val sequential = section.getBoolean("sequential")
+                                    val shown = t(if (sequential) "projects.sequential" else "projects.parallel")
+                                    val label = "${t("projects.sequenceMode")}: $name"
+                                    SmallButton(shown, idle, "project-section-flow-$id", color = c.secondaryText,
+                                        Modifier.semantics { contentDescription = label; stateDescription = shown }) { setSectionFlow(id, sequential) }
+                                    Spacer(Modifier.size(6.dp))
+                                }
                                 SmallButton(t("common.edit"), idle, "project-section-edit-$id") { sectionDraft = SectionDraft(id, name) }
                                 Spacer(Modifier.size(6.dp))
                                 SmallButton(t("common.delete"), idle, "project-section-delete-$id", color = c.danger) { sectionDelete = section }
@@ -1812,6 +1835,12 @@ internal class ReplyGuard {
 
     fun close() { session += 1 }
 }
+
+/** RN's Flow Mode choices in its order (ProjectDetailModal.tsx, #1429): the mode and its label key. */
+internal val PROJECT_FLOW_MODES = listOf("parallel" to "projects.parallel", "sequential" to "projects.sequential", "perSection" to "projects.perSection")
+
+/** A Flow Mode tap's edit fields: the [picked] mode as a target state, or null when it is the mode [shown] (RN's plan is null then). */
+internal fun flowModeEdit(shown: String?, picked: String): JSONObject? = if (shown == picked) null else JSONObject().put("mode", picked)
 
 /** A Project details edit as journaled: its request UUID, project, field kind, and the field's new value (core's NativeProjectEdit). */
 internal fun projectEdit(requestId: String, projectId: String, kind: String, fields: JSONObject): JSONObject =

@@ -1,3 +1,4 @@
+import { isTaskActionable } from './task-status';
 import type { Task } from './types';
 
 export type PomodoroPhase = 'focus' | 'break';
@@ -352,7 +353,8 @@ export function getPomodoroTaskChoices(pools: {
 }): Task[] {
     const byId = new Map<string, Task>();
     for (const task of [...pools.focusedTasks, ...pools.schedule, ...pools.nextActions, ...pools.reviewDue]) {
-        if (!task.deletedAt) byId.set(task.id, task);
+        // RN's picker lists only actionable tasks (e4d71e032).
+        if (!task.deletedAt && isTaskActionable(task)) byId.set(task.id, task);
     }
     return Array.from(byId.values());
 }

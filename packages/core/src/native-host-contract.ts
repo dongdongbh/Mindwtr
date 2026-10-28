@@ -624,6 +624,8 @@ export type NativeProjectDetailView = Omit<NativeProjectDetail, 'items'> & {
     items: (Extract<NativeProjectDetailItem, { type: 'task' }> | {
         type: 'section'; id: string; title: string; count: number; muted: boolean;
         collapsible: boolean; collapsed: boolean;
+        /** Parallel or Sequential under the header, only in a Per section project (#1429). */
+        flowLabel?: string;
     })[];
     controls: {
         showCompleted: boolean;
@@ -1522,7 +1524,8 @@ export function createNativeHostContract(options: {
             if (item.type !== 'section') return item;
             const source = cache.items[offset + index];
             return { ...item, collapsible: source.type === 'section' && source.collapsible === true,
-                collapsed: source.type === 'section' && source.collapsed === true };
+                collapsed: source.type === 'section' && source.collapsed === true,
+                ...(source.type === 'section' && source.flowLabel ? { flowLabel: source.flowLabel } : {}) };
         }),
         controls: {
             showCompleted,

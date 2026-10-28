@@ -178,4 +178,23 @@ describe('native Project completed view', () => {
             .toMatchObject({ ok: false, error: { code: 'TASK_NOT_FOUND' } });
         expect(saveData).not.toHaveBeenCalled();
     });
+
+    // RN's task list shows Parallel or Sequential under each section header of a Per section project (#1429, d25316cf9).
+    it('labels each section header with its flow in a Per section project only', async () => {
+        const host = createNativeHostContract();
+        expect(await host.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
+        const section = (id: string, projectId: string, order: number, extra: Partial<Section> = {}): Section =>
+            ({ id, projectId, title: id, order, createdAt: stamp, updatedAt: stamp, ...extra });
+        useTaskStore.setState({ _allProjects: [project('flow', { perSectionFlow: true }), project('plain')],
+            _allSections: [section('steps', 'flow', 0, { isSequential: true }), section('ideas', 'flow', 1), section('plain-s', 'plain', 0)],
+            _allTasks: [task('a', 'flow', 'next', { sectionId: 'steps' }), task('b', 'flow', 'next', { sectionId: 'ideas' }),
+                task('c', 'plain', 'next', { sectionId: 'plain-s' })] });
+        const headers = (projectId: string) => {
+            const result = host.getProjectDetailView({ projectId, offset: 0, limit: 50, showCompleted: false, completedCollapsed: false });
+            if (!result.ok) throw new Error(result.error.code);
+            return result.value.items.filter((item) => item.type === 'section').map((item) => [item.id, (item as { flowLabel?: string }).flowLabel]);
+        };
+        expect(headers('flow')).toEqual([['steps', 'Sequential'], ['ideas', 'Parallel']]);
+        expect(headers('plain')).toEqual([['plain-s', undefined]]);
+    });
 });

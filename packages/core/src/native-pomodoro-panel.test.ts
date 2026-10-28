@@ -91,7 +91,6 @@ describe('native Pomodoro presentation using RN timer helpers', () => {
         const state = initial(); state.session.selectedTaskId = 'outside'; const raw = JSON.stringify(state);
         const view = ready(panel(raw, { liveTasks: [task('outside', 'Outside current filters')] }));
         expect(view.selectedTask).toEqual({ id: 'outside', title: 'Outside current filters', taskRevision: taskRevisionOf(task('outside')), completionSource: 'ordinary' });
-        expect(ready(panel(raw, { liveTasks: [{ ...task('outside'), status: 'reference' }] })).selectedTask?.completionSource).toBe('reference');
         expect(view.selectionMissing).toBe(false);
         expect(ready(panel(raw)).selectionMissing).toBe(true);
         const off = ready(panel(raw, { settings: { features: { pomodoro: true } } }));
@@ -119,5 +118,24 @@ describe('native Pomodoro presentation using RN timer helpers', () => {
         const snapshot = JSON.stringify(pools), choices = getPomodoroTaskChoices(pools);
         expect(choices.map((t) => t.id)).toEqual(['shared', 'schedule', 'next', 'review']);
         expect(choices[0]).toBe(latest); expect(JSON.stringify(pools)).toBe(snapshot);
+    });
+
+    // e4d71e032: RN's card keeps only an actionable task linked (isTaskActionable); a task done, archived, cancelled, filed as
+    // Reference or gone unlinks, and the timer stays as it was.
+    it.each(['done', 'archived', 'cancelled', 'reference', 'deleted'] as const)('drops a linked task once it is %s (e4d71e032)', (transition) => {
+        const state = initial(); state.session.selectedTaskId = 'linked'; const raw = JSON.stringify(state);
+        const live = transition === 'deleted' ? [] : [{ ...task('linked'),
+            status: transition === 'cancelled' ? 'archived' as const : transition,
+            ...(transition === 'cancelled' ? { cancelledAt: '2026-10-10T00:00:00.000Z' } : {}) }];
+        const view = ready(panel(raw, { liveTasks: live }));
+        expect(view.selectedTask).toBeNull(); expect(view.selectionMissing).toBe(true);
+        expect(view.clock).toBe(ready(panel(raw, { liveTasks: [task('linked')] })).clock);
+        expect(JSON.stringify(state)).toBe(raw);
+    });
+    it('offers only actionable tasks in the picker, as RN filters its Focus lists (e4d71e032)', () => {
+        const done = { ...task('done'), status: 'done' as const }, reference = { ...task('reference'), status: 'reference' as const };
+        const archived = { ...task('archived'), status: 'archived' as const };
+        expect(getPomodoroTaskChoices({ focusedTasks: [done, task('next')], schedule: [reference], nextActions: [archived], reviewDue: [] })
+            .map((t) => t.id)).toEqual(['next']);
     });
 });

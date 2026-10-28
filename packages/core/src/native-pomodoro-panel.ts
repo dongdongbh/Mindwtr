@@ -5,6 +5,7 @@ import { createPomodoroState, DEFAULT_POMODORO_DURATIONS, formatPomodoroClock, g
     getPomodoroPresetOptions, type PomodoroEvent } from './pomodoro';
 import { resolvePomodoroSession } from './pomodoro-session';
 import { resolveFeatureFlags } from './resolve-feature-flags';
+import { isTaskActionable } from './task-status';
 import type { AppSettings, Task } from './types';
 
 export type NativePomodoroFeedback = { sessionID: string; generation: number; value: PomodoroEvent };
@@ -53,8 +54,9 @@ function buildPanel(input: {
     const resolved = resolvePomodoroSession(session, input.nowMs, autoStart, day);
     const remaining = needsReconcile ? 0 : resolved.timerState.remainingSeconds;
     const { linkTaskEnabled } = common;
+    // RN's card links only an actionable task (e4d71e032): one done, archived or filed as Reference unlinks.
     const selected = linkTaskEnabled && session.selectedTaskId
-        ? input.liveTasks.find((task) => task.id === session.selectedTaskId) : undefined;
+        ? input.liveTasks.find((task) => task.id === session.selectedTaskId && isTaskActionable(task)) : undefined;
     const lastEvent = input.lastEvent;
     if (lastEvent && !['focus-finished', 'break-finished'].includes(lastEvent.value)) throw new Error('Invalid Pomodoro feedback');
     const event = lastEvent?.sessionID === state.sessionID && lastEvent.generation === state.generation && !needsReconcile
@@ -76,7 +78,8 @@ function buildPanel(input: {
         presets: getPomodoroPresetOptions(options?.customDurations).map((preset) => ({ ...preset,
             active: preset.focusMinutes === session.durations.focusMinutes && preset.breakMinutes === session.durations.breakMinutes })),
         selectedTask: selected ? { id: selected.id, title: selected.title, taskRevision: taskRevisionOf(selected),
-            completionSource: selected.status === 'reference' ? 'reference' : 'ordinary' } : null,
+            // A linked task is never Reference now; the field stays for the iOS reader.
+            completionSource: 'ordinary' as const } : null,
         selectionMissing: linkTaskEnabled && session.selectedTaskId !== undefined && selected === undefined,
         event: event === 'focus-finished' ? tr('pomodoro.focusComplete', 'Focus session complete. Take a short break.')
             : event === 'break-finished' ? tr('pomodoro.breakComplete', 'Break complete. Ready for the next focus session.') : null,

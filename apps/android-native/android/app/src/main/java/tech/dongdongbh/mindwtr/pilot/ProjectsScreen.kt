@@ -117,7 +117,7 @@ data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>) {
 sealed interface DetailItem
 /** [collapsible]: RN's Completed pile heading, which folds ([collapsed]) the done tasks under it. */
 data class DetailSection(val id: String, val title: String, val count: Int, val muted: Boolean, val collapsible: Boolean = false,
-                         val collapsed: Boolean = false) : DetailItem
+                         val collapsed: Boolean = false, val flowLabel: String? = null) : DetailItem
 data class DetailTask(val row: TaskRow, val sequenceCue: String?) : DetailItem
 
 /** Core's sequence cue values and mobile's label key for each. */
@@ -151,7 +151,7 @@ data class ProjectDetail(val revision: String, val projectId: String, val readOn
                     items.getJSONObject(index).let { item ->
                         if (item.getString("type") == "section") {
                             DetailSection(item.getString("id"), item.getString("title"), item.getInt("count"), item.getBoolean("muted"),
-                                item.optBoolean("collapsible"), item.optBoolean("collapsed"))
+                                item.optBoolean("collapsible"), item.optBoolean("collapsed"), item.menuText("flowLabel"))
                         } else {
                             DetailTask(item.getJSONObject("row").taskRow(), if (item.isNull("sequenceCue")) null else item.getString("sequenceCue"))
                         }
@@ -494,7 +494,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 is DetailSection -> item(key = "section:${entry.id}") {
                     if (entry.collapsible) CompletedHeading(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted)
                     else SectionTitle(entry.title, entry.count,
-                        Modifier.fillMaxWidth().fade(if (entry.muted) 0.6f else 1f).padding(top = 12.dp, bottom = 8.dp, start = 4.dp))
+                        Modifier.fillMaxWidth().fade(if (entry.muted) 0.6f else 1f).padding(top = 12.dp, bottom = 8.dp, start = 4.dp), note = entry.flowLabel)
                 }
                 is DetailTask -> item(key = "task:${entry.row.id}") {
                     TaskRowItem(model, entry.row, status = RowStatus.Badge, completable = completable,

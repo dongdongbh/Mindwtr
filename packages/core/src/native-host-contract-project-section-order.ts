@@ -4,6 +4,7 @@ import { validSection } from './native-host-contract-project-section-rename';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { getProjectSectionsForView } from './project-utils';
 import { ensureDeviceId } from './store-helpers';
+import { getProjectFlowMode } from './task-utils';
 import { useTaskStore } from './store';
 import { projectSectionOrderEffect } from './store-projects/ordering-actions';
 import { sameSectionDeleteJson, sameSectionSqliteRow } from './store-projects/section-actions';
@@ -103,7 +104,7 @@ export function createProjectSectionOrderMethods(deps: {
         getProjectSectionOrderOptions(input: { projectId: string }): NativeHostResult<{
             revision: string; project: { id: string; title: string; status: Project['status'] };
             canReorder: boolean; sections: Array<{ id: string; title: string;
-                canMoveUp: boolean; canMoveDown: boolean }>; token: Section[] }> {
+                canMoveUp: boolean; canMoveDown: boolean; sequential: boolean | null }>; token: Section[] }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!input || typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 500)
@@ -117,11 +118,14 @@ export function createProjectSectionOrderMethods(deps: {
             const ids = new Set(shown.map((row) => row.id));
             if (ids.size !== shown.length) return fail('STALE_REVISION', 'Section IDs are ambiguous');
             const canReorder = parent.status !== 'archived' && shown.length > 1;
+            // RN's manager rows offer each section's flow only while the project is Per section (#1429).
+            const perSection = getProjectFlowMode(parent) === 'perSection';
             const value = { revision: deps.revision(),
                 project: { id: parent.id, title: parent.title, status: parent.status }, canReorder,
                 sections: shown.map((row, index) => ({ id: row.id, title: row.title,
                     canMoveUp: canReorder && index > 0,
-                    canMoveDown: canReorder && index < shown.length - 1 })),
+                    canMoveDown: canReorder && index < shown.length - 1,
+                    sequential: perSection ? row.isSequential === true : null })),
                 token: shown };
             const frozen = detach<typeof value>(JSON.parse(JSON.stringify(value)));
             return frozen && isNativeJsonWithinBytes(frozen) ? { ok: true, value: frozen }

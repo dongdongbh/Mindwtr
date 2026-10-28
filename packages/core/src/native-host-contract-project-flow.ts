@@ -6,7 +6,8 @@ import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { projectFlowEffect, sameProjectSqliteRow } from './store-projects/project-actions';
 import type { PreparedProjectFlow, ProjectFlowAction } from './store-types';
-import type { Project } from './types';
+import { getProjectFlowMode } from './task-utils';
+import type { Project, ProjectFlowMode } from './types';
 
 export type NativeProjectFlowToken = { title: string; status: Project['status'];
     isSequential: boolean | null; sequentialScope: 'project' | 'section' | null;
@@ -100,7 +101,7 @@ export function createProjectFlowMethods(deps: {
 }) {
     return {
         getProjectFlowOptions(input: { projectId: string }): NativeHostResult<{ revision: string;
-            project: { id: string } & NativeProjectFlowToken; canChange: boolean }> {
+            project: { id: string } & NativeProjectFlowToken; canChange: boolean; flowMode: ProjectFlowMode }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!input || typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 500)
@@ -109,7 +110,7 @@ export function createProjectFlowMethods(deps: {
             if (!project || project.deletedAt || project.purgedAt)
                 return fail('STALE_REVISION', 'Project is unavailable; refresh before changing flow');
             const value = { revision: deps.revision(), project: { id: project.id, ...token(project) },
-                canChange: project.status !== 'archived' };
+                canChange: project.status !== 'archived', flowMode: getProjectFlowMode(project) };
             return isNativeJsonWithinBytes(value) ? { ok: true, value }
                 : fail('INVALID_INPUT', 'Project flow options exceed the bounded native response');
         },

@@ -8,7 +8,7 @@
 // it back to RN's defaults (its title, Active, Parallel, no area, no tags, no notes, no dates, no attachments, no sections),
 // so the development data does not grow. Then, on the open project's Details panel (RN's ProjectDetailModal):
 //   (a) the folded Details shows core's summary; a tap unfolds the panel;
-//   (b) Status → Waiting, (c) Type → Sequential, (d) Sequential Scope → Within sections, (e) Sections: Add Section twice,
+//   (b) Status → Waiting, (c) Flow Mode → Sequential, (d) Sequential Scope → Within sections, (e) Sections: Add Section twice,
 //       Move down, Edit, Delete, (f) Area, (g) Tags (+ adds; Done and + on a held tag store nothing), (h) Notes (Preview shows the
 //       typed notes and stores nothing; Back stores them),
 //       (i) Attachments' Add link and Remove, (j) Start, Due and Review dates (the picker's day), and a Clear, (k) the title:
@@ -16,7 +16,10 @@
 //   (l) a restart replays a journaled edit: one stopped before the engine saw it (Status → Someday) is stored by the boot's
 //       replay, one stopped after core's reply (a tag) is replayed and stores nothing more; typed notes Back journaled, killed
 //       before the engine sees them, are stored by the replay;
-//   (m) a restart keeps every value: the reopened Details shows core's labels for the stored values.
+//   (m) a restart keeps every value: the reopened Details shows core's labels for the stored values;
+//   (o) Per section (#1429): Flow Mode → Parallel, then → Per section (the section gets an explicit Parallel); the section
+//       manager's flow button → Sequential stores that section's choice; closing and reopening the project and its Details
+//       shows Per section and stores nothing (native's old toggle turned it into Sequential).
 // It touches only the development package (it refuses any other APK), never launches over another app, leaves the app on its
 // Inbox tab, and restores rotation and clears its debug properties on exit. Leave the device on its home screen. It needs host
 // `sqlite3` and `bun`. Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
@@ -25,7 +28,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { bootFailure, box, button, check, connect, evidenced, fail, hasText, inEditor, mainList, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
+import { bootFailure, box, button, check, connect, evidenced, fail, hasText, inEditor, isOn, mainList, Stopped, tab, tabSelected, tagged, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -81,9 +84,9 @@ let ids = {};
 /** The fixture project as stored, and its live sections in order. */
 const stored = (label = 'stored') => {
     const db = pullDatabase(label);
-    const [project] = sqlite(db, `SELECT title, status, isSequential, sequentialScope, areaId, tagIds, supportNotes, attachments, startDate, dueDate,
+    const [project] = sqlite(db, `SELECT title, status, isSequential, sequentialScope, perSectionFlow, areaId, tagIds, supportNotes, attachments, startDate, dueDate,
         reviewAt, rev FROM projects WHERE id = '${ids.project}'`);
-    const sections = sqlite(db, `SELECT id, title FROM sections WHERE projectId = '${ids.project}' AND deletedAt IS NULL ORDER BY orderNum`);
+    const sections = sqlite(db, `SELECT id, title, isSequential, rev FROM sections WHERE projectId = '${ids.project}' AND deletedAt IS NULL ORDER BY orderNum`);
     return { ...project, tags: JSON.parse(project.tagIds || '[]'), attachmentList: JSON.parse(project.attachments || '[]'), sections };
 };
 /**
@@ -128,7 +131,7 @@ const core = (db, mode) => JSON.parse(execFileSync('bun', ['-e', `
             must(await store().deleteSection(section.id), 'deleteSection');
             await flushPendingSave();
         }
-        must(await store().updateProject(project.id, { title: names.project, status: 'active', isSequential: false, sequentialScope: undefined,
+        must(await store().updateProject(project.id, { title: names.project, status: 'active', isSequential: false, perSectionFlow: false, sequentialScope: undefined,
             areaId: undefined, tagIds: [], supportNotes: undefined, attachments: [], startDate: undefined, dueDate: undefined, reviewAt: undefined,
             isFocused: false }), 'reset');
         await flushPendingSave();
@@ -322,8 +325,8 @@ try {
     }, (current) => current.status === 'waiting');
     nodes = await waitFor('the Waiting status', (current) => withDescription(current, `${en['projects.statusLabel']}: ${en['status.waiting']}`), 15_000);
 
-    // (c) Type, (d) Sequential Scope.
-    row = await write('(c) Type → Sequential', async () => tap(tagged(await revealTag('project-type-toggle'), 'project-type-toggle')),
+    // (c) Flow Mode, (d) Sequential Scope.
+    row = await write('(c) Flow Mode → Sequential', async () => tap(tagged(await revealTag('project-flow-mode-sequential'), 'project-flow-mode-sequential')),
         (current) => current.isSequential === 1);
     nodes = await waitFor('the Sequential Scope block', (current) => textNode(current, en['projects.sequentialWithinSections']), 15_000);
     row = await write('(d) Sequential Scope → Within sections', async () => tap(textNode(await screen(), en['projects.sequentialWithinSections'])),
@@ -564,6 +567,43 @@ try {
             nodes = await revealIn((current) => Boolean(withDescription(current, `${en['common.clear']} ${label}`)), `Clear ${label}`);
             await tap(withDescription(nodes, `${en['common.clear']} ${label}`));
         }, (current) => current[field] === null);
+    }
+
+    // (o) Per section (#1429): RN's three Flow Mode choices; each tap stores exactly that mode.
+    row = await write('(o) Flow Mode → Parallel', async () => tap(tagged(await revealTag('project-flow-mode-parallel'), 'project-flow-mode-parallel')),
+        (current) => current.isSequential === 0);
+    const flowSection = row.sections[0];
+    check(row.sections.length === 1 && flowSection.isSequential === null, '(o) the section has no stored flow yet');
+    row = await write('(o) Flow Mode → Per section', async () => tap(tagged(await revealTag('project-flow-mode-perSection'), 'project-flow-mode-perSection')),
+        (current) => current.perSectionFlow === 1 && current.isSequential === 0);
+    check(row.sections[0].isSequential === 0, '(o) entering Per section from Parallel stores the section as Parallel (RN\'s planProjectFlowModeChange)');
+    nodes = await waitFor('Per section shown', (current) => isOn(tagged(current, 'project-flow-mode-perSection')), 15_000);
+    check(!isOn(tagged(nodes, 'project-flow-mode-sequential')), '(o) the control shows Per section, not Sequential');
+    {
+        const before = stored('before');
+        await tap(tagged(await revealTag('project-sections-button'), 'project-sections-button'));
+        nodes = await waitFor('the section manager flow button', (current) => tagged(current, `project-section-flow-${flowSection.id}`)?.text === en['projects.parallel'], 15_000);
+        await tap(tagged(nodes, `project-section-flow-${flowSection.id}`));
+        let after;
+        await waitFor('the section stored Sequential', () => { after = stored(); return after.sections[0]?.isSequential === 1; }, 30_000);
+        check(after.sections[0].rev === before.sections[0].rev + 1 && after.rev === before.rev && after.perSectionFlow === 1,
+            `(o) the section flow button stored Sequential once and left the project as it was (section rev ${before.sections[0].rev} → ${after.sections[0].rev})`);
+        await waitFor('the button shows Sequential', (current) => tagged(current, `project-section-flow-${flowSection.id}`)?.text === en['projects.sequential'], 15_000);
+        await tap(withDescription(await screen(), en['common.cancel']) ?? fail('no Close on the section manager'));
+        await waitFor('the section manager to close', (current) => !tagged(current, 'project-section-manager'), 10_000);
+    }
+    {
+        // The regression: leaving the project and opening its Details again shows Per section and writes nothing.
+        const before = stored('before');
+        await tap(button(await screen(), 'Back') ?? fail('no Back in the project header'));
+        await waitFor('the Projects list', (current) => !inProject(current), 15_000);
+        nodes = await openDetails();
+        nodes = await revealIn((current) => isOn(tagged(current, 'project-flow-mode-perSection')), 'Per section selected');
+        await sleep(2500);
+        const after = stored();
+        check(after.rev === before.rev && after.perSectionFlow === 1 && after.isSequential === 0 && after.sections[0].isSequential === 1
+            && after.sections[0].rev === before.sections[0].rev, '(o) reopened, the project is still Per section and nothing was stored');
+        check(coreMetadata('o').typeLabel === en['projects.perSection'], '(o) core\'s type label is Per section');
     }
     console.log('Project details device check passed');
 } catch (error) {

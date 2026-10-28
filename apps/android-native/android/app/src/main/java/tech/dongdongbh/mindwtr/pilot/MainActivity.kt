@@ -548,12 +548,14 @@ fun EmptyState(message: String, hint: String?, action: String? = null, onAction:
  * the count. TalkBack and the device checks read core's own title and count.
  */
 @Composable
-fun SectionTitle(title: String, count: Int?, modifier: Modifier = Modifier, trailing: @Composable () -> Unit = {}) {
+fun SectionTitle(title: String, count: Int?, modifier: Modifier = Modifier, note: String? = null, trailing: @Composable () -> Unit = {}) {
     val c = LocalTheme.current.colors
-    val spoken = if (count == null) title else "$title · $count"
+    val spoken = listOfNotNull(title, note, count?.toString()).joinToString(" · ")
     Row(modifier.clearAndSetSemantics { text = AnnotatedString(spoken); heading() }, verticalAlignment = Alignment.CenterVertically) {
         Text(title.uppercase(), style = rnText(12, 700, letterSpacing = 1f), color = c.secondaryText, maxLines = 2,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        // RN's flow label beside a Per section project's section title (task-list.tsx, #1429), in its sectionCount style.
+        note?.let { Text(it, style = rnText(11, 600), color = c.secondaryText, modifier = Modifier.padding(start = 8.dp)) }
         count?.let { Text("($it)", style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(start = 10.dp)) }
         Spacer(Modifier.weight(1f))
         trailing()
