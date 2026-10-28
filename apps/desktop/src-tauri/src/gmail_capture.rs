@@ -1067,14 +1067,20 @@ fn wait_callback(
     Err(error("cancelled"))
 }
 
+fn vault_namespace(identifier: &str, config_path: &std::path::Path) -> String {
+    digest(&format!("{identifier}:{}", config_path.to_string_lossy()))
+}
+
+/// The keyring entry name of a config path's Gmail vault. Each workspace has
+/// its own config path, so its own entry (#1473).
+pub(crate) fn vault_name(identifier: &str, config_path: &std::path::Path) -> String {
+    format!("gmail-capture:{}", vault_namespace(identifier, config_path))
+}
+
 fn context(app: &tauri::AppHandle) -> Result<Arc<Context>> {
     static CONTEXTS: OnceLock<Mutex<HashMap<String, Arc<Context>>>> = OnceLock::new();
     let config_path = crate::get_config_path(app);
-    let namespace = digest(&format!(
-        "{}:{}",
-        app.config().identifier,
-        config_path.to_string_lossy()
-    ));
+    let namespace = vault_namespace(&app.config().identifier, &config_path);
     let mut contexts = CONTEXTS
         .get_or_init(Mutex::default)
         .lock()
@@ -1085,7 +1091,7 @@ fn context(app: &tauri::AppHandle) -> Result<Arc<Context>> {
     let path = config_path.with_file_name("gmail-capture-receipts.sqlite");
     let vault = Arc::new(SystemVault {
         app: app.clone(),
-        name: format!("gmail-capture:{namespace}"),
+        name: vault_name(&app.config().identifier, &config_path),
     });
     let client = client_config();
     let mut state = Runtime::default();

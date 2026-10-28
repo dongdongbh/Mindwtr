@@ -73,6 +73,7 @@ mod sync_crypto;
 mod sync_encryption;
 mod ui;
 mod window_state;
+mod workspaces;
 
 use audio::{
     download_parakeet_model, download_whisper_model, start_audio_recording, stop_audio_recording,
@@ -128,16 +129,17 @@ use platform::{
     cloudkit_ensure_subscription, cloudkit_ensure_zone, cloudkit_fetch_all_records,
     cloudkit_fetch_attachment_asset, cloudkit_fetch_changes, cloudkit_register_for_notifications,
     cloudkit_save_attachment_asset, cloudkit_save_records, create_macos_calendar_event,
-    delete_macos_calendar_event, ensure_macos_mindwtr_calendar, get_macos_calendar_events,
-    get_macos_calendar_permission_status, get_macos_writable_calendars, get_managed_data_dir,
-    import_attachment_file, migrate_portable_attachments, open_path, remember_link_folder_access,
-    request_macos_calendar_permission, set_macos_activation_policy, update_macos_calendar_event,
+    delete_macos_calendar_event, ensure_macos_mindwtr_calendar, get_device_managed_data_dir,
+    get_macos_calendar_events, get_macos_calendar_permission_status, get_macos_writable_calendars,
+    get_managed_data_dir, import_attachment_file, migrate_portable_attachments, open_path,
+    remember_link_folder_access, request_macos_calendar_permission, set_macos_activation_policy,
+    update_macos_calendar_event,
 };
 use storage::{
     create_data_snapshot, delete_calendar_sync_entry, get_all_calendar_sync_entries,
-    get_calendar_sync_entry, get_config_path_for_startup, get_data, get_data_path_cmd,
-    get_db_path_cmd, list_data_snapshots, query_tasks, read_data_json, read_data_snapshot,
-    save_data, save_task, search_fts, upsert_calendar_sync_entry,
+    get_calendar_sync_entry, get_data, get_data_path_cmd, get_db_path_cmd,
+    get_device_config_path_for_startup, list_data_snapshots, query_tasks, read_data_json,
+    read_data_snapshot, save_data, save_task, search_fts, upsert_calendar_sync_entry,
 };
 use sync::{
     acquire_file_sync_lease, clear_sync_path, cloud_get_json, cloud_put_json, connect_dropbox,
@@ -1081,7 +1083,7 @@ fn resolve_tray_icon(handle: &tauri::AppHandle) -> Option<Image<'_>> {
 
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 fn read_startup_disable_hardware_acceleration() -> bool {
-    let config = read_config_toml(&get_config_path_for_startup());
+    let config = read_config_toml(&get_device_config_path_for_startup());
     hardware_acceleration_disabled(&config)
 }
 
@@ -1592,6 +1594,7 @@ pub(crate) fn install_renderer_recovery(_window: &tauri::WebviewWindow) {}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    workspaces::remember_launch_environment();
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     let disable_hardware_acceleration = read_startup_disable_hardware_acceleration();
     #[cfg(target_os = "windows")]
@@ -1619,6 +1622,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(workspaces::init_script_plugin())
         .manage(QuickAddPending(Mutex::new(None)))
         .manage(CloseRequestHandled(AtomicBool::new(false)))
         .manage(GlobalQuickAddShortcutState(Mutex::new(None)))
@@ -1931,6 +1935,9 @@ pub fn run() {
                 // config's 1200x800, blank, until then and then jumps (#936).
                 // Restoring here keeps all of that off screen.
                 main_window_builder = main_window_builder.visible(false);
+                if let Some(title) = workspaces::window_title() {
+                    main_window_builder = main_window_builder.title(title);
+                }
                 let main_window = main_window_builder.build()?;
                 install_renderer_recovery(&main_window);
                 crate::window_state::restore(&main_window);
@@ -1941,7 +1948,12 @@ pub fn run() {
             // captures) under the profile dir, which lies outside the fs
             // plugin's static $DATA scope.
             if crate::storage::is_portable_mode() {
-                expand_tauri_fs_scope(&app.handle(), &get_data_dir(&app.handle()));
+                // The device root covers logs, speech models and every
+                // workspace's folder below it (#1473).
+                expand_tauri_fs_scope(
+                    &app.handle(),
+                    &crate::storage::get_device_data_dir(&app.handle()),
+                );
             }
 
             {
@@ -2140,6 +2152,7 @@ pub fn run() {
             // Reported here because the migration itself runs before any
             // logger exists — the first config read is the top of `run()`.
             crate::storage_layout::log_layout_migration();
+            crate::workspaces::log_workspace_opened(&handle);
             // Optional helper readiness can take up to ten seconds. Startup
             // stays responsive and failure only affects this capability.
             let mcp_app = handle.clone();
@@ -2260,6 +2273,7 @@ pub fn run() {
             cloudkit_consume_pending_remote_change,
             cloudkit_register_for_notifications,
             get_managed_data_dir,
+            get_device_managed_data_dir,
             import_attachment_file,
             migrate_portable_attachments,
             open_path,
@@ -2332,6 +2346,11 @@ pub fn run() {
             get_desktop_rendering_config,
             set_desktop_rendering_config,
             write_macos_widget_payload,
+            workspaces::list_workspaces,
+            workspaces::create_workspace,
+            workspaces::update_workspace,
+            workspaces::delete_workspace,
+            workspaces::switch_workspace,
             quit_app
         ])
         .build(tauri::generate_context!())
@@ -2343,12 +2362,20 @@ pub fn run() {
                 log::info!("macOS Dock reopen handled extra.releaseCheck=v1.3.5/macos-dock-reopen");
             }
             if matches!(event, tauri::RunEvent::Exit) {
+                // A workspace switch restarts the app as soon as this returns;
+                // the new process must not find this one's socket and hand its
+                // launch back to a process that is exiting (#1473).
+                #[cfg(target_os = "linux")]
+                if let Some(socket) = app.try_state::<FlatpakInstanceSocketCleanup>() {
+                    let _ = fs::remove_file(&socket.0);
+                }
                 stop_mcp_server(&app.state::<McpServerState>());
                 crate::window_state::save(app);
                 // Other plugins can still create the OS config dir a portable
                 // install is meant to stay out of; clearing it here runs after
                 // they have handled the same event (#936).
                 crate::storage::cleanup_portable_os_config_dir(app);
+                crate::workspaces::relaunch_if_switching(app);
             }
         });
 }

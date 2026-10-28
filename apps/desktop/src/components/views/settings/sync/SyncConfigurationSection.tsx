@@ -1,4 +1,5 @@
 import { AlertCircle, CheckCircle2, ExternalLink, RefreshCw } from 'lucide-react';
+import { DEFAULT_WORKSPACE_ID, getActiveWorkspaceId } from '../../../../lib/workspaces';
 import { getDocsGuideUrl } from '@mindwtr/core';
 import { useDocumentationLanguage } from '../../../../contexts/language-context';
 import { cn } from '../../../../lib/utils';
@@ -578,11 +579,14 @@ export function SyncConfigurationSection({
     const language = useDocumentationLanguage();
     const isSelfHostedSelected = syncBackend === 'cloud' && cloudProvider === 'selfhosted';
     const isDropboxSelected = syncBackend === 'cloud' && cloudProvider === 'dropbox';
+    // CloudKit has one container per Apple ID, so it stays with the default
+    // workspace; another workspace would share its records (#1473).
+    const cloudKitOffered = isMacOS && getActiveWorkspaceId() === DEFAULT_WORKSPACE_ID;
     const backendGroups: BackendButtonGroup[] = [
         {
             title: t.syncBackendGroupCloud,
             description: t.syncBackendGroupCloudDesc,
-            options: ['dropbox', ...(isMacOS ? (['cloudkit'] as const) : [])],
+            options: ['dropbox', ...(cloudKitOffered ? (['cloudkit'] as const) : [])],
         },
         {
             title: t.syncBackendGroupFile,
@@ -789,6 +793,10 @@ export function SyncConfigurationSection({
 
                 {syncBackend === 'cloudkit' && (
                     <p className="text-sm text-muted-foreground">{t.cloudkitDesc}</p>
+                )}
+
+                {isMacOS && !cloudKitOffered && (
+                    <p className="text-xs text-muted-foreground">{t.workspacesICloudDefaultOnly}</p>
                 )}
 
                 {isDropboxSelected && renderDropboxPanel({

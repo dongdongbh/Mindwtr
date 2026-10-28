@@ -357,6 +357,8 @@ const technicalTermsByKey: Record<string, readonly string[]> = {
     'settings.cloudRememberTokenHint': ['localStorage'],
     'settings.obsidianDataviewMetadataHint': ['project::', 'context::', 'due::', 'scheduled::', 'priority::', 'estimate::'],
     'settings.obsidianMissingMarker': ['.obsidian'],
+    'workspaces.cliHint': ['MCP', 'mindwtr.db', '--db'],
+    'workspaces.unreadable': ['workspaces.toml'],
 };
 
 export function hasMixedEnglishText(locale: string, key: string, value: string, english: string): boolean {

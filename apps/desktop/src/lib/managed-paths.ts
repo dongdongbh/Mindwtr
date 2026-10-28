@@ -39,3 +39,25 @@ export async function getManagedDataDir(): Promise<string> {
 export async function getManagedPath(...segments: string[]): Promise<string> {
     return await join(await getManagedDataDir(), ...segments);
 }
+
+let cachedDeviceDir: string | null = null;
+
+// Device-level managed files shared by every workspace (#1473): logs and
+// speech models. In the default workspace this is getManagedDataDir() itself.
+export async function getDeviceManagedDataDir(): Promise<string> {
+    if (cachedDeviceDir) return cachedDeviceDir;
+    let dir = '';
+    if (isTauriRuntime()) {
+        try {
+            dir = (await invokeNative<string>('get_device_managed_data_dir')).trim();
+        } catch {
+            // Older backend without the command: workspaces did not exist then.
+        }
+    }
+    cachedDeviceDir = dir || await getManagedDataDir();
+    return cachedDeviceDir;
+}
+
+export async function getDeviceManagedPath(...segments: string[]): Promise<string> {
+    return await join(await getDeviceManagedDataDir(), ...segments);
+}

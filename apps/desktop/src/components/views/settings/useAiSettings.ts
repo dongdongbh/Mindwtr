@@ -16,7 +16,7 @@ import {
 } from '@mindwtr/core';
 import { exists, remove, size } from '@tauri-apps/plugin-fs';
 import { join } from '@tauri-apps/api/path';
-import { getManagedPath } from '../../../lib/managed-paths';
+import { getDeviceManagedPath } from '../../../lib/managed-paths';
 import { loadAIKey, saveAIKey } from '../../../lib/ai-config';
 import { downloadParakeetModel, downloadWhisperModel } from '../../../lib/speech-to-text';
 import { markSettingsOpenTrace, measureSettingsOpenStep } from '../../../lib/settings-open-diagnostics';
@@ -207,12 +207,12 @@ export function useAiSettings({ isTauri, settings, updateSettings, showSaved, en
         if (!isTauri) return null;
         const entry = WHISPER_MODELS.find((model) => model.id === modelId);
         if (!entry) return null;
-        return await getManagedPath('whisper-models', entry.fileName);
+        return await getDeviceManagedPath('whisper-models', entry.fileName);
     }, [isTauri]);
 
     const resolveParakeetPath = useCallback(async () => {
         if (!isTauri) return null;
-        return await getManagedPath(PARAKEET_MODEL_INSTALL_DIR);
+        return await getDeviceManagedPath(PARAKEET_MODEL_INSTALL_DIR);
     }, [isTauri]);
 
     const checkParakeetModelReady = useCallback(async (modelPath: string) => {

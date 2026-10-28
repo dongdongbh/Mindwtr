@@ -19,7 +19,7 @@ export const SETTINGS_PAGE_SYNONYMS: Record<SettingsSearchPageId, readonly strin
     manage: ['areas', 'contexts', 'tags', 'rename', 'delete', 'reorder'],
     notifications: ['review reminders', 'weekly review', 'daily digest', 'morning', 'evening'],
     sync: ['file sync', 'WebDAV', 'cloud', 'sync now', 'sync history', 'recovery snapshots', 'dropbox', 'self-hosted', 'iCloud', 'settings sync'],
-    data: ['backup', 'restore', 'import', 'Todoist', 'DGT GTD', 'OmniFocus', 'CSV', 'Mindwtr CSV', 'attachments', 'cleanup', 'archive retention', 'permanent archive removal', 'diagnostics', 'logging'],
+    data: ['backup', 'restore', 'import', 'Todoist', 'DGT GTD', 'OmniFocus', 'CSV', 'Mindwtr CSV', 'attachments', 'cleanup', 'archive retention', 'permanent archive removal', 'diagnostics', 'logging', 'workspaces', 'profiles'],
     integrations: ['obsidian', 'vault', 'calendar', 'ICS', 'apple calendar', 'integration'],
     ai: ['OpenAI', 'Gemini', 'Anthropic', 'API key', 'speech', 'whisper', 'copilot', 'model', 'timeout'],
     advanced: ['automation', 'local api', 'localhost', 'port', 'mcp', 'Claude', 'LLM', 'launch at startup', 'autostart', 'login item'],

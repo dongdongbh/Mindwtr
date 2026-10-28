@@ -823,6 +823,15 @@ pub(crate) fn get_managed_data_dir(app: tauri::AppHandle) -> String {
     get_data_dir(&app).to_string_lossy().into_owned()
 }
 
+// Device-level managed files (logs, speech models) shared by every workspace
+// (#1473). The same folder as get_managed_data_dir in the default workspace.
+#[tauri::command(async)]
+pub(crate) fn get_device_managed_data_dir(app: tauri::AppHandle) -> String {
+    crate::storage::get_device_data_dir(&app)
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn legacy_webview_data_root() -> Option<PathBuf> {
     dirs::data_dir().map(|dir| dir.join("mindwtr"))
 }
@@ -950,7 +959,12 @@ pub(crate) fn migrate_portable_attachments(
         managed_attachments_dir: managed_dir.to_string_lossy().into_owned(),
         migrated_file_names: Vec::new(),
     };
-    if !result.is_portable || file_names.is_empty() {
+    // The legacy files belong to the default workspace's tasks; another
+    // workspace never adopts them (#1473).
+    if !result.is_portable
+        || file_names.is_empty()
+        || crate::workspaces::active_workspace_id().is_some()
+    {
         return Ok(result);
     }
     let Some(legacy_root) = legacy_root else {

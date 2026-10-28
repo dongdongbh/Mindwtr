@@ -139,7 +139,7 @@ pub(crate) fn sync_encryption_artifact_label(name: &str) -> String {
 }
 
 const SYNC_ENCRYPTION_STATE_FILE_NAME: &str = "sync-encryption-state.json";
-const KEYRING_SYNC_ENCRYPTION_KEY: &str = "sync_encryption_key_v1";
+pub(crate) const KEYRING_SYNC_ENCRYPTION_KEY: &str = "sync_encryption_key_v1";
 
 /// Prefix on every error string a decrypt failure produces at a storage seam. The whole point
 /// of the class is that it must never be mistaken for "invalid JSON, try the next candidate /

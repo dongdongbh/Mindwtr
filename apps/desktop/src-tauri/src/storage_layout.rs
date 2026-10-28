@@ -125,6 +125,13 @@ const MIGRATED_ENTRIES: &[(&str, Destination)] = &[
     (DB_FILE_NAME, Data),
 ];
 
+/// Every name in `MIGRATED_ENTRIES`, for the workspace classification test
+/// (#1473): a new entry must say whether it is device-level or per-workspace.
+#[cfg(test)]
+pub(crate) fn migrated_entry_names() -> impl Iterator<Item = &'static str> {
+    MIGRATED_ENTRIES.iter().map(|(name, _)| *name)
+}
+
 /// `mindwtr.db` and its `-wal`/`-shm`/`-journal` sidecars are one unit. SQLite
 /// replays a WAL that passes its own checksums without checking which database
 /// wrote it, so a sidecar next to a different database can corrupt it. Whichever

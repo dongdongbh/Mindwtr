@@ -34,6 +34,7 @@ import { ToastHost } from './ToastHost';
 import { areaFilterSelectionToFilters, isTaskVisibleInInbox, resolveAreaFilterSelection, type AreaFilterSelection } from '@mindwtr/core';
 import { SyncService } from '../lib/sync-service';
 import { SidebarAreaFilter } from './ui/SidebarAreaFilter';
+import { SidebarWorkspaceSwitcher } from './workspaces/SidebarWorkspaceSwitcher';
 import { getCalendarTaskDragTaskId, hasCalendarTaskDragData } from '../lib/calendar-task-drag';
 import { stageCalendarDropLanding } from '../lib/calendar-view-params';
 import { SandboxBanner } from './sandbox/SandboxBanner';
@@ -1009,7 +1010,8 @@ export function Layout({
                 </div>
 
                 <div className="mt-auto border-t border-border/60 px-2 py-1.5" data-sidebar-footer>
-                    <div className={cn("pb-1.5", isCollapsed && "flex justify-center")}>
+                    <div className={cn("pb-1.5", isCollapsed && "flex flex-col items-center")}>
+                        <SidebarWorkspaceSwitcher collapsed={isCollapsed} />
                         <SidebarAreaFilter
                             areas={sortedAreas}
                             selection={resolvedAreaFilter}

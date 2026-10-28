@@ -561,6 +561,7 @@ export const SETTINGS_LABEL_KEYS = [
     'cloudProviderDropbox',
     'cloudProviderCloudkit',
     'cloudkitDesc',
+    'workspacesICloudDefaultOnly',
     'calendarFeed',
     'calendarFeedDesc',
     'calendarFeedWarning',
@@ -772,6 +773,7 @@ export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = 
     sandboxConfirmTitle: 'sandbox.confirmTitle',
     sandboxConfirmDescription: 'sandbox.confirmDescription',
     sandboxEnter: 'sandbox.enter',
+    workspacesICloudDefaultOnly: 'workspaces.iCloudDefaultOnly',
     back: 'common.back',
     // Sidebar-view checkboxes reuse the sidebar's own labels so every locale
     // is covered without new strings.

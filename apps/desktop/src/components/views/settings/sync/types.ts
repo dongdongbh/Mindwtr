@@ -124,6 +124,7 @@ export type SettingsSyncLabels = {
     cloudProviderDropbox: string;
     cloudProviderCloudkit: string;
     cloudkitDesc: string;
+    workspacesICloudDefaultOnly: string;
     calendarFeed: string;
     calendarFeedDesc: string;
     calendarFeedWarning: string;

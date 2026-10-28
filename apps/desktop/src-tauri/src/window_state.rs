@@ -234,7 +234,7 @@ fn legacy_geometry(candidates: &[PathBuf]) -> Option<WindowGeometry> {
 }
 
 fn layouts_path() -> PathBuf {
-    crate::storage::get_config_dir_for_startup().join(WINDOW_LAYOUTS_FILE_NAME)
+    crate::storage::get_device_config_dir_for_startup().join(WINDOW_LAYOUTS_FILE_NAME)
 }
 
 fn read_layouts() -> WindowLayouts {
@@ -325,7 +325,7 @@ pub(crate) fn restore<R: tauri::Runtime>(window: &tauri::WebviewWindow<R>) {
     let signature = layout_signature(&screens_of(window));
     let legacy_candidates = [
         // Portable installs redirected the plugin's file into their own profile.
-        crate::storage::get_config_dir_for_startup().join(LEGACY_WINDOW_STATE_FILE_NAME),
+        crate::storage::get_device_config_dir_for_startup().join(LEGACY_WINDOW_STATE_FILE_NAME),
         window
             .app_handle()
             .path()

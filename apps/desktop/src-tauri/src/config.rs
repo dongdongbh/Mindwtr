@@ -540,7 +540,11 @@ fn write_owner_only_atomic_text(path: &Path, content: &str) -> Result<(), String
     )
 }
 
-fn write_atomic_text(path: &Path, content: &str, owner_only: bool) -> Result<(), String> {
+pub(crate) fn write_atomic_text(
+    path: &Path,
+    content: &str,
+    owner_only: bool,
+) -> Result<(), String> {
     write_atomic_text_with_hooks(
         path,
         content,
@@ -1335,6 +1339,11 @@ where
     preflight_existing_config_toml(config_path)?;
     preflight_existing_config_toml(secrets_path)?;
     let mut sanitized = config.clone();
+    let device_pair = device_config_pair_for(config_path);
+    if device_pair.is_some() {
+        // Device-level keys never land in a workspace's own config (#1473).
+        copy_device_config_keys(&mut sanitized, &AppConfigToml::default(), true);
+    }
     let state_path = sync_backend_state_path_from_secrets_path(secrets_path);
     if let Some(state) = read_dropbox_credential_state_file(&state_path)? {
         // Once the dedicated state file exists it is the sole authority for
@@ -1370,7 +1379,36 @@ where
         &public_content,
         secrets_content.as_deref(),
         after_stage,
-    )
+    )?;
+    if let Some((device_config, device_secrets)) = device_pair {
+        publish_device_config_keys(&device_config, &device_secrets, config);
+    }
+    Ok(())
+}
+
+/// Copies the device-level keys a workspace snapshot holds to the default
+/// root's files, after the workspace's own pair is committed. Only values the
+/// snapshot holds are copied: a fresh workspace's first config, or any snapshot
+/// that never read the device keys, must not erase them, so clearing a device
+/// key from another workspace takes an explicit value. Best effort: an
+/// unreadable default config never blocks the workspace's own settings.
+fn publish_device_config_keys(device_config: &Path, device_secrets: &Path, config: &AppConfigToml) {
+    let result = read_config_files_verified_unlocked(device_config, device_secrets).and_then(
+        |mut device| {
+            if copy_device_config_keys(&mut device, config, false) {
+                write_config_files_with_backend_authority_unlocked(
+                    device_config,
+                    device_secrets,
+                    &device,
+                    true,
+                )?;
+            }
+            Ok(())
+        },
+    );
+    if let Err(error) = result {
+        log::warn!("Failed to save device-level settings to the default workspace: {error}");
+    }
 }
 
 fn endpoint_fingerprint(service: CredentialService, config: &AppConfigToml) -> String {
@@ -1900,7 +1938,74 @@ fn read_config_files_unlocked(
         config.dropbox_tokens = None;
         config.dropbox_promotion_journal = None;
     }
+    if let Some((device_config, device_secrets)) = device_config_pair_for(config_path) {
+        // An unreadable default config leaves the device keys unset rather
+        // than making every workspace's config unreadable too.
+        match read_config_files_verified_unlocked(&device_config, &device_secrets) {
+            Ok(device) => {
+                copy_device_config_keys(&mut config, &device, true);
+            }
+            Err(error) => log::warn!("Failed to read device-level settings: {error}"),
+        }
+    }
     Ok(config)
+}
+
+/// Settings that belong to the computer, not to a workspace (#1473): they are
+/// read from and written to the default workspace's files whichever workspace
+/// is open. `app_lock_*` covers the app lock's settings by prefix.
+pub(crate) fn is_device_config_key(key: &str) -> bool {
+    matches!(
+        key,
+        "disable_hardware_acceleration" | "autostart_startup_flag_migrated"
+    ) || key.starts_with("app_lock_")
+}
+
+/// The default root's config pair when `config_path` is a non-default
+/// workspace's `config.toml`; `None` for the default workspace itself.
+fn device_config_pair_for(config_path: &Path) -> Option<(PathBuf, PathBuf)> {
+    let device_dir = crate::workspaces::device_dir_of_workspace_dir(config_path.parent()?)?;
+    Some((
+        device_dir.join(CONFIG_FILE_NAME),
+        device_dir.join(SECRETS_FILE_NAME),
+    ))
+}
+
+/// Sets the device-level keys of `target` to their values in `source`. With
+/// `include_absent`, a key missing from `source` is removed from `target` too;
+/// without it, only keys `source` holds are copied. Returns whether anything
+/// changed.
+fn copy_device_config_keys(
+    target: &mut AppConfigToml,
+    source: &AppConfigToml,
+    include_absent: bool,
+) -> bool {
+    let source = config_as_object(source);
+    let mut map = config_as_object(target);
+    let keys: Vec<String> = map
+        .keys()
+        .chain(source.keys())
+        .filter(|key| is_device_config_key(key))
+        .cloned()
+        .collect();
+    let mut changed = false;
+    for key in keys {
+        let value = source.get(&key).filter(|value| !value.is_null()).cloned();
+        if value.is_none() && !include_absent {
+            continue;
+        }
+        if map.get(&key).filter(|value| !value.is_null()) != value.as_ref() {
+            changed = true;
+            match value {
+                Some(value) => map.insert(key, value),
+                None => map.remove(&key),
+            };
+        }
+    }
+    if changed {
+        *target = object_as_config(map);
+    }
+    changed
 }
 
 fn load_or_migrate_dropbox_credential_state_unlocked(
@@ -2069,7 +2174,65 @@ fn migrate_legacy_secrets(
 }
 
 fn keyring_service(app: &tauri::AppHandle) -> String {
-    format!("{}:secrets", app.config().identifier)
+    keyring_service_name(
+        &app.config().identifier,
+        crate::workspaces::active_workspace_id(),
+    )
+}
+
+/// Every keyring read and write goes through this name. The default workspace
+/// keeps the original service, so existing secrets are found unchanged; each
+/// other workspace gets its own service, so a Work token can never be read
+/// while Personal is open (#1473).
+pub(crate) fn keyring_service_name(identifier: &str, workspace: Option<&str>) -> String {
+    match workspace {
+        Some(id) => format!("{identifier}:secrets:{id}"),
+        None => format!("{identifier}:secrets"),
+    }
+}
+
+/// Fixed keyring entry names. Gmail's vault entry is per config path and is
+/// added by `delete_workspace_keyring_entries`.
+const WORKSPACE_KEYRING_KEYS: &[&str] = &[
+    KEYRING_WEB_DAV_PASSWORD,
+    KEYRING_CLOUD_TOKEN,
+    KEYRING_DROPBOX_TOKENS,
+    KEYRING_AI_OPENAI,
+    KEYRING_AI_ANTHROPIC,
+    KEYRING_AI_GEMINI,
+    KEYRING_EMAIL_CAPTURE_PASSWORD,
+    crate::sync::KEYRING_DROPBOX_PROMOTION_JOURNAL,
+    crate::sync_encryption::KEYRING_SYNC_ENCRYPTION_KEY,
+];
+
+/// Removes a deleted workspace's keyring entries. Best effort: a missing entry
+/// is the normal case. Flatpak and portable installs keep these secrets in
+/// files inside the workspace's config folder, which the caller deletes.
+pub(crate) fn delete_workspace_keyring_entries(app: &tauri::AppHandle, workspace: &str) {
+    if !keyring_enabled() {
+        return;
+    }
+    #[cfg(target_os = "linux")]
+    if crate::install::is_flatpak() {
+        return;
+    }
+    let identifier = &app.config().identifier;
+    let service = keyring_service_name(identifier, Some(workspace));
+    let config_path = crate::workspaces::workspace_dir(
+        &crate::storage::get_device_config_dir(app),
+        Some(workspace),
+    )
+    .join(CONFIG_FILE_NAME);
+    let gmail_vault = crate::gmail_capture::vault_name(identifier, &config_path);
+    for key in WORKSPACE_KEYRING_KEYS
+        .iter()
+        .copied()
+        .chain(std::iter::once(gmail_vault.as_str()))
+    {
+        if let Ok(entry) = Entry::new(&service, key) {
+            let _ = entry.delete_password();
+        }
+    }
 }
 
 fn keyring_entry(app: &tauri::AppHandle, key: &str) -> Result<Entry, String> {
@@ -2785,6 +2948,10 @@ pub(crate) fn set_sync_backend(app: tauri::AppHandle, backend: String) -> Result
     let Some(normalized) = normalize_backend(backend.trim()) else {
         return Err("Invalid sync backend".to_string());
     };
+    // One CloudKit container per Apple ID: it stays with the default workspace.
+    if normalized == "cloudkit" && crate::workspaces::active_workspace_id().is_some() {
+        return Err("iCloud sync is available only in the default workspace".to_string());
+    }
     publish_sync_backend_paths_with(
         &get_config_path(&app),
         &get_secrets_path(&app),
@@ -3249,6 +3416,101 @@ pub(crate) fn read_external_calendar_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keyring_service_differs_per_workspace_and_the_default_is_unchanged() {
+        let id = "tech.dongdongbh.mindwtr";
+        assert_eq!(
+            keyring_service_name(id, None),
+            "tech.dongdongbh.mindwtr:secrets"
+        );
+        let work = keyring_service_name(id, Some("0123456789abcdef"));
+        let other = keyring_service_name(id, Some("fedcba9876543210"));
+        assert_eq!(work, "tech.dongdongbh.mindwtr:secrets:0123456789abcdef");
+        assert_ne!(work, other);
+        assert_ne!(work, keyring_service_name(id, None));
+    }
+
+    #[test]
+    fn device_keys_live_in_the_default_root_while_another_workspace_is_open() {
+        let root = tempfile::tempdir().expect("should create temp dir");
+        let device_config = root.path().join(CONFIG_FILE_NAME);
+        let device_secrets = root.path().join(SECRETS_FILE_NAME);
+        let workspace = crate::workspaces::workspace_dir(root.path(), Some("0123456789abcdef"));
+        let work_config = workspace.join(CONFIG_FILE_NAME);
+        let work_secrets = workspace.join(SECRETS_FILE_NAME);
+        fs::create_dir_all(&workspace).expect("workspace dir");
+
+        let personal = AppConfigToml {
+            cloud_url: Some("https://personal.example".into()),
+            local_api_token: Some("personal-token".into()),
+            disable_hardware_acceleration: Some("false".into()),
+            ..AppConfigToml::default()
+        };
+        write_config_files(&device_config, &device_secrets, &personal).expect("personal");
+        let work = AppConfigToml {
+            cloud_url: Some("https://work.example".into()),
+            ..AppConfigToml::default()
+        };
+        write_config_files(&work_config, &work_secrets, &work).expect("work");
+        // A first write that never read the device keys leaves them alone.
+        assert_eq!(
+            read_config_toml(&device_config)
+                .disable_hardware_acceleration
+                .as_deref(),
+            Some("false")
+        );
+
+        // The open workspace reads the device key from the default root.
+        let mut config = read_config_files_verified(&work_config, &work_secrets).expect("read");
+        assert_eq!(
+            config.disable_hardware_acceleration.as_deref(),
+            Some("false")
+        );
+        assert_eq!(config.cloud_url.as_deref(), Some("https://work.example"));
+        assert_eq!(config.local_api_token, None);
+
+        config.disable_hardware_acceleration = Some("true".into());
+        config.autostart_startup_flag_migrated = Some("true".into());
+        config.local_api_token = Some("work-token".into());
+        write_config_files(&work_config, &work_secrets, &config).expect("write work");
+
+        let default_side =
+            read_config_files_verified(&device_config, &device_secrets).expect("default");
+        assert_eq!(
+            default_side.disable_hardware_acceleration.as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            default_side.autostart_startup_flag_migrated.as_deref(),
+            Some("true")
+        );
+        assert_eq!(
+            default_side.cloud_url.as_deref(),
+            Some("https://personal.example")
+        );
+        assert_eq!(
+            default_side.local_api_token.as_deref(),
+            Some("personal-token")
+        );
+
+        // The workspace's own files never hold a device key.
+        let work_public = read_config_toml(&work_config);
+        assert_eq!(work_public.disable_hardware_acceleration, None);
+        assert_eq!(work_public.autostart_startup_flag_migrated, None);
+        assert_eq!(
+            work_public.cloud_url.as_deref(),
+            Some("https://work.example")
+        );
+        assert_eq!(
+            read_config_toml(&work_secrets).local_api_token.as_deref(),
+            Some("work-token")
+        );
+
+        assert!(is_device_config_key("app_lock_enabled"));
+        assert!(!is_device_config_key("local_api_enabled"));
+        assert!(!is_device_config_key("cloud_url"));
+    }
 
     #[test]
     fn obsidian_required_inline_tag_survives_native_round_trip() {

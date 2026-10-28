@@ -825,15 +825,18 @@ pub(crate) async fn transcribe_whisper(
     language: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let data_dir = get_data_dir(&app);
-        transcribe_whisper_blocking(&data_dir, model_path, audio_path, language)
+        // Models are device-level; captures belong to the active workspace (#1473).
+        let model_root = crate::storage::get_device_data_dir(&app);
+        let capture_root = get_data_dir(&app);
+        transcribe_whisper_blocking(&model_root, &capture_root, model_path, audio_path, language)
     })
     .await
     .map_err(|error| format!("Whisper transcription task failed: {error}"))?
 }
 
 fn transcribe_whisper_blocking(
-    data_dir: &Path,
+    model_root: &Path,
+    capture_root: &Path,
     model_path: String,
     audio_path: String,
     language: Option<String>,
@@ -846,8 +849,8 @@ fn transcribe_whisper_blocking(
             "Local transcription requires a CPU with AVX support. Please use a cloud transcription provider instead.".into(),
         );
     }
-    let model_path = validate_managed_whisper_model_path(data_dir, Path::new(&model_path))?;
-    let audio_path = validate_managed_audio_path(data_dir, Path::new(&audio_path))?;
+    let model_path = validate_managed_whisper_model_path(model_root, Path::new(&model_path))?;
+    let audio_path = validate_managed_audio_path(capture_root, Path::new(&audio_path))?;
 
     let mut reader = hound::WavReader::open(&audio_path).map_err(|e| e.to_string())?;
     let spec = reader.spec();
@@ -935,7 +938,8 @@ fn download_parakeet_model_blocking(
         return Err("Unsupported Parakeet model".into());
     }
 
-    let data_dir = get_data_dir(&app);
+    // Speech models are large, device-level downloads shared by every workspace.
+    let data_dir = crate::storage::get_device_data_dir(&app);
     fs::create_dir_all(&data_dir).map_err(|error| error.to_string())?;
     let target_dir = parakeet_model_dir(&data_dir);
     ensure_sherpa_sidecar(&data_dir, &app)?;
@@ -998,7 +1002,7 @@ fn download_whisper_model_blocking(app: tauri::AppHandle, model: String) -> Resu
         whisper_model_file_name(&model).ok_or_else(|| "Unsupported Whisper model".to_string())?;
     let expected_sha256 =
         whisper_model_sha256(&model).ok_or_else(|| "Unsupported Whisper model".to_string())?;
-    let data_dir = get_data_dir(&app);
+    let data_dir = crate::storage::get_device_data_dir(&app);
     let target_path = whisper_model_path(&data_dir, &model)
         .ok_or_else(|| "Unsupported Whisper model".to_string())?;
     if target_path.is_file() {
@@ -1050,21 +1054,23 @@ pub(crate) async fn transcribe_parakeet(
     language: Option<String>,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let data_dir = get_data_dir(&app);
-        transcribe_parakeet_blocking(&data_dir, model_path, audio_path, language)
+        let model_root = crate::storage::get_device_data_dir(&app);
+        let capture_root = get_data_dir(&app);
+        transcribe_parakeet_blocking(&model_root, &capture_root, model_path, audio_path, language)
     })
     .await
     .map_err(|error| format!("Parakeet transcription task failed: {error}"))?
 }
 
 fn transcribe_parakeet_blocking(
-    data_dir: &Path,
+    model_root: &Path,
+    capture_root: &Path,
     model_path: String,
     audio_path: String,
     language: Option<String>,
 ) -> Result<String, String> {
-    let model_dir = validate_managed_parakeet_model_dir(data_dir, Path::new(&model_path))?;
-    let audio_file = validate_managed_audio_path(data_dir, Path::new(&audio_path))?;
+    let model_dir = validate_managed_parakeet_model_dir(model_root, Path::new(&model_path))?;
+    let audio_file = validate_managed_audio_path(capture_root, Path::new(&audio_path))?;
 
     let encoder = model_dir.join("encoder.int8.onnx");
     let decoder = model_dir.join("decoder.int8.onnx");

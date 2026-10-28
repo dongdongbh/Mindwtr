@@ -399,29 +399,59 @@ fn standard_dirs(app: Option<&tauri::AppHandle>) -> (PathBuf, PathBuf) {
     crate::storage_layout::standard_dirs(config_dir, data_dir)
 }
 
-pub(crate) fn get_config_dir_for_startup() -> PathBuf {
+/// The device-level config and data roots, before an AppHandle exists. These
+/// hold the default workspace and everything shared by all workspaces (#1473).
+pub(crate) fn device_dirs_for_startup() -> (PathBuf, PathBuf) {
     if let StorageMode::Portable { profile_root } = detect_storage_mode() {
-        return profile_root.join(PORTABLE_CONFIG_DIR_NAME);
+        return (
+            profile_root.join(PORTABLE_CONFIG_DIR_NAME),
+            profile_root.join(PORTABLE_DATA_DIR_NAME),
+        );
     }
-    standard_dirs(None).0
+    standard_dirs(None)
 }
 
-pub(crate) fn get_config_path_for_startup() -> PathBuf {
-    get_config_dir_for_startup().join(CONFIG_FILE_NAME)
+pub(crate) fn get_device_config_dir_for_startup() -> PathBuf {
+    device_dirs_for_startup().0
 }
 
-pub(crate) fn get_config_dir(app: &tauri::AppHandle) -> PathBuf {
+pub(crate) fn get_device_config_path_for_startup() -> PathBuf {
+    get_device_config_dir_for_startup().join(CONFIG_FILE_NAME)
+}
+
+/// Device-level config root: the registry, window state and the device-level
+/// `config.toml` keys. Equal to `get_config_dir` in the default workspace.
+pub(crate) fn get_device_config_dir(app: &tauri::AppHandle) -> PathBuf {
     if let StorageMode::Portable { profile_root } = detect_storage_mode() {
         return profile_root.join(PORTABLE_CONFIG_DIR_NAME);
     }
     standard_dirs(Some(app)).0
 }
 
-pub(crate) fn get_data_dir(app: &tauri::AppHandle) -> PathBuf {
+/// Device-level data root: logs and speech models. Equal to `get_data_dir` in
+/// the default workspace.
+pub(crate) fn get_device_data_dir(app: &tauri::AppHandle) -> PathBuf {
     if let StorageMode::Portable { profile_root } = detect_storage_mode() {
         return profile_root.join(PORTABLE_DATA_DIR_NAME);
     }
     standard_dirs(Some(app)).1
+}
+
+/// The active workspace's config dir. The single place a workspace is applied:
+/// every per-workspace config file is derived from it.
+pub(crate) fn get_config_dir(app: &tauri::AppHandle) -> PathBuf {
+    crate::workspaces::workspace_dir(
+        &get_device_config_dir(app),
+        crate::workspaces::active_workspace_id(),
+    )
+}
+
+/// The active workspace's data dir: database, data.json, attachments, captures.
+pub(crate) fn get_data_dir(app: &tauri::AppHandle) -> PathBuf {
+    crate::workspaces::workspace_dir(
+        &get_device_data_dir(app),
+        crate::workspaces::active_workspace_id(),
+    )
 }
 
 pub(crate) fn get_config_path(app: &tauri::AppHandle) -> PathBuf {
@@ -4099,13 +4129,16 @@ fn bootstrap_storage_layout(app: &tauri::AppHandle) -> Result<(), String> {
     fs::create_dir_all(&config_dir).map_err(|e| e.to_string())?;
     fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
 
-    let legacy_config_path = get_legacy_config_json_path(app);
-    let legacy_config: LegacyAppConfigJson =
-        if let Ok(content) = fs::read_to_string(&legacy_config_path) {
-            serde_json::from_str(&content).unwrap_or_default()
-        } else {
-            LegacyAppConfigJson::default()
-        };
+    // Pre-TOML files sit at device-level paths and belong to the default
+    // workspace. A new workspace starts empty and never imports them (#1473).
+    let import_legacy = crate::workspaces::active_workspace_id().is_none();
+    let legacy_config: LegacyAppConfigJson = match import_legacy
+        .then(|| fs::read_to_string(get_legacy_config_json_path(app)).ok())
+        .flatten()
+    {
+        Some(content) => serde_json::from_str(&content).unwrap_or_default(),
+        None => LegacyAppConfigJson::default(),
+    };
 
     let config_path = get_config_path(app);
     if !config_path.exists() {
@@ -4123,8 +4156,10 @@ fn bootstrap_storage_layout(app: &tauri::AppHandle) -> Result<(), String> {
         if let Some(custom_path) = legacy_config.data_file_path.as_ref() {
             legacy_sources.push(PathBuf::from(custom_path));
         }
-        legacy_sources.push(config_dir.join(DATA_FILE_NAME));
-        legacy_sources.push(get_legacy_data_json_path(app));
+        if import_legacy {
+            legacy_sources.push(config_dir.join(DATA_FILE_NAME));
+            legacy_sources.push(get_legacy_data_json_path(app));
+        }
         for source in legacy_sources {
             if !source.exists() {
                 continue;
@@ -6978,7 +7013,7 @@ mod tests {
     #[test]
     fn linux_keeps_the_two_xdg_directories_as_they_are() {
         assert_ne!(os_config_dir(), os_data_dir());
-        assert_eq!(get_config_dir_for_startup(), os_config_dir());
+        assert_eq!(get_device_config_dir_for_startup(), os_config_dir());
         assert_eq!(
             crate::storage_layout::standard_layout_root(&os_config_dir(), &os_data_dir()),
             None

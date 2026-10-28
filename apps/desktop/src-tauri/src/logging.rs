@@ -1,7 +1,7 @@
 use crate::*;
 
 fn write_log_line(app: &tauri::AppHandle, line: &str) -> Result<String, String> {
-    let log_dir = get_data_dir(app).join("logs");
+    let log_dir = crate::storage::get_device_data_dir(app).join("logs");
     if let Err(err) = std::fs::create_dir_all(&log_dir) {
         return Err(err.to_string());
     }
@@ -68,7 +68,9 @@ pub(crate) fn append_log_line(app: tauri::AppHandle, line: String) -> Result<Str
 // path the webview computes points at a file that does not exist there (#1135).
 #[tauri::command(async)]
 pub(crate) fn get_log_file_path(app: tauri::AppHandle) -> String {
-    let log_path = get_data_dir(&app).join("logs").join("mindwtr.log");
+    let log_path = crate::storage::get_device_data_dir(&app)
+        .join("logs")
+        .join("mindwtr.log");
     crate::install::windows_store_display_path(&log_path)
         .unwrap_or(log_path)
         .to_string_lossy()
@@ -77,7 +79,7 @@ pub(crate) fn get_log_file_path(app: tauri::AppHandle) -> String {
 
 #[tauri::command(async)]
 pub(crate) fn clear_log_file(app: tauri::AppHandle) -> Result<String, String> {
-    clear_log_files(&get_data_dir(&app).join("logs"))
+    clear_log_files(&crate::storage::get_device_data_dir(&app).join("logs"))
 }
 
 // Both files, not just the live one: write_log_line rotates at 5 MB, so

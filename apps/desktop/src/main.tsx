@@ -1,3 +1,6 @@
+// First import: scopes localStorage to the open workspace before any other
+// module reads it (#1473).
+import { workspaceStorageScopeFailed } from './lib/workspace-storage-scope';
 import React from 'react';
 import { markDesktopStartup } from './lib/startup-profiler';
 import ReactDOM from 'react-dom/client';
@@ -251,6 +254,14 @@ async function bootstrap() {
     }
 
     if (!sandboxMode && isDiagnosticsEnabled()) setupGlobalErrorLogging();
+    if (workspaceStorageScopeFailed) {
+        // The open workspace is reading the default workspace's UI caches (#1473).
+        void logWarn('Workspace storage scope unavailable', {
+            scope: 'app',
+            force: true,
+            extra: { releaseCheck: 'v1.3.8/desktop-workspaces', outcome: 'storage-unscoped' },
+        });
+    }
     if (!isQuickAddWindow && !sandboxMode) {
         await restoreFullscreenState();
         await restoreWebviewZoomState();

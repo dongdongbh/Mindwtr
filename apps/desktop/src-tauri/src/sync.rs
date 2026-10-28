@@ -104,7 +104,7 @@ const DROPBOX_MAX_STAGED_CREDENTIALS: usize = 4;
 const DROPBOX_MAX_RESOLVED_CREDENTIAL_HANDLES: usize = 16;
 const DROPBOX_RESOLVED_CREDENTIAL_HANDLE_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 const DROPBOX_PROMOTION_JOURNAL_VERSION: u8 = 1;
-const KEYRING_DROPBOX_PROMOTION_JOURNAL: &str = "dropbox_promotion_journal_v1";
+pub(crate) const KEYRING_DROPBOX_PROMOTION_JOURNAL: &str = "dropbox_promotion_journal_v1";
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum DropboxStartupRecoveryOutcome {

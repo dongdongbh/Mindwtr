@@ -460,7 +460,7 @@ const PAGE_VARIANTS: Record<SettingsSearchPageId, ReactElement[]> = {
         />,
         <SettingsSyncPage key="dropbox" {...syncProps} syncBackend="cloud" cloudProvider="dropbox" />,
     ],
-    data: [<SettingsDataPage key="data" {...dataProps} />],
+    data: [<LanguageProvider key="data"><SettingsDataPage {...dataProps} /></LanguageProvider>],
     integrations: [<LanguageProvider key="integrations"><SettingsIntegrationsPage {...integrationsProps} /></LanguageProvider>],
     ai: [
         <SettingsAiPage key="openai" {...aiProps} />,

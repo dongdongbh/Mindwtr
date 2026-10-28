@@ -35,7 +35,7 @@ vi.mock('./tauri-invoke', async () => {
 
 vi.mock('./managed-paths', async () => {
     return {
-        getManagedPath: getManagedPathMock,
+        getDeviceManagedPath: getManagedPathMock,
     };
 });
 

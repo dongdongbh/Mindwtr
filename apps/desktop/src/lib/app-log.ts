@@ -13,7 +13,7 @@ import {
 } from '@mindwtr/core';
 import { isTauriRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
-import { getManagedPath } from './managed-paths';
+import { getDeviceManagedPath } from './managed-paths';
 
 const LOG_DIR_NAME = 'logs';
 const LOG_FILE_NAME = 'mindwtr.log';
@@ -41,7 +41,7 @@ export function sanitizeLogMessage(value: string): string {
 }
 
 async function ensureLogDir(): Promise<string> {
-    const logDir = await getManagedPath(LOG_DIR_NAME);
+    const logDir = await getDeviceManagedPath(LOG_DIR_NAME);
     await mkdir(logDir, { recursive: true });
     return logDir;
 }
@@ -90,7 +90,7 @@ export async function getLogPath(): Promise<string | null> {
         // Older backend without the command — fall back to the computed path.
     }
     try {
-        return await getManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
+        return await getDeviceManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
     } catch (error) {
         return null;
     }
@@ -103,7 +103,7 @@ export async function clearLog(): Promise<void> {
         await invokeNative('clear_log_file');
     } catch (error) {
         try {
-            const logFile = await getManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
+            const logFile = await getDeviceManagedPath(LOG_DIR_NAME, LOG_FILE_NAME);
             await remove(logFile, { recursive: false });
         } catch (_removeError) {
             return;
