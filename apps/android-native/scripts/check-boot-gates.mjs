@@ -10105,6 +10105,16 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     state.__pumpTimers();
     assert.equal(JSON.stringify(await read), '{"labels":[]}');
     assert.equal(await refused, 'E_GMAIL_AUTH');
+    // Another operation's deadline cancels the host's calls (__cancelHostCalls); a Connect waiting on the user is not that
+    // operation's, and Kotlin bounds every Gmail call itself, so it settles with Kotlin's answer, as the lock release does.
+    const connecting = state.__mindwtrGmailCall({ op: 'connect' }).then((value) => JSON.stringify(value), (error) => `${error.name}: ${error.message}`);
+    state.__cancelHostCalls('Core netCheck timed out');
+    const whileDraining = state.__mindwtrGmailCall({ op: 'status' }).then(() => 'resolved', (error) => error.name);
+    answers.push(JSON.stringify({ id: '3', value: { connected: true } }), JSON.stringify({ id: '4', value: { connected: false } }));
+    state.__pumpTimers();
+    assert.equal(await connecting, '{"connected":true}', 'a pending Connect is not failed by another call\'s timeout');
+    assert.equal(await whileDraining, 'resolved');
+    state.__resumeHostCalls();
     // A five-minute poll timer is the idle pump's next wake (CoreHost.schedulePump), not a busy loop.
     vm.runInContext('setTimeout(() => {}, 300000)', state);
     assert.equal(state.__nextTimerDelay(), 300000);
