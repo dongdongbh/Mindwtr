@@ -6,6 +6,8 @@ import type { DesktopRenderingConfig } from '../../../lib/desktop-rendering';
 import { Switch } from '../../ui/Switch';
 import type { SettingsKeyboardWindowProps } from './SettingsMainPage';
 import { SettingRow, SettingsCard, SettingsDisclosureCard, SettingsSectionHeader } from './SettingRow';
+import type { AppLockAvailability } from '../../../lib/app-lock';
+import { AppLockSettingsSection } from './AppLockSettingsSection';
 
 export type SettingsAdvancedPageProps = SettingsKeyboardWindowProps & {
     t: SettingsLabels;
@@ -23,6 +25,8 @@ export type SettingsAdvancedPageProps = SettingsKeyboardWindowProps & {
     onNetworkProxyUrlChange: (value: string) => void;
     onSaveNetworkProxy: () => Promise<void> | void;
     onDesktopRenderingToggle: (disableHardwareAcceleration: boolean) => void;
+    /** Privacy lock support on this device; hidden when `supported` is false. */
+    appLockAvailability?: AppLockAvailability;
 };
 
 const inputCls =
@@ -44,6 +48,7 @@ export function SettingsAdvancedPage({
     onNetworkProxyUrlChange,
     onSaveNetworkProxy,
     onDesktopRenderingToggle,
+    appLockAvailability = { supported: false, available: false },
     onOpenHelp,
     keybindingStyle,
     onKeybindingStyleChange,
@@ -143,6 +148,7 @@ export function SettingsAdvancedPage({
                     </SettingRow>
                 )}
             </SettingsDisclosureCard>
+            <AppLockSettingsSection t={t} availability={appLockAvailability} />
             <SettingsSectionHeader>{t.automation}</SettingsSectionHeader>
             <SettingsCard>
                 <SettingRow padded settingsKey="localApiServer" title={t.localApiServer} description={statusText}>

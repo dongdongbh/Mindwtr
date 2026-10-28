@@ -617,25 +617,50 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         setBulkQuickAddError(null);
     }, [attachImagesFromAsyncClipboard, attachPastedImageFiles]);
 
+    const applyImportedText = useCallback((text: string) => {
+        const lines = splitQuickAddBulkLines(text);
+        setBulkQuickAddError(null);
+        if (lines.length > 1) {
+            setBulkQuickAddLines(lines);
+        } else if (lines.length === 1) {
+            setValue(lines[0]);
+        }
+    }, []);
+
+    const reportTextFileImportError = useCallback((error: unknown) => {
+        reportError('Failed to import quick add text file', error);
+        setBulkQuickAddError(tFallback(t, 'quickAdd.bulkImportError', 'Could not read that text file.'));
+    }, [t]);
+
     const handleTextFileImport = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
         if (isSandboxMode()) return;
         const file = event.target.files?.[0];
         event.target.value = '';
         if (!file) return;
         try {
-            const text = await readTextFile(file);
-            const lines = splitQuickAddBulkLines(text);
-            setBulkQuickAddError(null);
-            if (lines.length > 1) {
-                setBulkQuickAddLines(lines);
-            } else if (lines.length === 1) {
-                setValue(lines[0]);
-            }
+            applyImportedText(await readTextFile(file));
         } catch (error) {
-            reportError('Failed to import quick add text file', error);
-            setBulkQuickAddError(tFallback(t, 'quickAdd.bulkImportError', 'Could not read that text file.'));
+            reportTextFileImportError(error);
         }
-    }, [t]);
+    }, [applyImportedText, reportTextFileImportError]);
+
+    // The desktop app picks the file through native-dialog, so the privacy
+    // lock knows the picker's focus loss is Mindwtr's own (#1472).
+    const importTextFileNative = useCallback(async () => {
+        if (isSandboxMode()) return;
+        try {
+            const { open } = await import('../lib/native-dialog');
+            const selected = await open({
+                multiple: false,
+                filters: [{ name: 'Text', extensions: ['txt'] }],
+            });
+            if (!selected || typeof selected !== 'string') return;
+            const { readTextFile: readTextFileAtPath } = await import('@tauri-apps/plugin-fs');
+            applyImportedText(await readTextFileAtPath(selected));
+        } catch (error) {
+            reportTextFileImportError(error);
+        }
+    }, [applyImportedText, reportTextFileImportError]);
 
     const startRecording = useCallback((): Promise<void> => {
         if (isSandboxMode()) return Promise.resolve();
@@ -1467,7 +1492,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             />
                             <button
                                 type="button"
-                                onClick={() => fileInputRef.current?.click()}
+                                onClick={() => {
+                                    if (isTauriRuntime()) void importTextFileNative();
+                                    else fileInputRef.current?.click();
+                                }}
                                 disabled={isSandboxMode() || isSubmitting}
                                 title={isSandboxMode() ? t('sandbox.unavailable') : undefined}
                                 className="px-3 py-1.5 rounded-md text-sm border border-border bg-background hover:bg-muted/60"

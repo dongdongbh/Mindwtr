@@ -16,6 +16,7 @@ const SRC_ROOT = existsSync(LOCAL_SRC) ? LOCAL_SRC : join(process.cwd(), 'apps',
  */
 const ALLOWED_OVERLAY_FILES = new Map<string, string>([
     ['components/ui/Dialog.tsx', 'the module itself'],
+    ['components/AppLockGate.tsx', 'the privacy lock screen is not a dismissable dialog: no Escape, no click-outside, and it must cover every Dialog'],
 ]);
 
 function collectSourceFiles(dir: string): string[] {

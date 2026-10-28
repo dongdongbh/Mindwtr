@@ -1,5 +1,13 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const arOverrides: Record<string, string> = {
+    "settings.desktopAppLockDesc": "اطلب Windows Hello أو Touch ID (أو كلمة مرور Mac) عند فتح Mindwtr وبعد ابتعادك. هذا يخفي نافذة التطبيق فقط؛ يظل بإمكان أداة macOS وواجهة API المحلية وخادم MCP قراءة بياناتك.",
+    "settings.desktopAppLockUnavailable": "أعدّ Windows Hello أو كلمة مرور تسجيل الدخول على Mac لاستخدام قفل التطبيق.",
+    "appLock.lockNow": "قفل Mindwtr",
+    "appLock.lockedReminder": "تذكير من Mindwtr",
+    "appLock.turnOff": "إيقاف قفل التطبيق",
+    "appLock.osCheckUnavailable": "Windows Hello أو Touch ID غير متاح على هذا الجهاز الآن.",
+    "appLock.macUnlockReason": "فتح القفل وعرض مهامك",
+    "appLock.macEnableReason": "تشغيل قفل التطبيق",
     "attachments.webUploadRequiresCloud": "يتطلب الرفع من المتصفح مزامنة سحابية على خادم مستضاف ذاتيًا.",
     "attachments.webUploadEncrypted": "يتطلب الرفع من المتصفح إيقاف تشفير المزامنة.",
     "attachments.webUploadOffline": "لا يمكن رفع الملفات دون اتصال.",

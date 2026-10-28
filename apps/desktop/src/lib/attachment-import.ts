@@ -13,7 +13,7 @@ export type ImportPickedFileResult =
 // with the picked path instead of importing the bytes.
 export async function browseForLinkTarget(dialogTitle: string): Promise<string | null> {
     if (isSandboxMode()) return null;
-    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { open } = await import('./native-dialog');
     const selected = await open({
         multiple: false,
         directory: false,
@@ -27,7 +27,7 @@ export async function browseForLinkTarget(dialogTitle: string): Promise<string |
 // App Store build so the folder still opens after a relaunch.
 export async function pickFolderLinkAttachment(dialogTitle: string): Promise<Attachment | null> {
     if (isSandboxMode()) return null;
-    const { open } = await import('@tauri-apps/plugin-dialog');
+    const { open } = await import('./native-dialog');
     const selected = await open({
         multiple: false,
         directory: true,

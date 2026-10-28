@@ -9811,6 +9811,11 @@ mod tests {
                 include_str!("local_api.rs"),
                 "write_local_api_config",
             ),
+            (
+                "app_lock.rs",
+                include_str!("app_lock.rs"),
+                "write_app_lock_config",
+            ),
             ("sync.rs", include_str!("sync.rs"), "clear_sync_path"),
             ("sync.rs", include_str!("sync.rs"), "set_sync_path"),
         ];

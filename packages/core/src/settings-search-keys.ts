@@ -197,6 +197,7 @@ export const SETTINGS_SEARCH_PAGE_KEYS: Record<SettingsSearchPageId, readonly Se
         { key: 'closeBehavior', section: 'keyboardAndWindow' },
         { key: 'showTray', section: 'keyboardAndWindow' },
         { key: 'launchAtStartup', section: 'keyboardAndWindow' },
+        { key: 'desktopAppLock', section: 'privacy' },
         { key: 'localApiServer', section: 'automation' },
         { key: 'localApiPort', section: 'automation' },
         { key: 'localApiToken', section: 'automation' },
@@ -240,6 +241,7 @@ export const SETTINGS_SEARCH_PAGE_TITLE_KEYS: Record<SettingsSearchPageId, strin
 const SEARCH_KEY_I18N_OVERRIDES: Record<string, string> = {
     sandboxWorkspace: 'sandbox.open',
     keybindings: 'keybindings.helpTitle',
+    desktopAppLock: 'settings.mobile.appLock',
     manageAreas: 'areas.manage',
     managePeople: 'people.title',
     manageSomedaySections: 'viewSections.somedaySections',
@@ -295,6 +297,7 @@ export const SETTINGS_SEARCH_MOBILE_EXCLUSIONS: Record<string, string> = {
     closeBehavior: 'Desktop window-close behavior (ask/tray/quit); mobile apps background instead of closing.',
     showTray: 'No system tray on mobile.',
     launchAtStartup: 'No user-facing autostart setting on mobile.',
+    desktopAppLock: 'Desktop privacy lock; mobile has its own App lock row under General.',
     undoNotifications: 'Desktop-only preference; not present on mobile.',
     inboxDefaultMode: 'Mobile inbox processing has no guided/quick default-mode row.',
     inboxTwoMinuteFirst: 'Mobile inbox processing has no two-minute-rule ordering row.',

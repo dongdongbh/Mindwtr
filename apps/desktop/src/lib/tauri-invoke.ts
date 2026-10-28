@@ -3,7 +3,14 @@ import { isSandboxMode } from '@mindwtr/core';
 
 const SANDBOX_NATIVE_COMMAND_ALLOWLIST = new Set([
     'acknowledge_close_request',
+    // The privacy lock is device-wide: it must keep working in the sample workspace.
+    'app_lock_authenticate',
+    'app_lock_dialog_begin',
+    'app_lock_dialog_end',
+    'app_lock_disable_unavailable',
+    'app_lock_engage',
     'append_log_line',
+    'get_app_lock_state',
     'get_system_theme_preference',
     'notify_ui_ready',
     'quit_app',

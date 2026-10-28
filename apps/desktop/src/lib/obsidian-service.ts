@@ -169,7 +169,7 @@ export class ObsidianService {
 
     static async selectVaultFolder(title: string): Promise<string | null> {
         if (!isTauriRuntime()) return null;
-        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import('./native-dialog');
         const selected = await open({
             directory: true,
             multiple: false,

@@ -9,7 +9,8 @@ export type DesktopShellSyncOptions = {
     /** `undefined` until settings hydrate — the tray is left alone until then. */
     showTray: boolean | undefined;
     trayTooltip: string;
-    trayLabels: { quickAdd: string; show: string; quit: string };
+    /** `lock` is the privacy lock's "Lock Mindwtr" item; null leaves it out. */
+    trayLabels: { quickAdd: string; show: string; quit: string; lock?: string | null };
     closeBehavior: DesktopCloseBehavior;
 };
 
@@ -65,9 +66,9 @@ export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, tra
     useEffect(() => {
         if (!enabled || !isTauriRuntime() || showTray === false) return;
         return runShellCommand('set_tray_labels', {
-            quickAdd: trayLabels.quickAdd, show: trayLabels.show, quit: trayLabels.quit,
+            quickAdd: trayLabels.quickAdd, show: trayLabels.show, quit: trayLabels.quit, lock: trayLabels.lock ?? null,
         }, 'tray', 'setLabels');
-    }, [enabled, showTray, trayLabels.quickAdd, trayLabels.show, trayLabels.quit]);
+    }, [enabled, showTray, trayLabels.quickAdd, trayLabels.show, trayLabels.quit, trayLabels.lock]);
 
     // Settings alone can only ever put the app *back* in the Dock, Cmd+Tab and
     // the menu bar. Enabling close-to-tray used to make it an accessory app for

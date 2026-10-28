@@ -417,6 +417,8 @@ const advancedProps: Parameters<typeof SettingsAdvancedPage>[0] = {
     networkProxyUrl: '',
     desktopRenderingConfig: { disableHardwareAcceleration: false },
     desktopRenderingBusy: false,
+    // The privacy lock row exists only where the OS has a sign-in check (Windows, macOS).
+    appLockAvailability: { supported: true, available: true },
     onLocalApiToggle: noop,
     onLocalApiPortInputChange: noop,
     onLocalApiPortCommit: noop,

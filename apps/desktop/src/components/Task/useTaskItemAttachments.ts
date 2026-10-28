@@ -498,7 +498,7 @@ export function useTaskItemAttachments({ task, t }: UseTaskItemAttachmentsProps)
         }
         setAttachmentError(null);
         const generation = importGenerationRef.current;
-        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import('../../lib/native-dialog');
         const selected = await open({ multiple: false, directory: false, title: t('attachments.addFile') });
         if (!selected || typeof selected !== 'string' || generation !== importGenerationRef.current) return;
         setPendingFileImports((count) => count + 1);

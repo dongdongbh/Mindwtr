@@ -171,6 +171,9 @@ use ui::{
     show_macos_widget_quick_add_window, show_main, show_quick_add_window, MainWindowReveal,
 };
 
+// Desktop privacy lock (#1472).
+mod app_lock;
+
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
 use config::read_config_toml;
 pub(crate) use config::{
@@ -662,6 +665,12 @@ struct AppConfigToml {
     mcp_port: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     mcp_token: Option<String>,
+    // Desktop privacy lock (#1472). Device-level on purpose: never in a
+    // library's database. Read and written only by app_lock.rs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_lock_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    app_lock_relock_delay_minutes: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1669,6 +1678,9 @@ pub fn run() {
         });
     builder
         .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Focused(_)) {
+                app_lock::focus_changed(window.app_handle());
+            }
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let lease_state = window.app_handle().state::<FileSyncLeaseState>();
                 if let Err(error) =
@@ -1999,12 +2011,14 @@ pub fn run() {
             if let Some(listener) = flatpak_instance_listener {
                 start_flatpak_instance_listener(&handle, listener);
             }
+            app_lock::init(&handle);
             if let Err(error) = create_quick_add_window(&handle) {
                 log::warn!("{error}");
             }
             macos_widget::install_macos_widget_capture_listener(&handle);
             let tray_init_result: tauri::Result<()> = (|| {
-                let tray_menu = build_tray_menu(handle, "Quick Add", "Show Mindwtr", "Quit")?;
+                let tray_menu =
+                    build_tray_menu(handle, "Quick Add", "Show Mindwtr", None, "Quit")?;
 
                 let tray_icon = resolve_tray_icon(handle);
 
@@ -2049,6 +2063,9 @@ pub fn run() {
                             }
                             "show" => {
                                 show_main(app);
+                            }
+                            "lock" => {
+                                app_lock::engage_from_tray(app);
                             }
                             "quit" => {
                                 app.exit(0);
@@ -2263,6 +2280,15 @@ pub fn run() {
             install_attachment_download,
             set_tray_visible,
             set_tray_tooltip,
+            app_lock::get_app_lock_state,
+            app_lock::app_lock_engage,
+            app_lock::app_lock_availability,
+            app_lock::app_lock_authenticate,
+            app_lock::set_app_lock_enabled,
+            app_lock::set_app_lock_relock_delay,
+            app_lock::app_lock_dialog_begin,
+            app_lock::app_lock_dialog_end,
+            app_lock::app_lock_disable_unavailable,
             set_tray_labels,
             set_macos_activation_policy,
             get_linux_distro,

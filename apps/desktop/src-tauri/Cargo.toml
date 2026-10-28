@@ -94,7 +94,8 @@ fontdb = "0.24.0"
 libc = "0.2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["ApplicationModel", "Data_Xml_Dom", "Foundation", "Foundation_Collections", "Services_Store", "UI_Notifications"] }
+windows = { version = "0.61", features = ["ApplicationModel", "Data_Xml_Dom", "Foundation", "Foundation_Collections", "Security_Credentials_UI", "Services_Store", "UI_Notifications", "Win32_Foundation", "Win32_System_WinRT"] }
+windows-future = "0.2"
 windows-sys = { version = "0.61", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_Storage_Packaging_Appx", "Win32_System_IO", "Win32_System_Threading", "Win32_System_Time", "Win32_UI_WindowsAndMessaging"] }
 # Windows sync goes through schannel (see blocking_http_client); this only adds
 # the native-tls backend to Windows builds, other targets stay rustls-only.

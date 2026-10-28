@@ -3384,6 +3384,8 @@ mod tests {
             mcp_allow_delete: Some("false".to_string()),
             mcp_port: Some("9123".to_string()),
             mcp_token: Some("managed-mcp-token-value".to_string()),
+            app_lock_enabled: Some(true),
+            app_lock_relock_delay_minutes: Some(5),
         }
     }
 

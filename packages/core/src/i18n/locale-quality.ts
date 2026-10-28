@@ -69,6 +69,10 @@ export const allowedEnglishMirrorTerms = [
     'Copilot',
     'macOS',
     'iOS',
+    // The OS sign-in checks the desktop privacy lock uses (#1472).
+    'Windows Hello',
+    'Touch ID',
+    'Mac',
     'Apple Calendar',
     'Linux',
     'Evolution Data Server',

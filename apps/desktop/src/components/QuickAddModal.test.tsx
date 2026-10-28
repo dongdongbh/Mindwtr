@@ -37,6 +37,7 @@ const tauriMocks = vi.hoisted(() => ({
 const fsMocks = vi.hoisted(() => ({
     mkdir: vi.fn(async () => undefined),
     readFile: vi.fn(async () => new Uint8Array()),
+    readTextFile: vi.fn(async (_path?: string) => ''),
     remove: vi.fn(async () => undefined),
     writeFile: vi.fn(async () => undefined),
 }));
@@ -67,8 +68,17 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     BaseDirectory: { Data: 'Data' },
     mkdir: fsMocks.mkdir,
     readFile: fsMocks.readFile,
+    readTextFile: fsMocks.readTextFile,
     remove: fsMocks.remove,
     writeFile: fsMocks.writeFile,
+}));
+
+const dialogMocks = vi.hoisted(() => ({
+    open: vi.fn(async (_options?: unknown) => null as string | null),
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+    open: dialogMocks.open,
 }));
 
 vi.mock('@tauri-apps/api/path', () => ({
@@ -1075,6 +1085,29 @@ describe('QuickAddModal', () => {
             { title: 'First imported task', initialProps: expect.objectContaining({ status: 'inbox' }) },
             { title: 'Second imported task', initialProps: expect.objectContaining({ status: 'inbox' }) },
         ]);
+    });
+
+    it('imports a .txt file through the native dialog in the desktop app, marking it as Mindwtr\'s own dialog (#1472)', async () => {
+        (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
+        dialogMocks.open.mockResolvedValueOnce('/home/me/tasks.txt');
+        fsMocks.readTextFile.mockResolvedValueOnce('First imported task\nSecond imported task\n');
+        renderQuickAddModal();
+
+        await act(async () => {
+            window.dispatchEvent(new CustomEvent('mindwtr:quick-add'));
+            await Promise.resolve();
+        });
+
+        fireEvent.click(screen.getByRole('button', { name: 'Import .txt' }));
+
+        expect(await screen.findByText('Create 2 tasks?')).toBeInTheDocument();
+        expect(dialogMocks.open).toHaveBeenCalledWith(expect.objectContaining({
+            filters: [{ name: 'Text', extensions: ['txt'] }],
+        }));
+        expect(fsMocks.readTextFile).toHaveBeenCalledWith('/home/me/tasks.txt');
+        const commands = tauriMocks.invoke.mock.calls.map(([command]) => command);
+        expect(commands.indexOf('app_lock_dialog_begin')).toBeGreaterThanOrEqual(0);
+        await waitFor(() => expect(tauriMocks.invoke.mock.calls.map(([command]) => command)).toContain('app_lock_dialog_end'));
     });
 
     it('shows a settings notice and keeps the dialog open when speech-to-text is unconfigured', async () => {

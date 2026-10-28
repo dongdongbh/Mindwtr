@@ -39,6 +39,8 @@ import {
     sendDesktopDailyHeartbeat,
 } from './lib/analytics-heartbeat';
 import { consumeDesktopSandboxBootRequest } from './lib/sandbox-session';
+import { installAppLockKeyboardGuard, loadAppLockState } from './lib/app-lock';
+import { AppLockGate } from './components/AppLockGate';
 
 let coreLoggerBridgeInstalled = false;
 
@@ -188,6 +190,7 @@ async function signalUiReady() {
 
 async function bootstrap() {
     markDesktopStartup('bootstrap');
+    if (!isQuickAddWindow) installAppLockKeyboardGuard();
     installFileDropNavigationGuard();
 
     // The quick-add webview is always personal. The main window removes its
@@ -283,6 +286,9 @@ async function bootstrap() {
     // Several desktop stores read device-local caches while their modules are
     // evaluated, so importing them earlier could expose personal view state to
     // a sandbox renderer before React mounts.
+    // The privacy lock state comes first so a locked launch paints the lock
+    // screen, never the task list (the window is still hidden here).
+    if (!isQuickAddWindow) await loadAppLockState();
     const RootApp = isQuickAddWindow
         ? (await import('./QuickAddWindowApp.tsx')).QuickAddWindowApp
         : (await import('./App.tsx')).default;
@@ -294,6 +300,7 @@ async function bootstrap() {
         <React.StrictMode>
             <LanguageProvider initialLanguage={initialLanguage} persistLanguage={!sandboxMode}>
                 <RootApp />
+                {!isQuickAddWindow && <AppLockGate />}
             </LanguageProvider>
         </React.StrictMode>,
     );

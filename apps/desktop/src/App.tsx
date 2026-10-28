@@ -78,6 +78,7 @@ import * as LocalDataWatcher from './lib/local-data-watcher';
 import { invokeNative } from './lib/tauri-invoke';
 import { getInstallSourceOrFallback, isFlatpakRuntime, isLinuxRuntime, isTauriRuntime } from './lib/runtime';
 import { useDesktopShellSync } from './lib/desktop-shell-sync';
+import { useAppLockStore } from './lib/app-lock';
 import { reportError as reportAppError } from './lib/report-error';
 import { syncNativeProxyUrl } from './lib/tauri-http';
 import { persistLastView, readRestorableLastView } from './lib/session-restore';
@@ -348,11 +349,14 @@ function App() {
             focusTasks.filter((task) => isTaskFocusedNow(task, now) && !isTaskFinished(task))
         ).map((task) => task.title).join(FOCUS_TITLE_SEPARATOR);
     }, [focusTasks, localDayKey]);
+    const appLocked = useAppLockStore((state) => state.locked);
+    const appLockEnabled = useAppLockStore((state) => state.enabled);
+    // While the privacy lock is on, the tray tooltip names no task (#1472).
     const trayTooltip = useMemo(() => buildTrayTooltip({
         appName: translateWithFallback(t, 'app.name', 'Mindwtr'),
         focusLabel: translateWithFallback(t, 'agenda.todaysFocus', "Today's Focus"),
-        titles: focusTaskTitles ? focusTaskTitles.split(FOCUS_TITLE_SEPARATOR) : [],
-    }), [focusTaskTitles, t]);
+        titles: focusTaskTitles && !appLocked ? focusTaskTitles.split(FOCUS_TITLE_SEPARATOR) : [],
+    }), [appLocked, focusTaskTitles, t]);
     const isActiveRef = useRef(true);
     const lastSyncErrorRef = useRef<string | null>(null);
     const lastSyncErrorAtRef = useRef(0);
@@ -1240,7 +1244,10 @@ function App() {
 
     useDesktopShellSync({
         enabled: !sandboxMode, showTray, trayTooltip, closeBehavior,
-        trayLabels: { quickAdd: t('tray.quickAdd'), show: t('tray.show'), quit: t('tray.quit') },
+        trayLabels: {
+            quickAdd: t('tray.quickAdd'), show: t('tray.show'), quit: t('tray.quit'),
+            lock: appLockEnabled ? t('appLock.lockNow') : null,
+        },
     });
 
     useEffect(() => {

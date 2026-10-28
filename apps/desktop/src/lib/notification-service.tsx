@@ -23,6 +23,7 @@ import { useTaskStore } from '@mindwtr/core';
 import { isFlatpakRuntime, isLinuxRuntime, isMacRuntime, isTauriRuntime, isWindowsRuntime } from './runtime';
 import { invokeNative } from './tauri-invoke';
 import { logInfo, logWarn } from './app-log';
+import { isAppLocked } from './app-lock';
 
 const notifiedAtByTask = new Map<string, string>();
 const advanceObservedByTask = new Map<string, string>();
@@ -303,6 +304,12 @@ async function sendReplacingNotification(title: string, body: string | undefined
  * instead of one more notification per occurrence.
  */
 async function sendNotification(title: string, body?: string, tag?: string): Promise<boolean> {
+    // While the privacy lock is on, a reminder still fires (same tag, so its
+    // actions still work after unlock) but shows no task text (#1472).
+    if (isAppLocked()) {
+        title = resolveI18nText(getTranslator(getCurrentLanguage()), 'appLock.lockedReminder', { fallback: 'Mindwtr reminder' });
+        body = undefined;
+    }
     const linuxSent = await handleLinuxNotification(title, body, tag);
     if (linuxSent !== null) return linuxSent;
 

@@ -1,5 +1,13 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const nlOverrides: Record<string, string> = {
+    "settings.desktopAppLockDesc": "Vraag om Windows Hello of Touch ID (of je Mac-wachtwoord) wanneer Mindwtr opent en nadat je weg bent geweest. Dit verbergt alleen het app-venster; de macOS-widget, de lokale API en de MCP-server kunnen je gegevens nog steeds lezen.",
+    "settings.desktopAppLockUnavailable": "Stel Windows Hello of een Mac-inlogwachtwoord in om de app-vergrendeling te gebruiken.",
+    "appLock.lockNow": "Mindwtr vergrendelen",
+    "appLock.lockedReminder": "Mindwtr-herinnering",
+    "appLock.turnOff": "App-vergrendeling uitzetten",
+    "appLock.osCheckUnavailable": "Windows Hello of Touch ID is nu niet beschikbaar op dit apparaat.",
+    "appLock.macUnlockReason": "ontgrendelen en je taken tonen",
+    "appLock.macEnableReason": "de app-vergrendeling aanzetten",
     'projects.useAreaColor': "Kleur van gebied gebruiken",
     'projects.colorSaveFailed': "De kleur kon niet worden opgeslagen.",
     'projects.sequenceMode': "Stroommodus",

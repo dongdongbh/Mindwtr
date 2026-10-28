@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useTaskStore, type AppData } from '@mindwtr/core';
+import { isSandboxMode, useTaskStore, type AppData } from '@mindwtr/core';
 
 import { reportError } from '../../../lib/report-error';
 import {
@@ -19,6 +19,7 @@ import {
     setDesktopRenderingConfig,
     type DesktopRenderingConfig,
 } from '../../../lib/desktop-rendering';
+import { getAppLockAvailability, type AppLockAvailability } from '../../../lib/app-lock';
 import { useUiStore } from '../../../store/ui-store';
 import type { SettingsLabels } from './labels';
 import type { SettingsAdvancedPageProps } from './SettingsAdvancedPage';
@@ -68,6 +69,19 @@ export function useSettingsAdvancedPage({
         disableHardwareAcceleration: false,
     });
     const [desktopRenderingBusy, setDesktopRenderingBusy] = useState(false);
+    const [appLockAvailability, setAppLockAvailability] = useState<AppLockAvailability>({ supported: false, available: false });
+
+    // The sample workspace cannot change device settings, so the lock row hides there.
+    useEffect(() => {
+        if (!loadEnabled || !isTauri || isSandboxMode()) return;
+        let cancelled = false;
+        void getAppLockAvailability().then((availability) => {
+            if (!cancelled) setAppLockAvailability(availability);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [loadEnabled, isTauri]);
 
     useEffect(() => {
         setNetworkProxyUrl(normalizeProxyUrl(settings?.network?.proxyUrl));
@@ -241,5 +255,6 @@ export function useSettingsAdvancedPage({
         onNetworkProxyUrlChange: setNetworkProxyUrl,
         onSaveNetworkProxy,
         onDesktopRenderingToggle,
+        appLockAvailability,
     };
 }

@@ -136,7 +136,7 @@ export async function saveLogCopy(): Promise<SaveLogCopyResult> {
         .filter(Boolean);
     if (parts.length === 0) return 'missing';
 
-    const { save } = await import('@tauri-apps/plugin-dialog');
+    const { save } = await import('./native-dialog');
     const selected = await save({
         defaultPath: LOG_FILE_NAME,
         filters: [{ name: 'Log', extensions: ['log', 'txt'] }],

@@ -1058,3 +1058,11 @@ html {
     /* `rotate`, not `transform`, so it composes with any transform utility on the element. */
     rotate: var(--mindwtr-spin-angle, 0deg);
 }
+
+/* While the privacy lock is on (#1472), only the lock screen prints. The
+   inert app beneath is still laid out, and print drops the cover's background. */
+@media print {
+    html[data-app-locked] body > :not([data-app-lock-screen]) {
+        display: none !important;
+    }
+}

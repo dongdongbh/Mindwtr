@@ -202,7 +202,7 @@ export function useCalendarSettings({ loadEnabled = true, showSaved, settings, u
         }
         setCalendarError(null);
         try {
-            const { open } = await import('@tauri-apps/plugin-dialog');
+            const { open } = await import('../../../lib/native-dialog');
             const selected = await open({
                 multiple: false,
                 directory: false,

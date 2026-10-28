@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { renderSvgToPng, saveShareCardPng } from "./share-card-export";
+// Loaded up front: the tests below stub the global URL, which the module loader needs.
+import "./native-dialog";
 
 const mocks = vi.hoisted(() => ({
     isTauriRuntime: vi.fn(() => false),

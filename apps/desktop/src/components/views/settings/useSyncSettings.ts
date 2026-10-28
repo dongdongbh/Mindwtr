@@ -596,7 +596,7 @@ export const useSyncSettings = ({
         try {
             if (!isTauri) return;
 
-            const { open } = await import('@tauri-apps/plugin-dialog');
+            const { open } = await import('../../../lib/native-dialog');
             const selected = await open({
                 directory: true,
                 multiple: false,

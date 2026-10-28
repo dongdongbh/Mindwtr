@@ -3265,6 +3265,7 @@ dependencies = [
  "webkit2gtk",
  "whisper-rs",
  "windows 0.61.3",
+ "windows-future",
  "windows-sys 0.61.2",
  "zbus 5.12.0",
 ]

@@ -32,6 +32,7 @@ vi.mock('@tauri-apps/plugin-notification', () => pluginMock);
 vi.mock('./app-log', () => logMock);
 
 import { setNativeInvokeTransport } from './tauri-invoke';
+import { resetAppLockStoreForTests } from './app-lock';
 import {
     buildDesktopTaskNotificationBody,
     resolveDesktopReminderGates,
@@ -673,6 +674,23 @@ describe('a task\'s reminders replace its notification', () => {
         await startDesktopNotifications();
         await vi.advanceTimersByTimeAsync(10 * 60_000);
     }
+
+    it('fires a reminder while the privacy lock is on with no task text, keeping its tag (#1472)', async () => {
+        runtimeMock.isTauriRuntime.mockReturnValue(true);
+        runtimeMock.isMacRuntime.mockReturnValue(true);
+        resetAppLockStoreForTests({ enabled: true, locked: true });
+        try {
+            const calls = captureInvokes();
+            await fireDueThenRepeat(new Date(2026, 7, 9, 9, 0, 0, 0));
+            const replaced = calls.filter((call) => call.command === 'send_replacing_notification');
+            expect(replaced.length).toBeGreaterThanOrEqual(1);
+            expect(replaced.every((call) => call.args.tag === tag)).toBe(true);
+            expect(replaced.every((call) => call.args.title === 'Mindwtr reminder' && call.args.body === undefined)).toBe(true);
+            expect(JSON.stringify(calls)).not.toContain('Prepare report');
+        } finally {
+            resetAppLockStoreForTests();
+        }
+    });
 
     it('passes the task\'s tag with the due reminder and its repeats on Linux', async () => {
         runtimeMock.isTauriRuntime.mockReturnValue(true);

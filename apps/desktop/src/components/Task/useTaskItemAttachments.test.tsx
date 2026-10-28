@@ -36,6 +36,12 @@ vi.mock('@tauri-apps/plugin-fs', () => ({
     remove: (...args: unknown[]) => removeMock(...args),
 }));
 
+// The privacy lock's dialog bookkeeping (its own invoke calls) is tested in
+// app-lock.test.ts; here the picker runs as-is so the invoke assertions stay exact.
+vi.mock('../../lib/app-lock', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('../../lib/app-lock')>()),
+    withMindwtrDialog: <T,>(run: () => Promise<T>) => run(),
+}));
 vi.mock('@tauri-apps/plugin-dialog', () => ({
     open: (...args: unknown[]) => openMock(...args),
 }));

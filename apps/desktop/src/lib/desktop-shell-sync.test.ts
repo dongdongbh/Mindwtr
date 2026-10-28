@@ -44,7 +44,7 @@ describe('useDesktopShellSync', () => {
         expect(invoked).toEqual([
             ['set_tray_visible', { visible: true }],
             ['set_tray_tooltip', { tooltip: 'Mindwtr' }],
-            ['set_tray_labels', options.trayLabels],
+            ['set_tray_labels', { ...options.trayLabels, lock: null }],
         ]);
     });
 
@@ -110,13 +110,13 @@ describe('useDesktopShellSync', () => {
         invoked.length = 0;
         const trayLabels = { quickAdd: '快速添加', show: '查看Mindwtr', quit: '退出' };
         rerender({ ...options, trayLabels });
-        expect(invoked).toEqual([['set_tray_labels', trayLabels]]);
+        expect(invoked).toEqual([['set_tray_labels', { ...trayLabels, lock: null }]]);
         rerender({ ...options, showTray: false, trayLabels });
         invoked.length = 0;
         rerender({ ...options, showTray: false });
         expect(invoked).toEqual([]);
         rerender(options);
-        expect(invoked).toContainEqual(['set_tray_labels', options.trayLabels]);
+        expect(invoked).toContainEqual(['set_tray_labels', { ...options.trayLabels, lock: null }]);
     });
 
     it('issues each command once per unchanged render', () => {

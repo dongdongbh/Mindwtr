@@ -99,7 +99,7 @@ export async function saveShareCardPng(
 ): Promise<boolean> {
     const fileName = `mindwtr-${kind}.png`;
     if (isTauriRuntime()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
+        const { save } = await import('./native-dialog');
         const selected = await save({
             defaultPath: fileName,
             filters: [{ name: 'PNG', extensions: ['png'] }],

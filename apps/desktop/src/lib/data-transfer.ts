@@ -101,7 +101,7 @@ const pickTransferDocument = async (
     }
 ): Promise<DesktopTransferDocument | null> => {
     if (isTauriRuntime()) {
-        const { open } = await import('@tauri-apps/plugin-dialog');
+        const { open } = await import('./native-dialog');
         const selected = await open({
             filters: [{ name: options.title, extensions: options.extensions }],
             multiple: false,
@@ -148,7 +148,7 @@ const downloadTextFile = async (
     format: { name: string; extension: string; mimeType: string } = { name: 'JSON', extension: 'json', mimeType: 'application/json' },
 ): Promise<boolean> => {
     if (isTauriRuntime()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
+        const { save } = await import('./native-dialog');
         const selected = await save({
             defaultPath: fileName,
             filters: [{ name: format.name, extensions: [format.extension] }],
@@ -276,7 +276,7 @@ const downloadBinaryFile = async (
     format: { name: string; extension: string; mimeType: string },
 ): Promise<void> => {
     if (isTauriRuntime()) {
-        const { save } = await import('@tauri-apps/plugin-dialog');
+        const { save } = await import('./native-dialog');
         const selected = await save({
             defaultPath: fileName,
             filters: [{ name: format.name, extensions: [format.extension] }],

@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Desktop (Windows and macOS): an optional app lock in Settings › Advanced › Privacy. It asks for Windows Hello, or Touch ID or your Mac password, when Mindwtr opens, after the Require unlock time away from Mindwtr or without input, and when you press Ctrl+Shift+L (Cmd+Shift+L) or choose Lock Mindwtr in the tray menu. While locked, the window shows only the lock screen, the tray tooltip and reminders show no task text, and Quick Add opens the lock screen instead. Unsaved edits stay as they were. If Windows Hello or Touch ID stops working (for example over Remote Desktop), the lock screen offers Turn off app lock. The lock hides the app window only; the macOS widget, the local API and the MCP server can still read your data (#1472).
 - Desktop: quick-add suggestions now open for a +project, @context, #tag, !area or %person typed after a slash command, as in `Buy milk /start:now +Ho`. Before, they only opened when those came before the first slash command (#1259).
 - Linux packages that ship their own mindwtr:// desktop entry, such as a Nix package, can set `MINDWTR_SKIP_LINK_REGISTRATION=1` in the app's launcher. Mindwtr then does not write its own task-link handler, which on Nix pointed at a versioned store path (#1377).
 - Desktop: in the Weekly and Daily Review, Next Step (and Back) opens the new step at its top. Before, it kept the previous step's scroll position, so you had to scroll back up (#1471).
