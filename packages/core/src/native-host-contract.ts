@@ -1079,6 +1079,8 @@ export function createNativeHostContract(options: {
     // read, a small map keyed by controls if a second caller ever does.
     let cachedFocusBuiltAt = 0;
     let cachedFocusValidUntil = 0;
+    // Every rebuild of the kept model, in the Focus revision: paging opened on an older build is refused.
+    let focusModelBuilds = 0;
     let cachedFocusSections: CachedFocusSection[] = [];
     let cachedFocusModel: FocusControlsModel | null = null;
     let cachedFocusProjectTitles = new Map<string, string>();
@@ -1274,10 +1276,16 @@ export function createNativeHostContract(options: {
      * still read the clock on every read (focusRows). Any doubt (no valid window, a clock that went back) rebuilds.
      */
     const focusSections = (now: Date, controls: FocusControlState | null): CachedFocusSection[] => {
-        const key = `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}\u0000${controls ? paramsKey(controls) : 'flat'}`;
+        // The zone and the local day: a time zone change moves today's bounds without moving the clock.
+        let zone: string | null = null;
+        try {
+            zone = `${now.getTimezoneOffset()}/${new Intl.DateTimeFormat().resolvedOptions().timeZone}/${formatLocalDate(now)}`;
+        } catch { /* No zone: rebuild. */ }
+        const key = `${revision()}:${settingsRevision()}:${language}:${systemLocale ?? ''}:${zone}\u0000${controls ? paramsKey(controls) : 'flat'}`;
         const nowMs = now.getTime();
-        if (options.focusModelCache === false || cachedFocusKey !== key
+        if (options.focusModelCache === false || zone === null || cachedFocusKey !== key
             || !(nowMs >= cachedFocusBuiltAt && nowMs < cachedFocusValidUntil)) {
+            focusModelBuilds += 1;
             const state = useTaskStore.getState();
             const formatDate = createDateFormatter(dateFormatting());
             const model = buildFocusControlsModel({
@@ -1339,8 +1347,8 @@ export function createNativeHostContract(options: {
      * Focus revision it always had.
      */
     const focusModel = (controls: FocusControlState | null, now: Date): { model: FocusControlsModel; revision: string } => {
-        const currentRevision = focusRevision(now);
         focusSections(now, controls);
+        const currentRevision = `${focusRevision(now)}:${focusModelBuilds}`;
         const model = cachedFocusModel as FocusControlsModel;
         return { model, revision: controls ? `${currentRevision}:${paramsKey(model.filter.state)}` : currentRevision };
     };

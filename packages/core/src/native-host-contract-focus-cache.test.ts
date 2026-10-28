@@ -22,15 +22,14 @@ describe('native host contract: the kept Focus model', () => {
         resetForTests();
     });
 
-    const seed = async () => {
-        const tasks = [
-            task('later', { startTime: '2026-03-07T21:30:00' }),
-            task('tomorrow', { startTime: '2026-03-08' }),
-            task('due-soon', { dueDate: '2026-04-06T21:45:00' }),
-            task('review', { reviewAt: '2026-03-07T22:15:00' }),
-            task('focused', { isFocusedToday: true }),
-            ...Array.from({ length: 300 }, (_, index) => task(`n${index}`, index % 3 === 0 ? { dueDate: '2026-03-08' } : {})),
-        ];
+    const seed = async (tasks: Task[] = [
+        task('later', { startTime: '2026-03-07T21:30:00' }),
+        task('tomorrow', { startTime: '2026-03-08' }),
+        task('due-soon', { dueDate: '2026-04-06T21:45:00' }),
+        task('review', { reviewAt: '2026-03-07T22:15:00' }),
+        task('focused', { isFocusedToday: true }),
+        ...Array.from({ length: 300 }, (_, index) => task(`n${index}`, index % 3 === 0 ? { dueDate: '2026-03-08' } : {})),
+    ]) => {
         let data: AppData = { tasks, projects: [], sections: [], areas: [], people: [], settings: {} } as AppData;
         setStorageAdapter({ getData: async () => data, saveData: async (next) => { data = JSON.parse(JSON.stringify(next)); } });
         useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {},
@@ -76,4 +75,48 @@ describe('native host contract: the kept Focus model', () => {
         vi.setSystemTime(new Date(2026, 2, 7, 20, 0));
         same();
     });
+
+    // A time zone change while the app runs moves the local day: Today must follow at once, not at the old zone's midnight.
+    it('follows a time zone change at the next read', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date('2026-03-07T15:00:00Z'));
+        try {
+            const open = await seed([
+                task('due-tokyo-day', { dueDate: '2026-03-08' }),
+                task('starts-tokyo-day', { startTime: '2026-03-08' }),
+                ...Array.from({ length: 20 }, (_, index) => task(`n${index}`)),
+            ]);
+            const kept = await open(true);
+            const fresh = await open(false);
+            const read = (host: ReturnType<typeof createNativeHostContract>) => (
+                JSON.stringify(host.getFocus({ limit: 100 }), (key, value) => (key === 'revision' ? undefined : value)));
+            expect(read(kept)).toBe(read(fresh));
+            // 10:00 in New York is 00:00 on 03-08 in Tokyo.
+            process.env.TZ = 'Asia/Tokyo';
+            vi.setSystemTime(new Date('2026-03-07T15:30:00Z'));
+            expect(read(kept)).toBe(read(fresh));
+            expect(read(kept)).toContain('due-tokyo-day');
+        } finally {
+            process.env.TZ = 'America/New_York';
+        }
+    });
+
+    // The kept model rebuilds at an instant with seconds (a start at 21:30:30): paging opened before it must be refused.
+    it('refuses paging opened before a rebuild inside the same minute', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 2, 7, 21, 30, 10));
+        const open = await seed([
+            ...Array.from({ length: 10 }, (_, index) => task(`late${index}`, { startTime: '2026-03-07T21:30:30' })),
+            ...Array.from({ length: 30 }, (_, index) => task(`today${index}`, { startTime: '2026-03-07' })),
+        ]);
+        const host = await open(true);
+        const first = host.getFocus({ limit: 20 });
+        if (!first.ok) throw new Error(first.error.message);
+        const schedule = first.value.sections.find((section) => section.key === 'schedule')!;
+        expect(schedule.total).toBe(40);
+        vi.setSystemTime(new Date(2026, 2, 7, 21, 30, 40));
+        const page = host.getFocusSectionWindow({ key: 'schedule', offset: 20, limit: 20, revision: first.value.revision });
+        expect(page).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
 });
+
