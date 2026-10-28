@@ -507,11 +507,14 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
 
     /**
      * A General write that failed without a refusal (SAVE_FAILED: core applied it in memory and the save is owed): App lock's gate
-     * follows core's value at once, as RN's gate follows its store; the exact retry stays owed. On the command's thread.
+     * and its relock delay follow core's values at once, as RN's gate follows its store; the exact retry stays owed. On the
+     * command's thread.
      */
     internal fun unsettled(runtime: CoreHost, action: FailedAction) {
-        if (JSONObject(action.title).getJSONObject("edit").getString("type") != "appLock") return
-        runCatching { runtime.appLock().getBoolean("value") }.onSuccess { on -> shell.ui { shell.lock.stored(on) } }
+        when (JSONObject(action.title).getJSONObject("edit").getString("type")) {
+            "appLock" -> runCatching { runtime.appLock().getBoolean("value") }.onSuccess { on -> shell.ui { shell.lock.stored(on) } }
+            "appLockRelockDelay" -> runCatching { runtime.appLock().optInt("relockDelayMinutes") }.onSuccess { minutes -> shell.ui { shell.lock.relock.delayMinutes = minutes } }
+        }
     }
 
     /** Core's answer on screen: the editor closes; an auto-start turned on shows RN's notice once per visit; the tab bar follows. */
@@ -526,6 +529,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
                 "quickAccessView" -> menu.readMore()
                 // RN's gate follows the stored value (AppLock.kt).
                 "appLock" -> shell.lock.stored(input.getJSONObject("edit").getBoolean("value"))
+                "appLockRelockDelay" -> shell.lock.relock.delayMinutes = input.getJSONObject("edit").getInt("value")
             }
             "gtdSetting" -> {
                 val edit = input.getJSONObject("edit")

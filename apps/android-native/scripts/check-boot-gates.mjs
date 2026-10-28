@@ -3098,20 +3098,24 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     const settingsModel = source('SettingsModel.kt');
     const manifest = readFileSync(resolve(app, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
     // The gate reads core's row through its own host call, which no failed save blocks: a lock turned on whose save is owed still locks.
-    assert.match(hostEntry, /appLock\(\): string \{\s*return submit\(async \(\) => unwrap\(contract\.getGeneralSettings\(\{\}\)\)\.privacy\.appLock\);/);
+    // It also carries the stored relock delay (#1423), kept while the lock is off.
+    assert.match(hostEntry, /appLock\(\): string \{\s*return submit\(async \(\) => \(\{ \.\.\.unwrap\(contract\.getGeneralSettings\(\{\}\)\)\.privacy\.appLock,\s*relockDelayMinutes: resolveMobileAppLockRelockDelayMinutes\(useTaskStore\.getState\(\)\.settings\?\.security\?\.mobileAppLockRelockDelayMinutes\) \}\)\);/);
     assert.doesNotMatch(hostEntry.slice(hostEntry.indexOf('appLock(): string {'), hostEntry.indexOf('    projects(): string {')), /requireSaved/);
     assert.match(coreHost, /fun appLock\(\): JSONObject = callAsync\("appLock"\)/);
     // At boot, before any screen reads data (the owed-retry restore included), the app opens locked while core says on.
     assert.match(model, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)\s+\/\/[^\n]*\n\s+lock\.boot\(runtime\)\s+ProcessCoreHost\.failure\?\.let/);
-    assert.match(lockKt, /val on = runtime\.appLock\(\)\.getBoolean\("value"\)\s+shell\.ui \{ enabled = on; locked = on \}/);
+    assert.match(lockKt, /val row = runtime\.appLock\(\)\s+val on = row\.getBoolean\("value"\)\s+shell\.ui \{ enabled = on; locked = on; relock\.delayMinutes = row\.optInt\("relockDelayMinutes"\) \}/);
     // The gate wraps every screen inside the one theme; while locked the lock screen replaces them (RN's gate renders it instead of
     // its children), and the screens' saved state waits for the unlock.
     assert.match(activity, /MindwtrTheme\(if \(model\.loading\) null else ThemeChoice\.current\) \{ AppLockGate\(model\) \{ CompositionLocalProvider\(LocalFailureBanners provides banners\) \{ with\(model\) \{/);
     assert.match(lockKt, /if \(model\.lock\.locked && !model\.loading\) AppLockScreen\(model\) else screens\.SaveableStateProvider\("app", content\)/);
     // RN locks when AppState leaves active (Android's onPause), not for a rotation, not while its own prompt is up; each lock
     // prompts by itself once, 250 ms after the app is active.
-    assert.match(lockKt, /if \(event == Lifecycle\.Event\.ON_PAUSE\) model\.lock\.paused\(activity\?\.isChangingConfigurations == true\)/);
-    assert.match(lockKt, /if \(!enabled \|\| authenticating \|\| rotating\) return\s+locked = true\s+failure = null\s+locks \+= 1/);
+    assert.match(lockKt, /Lifecycle\.Event\.ON_PAUSE -> model\.lock\.paused\(activity\?\.isChangingConfigurations == true\)/);
+    assert.match(lockKt, /if \(!enabled \|\| authenticating \|\| rotating\) return\s+relock\.left\(unlocked = !locked\)\s+locked = true\s+failure = null\s+locks \+= 1/);
+    // RN's relock delay (#1423): a return within it of leaving unlocked opens the app without asking; not while the prompt is up.
+    assert.match(lockKt, /Lifecycle\.Event\.ON_RESUME -> model\.lock\.resumed\(\)/);
+    assert.match(lockKt, /fun resumed\(\) \{\s+if \(!enabled \|\| authenticating\) return\s+if \(relock\.returned\(\)\) \{ locked = false; failure = null \}/);
     assert.match(lockKt, /fun shouldPrompt\(resumed: Boolean\) = enabled && locked && !authenticating && resumed && prompted != locks/);
     assert.match(lockKt, /private const val PROMPT_DELAY_MS = 250L/);
     // The device lock as expo-local-authentication asks it (correction pass, finding 4): AndroidX BiometricPrompt at Expo's version on
@@ -3124,7 +3128,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockKt, /^import androidx\.biometric\.BiometricPrompt$/m);
     assert.doesNotMatch(lockKt, /android\.hardware\.biometrics/, 'no platform prompt beside AndroidX\'s');
     assert.match(lockKt, /prompt\(title, Authenticators\.BIOMETRIC_WEAK or Authenticators\.DEVICE_CREDENTIAL\)/);
-    assert.match(lockKt, /val activity = host\?\.get\(\) \?: return answered\("unavailable"\)\s+try \{\s+if \(!activity\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceSecure\) return answered\("unavailable"\)\s+if \(activity\.supportFragmentManager\.isStateSaved\) return answered\("cancelled"\)/);
+    // A debug build's device check (check-app-lock-device.mjs) may answer yes by a debug property; release builds read none.
+    assert.match(lockKt, /val activity = host\?\.get\(\) \?: return answered\("unavailable"\)\s+\/\/[^\n]*\n\s+if \(debugProperty\("app_lock_answer"\) == "yes"\) return answered\(null\)\s+try \{\s+if \(!activity\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceSecure\) return answered\("unavailable"\)\s+if \(activity\.supportFragmentManager\.isStateSaved\) return answered\("cancelled"\)/);
     assert.match(lockKt, /BiometricPrompt\.PromptInfo\.Builder\(\)\.setTitle\(title\)\.setAllowedAuthenticators\(authenticators\)\.setConfirmationRequired\(true\)\.build\(\)/);
     assert.match(lockKt, /BiometricPrompt\(activity, ContextCompat\.getMainExecutor\(activity\), object : BiometricPrompt\.AuthenticationCallback\(\) \{\s+override fun onAuthenticationSucceeded\(result: BiometricPrompt\.AuthenticationResult\) = answered\(null\)\s+override fun onAuthenticationError\(code: Int, message: CharSequence\) = failed\(title, code\)/);
     // The Activity on screen is the gate's, weakly held and let go with its composition.
@@ -3146,7 +3151,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // A lock turned on whose save failed (finding 1): core applied it in memory, so the gate follows core's value at once while the
     // exact retry stays owed (the failure is rethrown to perform, which keeps it).
     assert.match(menuModel, /if \(!refused && action\.kind == "generalSetting"\) settings\.unsettled\(runtime, action\)\s+throw failure/);
-    assert.match(settingsModel, /internal fun unsettled\(runtime: CoreHost, action: FailedAction\) \{\s+if \(JSONObject\(action\.title\)\.getJSONObject\("edit"\)\.getString\("type"\) != "appLock"\) return\s+runCatching \{ runtime\.appLock\(\)\.getBoolean\("value"\) \}\.onSuccess \{ on -> shell\.ui \{ shell\.lock\.stored\(on\) \} \}/);
+    assert.match(settingsModel, /internal fun unsettled\(runtime: CoreHost, action: FailedAction\) \{\s+when \(JSONObject\(action\.title\)\.getJSONObject\("edit"\)\.getString\("type"\)\) \{\s+"appLock" -> runCatching \{ runtime\.appLock\(\)\.getBoolean\("value"\) \}\.onSuccess \{ on -> shell\.ui \{ shell\.lock\.stored\(on\) \} \}/);
     // The lock screen stays centered and scrolls when large text does not fit a short landscape window (finding 5).
     assert.match(lockKt, /BoxWithConstraints\(Modifier\.fillMaxSize\(\)[^\n]*\.testTag\("app-lock"\)\) \{\s+Column\(Modifier\.fillMaxWidth\(\)\.verticalScroll\(rememberScrollState\(\)\)\.heightIn\(min = maxHeight\)/);
     // A failed prompt's line is RN's (getMobileAppLockErrorKey) in core's words.
@@ -3163,7 +3168,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockCheck, /await device\.stopApp\(\);\s+changes \+= 1;\s+const original = pullDatabase\(`original-\$\{changes\}`\);/);
     assert.match(lockCheck, /const staged = Number\(runAs\(`stat -c %s \$\{next\}`\)\);\s+if \(staged !== statSync\(db\)\.size\) fail\([^\n]*\n\s+if \(pid\(\) !== ''\) fail\([^\n]*\n\s+runAs\(`rm -f files\/\$\{DB\}-wal files\/\$\{DB\}-shm`\);\s+runAs\(`mv -f \$\{next\} files\/\$\{DB\}`\);/);
     assert.doesNotMatch(lockCheck, /runAs\(`cp \$\{STAGED\} files\/\$\{DB\}`\)/, 'never copy over the live database in place');
-    assert.match(lockCheck, /const now = core\('read'\)\.stored === true;\s+if \(now !== original\) fail\(/);
+    assert.match(lockCheck, /const after = core\('read'\);\s+const now = after\.stored === true;\s+if \(now !== original\) fail\(/);
     assert.match(lockCheck, /await toInbox\(\);[\s\S]{0,200}?RESTORE FAILED[^\n]*\n\s+process\.exitCode = 1;/);
     // No Kotlin policy, dates, colors or literal text; every key a label key; one semantics block per control.
     assert.doesNotMatch(code(lockKt), /\.(sort\w*|sorted\w*|filter(?!Bg\b)\w*|groupBy)\b|SimpleDateFormat|java\.time|\bColor\(|"#[0-9A-Fa-f]{3,8}"/);
@@ -4089,6 +4094,7 @@ export { serializeBackupData } from ${JSON.stringify(resolve(app, '../../package
 export { validateMergedSyncData } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-normalization.ts'))};
 export { getNextFutureStartRevealAt } from ${JSON.stringify(resolve(app, '../../packages/core/src/task-utils.ts'))};
 export { resolveEntityOpenTarget } from ${JSON.stringify(resolve(app, '../../packages/core/src/entry-points.ts'))};
+export { resolveMobileAppLockRelockDelayMinutes } from ${JSON.stringify(resolve(app, '../../packages/core/src/general-settings-model.ts'))};
 export { compareAppVersions, fetchAppStoreInfo, UPDATE_BADGE_AVAILABLE_KEY, UPDATE_BADGE_LAST_CHECK_KEY, UPDATE_BADGE_LATEST_KEY, shouldCheckForAppUpdate } from ${JSON.stringify(resolve(app, '../../packages/core/src/app-store-update.ts'))};
 export { SYNC_BACKEND_KEY, CLOUD_PROVIDER_KEY } from ${JSON.stringify(resolve(app, '../../packages/core/src/sync-storage-keys.ts'))};
 export { getBaseSyncUrl } from ${JSON.stringify(resolve(app, '../../packages/core/src/attachment-paths.ts'))};

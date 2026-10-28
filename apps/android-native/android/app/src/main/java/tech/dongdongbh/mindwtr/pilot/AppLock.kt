@@ -3,6 +3,7 @@ package tech.dongdongbh.mindwtr.pilot
 import android.app.Activity
 import android.app.KeyguardManager
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
@@ -60,6 +61,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import tech.dongdongbh.mindwtr.pilot.core.debugProperty
 import java.lang.ref.WeakReference
 
 /*
@@ -73,6 +75,37 @@ import java.lang.ref.WeakReference
 private const val SWITCH_FAILURE = "appLockFailure"
 /** RN's AUTHENTICATE_AFTER_ACTIVE_DELAY_MS. */
 private const val PROMPT_DELAY_MS = 250L
+/**
+ * RN's isWithinMobileAppLockRelockDelay (#1423): a return may skip the prompt only when the app left unlocked ([leftUnlockedAt],
+ * null otherwise or after a cold start) and came back within [delayMinutes]; 0 asks every time. A negative time away asks.
+ */
+internal fun withinRelockDelay(delayMinutes: Int, leftUnlockedAt: Long?, now: Long): Boolean {
+    if (delayMinutes <= 0 || leftUnlockedAt == null) return false
+    val away = now - leftUnlockedAt
+    return away >= 0 && away < delayMinutes * 60_000L
+}
+
+/**
+ * RN's relock delay state (mobile-app-lock-gate.tsx's leftUnlockedAtRef): when the app last left while unlocked, on [clock].
+ * In memory only, so process death forgets it and the next start asks, as RN's cold start does. The clock is the time since boot
+ * (RN reads the wall clock), so moving the device's clock neither skips nor forces the prompt.
+ */
+internal class Relock(private val clock: () -> Long = SystemClock::elapsedRealtime) {
+    /** Core's stored delay (RN's resolveMobileAppLockRelockDelayMinutes): read at boot, then after each write of it. */
+    var delayMinutes = 0
+    private var leftUnlockedAt: Long? = null
+
+    /** The app left the foreground; [unlocked]: it was open, not on the lock screen. */
+    fun left(unlocked: Boolean) { leftUnlockedAt = if (unlocked) clock() else null }
+
+    /** The app is back: whether this return may skip the prompt. Each leave counts once. */
+    fun returned(): Boolean {
+        val left = leftUnlockedAt
+        leftUnlockedAt = null
+        return withinRelockDelay(delayMinutes, left, clock())
+    }
+}
+
 /** Expo's isBiometricUnavailable: the errors after which it asks for the device credential alone, once. */
 private val BIOMETRIC_UNUSABLE = setOf(BiometricPrompt.ERROR_HW_NOT_PRESENT, BiometricPrompt.ERROR_HW_UNAVAILABLE, BiometricPrompt.ERROR_NO_BIOMETRICS,
     BiometricPrompt.ERROR_UNABLE_TO_PROCESS, BiometricPrompt.ERROR_NO_SPACE)
@@ -95,14 +128,17 @@ class AppLock(private val shell: InboxViewModel) {
     private var fallback = false
     /** The Activity on screen (AppLockGate attaches it), for the prompt and its fallback; weak, so a finished one is never kept. */
     private var host: WeakReference<MainActivity>? = null
+    /** How long the app may be away before the lock asks again (#1423). */
+    internal val relock = Relock()
 
     fun attach(activity: MainActivity) { host = WeakReference(activity) }
     fun detach(activity: MainActivity) { if (host?.get() === activity) host = null }
 
     /** At boot, off the main thread: core's value. While on, the app opens locked (RN's `useState(enabled)`). */
     internal fun boot(runtime: CoreHost) {
-        val on = runtime.appLock().getBoolean("value")
-        shell.ui { enabled = on; locked = on }
+        val row = runtime.appLock()
+        val on = row.getBoolean("value")
+        shell.ui { enabled = on; locked = on; relock.delayMinutes = row.optInt("relockDelayMinutes") }
     }
 
     /** Core holds [on] (General's switch): turning it on leaves the app open, as RN's gate does; turning it off unlocks. */
@@ -113,13 +149,21 @@ class AppLock(private val shell: InboxViewModel) {
 
     /**
      * RN locks when AppState leaves active (Android's onPause), but not while its own prompt is up. A rotation is no leave:
-     * RN's activity handles it without a pause, while this one is recreated.
+     * RN's activity handles it without a pause, while this one is recreated. The lock screen covers the app while it is away
+     * (recents included) even within the relock delay; the delay only skips the prompt on the return ([resumed]).
      */
     fun paused(rotating: Boolean) {
         if (!enabled || authenticating || rotating) return
+        relock.left(unlocked = !locked)
         locked = true
         failure = null
         locks += 1
+    }
+
+    /** RN's return to active: within the relock delay of leaving unlocked, the app opens again without asking (#1423). */
+    fun resumed() {
+        if (!enabled || authenticating) return
+        if (relock.returned()) { locked = false; failure = null }
     }
 
     /** RN's shouldAttemptMobileAppLockAuthentication. */
@@ -174,6 +218,8 @@ class AppLock(private val shell: InboxViewModel) {
      */
     private fun prompt(title: String, authenticators: Int) {
         val activity = host?.get() ?: return answered("unavailable")
+        // Debug builds only (check-app-lock-device.mjs, on a phone with no screen lock): the device lock says yes.
+        if (debugProperty("app_lock_answer") == "yes") return answered(null)
         try {
             if (!activity.getSystemService(KeyguardManager::class.java).isDeviceSecure) return answered("unavailable")
             if (activity.supportFragmentManager.isStateSaved) return answered("cancelled")
@@ -242,9 +288,9 @@ private val LockKeyhole = lucide("LockKeyhole", circle(12, 16, 1), "M5 10h14a2 2
     "M7 10V7a5 5 0 0 1 10 0v3", stroke = 2.2f)
 
 /**
- * RN's MobileAppLockGate around the app's screens: each time the app leaves the foreground (not a rotation) it locks, and while
- * locked the lock screen replaces the screens, so TalkBack reaches none of them. The screens keep their saved state (scroll
- * positions, open pickers) for when they come back.
+ * RN's MobileAppLockGate around the app's screens: each time the app leaves the foreground (not a rotation) it locks, and a
+ * return within the relock delay opens it again without asking. While locked the lock screen replaces the screens, so TalkBack
+ * reaches none of them. The screens keep their saved state (scroll positions, open pickers) for when they come back.
  */
 @Composable
 fun AppLockGate(model: InboxViewModel, content: @Composable () -> Unit) {
@@ -253,7 +299,13 @@ fun AppLockGate(model: InboxViewModel, content: @Composable () -> Unit) {
     DisposableEffect(owner, activity) {
         val main = activity as? MainActivity
         main?.let(model.lock::attach)
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) model.lock.paused(activity?.isChangingConfigurations == true) }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> model.lock.paused(activity?.isChangingConfigurations == true)
+                Lifecycle.Event.ON_RESUME -> model.lock.resumed()
+                else -> Unit
+            }
+        }
         owner.lifecycle.addObserver(observer)
         onDispose {
             owner.lifecycle.removeObserver(observer)

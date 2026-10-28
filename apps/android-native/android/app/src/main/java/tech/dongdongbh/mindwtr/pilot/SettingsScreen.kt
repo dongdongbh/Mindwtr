@@ -318,6 +318,8 @@ private fun GeneralSettings(model: InboxViewModel, view: JSONObject) = with(mode
         SettingRow(lock.getString("label"), lock.getString("description"), failure = model.lock.switchFailure(lock)) {
             RnSwitch(lock.getBoolean("value"), model.failedAction == null && !model.lock.authenticating, lock.getString("label"), theme.generalSwitch) { model.lock.toggle(lock) }
         }
+        // RN's relock delay row (#1423), only while App lock is on.
+        privacy.optJSONObject("appLockRelockDelay")?.let { PressRow(it.getString("label"), it.getString("value"), true, idle) { open("appLockRelockDelay") } }
         privacy.optJSONObject("appSearch")?.let { ToggleRow(model, it, true, props = theme.generalSwitch) { edit -> settings.general(edit) } }
     }
     SectionTitle(language.getString("title"), top = 16)
@@ -1147,6 +1149,7 @@ private fun Picker(model: InboxViewModel, view: JSONObject, picker: String) = wi
     val source = when (picker) {
         "theme" -> view.getJSONObject("appearance").getJSONObject("theme")
         "quickAccess" -> view.getJSONObject("appearance").getJSONObject("quickAccess")
+        "appLockRelockDelay" -> view.getJSONObject("privacy").optJSONObject("appLockRelockDelay")
         "language" -> view.getJSONObject("language")
         "defaultArea" -> view.getJSONObject("capture").getJSONObject("defaultArea")
         "weeklyReviewDay" -> view.getJSONObject("weeklyReview").getJSONObject("day")

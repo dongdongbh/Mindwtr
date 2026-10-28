@@ -99,6 +99,7 @@ import {
     isEntityOpenUrl,
     parseEntityOpenUrl,
     resolveEntityOpenTarget,
+    resolveMobileAppLockRelockDelayMinutes,
     isWorkspaceTransitionActive,
     legacyImportMismatch,
     assertNativeLegacyBackupSafe,
@@ -2620,10 +2621,12 @@ globalThis.MindwtrHost = {
     /**
      * RN's app lock gate: core's General row for it, whose `value` is `settings.security.mobileAppLockEnabled` (per device).
      * The gate guards the screens and shows no stored data, so no failed save blocks it: a lock turned on whose save is owed
-     * still locks.
+     * still locks. `relockDelayMinutes` is RN's resolveMobileAppLockRelockDelayMinutes of the stored delay, kept while the lock is
+     * off (General draws its row only while it is on).
      */
     appLock(): string {
-        return submit(async () => unwrap(contract.getGeneralSettings({})).privacy.appLock);
+        return submit(async () => ({ ...unwrap(contract.getGeneralSettings({})).privacy.appLock,
+            relockDelayMinutes: resolveMobileAppLockRelockDelayMinutes(useTaskStore.getState().settings?.security?.mobileAppLockRelockDelayMinutes) }));
     },
     projects(): string {
         return submit(async () => {
