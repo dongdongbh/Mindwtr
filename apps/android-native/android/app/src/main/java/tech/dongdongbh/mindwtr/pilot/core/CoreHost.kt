@@ -1047,6 +1047,13 @@ class CoreHost(
     fun calendarRequest(name: String, json: String): JSONObject = callLong("calendarRequest", name, json)
 
     /**
+     * Settings › GTD › Capture's Gmail section (host-gmail.ts requests) with [json] unchanged: `{ value }` or `{ errorKey }`. Connect
+     * waits on the account picker and Google's consent screen (up to RN's 180 s), Check now on Gmail, so it never holds the engine
+     * ([callLong]). None is a journaled write.
+     */
+    fun gmailRequest(name: String, json: String): JSONObject = callLong("gmailRequest", name, json)
+
+    /**
      * A long call's handle: [cancel] frees the thread that waits on it at once and aborts its operation's signal
      * (host-entry.ts abort), so its provider call stops. Main thread safe: nothing here waits for the engine.
      */

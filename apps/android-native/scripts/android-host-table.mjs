@@ -55,6 +55,7 @@ export const ANDROID_HOST_METHODS = [
     'editorSuggestions',
     'focus',
     'focusWindow',
+    'gmailRequest',
     'inboxCommit',
     'inboxDecisionUndo',
     'inboxEnd',

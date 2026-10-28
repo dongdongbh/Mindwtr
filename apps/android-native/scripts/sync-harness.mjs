@@ -65,11 +65,12 @@ export const startCloud = async ({ repo, port, token, dataDir }) => {
  * sees each statement with its bound parameters' JSON before it runs ('before') and after it succeeded ('after'), and may
  * answer 'fail' (the statement fails as SQLite would) or 'kill' (the process dies there). [nativeSubscribers] adds the widget
  * and alarm bridges (HostWidgets.kt, HostReminders.kt; their calls are recorded in [published]), so the boot starts the widget
- * publisher and remindersStart the reminder subscriber, as on the phone.
+ * publisher and remindersStart the reminder subscriber, as on the phone. [gmail] adds Gmail's calls as a build with the Gmail gate
+ * off answers them (GmailAuthorization.kt: unavailable; no receipts file), so the boot builds Gmail capture as on the phone.
  */
 export const hostDevice = async ({
     bundle, name, log = () => {}, filesRoot, automaticSync = true, trace, onSql,
-    database: databasePath = ':memory:', keyValue = new Map(), secrets = new Map(), nativeSubscribers = false,
+    database: databasePath = ':memory:', keyValue = new Map(), secrets = new Map(), nativeSubscribers = false, gmail = false,
 }) => {
     const { DatabaseSync } = await import('node:sqlite');
     const database = new DatabaseSync(databasePath);
@@ -110,6 +111,17 @@ export const hostDevice = async ({
             rnAlarmCleanup: () => 0,
             reminderReceiverCounts: () => JSON.stringify({ dropped: 0, notQueued: 0 }),
             reminderLedger: () => JSON.stringify({ fired: [], shown: [] }),
+        } : {}),
+        ...(gmail ? {
+            gmailCall(json) {
+                const id = String(++ids);
+                const { op } = JSON.parse(json);
+                setTimeout(() => answers.push({ json: JSON.stringify(op === 'status'
+                    ? { id, value: { available: false, connected: false, account: null, accountId: null } } : { id, error: 'E_GMAIL_CONFIG' }) }), 1);
+                return id;
+            },
+            gmailFile: guarded(() => { throw new Error('No Gmail receipts file in this build'); }),
+            gmailSql: guarded(() => { throw new Error('No Gmail receipts file in this build'); }),
         } : {}),
         collationKey: (text) => text,
         rnStateCommit: () => null,

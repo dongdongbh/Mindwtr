@@ -895,6 +895,12 @@
         // No abort: an AppSearch call ends on its own (its late answer settles nothing); 'appSearchAbort' does not exist and is skipped.
         global.__mindwtrAppSearchCall = fileChannel('appSearchCall', 'appSearchAbort');
     }
+    // Gmail capture (GmailAuthorization.kt, host-gmail.ts): RN's five calls on Kotlin's own threads, settled where a timer fires. A
+    // failure rejects with RN's fixed E_GMAIL_<KIND> code as its message. No abort: Kotlin bounds every call (30 s a read, 180 s a
+    // consent); 'gmailAbort' does not exist and is skipped, and a late answer settles nothing.
+    if (global.__mindwtrNative && typeof global.__mindwtrNative.gmailCall === 'function') {
+        global.__mindwtrGmailCall = fileChannel('gmailCall', 'gmailAbort');
+    }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarPushCall === 'function') {
         global.__mindwtrCalendarPushCall = fileChannel('calendarPushCall', 'calendarPushAbort');
     }

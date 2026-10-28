@@ -328,6 +328,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             // A screen's external calendars finished loading (host-calendar.ts): the screen showing them reads again.
             "calendarFeed" -> if (menu.list == FEED_LISTS[event.optString("slot")]) menu.whenIdle { if (writable) menu.refresh() }
             "toast" -> showToast(event, event.optString("action").ifEmpty { null }) { if (event.optString("open") == "sync") menu.openSyncSettings() }
+            // Gmail capture put mail in the Inbox (host-gmail.ts, outside any host call): the lists read again, as RN's store redraws.
+            "gmailStatus" -> event.optJSONObject("status")?.let { status ->
+                if (status.optInt("lastImportCount") > 0 && status.isNull("lastError")) menu.whenIdle { if (writable) refreshAll(synced = true) }
+            }
         }
     }
 

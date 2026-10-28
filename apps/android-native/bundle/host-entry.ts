@@ -144,6 +144,7 @@ import { createNativeAI } from './host-ai';
 import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundle/host-calendar';
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
 import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
+import { createNativeGmail } from './host-gmail';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
     prepareNativeTaskAttachmentAvailability, prepareNativeProjectFileAvailability, nativeProjectFileAvailabilityInitialURL,
     createNativeReadOnlySelfHostedAttachments, assertNativeSelfHostedAttachmentEncryptionAdmission } from './host-attachments';
@@ -227,6 +228,9 @@ type NativeBridge = {
     dataClose?(handle: string): string;
     /** Android only (HostAppSearch.kt, pass O2d): `{ supported, scheme }` for system search. */
     appSearchInfo?(): string;
+    /** Android only (HostGmailReceipts.kt): core's Gmail receipt store's file calls and SQL, in filesDir/GmailCapture only. */
+    gmailFile?(op: string, name: string, to: string): string;
+    gmailSql?(name: string, sql: string, paramsJson: string): string;
     /** Android debug builds only (pass D1c's device checks): a debug property's value, "" when unset. */
     debugProp?(name: string): string;
     /** Android debug builds only (pass D1c step 0): logs QuickJS's memory at a named checkpoint. */
@@ -699,6 +703,29 @@ const calendarFeeds = nativeCalendar ? createCalendarFeeds({
         } catch { /* the screen reads again on its next refresh */ }
     },
 }) : null;
+/**
+ * Gmail capture (host-gmail.ts, design pass G3), on a host with Kotlin's Gmail calls (Android; GmailAuthorization answers
+ * `available: false` in a FOSS build or with the build gate off): RN's controller while the app is in front, after the sync start.
+ */
+const nativeGmail = nativeSync && typeof globalThis.__mindwtrGmailCall === 'function' && typeof native().gmailFile === 'function'
+    ? createNativeGmail({
+        call: globalThis.__mindwtrGmailCall as (request: { op: string; path?: string }) => Promise<unknown>,
+        file: (op, name, to = '') => checked(native().gmailFile!(op, name, to)),
+        sql: (name, sql, params) => checked(native().gmailSql!(name, sql, params)),
+        addTasks: (items) => useTaskStore.getState().addTasks(items),
+        flushPendingSave,
+        // Declared further down: read when a capture saves, never while this module loads.
+        requireSaved: () => requireSaved(),
+        sandbox: isSandboxMode,
+        logInfo,
+        logWarn,
+        statusChanged: (status) => { checked(native().hostEvent(JSON.stringify({ type: 'gmailStatus', status }))); },
+    })
+    : null;
+/** Gmail follows the sync start and RN's AppState; a failure there never fails sync's. */
+const gmailLifecycle = (work: () => void) => {
+    try { work(); } catch { logWarn('Native Android Gmail capture lifecycle failed', { scope: 'gmail-capture' }); }
+};
 /** A Calendar call's input with the feed the Calendar shows; a host without calendars sends none (core then shows no events). */
 const withCalendar = <T,>(input: T): T => (calendarFeeds ? calendarFeeds.calendar(input) : input);
 const withReview = <T extends Record<string, unknown>>(slot: 'weeklyReview' | 'dailyReview', input: T): T => (calendarFeeds ? calendarFeeds.review(slot, input) : input);
@@ -5442,11 +5469,30 @@ globalThis.MindwtrHost = {
      * Each answers the badge and the finished-cycle count.
      */
     syncStart(appState: string): string {
-        return submit(async () => requireSync().start(appState));
+        return submit(async () => {
+            const state = requireSync().start(appState);
+            // RN's canonicalDataReady for Gmail capture (use-root-layout-gmail-capture.ts): the same validated load and replay.
+            gmailLifecycle(() => nativeGmail?.start(appState));
+            return state;
+        });
     },
-    /** RN's AppState change: resume and leave run core's triggers. */
+    /** RN's AppState change: resume and leave run core's triggers, and Gmail capture starts in front and stops behind. */
     syncAppState(appState: string): string {
-        return submit(async () => requireSync().appState(appState));
+        return submit(async () => {
+            gmailLifecycle(() => nativeGmail?.appState(appState));
+            return requireSync().appState(appState);
+        });
+    },
+    /**
+     * Settings › GTD › Capture's Gmail section (host-gmail.ts requests): `name` is one of its calls, `json` its input. Connect waits
+     * on the account picker and the consent screen, Check now on Gmail, so CoreHost.gmailRequest waits without holding the engine.
+     * None is a journaled write: a capture is idempotent through its task IDs and the receipts.
+     */
+    gmailRequest(name: string, json: string): string {
+        return submit(async () => {
+            if (!nativeGmail) throw new Error('Gmail capture is not available on this host');
+            return nativeGmail.request(name, JSON.parse(json) as { labelId?: string; enabled?: boolean });
+        });
     },
     /** `json` is the device's network state (`{ isConnected, isInternetReachable }`, as expo-network reads it). */
     syncNetwork(json: string): string {

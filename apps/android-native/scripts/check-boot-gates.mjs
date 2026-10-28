@@ -1547,8 +1547,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // only an unjournaled write or a read, so no journaled write can skip the journal through it.
         assert.match(journalKt, /fun unjournaled\(method: String, args: List<Any\?>\): Boolean = method in WRITES && key\(method, args\) in UNJOURNALED/);
         assert.match(coreHost, /private fun callLong\(method: String, vararg args: Any\?, handle: LongCall = LongCall\(\)\): JSONObject \{\s+require\(method !in WriteJournal\.WRITES \|\| WriteJournal\.unjournaled\(method, args\.toList\(\)\)\)/);
-        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest'],
-            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests and the attachments\' downloads take the long path');
+        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest'],
+            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s and Gmail\'s requests take the long path');
         // O1: About's requests (an update check, a feedback send, the heartbeat, the prompts) are reads of core: never journaled.
         assert(!writes.includes('aboutRequest'), 'an About request is no journaled write');
         assert.match(coreHost, /fun calendarRequest\(name: String, json: String\): JSONObject = callLong\("calendarRequest", name, json\)/);
@@ -4757,10 +4757,10 @@ export function setSha256HexProvider() {
 // stand-in bridge below lacks, so they are bundled and never run here. Each one the fake does not define throws if anything calls it.
 // host-attachments.ts's too: host-sync.ts binds them on the same host only. host-widgets.ts's are bound only on a host with RN's
 // widget module (Android), which the stand-in bridge lacks too. host-calendar.ts's are bound only on a host with the device
-// calendar bridge (C3), which it lacks as well.
+// calendar bridge (C3), which it lacks as well. host-gmail.ts's need Kotlin's Gmail calls (G3), which it lacks too.
 const hostSyncTs = readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-attachments.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-reminders.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-widgets.ts'), 'utf8')
-    + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8');
+    + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8');
 const syncOnly = [...new Set([...hostSyncTs.matchAll(/^import \{([\s\S]*?)\} from '@mindwtr\/core';/gm)].flatMap((m) => [...m[1].matchAll(/^\s+(\w+),$/gm)].map((n) => n[1])))]
     .filter((name) => !new RegExp(`export (?:async )?(?:function|const|class) ${name}\\b|export \\{[^}]*\\b${name}\\b`).test(fakeCore));
 assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('createMobileSyncTriggers'), 'host-sync.ts\'s core imports parsed');
@@ -9747,6 +9747,19 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         } finally {
             shipped.stop();
         }
+        // G3: the shipped bundle with Kotlin's Gmail calls loads, boots, starts Gmail with sync, and Settings reads it unavailable.
+        const withGmail = await hostDevice({ bundle: resolve(app, 'android/app/src/main/assets/core-host.js'), name: 'gmail', filesRoot, gmail: true });
+        try {
+            await withGmail.boot('journaled');
+            await withGmail.call('syncAppState', 'background');
+            await withGmail.call('syncAppState', 'active');
+            assert.equal(JSON.stringify(await withGmail.call('gmailRequest', 'config', '{}')),
+                '{"value":{"available":false,"connected":false,"account":null,"accountId":null,"labelId":null,"enabled":false}}');
+            assert.equal(JSON.stringify(await withGmail.call('gmailRequest', 'labels', '{}')), '{"errorKey":"settings.gmailCaptureConfigFailed"}');
+            assert.equal(withGmail.lines.filter((line) => /Gmail capture lifecycle failed/.test(line)).length, 0);
+        } finally {
+            withGmail.stop();
+        }
     } finally {
         rmSync(filesRoot, { recursive: true, force: true });
     }
@@ -10052,5 +10065,68 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(activity, /fun RetryButton\(onClick: \(\) -> Unit, enabled: Boolean, tag: String\? = null\)/);
     const all = ['MainActivity.kt', 'DailyReviewScreen.kt', 'MenuWidgets.kt', 'MindSweep.kt', 'TaskEditor.kt', 'WeeklyReviewScreen.kt'].map(source).join('\n');
     assert.doesNotMatch(all, /TextButton\([^\n]*\) \{ Text\(t\("common\.retry"\)\) \}/);
+}
+// Native Gmail capture, passes G2 and G3 (native-gmail-capture design rev 2): RN's controller on this host, started after the
+// validated load in front only, outside sandbox mode, on the polyfill's timers (CoreHost.schedulePump wakes for them); the flush
+// that throws on a failed save (the lost-mail rule); Kotlin's fixed codes as RN's rejection codes; no token, mail or account in a
+// log, and nothing of Gmail in SecretStore; FOSS answers unavailable.
+{
+    const gmailTs = readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8');
+    const play = readFileSync(resolve(app, 'android/app/src/play/java/tech/dongdongbh/mindwtr/pilot/GmailAuthorization.kt'), 'utf8');
+    const foss = readFileSync(resolve(app, 'android/app/src/foss/java/tech/dongdongbh/mindwtr/pilot/GmailAuthorization.kt'), 'utf8');
+    const receiptsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostGmailReceipts.kt'), 'utf8');
+    const gradle = readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8');
+    assert.match(gmailTs, /flushPendingSave: async \(\) => \{\s*await bindings\.flushPendingSave\(\);\s*bindings\.requireSaved\(\);\s*\},/, 'the flush throws on a failed save');
+    assert.match(gmailTs, /initialDelayMs: 1_000,/);
+    assert.match(gmailTs, /if \(controller \|\| bindings\.sandbox\(\)\) return;/);
+    assert.match(gmailTs, /const stop = \(\) => \{\s*runtime\.registerGmailCaptureController\(null\);\s*controller\?\.pause\(\);\s*controller\?\.dispose\(\);/);
+    assert.match(gmailTs, /if \(next === 'active'\) start\(\);\s*else stop\(\);/);
+    assert.doesNotMatch(gmailTs.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /setTimer: setTimeout|setTimeout\(/, 'the controller runs on the polyfill\'s timers');
+    assert.match(coreHost, /val delay = \(global\(engine, "__nextTimerDelay"\)\.call\(\) as\? Number\)\?\.toLong\(\) \?: return/, 'the idle pump wakes for the next timer');
+    const gmailBlock = hostEntry.slice(hostEntry.indexOf('const nativeGmail = '), hostEntry.indexOf('const gmailLifecycle = '));
+    for (const line of ['addTasks: (items) => useTaskStore.getState().addTasks(items),', 'flushPendingSave,', 'requireSaved: () => requireSaved(),', 'sandbox: isSandboxMode,']) {
+        assert(gmailBlock.includes(line), `host-entry binds Gmail's ${line}`);
+    }
+    assert.match(hostEntry, /const state = requireSync\(\)\.start\(appState\);\s*\/\/[^\n]*\s*gmailLifecycle\(\(\) => nativeGmail\?\.start\(appState\)\);/);
+    assert.match(hostEntry, /gmailLifecycle\(\(\) => nativeGmail\?\.appState\(appState\)\);\s*return requireSync\(\)\.appState\(appState\);/);
+    assert.match(coreHost, /fun gmailRequest\(name: String, json: String\): JSONObject = callLong\("gmailRequest", name, json\)/);
+    // Mail captured outside any host call shows: the status event of a cycle that imported reads the lists again.
+    assert.match(source('InboxViewModel.kt'), /"gmailStatus" -> event\.optJSONObject\("status"\)\?\.let \{ status ->\s*if \(status\.optInt\("lastImportCount"\) > 0 && status\.isNull\("lastError"\)\) menu\.whenIdle \{ if \(writable\) refreshAll\(synced = true\) \}/);
+    assert.match(hostEntry, /statusChanged: \(status\) => \{ checked\(native\(\)\.hostEvent\(JSON\.stringify\(\{ type: 'gmailStatus', status \}\)\)\); \},/);
+    // The polyfill's channel: a failure rejects with Kotlin's text, RN's fixed code, which host-gmail.ts reads as the code.
+    const answers = [];
+    const sent = [];
+    const bridge = { log() {}, nowMs: () => 0, gmailCall: (text) => { sent.push(JSON.parse(text)); return String(sent.length); }, ioNext: () => answers.shift() ?? '', ioBody: () => '' };
+    const state = vm.createContext({ __mindwtrNative: bridge });
+    vm.runInContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), state);
+    const read = state.__mindwtrGmailCall({ op: 'get', path: 'labels' });
+    const refused = state.__mindwtrGmailCall({ op: 'status' }).then(() => 'resolved', (error) => error.message);
+    answers.push(JSON.stringify({ id: '1', value: { labels: [] } }), JSON.stringify({ id: '2', error: 'E_GMAIL_AUTH' }));
+    state.__pumpTimers();
+    assert.equal(JSON.stringify(await read), '{"labels":[]}');
+    assert.equal(await refused, 'E_GMAIL_AUTH');
+    // A five-minute poll timer is the idle pump's next wake (CoreHost.schedulePump), not a busy loop.
+    vm.runInContext('setTimeout(() => {}, 300000)', state);
+    assert.equal(state.__nextTimerDelay(), 300000);
+    // No token or mail leaves Kotlin, and none reaches a log: the authorization logs nothing and keeps nothing in SecretStore.
+    for (const [name, text] of [['GmailAuthorization.kt (Play)', play], ['GmailAuthorization.kt (FOSS)', foss], ['HostGmailReceipts.kt', receiptsKt]]) {
+        assert.doesNotMatch(text, /\bLog\.|logLine|SecretStore|println/, `${name} logs nothing and stores no secret`);
+    }
+    assert.match(play, /private fun reject\(reply: \(Result<Any\?>\) -> Unit, failure: Throwable\) \{\s*reply\(Result\.failure\(IllegalStateException\(gmailFailureCode\(failure\)\)\)\)/, 'every Play failure replies with its fixed code');
+    assert.equal(play.match(/Result\.failure\(/g).length, 1, 'no other failure reply');
+    assert.match(foss, /put\("available", false\)/);
+    assert.match(foss, /Result\.failure\(IllegalStateException\("E_GMAIL_CONFIG"\)\)/);
+    assert.doesNotMatch(foss, /^import com\.google/m);
+    // RN's Kotlin core compiled as it is, Play only; Google's library in the Play channel only (checkFossDependencies proves it).
+    assert.match(gradle, /"playImplementation"\("com\.google\.android\.gms:play-services-auth:22\.0\.0"\)/);
+    assert.doesNotMatch(gradle, /(?<!")implementation\("com\.google\.android\.gms/);
+    assert.match(gradle, /getByName\("play"\)\.java\.srcDir\(layout\.buildDirectory\.dir\("generated\/rnGmail\/main\/java"\)\)/);
+    assert.match(gradle, /getByName\("testPlay"\)\.java\.srcDir\(layout\.buildDirectory\.dir\("generated\/rnGmail\/test\/java"\)\)/);
+    // RN's receipts file, in place: the same folder and name, so an RN user who upgrades keeps every receipt.
+    assert.match(source('ProcessCoreHost.kt'), /gmailReceipts = HostGmailReceipts\(File\(app\.filesDir, "GmailCapture"\)\)/);
+    assert.match(receiptsKt, /BundledSQLiteDriver\(\)\.open\(file\.path\)/);
+    assert.doesNotMatch(receiptsKt, /android\.database/);
+    const gmailTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-gmail.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(gmailTested.status, 0, `bundle/host-gmail.test.ts: ${gmailTested.stderr.slice(-1500)}`);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');
