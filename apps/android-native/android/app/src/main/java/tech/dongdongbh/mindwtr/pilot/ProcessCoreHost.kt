@@ -481,7 +481,7 @@ internal object ProcessCoreHost {
         }
         val runtime = syncHost ?: return
         syncThread.execute { runCatching { runtime.syncAppState(state) }.onFailure { Log.w(CoreHost.TAG, "Native Android sync app state failed ${failureForLog(it)}") } }
-        if (state == "active") application?.let { drainAudio(it, runtime, resumedAt) { appState != "active" } }
+        if (state == "active") application?.let { drainAudio(it, runtime, resumedAt, quietSince = resumedAt) { appState != "active" } }
     }
 
     private val audioThread = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-widget-audio") }
@@ -490,13 +490,14 @@ internal object ProcessCoreHost {
     /**
      * The widget's queued recordings (core's ingestPendingAudio), as RN's foreground drain: once sync started (after the boot's
      * validated load, replay and queue drain) and on each resume. One at a time; a resume while one runs asks for one more.
-     * The wait and its bound count from [askedAt], the trigger; [stop] ends it (a resume's: the app left) ([WidgetAudioDrain]).
+     * The wait and its bound count from [askedAt], the trigger; a resume passes itself as [quietSince] (it counts as a call, so a
+     * long idle never lets the drain go before the screen's first read) and [stop] (the app left) ([WidgetAudioDrain]).
      */
-    private fun drainAudio(app: Application, runtime: CoreHost, askedAt: Long, stop: () -> Boolean = { false }) {
+    private fun drainAudio(app: Application, runtime: CoreHost, askedAt: Long, quietSince: Long = 0, stop: () -> Boolean = { false }) {
         if (!audioDrainQueued.compareAndSet(false, true)) return
         audioThread.execute {
             audioDrainQueued.set(false)
-            WidgetAudioDrain.run({ WidgetAudioDrain.hasQueuedRecording(queue(app)) }, { runtime.awaitQuiet(askedAt, stop) },
+            WidgetAudioDrain.run({ WidgetAudioDrain.hasQueuedRecording(queue(app)) }, { runtime.awaitQuiet(askedAt, quietSince, stop) },
                 {
                     Log.i(CoreHost.TAG, "Native Android widget audio drain after its quiet wait waitedMs=${SystemClock.uptimeMillis() - askedAt}")
                     runCatching { runtime.ingestPendingAudio() }.onFailure { Log.w(CoreHost.TAG, "Native Android widget audio drain failed ${failureForLog(it)}") }

@@ -10217,11 +10217,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     // The journaled ingest still passes no audio port: a transcription must never run inside its deadline.
     assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)/);
     assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime, SystemClock\.uptimeMillis\(\)\)/);
-    assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt\) \{ appState != "active" \} \}/);
+    assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime, resumedAt, quietSince = resumedAt\) \{ appState != "active" \} \}/);
+    // A resume counts as a call (W1b): after a long idle the gate would hold at once, before the screen's first read. The sync
+    // start's drain keeps quietSince 0: the boot's own reads are its calls.
+    assert.match(processHost, /private fun drainAudio\(app: Application, runtime: CoreHost, askedAt: Long, quietSince: Long = 0, stop: \(\) -> Boolean = \{ false \}\)/);
     // The resume path is tuned for hot start: with no recording queued, a drain costs the queue's listing and a read of its small
     // items (no store read, no fingerprint, no core call); with one, it waits behind the same quiet gate as the widget build and the
     // resume reminder cycle. The queue's audio items, never the WAV folder, start it: an orphan WAV costs nothing (core deletes it).
-    assert.match(processHost, /audioDrainQueued\.set\(false\)\s*WidgetAudioDrain\.run\(\{ WidgetAudioDrain\.hasQueuedRecording\(queue\(app\)\) \}, \{ runtime\.awaitQuiet\(askedAt, stop\) \},\s*\{\s*Log\.i\(CoreHost\.TAG, "Native Android widget audio drain after its quiet wait waitedMs=[^"]*"\)\s*runCatching \{ runtime\.ingestPendingAudio\(\) \}/);
+    assert.match(processHost, /audioDrainQueued\.set\(false\)\s*WidgetAudioDrain\.run\(\{ WidgetAudioDrain\.hasQueuedRecording\(queue\(app\)\) \}, \{ runtime\.awaitQuiet\(askedAt, quietSince, stop\) \},\s*\{\s*Log\.i\(CoreHost\.TAG, "Native Android widget audio drain after its quiet wait waitedMs=[^"]*"\)\s*runCatching \{ runtime\.ingestPendingAudio\(\) \}/);
     assert.match(source('core/WidgetAudioDrain.kt'), /val ended = awaitQuiet\(\)\s*if \(ended != "left"\) ingest\(\)/);
     assert.match(source('core/WidgetAudioDrain.kt'), /queue\.listFiles \{ file -> file\.name\.endsWith\(".json"\) \}\s*\?\.any \{ item -> runCatching \{ JSONObject\(item\.readText\(\)\)\.optString\("kind"\) == "audio" \}/);
     assert.doesNotMatch(processHost, /AUDIO_DIRECTORY/, 'the WAV folder never starts a drain');

@@ -79,6 +79,16 @@ class WidgetAudioDrainQueueTest {
         assertEquals(false, WidgetAudioDrain.hasQueuedRecording(dir))
     }
 
+    @Test fun anOrphanWavNeverWaitsOrCallsCore() {
+        val dir = queue("a.json" to """{"kind":"capture","title":"Milk"}""")
+        java.io.File(folder.root, "quick-capture-audio").apply { mkdirs() }.resolve("0c8a7d8e-1b2c-4d5e-8f90-123456789abc.wav").writeBytes(ByteArray(64))
+        var waits = 0
+        var ingests = 0
+        assertEquals("empty", WidgetAudioDrain.run({ WidgetAudioDrain.hasQueuedRecording(dir) }, { waits++; "quiet" }, { ingests++ }))
+        assertEquals(0, waits)
+        assertEquals(0, ingests)
+    }
+
     @Test fun aQueuedAudioItemAsksForADrain() {
         val dir = queue("a.json" to """{"kind":"capture","title":"Milk"}""", "b.json" to """{"kind":"audio","id":"0c8a7d8e-1b2c-4d5e-8f90-123456789abc"}""")
         assertEquals(true, WidgetAudioDrain.hasQueuedRecording(dir))
