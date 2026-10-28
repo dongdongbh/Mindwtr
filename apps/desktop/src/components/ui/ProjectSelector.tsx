@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { getProjectChoiceState, groupProjectsForPicker, type Project } from '@mindwtr/core';
+import { getProjectChoiceState, groupProjectsForPicker, useTaskStore, type Project } from '@mindwtr/core';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { ModalPortal } from '../ModalPortal';
@@ -83,7 +83,8 @@ export function ProjectSelector({
         () => getProjectChoiceState(projects, query, projectPool),
         [projectPool, projects, query],
     );
-    const groups = useMemo(() => groupProjectsForPicker(filteredProjects), [filteredProjects]);
+    const areas = useTaskStore((state) => state.areas);
+    const groups = useMemo(() => groupProjectsForPicker(filteredProjects, areas), [areas, filteredProjects]);
     // Visual order: the arrow keys walk the DOM and Enter takes the first row, so both follow it.
     const filtered = useMemo(() => [...groups.active, ...groups.deferred], [groups]);
 

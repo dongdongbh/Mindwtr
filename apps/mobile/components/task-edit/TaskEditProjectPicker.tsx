@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { compareProjectsByPickerOrder, getProjectChoiceState, groupProjectsForPicker, tFallback, type Project } from '@mindwtr/core';
+import { getProjectChoiceState, groupProjectsForPicker, tFallback, useTaskStore, type Project } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { styles } from './task-edit-modal.styles';
 import { logError } from '../../lib/app-log';
@@ -71,15 +71,12 @@ export function TaskEditProjectPicker({
 
     const normalizedProjectQuery = projectQuery.trim().toLowerCase();
     const { filteredProjects, exactMatch, canCreate } = useMemo(
-        () => getProjectChoiceState(
-            [...projects].sort(compareProjectsByPickerOrder),
-            projectQuery,
-            [...(allProjects ?? projects)].sort(compareProjectsByPickerOrder),
-        ),
+        () => getProjectChoiceState(projects, projectQuery, allProjects ?? projects),
         [allProjects, projectQuery, projects],
     );
     // Active projects first, then Someday / Waiting under a heading (#1467); matches are grouped the same way.
-    const projectGroups = useMemo(() => groupProjectsForPicker(filteredProjects), [filteredProjects]);
+    const areas = useTaskStore((state) => state.areas);
+    const projectGroups = useMemo(() => groupProjectsForPicker(filteredProjects, areas), [areas, filteredProjects]);
 
     const handleCreateProject = async () => {
         if (!allowCreate || creatingRef.current) return;

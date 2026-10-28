@@ -1,4 +1,4 @@
-import { getProjectAccentColor, groupProjectsForPicker, tFallback, type Project as CoreProject } from '@mindwtr/core';
+import { getProjectAccentColor, groupProjectsForPicker, tFallback, useTaskStore, type Project as CoreProject } from '@mindwtr/core';
 import React from 'react';
 import { Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Folder, X } from 'lucide-react-native';
@@ -71,6 +71,7 @@ export function InboxProjectSection({
   selectSection,
 }: Props) {
   const filledButton = useFilledButtonColors();
+  const areas = useTaskStore((state) => state.areas);
   if (!show) return null;
 
   const areaOptions = Array.from(areaById.values());
@@ -181,7 +182,7 @@ export function InboxProjectSection({
   };
 
   // Active projects first, then Someday / Waiting after a heading (#1467).
-  const projectGroups = groupProjectsForPicker(filteredProjects);
+  const projectGroups = groupProjectsForPicker(filteredProjects, areas);
   const renderProjectChip = (project: Project) => {
     const projectColor = getProjectAccentColor(project, areaById);
     const isSelected = selectedProjectId === project.id;

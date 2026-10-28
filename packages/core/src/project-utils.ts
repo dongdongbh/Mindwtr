@@ -1,7 +1,7 @@
-import type { Project, ProjectFlowMode, Section, Task, TaskSortBy } from './types';
+import type { Area, Project, ProjectFlowMode, Section, Task, TaskSortBy } from './types';
 import { isTaskActionable } from './task-status';
 // task-utils imports this file too; both only call across at run time, so the cycle is safe.
-import { getProjectFlowMode, getSequentialFirstTaskIds, getTaskSequencing, getTaskSequenceKey, isSequentialChainStatus } from './task-utils';
+import { compareAreasByOrder, compareProjectsByOrder, getProjectFlowMode, getSequentialFirstTaskIds, getTaskSequencing, getTaskSequenceKey, isSequentialChainStatus } from './task-utils';
 
 export function normalizeProjectSequentialScope(value: unknown): Project['sequentialScope'] {
     if (value === 'section' || value === 'project') return value;
@@ -349,10 +349,6 @@ export type ProjectChoiceState = {
     canCreate: boolean;
 };
 
-/** The mobile project pickers' order: each project's `order` (0 when unset); ties keep the order they came in. */
-export const compareProjectsByPickerOrder = (a: Project, b: Project): number =>
-    (Number.isFinite(a.order) ? a.order : 0) - (Number.isFinite(b.order) ? b.order : 0);
-
 export function getProjectChoiceState(
     browseProjects: readonly Project[],
     query: string,
@@ -375,16 +371,31 @@ export function getProjectChoiceState(
 }
 
 /**
- * A destination picker's two groups (#1467): active projects, then Someday / Waiting ones. Each group keeps
- * the order it came in, so search matches stay matches and the picker's own order rule still applies inside.
+ * A destination picker's two groups (#1467): active projects, then Someday / Waiting ones. Each group is in
+ * the Projects view's order: areas in their order, projects without an area last, then each project's stored
+ * order, so a picker shows the order the user dragged instead of A-Z.
  */
-export function groupProjectsForPicker<T extends { status?: Project['status'] }>(projects: readonly T[]): { active: T[]; deferred: T[] } {
+type PickerProject = Pick<Project, 'title'> & Partial<Pick<Project, 'status' | 'areaId' | 'order'>>;
+
+export function groupProjectsForPicker<T extends PickerProject>(
+    projects: readonly T[],
+    areas: readonly Area[],
+): { active: T[]; deferred: T[] } {
+    const areaRank = new Map(areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder).map((area, index) => [area.id, index]));
+    const rankOf = (project: PickerProject) => (project.areaId ? areaRank.get(project.areaId) : undefined) ?? areaRank.size;
+    const sorted = [...projects].sort((a, b) => rankOf(a) - rankOf(b) || compareProjectsByOrder(a, b));
     const active: T[] = [];
     const deferred: T[] = [];
-    for (const project of projects) {
+    for (const project of sorted) {
         (project.status === 'someday' || project.status === 'waiting' ? deferred : active).push(project);
     }
     return { active, deferred };
+}
+
+/** {@link groupProjectsForPicker} as one list: the order a picker shows its project rows in. */
+export function sortProjectsForPicker<T extends PickerProject>(projects: readonly T[], areas: readonly Area[]): T[] {
+    const { active, deferred } = groupProjectsForPicker(projects, areas);
+    return [...active, ...deferred];
 }
 
 export const getProjectsByTag = (projects: Project[], tagId: string): Project[] => {

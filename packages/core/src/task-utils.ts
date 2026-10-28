@@ -448,8 +448,8 @@ export function compareTasksByProjectOrder<T extends SequentialTaskOrderFields &
 // Ranks projects the way the sidebar and project-grouped views arrange them:
 // manual order first (projects without one sort last), title as the tie-break.
 export function compareProjectsByOrder(
-    a: Pick<Project, 'order' | 'title'>,
-    b: Pick<Project, 'order' | 'title'>,
+    a: Pick<Project, 'title'> & Partial<Pick<Project, 'order'>>,
+    b: Pick<Project, 'title'> & Partial<Pick<Project, 'order'>>,
 ): number {
     const aOrder = Number.isFinite(a.order) ? (a.order as number) : Number.POSITIVE_INFINITY;
     const bOrder = Number.isFinite(b.order) ? (b.order as number) : Number.POSITIVE_INFINITY;

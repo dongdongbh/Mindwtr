@@ -3,7 +3,6 @@ import {
     compareAreasByOrder,
     groupProjectsForPicker,
     isSelectableProjectForTaskAssignment,
-    numericTextCollator,
     type Area,
     type Project,
     type TaskMoveDestination,
@@ -80,12 +79,7 @@ export function DestinationSelector({
         dropdownRef,
     });
 
-    const sortedProjects = useMemo(
-        () => projects
-            .filter(isSelectableProjectForTaskAssignment)
-            .sort((left, right) => numericTextCollator.compare(left.title, right.title)),
-        [projects],
-    );
+    const selectableProjects = useMemo(() => projects.filter(isSelectableProjectForTaskAssignment), [projects]);
     const sortedAreas = useMemo(
         () => areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder),
         [areas],
@@ -95,9 +89,9 @@ export function DestinationSelector({
         () => groupProjectsForPicker(!showProjects
             ? []
             : normalizedQuery
-                ? sortedProjects.filter((project) => project.title.toLocaleLowerCase().includes(normalizedQuery))
-                : sortedProjects),
-        [normalizedQuery, showProjects, sortedProjects],
+                ? selectableProjects.filter((project) => project.title.toLocaleLowerCase().includes(normalizedQuery))
+                : selectableProjects, areas),
+        [areas, normalizedQuery, selectableProjects, showProjects],
     );
     // Visual order: Enter takes the first row and the arrow keys walk the DOM, so both follow it.
     const filteredProjects = useMemo(() => [...projectGroups.active, ...projectGroups.deferred], [projectGroups]);
@@ -205,7 +199,7 @@ export function DestinationSelector({
     const canCreateProject = showProjects
         && Boolean(onCreateProject)
         && Boolean(normalizedQuery)
-        && !sortedProjects.some((project) => project.title.trim().toLocaleLowerCase() === normalizedQuery);
+        && !selectableProjects.some((project) => project.title.trim().toLocaleLowerCase() === normalizedQuery);
     const canCreateArea = showAreas
         && Boolean(onCreateArea)
         && Boolean(normalizedQuery)

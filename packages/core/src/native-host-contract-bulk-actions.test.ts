@@ -410,21 +410,20 @@ describe('native host contract: selection mode', () => {
             expect(log).toEqual([]);
         });
 
-        it('the project picker lists projects in the mobile picker order (by order, not by title)', async () => {
+        it('the project picker lists projects in the Projects view order: area order, then project order (#1467)', async () => {
             freezeClock();
             const { host } = await open();
-            await useTaskStore.getState().updateProject('p-launch', { order: -10 });
-            await useTaskStore.getState().updateProject('p-home', { order: 10 });
             const ids = (query?: string) => value(host.getBulkActions({
                 list: 'inbox', taskIds: ['i-call'], organize: {}, picker: { kind: 'project', ...(query === undefined ? {} : { query }) },
             })).picker!.items.map((item) => item.value).filter((id) => id === 'p-launch' || id === 'p-home');
-            // Title order would put Home first; mobile's TaskEditProjectPicker sorts by `order`.
+            // Work's area is first, so its project leads even though Home Repairs sorts first by title.
             expect(ids()).toEqual(['p-launch', 'p-home']);
-            // A search keeps that order ("h" is in both titles).
-            expect(ids('h')).toEqual(['p-launch', 'p-home']);
-            // Equal custom orders keep the title order passed to the mobile picker.
-            await useTaskStore.getState().updateProject('p-launch', { order: 10 });
+            await useTaskStore.getState().updateArea('a-home', { order: -1 });
             expect(ids()).toEqual(['p-home', 'p-launch']);
+            // In one area the stored order wins over the title, and a search keeps that order ("h" is in both titles).
+            await useTaskStore.getState().updateProject('p-launch', { areaId: 'a-home', order: -10 });
+            expect(ids()).toEqual(['p-launch', 'p-home']);
+            expect(ids('h')).toEqual(['p-launch', 'p-home']);
         });
 
         it('the organize pickers lead with Keep and None, and search the rest', async () => {

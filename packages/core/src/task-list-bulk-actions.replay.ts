@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { collectBulkTaskTokens } from './bulk-task-tokens';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
 import type { NativeBulkList } from './native-host-contract-bulk-actions';
-import { compareProjectsByPickerOrder } from './project-utils';
+import { sortProjectsForPicker } from './project-utils';
 import { updateRangeSelection } from './range-selection';
 import { getSomedaySectionMoveSelection } from './someday-sections-model';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -258,7 +258,7 @@ export function createCoreDriver(t: (key: string) => string): BulkDriver {
                 dates: dialog.dates.map(({ field, label }) => ({ field, model: buildBulkOrganizeDateFieldModel({ label, value: draft[field], now, t }) })),
                 picker: picker === 'project'
                     ? {
-                        projects: [...projects].sort(compareProjectsByPickerOrder).map((project) => project.id),
+                        projects: sortProjectsForPicker(projects, store().areas).map((project) => project.id),
                         leading: [[dialog.project.keepLabel, draft.projectChoice === BULK_ORGANIZE_KEEP]],
                         selectedId: draft.projectChoice === BULK_ORGANIZE_NONE ? null : dialog.project.selectedId,
                     }

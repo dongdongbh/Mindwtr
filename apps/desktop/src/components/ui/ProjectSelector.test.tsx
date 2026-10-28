@@ -405,10 +405,11 @@ describe('ProjectSelector', () => {
     });
 
     describe('while searching (#1461)', () => {
+        // Stored order, not A-Z: the picker follows the Projects view (#1467).
         const fooBarBaz: Project[] = [
-            { ...projects[0], id: 'p-foo', title: 'foo' },
-            { ...projects[0], id: 'p-bar', title: 'bar' },
-            { ...projects[0], id: 'p-baz', title: 'baz' },
+            { ...projects[0], id: 'p-foo', title: 'foo', order: 0 },
+            { ...projects[0], id: 'p-bar', title: 'bar', order: 1 },
+            { ...projects[0], id: 'p-baz', title: 'baz', order: 2 },
         ];
         const renderSearching = (onChange = vi.fn(), onCreateProject = vi.fn(async () => 'p-new')) => {
             const view = render(

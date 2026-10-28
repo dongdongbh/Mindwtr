@@ -103,7 +103,7 @@ export function TaskEditDestinationPicker({
         [allProjects, projects, query],
     );
     // Active projects first, then Someday / Waiting under their own heading (#1467).
-    const projectGroups = useMemo(() => groupProjectsForPicker(projectChoices.filteredProjects), [projectChoices.filteredProjects]);
+    const projectGroups = useMemo(() => groupProjectsForPicker(projectChoices.filteredProjects, areas), [areas, projectChoices.filteredProjects]);
     const activeAreas = useMemo(
         () => areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder),
         [areas],

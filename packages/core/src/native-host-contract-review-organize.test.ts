@@ -7,7 +7,7 @@ import { createNativeHostContract } from './native-host-contract';
 import { matchesPickerQuery } from './native-host-contract-menu-views';
 import { taskRevisionOf, setNativeReplayTokens } from './native-request-receipts';
 import type { NativeReviewAction, NativeReviewOverview } from './native-host-contract-review-views';
-import { compareProjectsByPickerOrder } from './project-utils';
+import { sortProjectsForPicker } from './project-utils';
 import { getAdvancedReviewDate } from './review-utils';
 import { createReviewRecorder, loadReviewViewsFixture, seedReviewStore, type ReviewFixturePart, type ReviewScenario } from './review-views-model.replay';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
@@ -236,7 +236,7 @@ describe('native host contract: Review rows and Review\'s Organize sheet', () =>
             expect(review.bulk?.organize).toMatchObject({ draft, title: dialog.title, subtitle: dialog.subtitle, canApply: true, project: dialog.project, area: dialog.area });
 
             // The project picker: Keep, None, then the options matching the search (the Inbox tokens' rule), in mobile's picker order.
-            const projects = [...getBulkOrganizeProjectOptions(state.projects)].sort(compareProjectsByPickerOrder);
+            const projects = sortProjectsForPicker(getBulkOrganizeProjectOptions(state.projects), state.areas);
             const all = everything(host, { selectedIds: REVIEW_SELECTION, organize: { draft }, picker: { kind: 'project' } }).bulk!.picker!;
             expect(all.items.map((item) => item.value)).toEqual([BULK_ORGANIZE_KEEP, BULK_ORGANIZE_NONE, ...projects.map((project) => project.id)]);
             expect(review.bulk?.picker?.items.slice(2).map((item) => item.label))

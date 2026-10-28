@@ -83,7 +83,7 @@ import {
     type NativeUnsavedWrite,
 } from './native-request-receipts';
 import { updateRangeSelection } from './range-selection';
-import { compareProjectsByPickerOrder, getProjectChoiceState } from './project-utils';
+import { getProjectChoiceState, sortProjectsForPicker } from './project-utils';
 import { useTaskStore } from './store';
 import {
     applyBulkOrganizeDraftEdit,
@@ -243,7 +243,7 @@ const exactDestination = (kind: 'project' | 'area', query: string): Project | Ar
     const state = useTaskStore.getState();
     if (kind === 'project') {
         const options = getBulkOrganizeProjectOptions(state.projects);
-        return getProjectChoiceState([...options].sort(compareProjectsByPickerOrder), query, [...state.projects].sort(compareProjectsByPickerOrder)).exactMatch;
+        return getProjectChoiceState(sortProjectsForPicker(options, state.areas), query, sortProjectsForPicker(state.projects, state.areas)).exactMatch;
     }
     const normalized = query.trim().toLowerCase();
     return normalized ? getBulkOrganizeAreaOptions(state.areas).find((area) => area.name.toLowerCase() === normalized) : undefined;
@@ -344,8 +344,8 @@ export function buildNativeBulkOrganizePicker(input: {
     const set = (value: string): BulkOrganizeDraftEdit => ({ type: isProject ? 'setProject' : 'setArea', value });
     const choice = (value: string, label: string) => ({ value, label, selected: current === value, edit: set(value) });
     const options = isProject
-        // In mobile's picker order (TaskEditProjectPicker sorts core's title-ordered options by `order`).
-        ? [...getBulkOrganizeProjectOptions(state.projects)].sort(compareProjectsByPickerOrder).map((project) => ({ id: project.id, label: project.title }))
+        // In mobile's picker order (TaskEditProjectPicker shows them grouped in the Projects view's order).
+        ? sortProjectsForPicker(getBulkOrganizeProjectOptions(state.projects), state.areas).map((project) => ({ id: project.id, label: project.title }))
         : getBulkOrganizeAreaOptions(state.areas).map((area) => ({ id: area.id, label: area.name }));
     // Keep and None stay whatever the search; the options narrow.
     const items = [
