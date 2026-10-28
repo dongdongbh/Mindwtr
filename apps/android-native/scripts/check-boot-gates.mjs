@@ -2177,7 +2177,7 @@ assert.match(model, /if \(id != openProjectId\) return\s+if \(detail == null\) k
 assert.match(model, /if \(failure\.message\?\.startsWith\("TASK_NOT_FOUND"\) != true\) throw failure\s+null/);
 // Read on every resume of the Projects tab and after every command, as Focus is.
 assert.match(projectsUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{ model\.refreshProjects\(\) \}/);
-assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 5, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), and RN\'s Show completed and Completed pile (b4a)');
+assert.equal(code([activity, model, projectsUi].join('\n')).match(/(?<!fun )refreshProjects\(\)/g).length, 6, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), RN\'s Show completed and Completed pile (b4a), and a row the clock changes (#1360)');
 assert.match(model, /ProjectsView\.parse\(runtime\.projects\(\)\) else null,\s*at\.project,\s*if \(shown == null \|\| shown == Screen\.Projects\) readOpen\(runtime, at\) else null,/);
 // The open project survives rotation (ViewModel) and process death (SavedStateHandle); Back closes it unless a retry is owed.
 assert.match(model, /var openProjectId by mutableStateOf\(saved\.get<String>\("project"\)\)/);

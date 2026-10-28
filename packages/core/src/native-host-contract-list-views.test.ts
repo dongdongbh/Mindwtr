@@ -25,7 +25,7 @@ import { replayAfterRestart, value } from './screen-parity.replay';
 import { matchesPickerQuery, paramsKey } from './native-host-contract-menu-views';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { noopStorage } from './storage';
-import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
+import { buildTaskRowMeta, getTaskRowMetaValidUntil, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
 import { buildTrashTimeline } from './task-utils';
 import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
 import { generateUUID } from './uuid';
@@ -154,12 +154,13 @@ describe('native host contract: Contexts, Archive, Trash and History', () => {
         const now = new Date();
         const meta = (id: string) => {
             const task = state._tasksById.get(id)!;
-            return buildTaskRowMeta({
+            // The contract adds the instant the row next reads differently (#1360).
+            return { validUntil: getTaskRowMetaValidUntil(task, now, resolveTaskRowFeatures(state.settings)), ...buildTaskRowMeta({
                 task, lookup: resolveTaskRowLookup(task, state.projects, state.areas, state._sectionsById),
                 features: resolveTaskRowFeatures(state.settings), language: 'en',
                 dateFormatting: { language: 'en', dateFormat: state.settings.dateFormat, calendarSystem: state.settings.calendarSystem, timeFormat: state.settings.timeFormat, systemLocale: null },
                 t: getTranslator('en'), now,
-            });
+            }) };
         };
         expect(first.value.total).toBe(model.tasks.length);
         expect(first.value.rows.map((row) => [row.id, row.meta])).toEqual(model.tasks.slice(0, 2).map((task) => [task.id, meta(task.id)]));

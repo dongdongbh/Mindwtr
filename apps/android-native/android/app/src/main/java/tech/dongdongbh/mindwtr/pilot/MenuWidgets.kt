@@ -114,6 +114,8 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
     val c = LocalTheme.current.colors
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(owner) { owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { menu.refresh() } }
+    // Again when the clock changes a row (a due color, an age; #1360) or the widget list's day (its midnight).
+    ReadAgainAt(menu.page?.let { shown -> clockReadAt(shown.items.map { it.row }, shown.view) }) { menu.refresh() }
     // Back closes an open dialog, then leaves selection mode, then the screen.
     BackHandler(enabled = failedAction == null) { if (menu.dialog != null) menu.backInDialog() else if (menu.page?.bulk != null) menu.list?.let(menu::endBulk) else menu.closeScreen() }
     Box(Modifier.fillMaxSize().background(c.bg).systemBarsPadding().semantics { testTagsAsResourceId = true }.testTag("menu-screen")) {
@@ -179,6 +181,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
 fun QuickList(model: InboxViewModel, modifier: Modifier) = with(model) {
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(owner) { owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { menu.refresh() } }
+    ReadAgainAt(menu.page?.let { shown -> clockReadAt(shown.items.map { it.row }, shown.view) }) { menu.refresh() }
     BackHandler(enabled = failedAction == null && menu.dialog != null) { menu.backInDialog() }
     Box(modifier) {
         when (menu.list) {

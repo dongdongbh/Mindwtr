@@ -171,6 +171,10 @@ fun ProjectsTab(model: InboxViewModel, modifier: Modifier) {
     LaunchedEffect(owner) {
         owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { model.refreshProjects() }
     }
+    // The open project again when the clock changes one of its rows (a due color, an age; #1360).
+    ReadAgainAt(model.project?.takeIf { model.openProjectId != null }?.let { open -> clockReadAt(open.items.map { (it as? DetailTask)?.row }) }) {
+        model.refreshProjects()
+    }
     if (model.openProjectId == null) ProjectList(model, modifier) else ProjectDetailList(model, modifier)
 }
 

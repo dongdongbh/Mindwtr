@@ -153,6 +153,35 @@ const swipeFor = (status: TaskStatus, t: TranslateFn): TaskRowMeta['swipe'] => {
     return { target: 'done', label: tFallback(t, 'common.done', 'Done'), icon: 'done' };
 };
 
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * The first instant (epoch ms) after `now` at which buildTaskRowMeta for this task reads differently, the store unchanged: the
+ * due tone's (dueToneFor: dueSoon from 72 h before the due instant, overdue just after it) and the age label's next change
+ * (getTaskAgeLabel over whole days). Null when the clock never changes the row. A host reads a list again at its rows'
+ * earliest (#1360: RN redraws its rows each minute).
+ */
+export function getTaskRowMetaValidUntil(task: Task, now: Date, features: Pick<TaskRowFeatures, 'taskAge'>): number | null {
+    const nowMs = now.getTime();
+    if (!Number.isFinite(nowMs) || task.status === 'reference') return null;
+    let next = Infinity;
+    const consider = (at: number) => { if (at > nowMs && at < next) next = at; };
+    const due = isTaskActionable(task) ? safeParseDueDate(task.dueDate)?.getTime() : undefined;
+    // getTaskUrgency compares the hours left strictly: each tone changes 1 ms after its threshold instant.
+    if (due !== undefined) for (const before of [72 * HOUR_MS, 0]) consider(due - before + 1);
+    const created = Date.parse(task.createdAt);
+    if (features.taskAge && task.status !== 'done' && Number.isFinite(created)) {
+        // The label's steps are at most 30 days apart (months), and every language steps on the same days.
+        const days = Math.floor((nowMs - created) / DAY_MS);
+        const label = getTaskAgeLabel(task.createdAt, 'en', now);
+        for (let day = Math.max(days + 1, 1); day <= days + 31; day += 1) {
+            if (getTaskAgeLabel(task.createdAt, 'en', new Date(created + day * DAY_MS)) !== label) { consider(created + day * DAY_MS); break; }
+        }
+    }
+    return Number.isFinite(next) ? next : null;
+}
+
 /** The React Native task row's meta line and labels, as data. The output depends only on the input. */
 export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
     const { task, features, t } = input;

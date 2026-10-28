@@ -33,6 +33,11 @@ export type NativeWidgetListView = {
     rows: NativeTaskRow[];
     /** RN's empty line, only when the list has no task. */
     empty: { message: string } | null;
+    /**
+     * When to read the screen again (epoch ms): the next local midnight (RN's day key, e5c0ca45e), or a row's meta changing
+     * first (#1360).
+     */
+    validUntil: number;
 };
 
 type WidgetListDeps = {
@@ -73,6 +78,8 @@ export function createWidgetListMethods(deps: WidgetListDeps) {
             }, deps.language(), input.id);
             const t = deps.t();
             const tasks = list?.tasks ?? [];
+            const rows = deps.rows(page(tasks, window), now);
+            const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
             return {
                 ok: true,
                 value: {
@@ -82,8 +89,9 @@ export function createWidgetListMethods(deps: WidgetListDeps) {
                     found: Boolean(list),
                     title: list?.title ?? t('search.noResults'),
                     total: tasks.length,
-                    rows: deps.rows(page(tasks, window), now),
+                    rows,
                     empty: tasks.length === 0 ? { message: t('search.noResults') } : null,
+                    validUntil: Math.min(midnight, ...rows.map((row) => row.meta?.validUntil ?? midnight)),
                 },
             };
         },

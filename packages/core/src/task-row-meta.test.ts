@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { configureDateFormatting } from './date';
 import { loadTranslations } from './i18n/i18n-loader';
 import type { Language } from './i18n/i18n-types';
-import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaPart } from './task-row-meta';
+import { buildTaskRowMeta, getTaskRowMetaValidUntil, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaPart } from './task-row-meta';
 import { getProjectRowStatus } from './project-row-meta';
 import { DEFAULT_AREA_COLOR, TASK_PRIORITY_COLORS } from './color-constants';
 import type { Area, Project, Section, Task } from './types';
@@ -265,5 +265,41 @@ describe('resolveTaskRowFeatures', () => {
         expect(resolveTaskRowFeatures(undefined)).toEqual({ priorities: true, timeEstimates: true, timeSpent: false, taskAge: false, status: true });
         expect(resolveTaskRowFeatures({ features: { pomodoro: true } }).timeSpent).toBe(false);
         expect(resolveTaskRowFeatures({ features: { pomodoro: true }, gtd: { pomodoro: { linkTask: true } } }).timeSpent).toBe(true);
+    });
+});
+
+// #1360 (8b4c4e447): RN redraws a row's due color and age as the clock passes them. Native reads a list again only at the next
+// instant one of its rows can differ: getTaskRowMetaValidUntil names that instant.
+describe('getTaskRowMetaValidUntil', () => {
+    const t = (key: string) => key;
+    const features = resolveTaskRowFeatures({ appearance: { showTaskAge: true } });
+    const meta = (task: Task, now: number) => buildTaskRowMeta({
+        task, lookup: {}, features, language: 'en', dateFormatting: { language: 'en', systemLocale: 'en-US' }, t, now: new Date(now),
+    });
+    const now = Date.parse('2026-10-28T10:00:00.000Z');
+    const hour = 60 * 60 * 1000;
+    const task = (extra: Partial<Task>): Task => ({
+        id: 't', title: 'Pay rent', status: 'next', tags: [], contexts: [], createdAt: '2026-10-20T09:30:00.000Z',
+        updatedAt: '2026-10-20T09:30:00.000Z', ...extra,
+    });
+
+    it.each([
+        ['due in 3 days (dueSoon next)', task({ dueDate: new Date(now + 80 * hour).toISOString() })],
+        ['due in 5 hours (overdue next)', task({ dueDate: new Date(now + 5 * hour).toISOString() })],
+        ['due tomorrow, a date only', task({ dueDate: '2026-10-29' })],
+        ['overdue, its age next', task({ dueDate: new Date(now - hour).toISOString() })],
+        ['no due date, its age next', task({})],
+    ])('is the first instant the row reads differently: %s', (_name, row) => {
+        const at = getTaskRowMetaValidUntil(row, new Date(now), features);
+        expect(at).toBeGreaterThan(now);
+        expect(meta(row, at! - 1)).toEqual(meta(row, now));
+        expect(meta(row, at!)).not.toEqual(meta(row, now));
+    });
+
+    it('is null for a row the clock never changes', () => {
+        const done = task({ status: 'done', dueDate: new Date(now + hour).toISOString(), completedAt: '2026-10-27T10:00:00.000Z' });
+        expect(getTaskRowMetaValidUntil(done, new Date(now), features)).toBeNull();
+        expect(getTaskRowMetaValidUntil(task({ dueDate: new Date(now - hour).toISOString() }), new Date(now), { ...features, taskAge: false })).toBeNull();
+        expect(getTaskRowMetaValidUntil(task({ status: 'reference', dueDate: new Date(now + hour).toISOString() }), new Date(now), features)).toBeNull();
     });
 });

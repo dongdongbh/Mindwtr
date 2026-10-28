@@ -27,7 +27,7 @@ import { configureDateFormatting, getDateFormattingConfig, safeFormatDate, safeP
 import { getFocusStarBlockedText } from './focus-star';
 import { createMarkdownLinkLookup, resolveMarkdownBlocks } from './markdown-blocks';
 import { normalizeFocusTaskLimit } from './focus-utils';
-import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
+import { buildTaskRowMeta, getTaskRowMetaValidUntil, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
 import { isTaskActionable } from './task-status';
 import { splitTodayTasksByStartTime } from './task-utils';
 import { createTaskDraft, setTaskDraftField, type TaskDraft } from './task-draft';
@@ -2891,7 +2891,8 @@ describe('native host contract', () => {
         const mobileMeta = (id: string, settings: AppSettings, language: Language, systemLocale: string | null, options = {}) => {
             const state = useTaskStore.getState();
             const rowTask = state._allTasks.find((candidate) => candidate.id === id)!;
-            return buildTaskRowMeta({
+            // The contract adds the instant the row next reads differently (#1360).
+            return { validUntil: getTaskRowMetaValidUntil(rowTask, NOW, resolveTaskRowFeatures(state.settings)), ...buildTaskRowMeta({
                 ...options,
                 task: rowTask,
                 lookup: resolveTaskRowLookup(rowTask, state.projects, state.areas, state._sectionsById),
@@ -2906,7 +2907,7 @@ describe('native host contract', () => {
                 },
                 t: getTranslator(language),
                 now: NOW,
-            });
+            }) };
         };
         afterEach(() => configureDateFormatting());
 

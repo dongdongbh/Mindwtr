@@ -1,6 +1,12 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import android.content.SharedPreferences
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -123,6 +129,29 @@ data class ListViewState(val groupBy: String?, val sortBy: String?) {
             val raw = runCatching { JSONObject(text ?: "{}") }.getOrDefault(JSONObject())
             return ListViewState((raw.opt("groupBy") as? String)?.takeIf { it in LIST_VIEW_GROUP_OPTIONS },
                 (raw.opt("sortBy") as? String)?.takeIf { it in LIST_VIEW_SORT_OPTIONS })
+        }
+    }
+}
+
+/**
+ * A list's next read by the clock (#1360): the earliest of its rows' [RowMeta.validUntil] and the view's own `validUntil` (the
+ * widget list's midnight), epoch ms; null when the clock changes nothing shown.
+ */
+fun clockReadAt(rows: List<TaskRow?>, view: JSONObject? = null): Long? =
+    (rows.mapNotNull { it?.meta?.validUntil } + listOfNotNull(view?.takeIf { it.has("validUntil") && !it.isNull("validUntil") }?.getLong("validUntil"))).minOrNull()
+
+/**
+ * Reads a list again at [at] (core's [clockReadAt]) while the screen is resumed, as RN's rows redraw as time passes (#1360): one
+ * read at the instant core names, never a timer each minute. The read's new rows bring the next instant.
+ */
+@Composable
+fun ReadAgainAt(at: Long?, read: () -> Unit) {
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(owner, at) {
+        if (at == null) return@LaunchedEffect
+        owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            delay((at - System.currentTimeMillis()).coerceAtLeast(0))
+            read()
         }
     }
 }

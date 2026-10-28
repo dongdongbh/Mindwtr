@@ -51,6 +51,8 @@ import org.json.JSONObject
 fun InboxList(model: InboxViewModel, modifier: Modifier) = with(model.menu) {
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(owner) { owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { refresh() } }
+    // Again when the clock changes a row (a due color, an age; #1360).
+    ReadAgainAt(page?.let { shown -> clockReadAt(shown.items.map { it.row }, shown.view) }) { refresh() }
     // Time to first content (scripts/measure-startup-device.mjs): the frame that first draws core's Inbox rows.
     ReportDrawnWhen { page != null }
     // Back closes an open dialog first, then leaves selection mode.

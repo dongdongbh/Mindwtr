@@ -38,6 +38,23 @@ afterEach(async () => {
 });
 
 describe('native host contract: widget list screen', () => {
+    // e5c0ca45e (#1396): RN reads an open widget list again at midnight (its day key); #1360 (8b4c4e447): a row's due color and
+    // age change as time passes. The view names the first instant either can change, so the screen reads again then.
+    it('names the next instant to read again: the next local midnight, or a row that changes first (#1360)', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 9, 17, 12));
+        const host = await open({ tasks: [task('later', { dueDate: '2026-11-30' })] });
+        expect(value(host.getWidgetListView({ id: 'next' })).validUntil).toBe(new Date(2026, 9, 18).getTime());
+        // Due 73 hours from now: its due color turns dueSoon in an hour, before midnight.
+        const dueSoon = new Date(2026, 9, 20, 13);
+        const created = new Date(2026, 9, 1).toISOString();
+        const soon = await open({ tasks: [task('soon', { dueDate: dueSoon.toISOString(), createdAt: created, updatedAt: created })] });
+        const view = value(soon.getWidgetListView({ id: 'next' }));
+        const turns = dueSoon.getTime() - 72 * 60 * 60 * 1000 + 1;
+        expect(view.rows[0].meta.validUntil).toBe(turns);
+        expect(view.validUntil).toBe(turns);
+    });
+
     it('opens the full Upcoming list through the header route and re-evaluates the local day', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 9, 17, 12));

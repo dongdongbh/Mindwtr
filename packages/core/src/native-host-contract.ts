@@ -96,7 +96,7 @@ import { themeDescriptor } from './theme-scheme';
 import { formatLocalDate } from './import-source-reader';
 import { resolveFeatureFlags } from './resolve-feature-flags';
 import { isTaskCancelled, isTaskFinished } from './task-status';
-import { buildTaskRowMeta, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaInput } from './task-row-meta';
+import { buildTaskRowMeta, getTaskRowMetaValidUntil, resolveTaskRowFeatures, resolveTaskRowLookup, type TaskRowMeta, type TaskRowMetaInput } from './task-row-meta';
 import type { ProjectDeadlineBoost } from './task-utils';
 import { getEnglishI18nValue, getTranslator, tFallback } from './i18n';
 import { formatTaskMarkedDoneMessage, restoreTaskSnapshot, undoTaskCompletion } from './undo-task-completion';
@@ -466,6 +466,8 @@ export type NativeHostResult<T> = { ok: true; value: T } | {
 };
 
 export type NativeTaskRowMeta = TaskRowMeta & {
+    /** The next instant (epoch ms) this row's meta reads differently (getTaskRowMetaValidUntil, #1360); null: never by the clock. */
+    validUntil: number | null;
     description?: {
         inline: MarkdownInline[];
         labels: { deletedTask: string; deletedProject: string };
@@ -722,7 +724,7 @@ export const sortAreasForDisplay = (areas: Area[]): Area[] => [...areas]
 // The per-row view options mobile passes to the row.
 type RowMetaOptions = Omit<TaskRowMetaInput, 'task' | 'lookup' | 'features' | 'language' | 'dateFormatting' | 't' | 'now'>;
 
-const toNativeTaskRow = (task: Task, projectTitles: Map<string, string>, meta: TaskRowMeta): NativeTaskRow => ({
+const toNativeTaskRow = (task: Task, projectTitles: Map<string, string>, meta: NativeTaskRowMeta): NativeTaskRow => ({
     id: task.id,
     title: task.title,
     status: task.status,
@@ -1254,16 +1256,20 @@ export function createNativeHostContract(options: {
 
     const rowMeta = (task: Task, now: Date, options: RowMetaOptions = {}): NativeTaskRowMeta => {
         const state = useTaskStore.getState();
-        const base = buildTaskRowMeta({
-            ...options,
-            task,
-            lookup: resolveTaskRowLookup(task, state.projects, state.areas, state._sectionsById),
-            features: resolveTaskRowFeatures(state.settings),
-            language,
-            dateFormatting: dateFormatting(),
-            t: translate,
-            now,
-        });
+        const features = resolveTaskRowFeatures(state.settings);
+        const base = {
+            ...buildTaskRowMeta({
+                ...options,
+                task,
+                lookup: resolveTaskRowLookup(task, state.projects, state.areas, state._sectionsById),
+                features,
+                language,
+                dateFormatting: dateFormatting(),
+                t: translate,
+                now,
+            }),
+            validUntil: getTaskRowMetaValidUntil(task, now, features),
+        };
         if (!base.descriptionPreview) return base;
         if (cachedMarkdownLookup?.tasks !== state._allTasks || cachedMarkdownLookup.projects !== state._allProjects) {
             cachedMarkdownLookup = {
@@ -4716,7 +4722,7 @@ type ListViewDeps = {
     revision: (now: Date) => string;
     /** Changes with any data or setting change: what Clear Trash's scope depends on. */
     dataRevision: () => string;
-    rowMeta: (task: Task, now: Date) => TaskRowMeta;
+    rowMeta: (task: Task, now: Date) => NativeTaskRowMeta;
     t: () => (key: string) => string;
     formatDate: () => DateFormatter;
 };

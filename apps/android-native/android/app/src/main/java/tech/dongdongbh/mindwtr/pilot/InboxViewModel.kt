@@ -43,6 +43,8 @@ data class RowMeta(
     val swipe: RowSwipe, val rtl: Boolean, val accessibilityLabel: String, val hasDescription: Boolean = false,
     /** Core's statusHidden: the editor layout hides Status, so RN's row shows no status control (#1405); the swipe stays. */
     val statusHidden: Boolean = false,
+    /** Core's validUntil: when the clock next changes this row's meta (a due color, the age; #1360), epoch ms; null: never. */
+    val validUntil: Long? = null,
 ) {
     /** The status control's label, or null when the row shows none (Reference, or Status hidden). */
     val statusControl: String? get() = statusLabel?.takeUnless { statusHidden }
@@ -126,7 +128,8 @@ fun JSONObject.taskRow() = getJSONObject("meta").let { meta ->
             meta.text("priority"), meta.text("statusLabel"), meta.getBoolean("canFocus"),
             meta.getJSONObject("swipe").let { RowSwipe(it.getString("target"), it.getString("label"), it.getString("icon")) },
             meta.getString("textDirection") == "rtl", meta.getString("accessibilityLabel"),
-            !meta.text("descriptionPreview").isNullOrEmpty(), meta.optBoolean("statusHidden")),
+            !meta.text("descriptionPreview").isNullOrEmpty(), meta.optBoolean("statusHidden"),
+            meta.takeIf { it.has("validUntil") && !it.isNull("validUntil") }?.getLong("validUntil")),
         text("revealLabel"), getBoolean("laterToday"), optString("taskRevision"), text("focusBlockedLabel"))
 }
 
