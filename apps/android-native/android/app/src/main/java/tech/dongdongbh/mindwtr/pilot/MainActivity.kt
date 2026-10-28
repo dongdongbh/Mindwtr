@@ -11,6 +11,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.runtime.getValue
 import android.content.Intent
+import android.content.IntentSender
 import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
@@ -18,6 +19,7 @@ import android.window.SplashScreenView
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.activity.compose.setContent
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
@@ -108,6 +110,7 @@ import kotlinx.coroutines.launch
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import tech.dongdongbh.mindwtr.pilot.core.CalendarPermissionPrompt
+import tech.dongdongbh.mindwtr.pilot.core.GmailConsentPrompt
 
 /**
  * Isolated development UI, drawn as the React Native app draws it: its header, its bottom
@@ -126,6 +129,15 @@ class MainActivity : FragmentActivity() {
     /** expo-calendar's prompt for the calendar pair (HostCalendars); its answer is read again as a status by the call that asked. */
     private val calendarPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { CalendarPermissionPrompt.answered() }
     private val askCalendar: (Array<String>) -> Unit = { calendarPermission.launch(it) }
+    /** RN's Gmail module's account picker and Google's consent screen (GmailAuthorization): answered on this Activity or the next. */
+    private val gmailPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        GmailConsentPrompt.answered("picker", it.resultCode, it.data)
+    }
+    private val gmailConsent = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
+        GmailConsentPrompt.answered("consent", it.resultCode, it.data)
+    }
+    private val pickGmail: (Intent) -> Unit = { gmailPicker.launch(it) }
+    private val consentGmail: (IntentSender) -> Unit = { gmailConsent.launch(IntentSenderRequest.Builder(it).build()) }
 
     @OptIn(ExperimentalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -142,12 +154,18 @@ class MainActivity : FragmentActivity() {
             }
         }
         CalendarPermissionPrompt.launcher = askCalendar
+        GmailConsentPrompt.picker = pickGmail
+        GmailConsentPrompt.consent = consentGmail
         // A recreated screen registers its own launcher (the prompt's answer reaches it); a finished one answers any prompt left
         // open. It touches only the prompt, never the core host.
         lifecycle.addObserver(LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_DESTROY && CalendarPermissionPrompt.launcher === askCalendar) {
                 CalendarPermissionPrompt.launcher = null
                 if (isFinishing) CalendarPermissionPrompt.answered()
+            }
+            if (event == Lifecycle.Event.ON_DESTROY && GmailConsentPrompt.picker === pickGmail) {
+                GmailConsentPrompt.picker = null
+                GmailConsentPrompt.consent = null
             }
         })
         model.attach()

@@ -201,7 +201,18 @@ class HostIo(context: Context) {
      * Starts a device calendar call (HostCalendars.call) on the calendar thread. Its answer is `{ id, value }` or `{ id, error }`,
      * queued when [run] replies (a permission prompt replies once the user answers it; the thread is free meanwhile).
      */
-    fun calendar(json: String, run: (String, (Result<Any?>) -> Unit) -> Unit): String {
+    fun calendar(json: String, run: (String, (Result<Any?>) -> Unit) -> Unit): String =
+        replied { reply -> calendarThread.execute { runCatching { run(json, reply) }.onFailure { reply(Result.failure(it)) } } }
+
+    /**
+     * Starts a Gmail call (GmailAuthorization.call): [run] only hands it to its own threads, so it is called here. Its answer is
+     * `{ id, value }` or `{ id, error }`, the error RN's fixed `E_GMAIL_<KIND>` code (host-gmail.ts reads it as RN's rejection code).
+     */
+    fun gmail(json: String, run: (String, (Result<Any?>) -> Unit) -> Unit): String =
+        replied { reply -> runCatching { run(json, reply) }.onFailure { reply(Result.failure(it)) } }
+
+    /** A call answered once through its reply, whichever thread replies; [start] starts it. */
+    private fun replied(start: ((Result<Any?>) -> Unit) -> Unit): String {
         val id = (++nextId).toString()
         val replied = java.util.concurrent.atomic.AtomicBoolean(false)
         val reply = { result: Result<Any?> ->
@@ -211,7 +222,7 @@ class HostIo(context: Context) {
                 wake()
             }
         }
-        calendarThread.execute { runCatching { run(json, reply) }.onFailure { reply(Result.failure(it)) } }
+        start(reply)
         open += 1
         return id
     }

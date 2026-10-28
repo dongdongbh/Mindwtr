@@ -69,6 +69,10 @@ class CoreHost(
     private val documents: HostDocuments? = null,
     /** File Sync's folder lock (RN's SyncFileLockCore); null: this host has no File Sync. */
     private val syncLock: HostSyncLock? = null,
+    /** RN's Gmail authorization (GmailAuthorization.call, bundle/host-gmail.ts); null: this host has no Gmail capture. */
+    private val gmail: ((String, (Result<Any?>) -> Unit) -> Unit)? = null,
+    /** Core's Gmail receipt store's file calls and SQL (HostGmailReceipts); null with [gmail]. */
+    private val gmailReceipts: HostGmailReceipts? = null,
 ) {
     /**
      * Reminder alarms on the platform (pilot/Reminders.kt): core's plan applied in core's order, the notification permission as RN
@@ -541,6 +545,13 @@ class CoreHost(
             bridge.setProperty("widgetAppState", guarded { _ -> widgets.appState() })
         }
         scheduleBackgroundSync?.let { schedule -> bridge.setProperty("bgSyncSchedule", guarded { args -> schedule(args[0] as Boolean); null }) }
+        // Gmail capture (host-gmail.ts): RN's five authorization calls, each only started here and settled by the pump, as a fetch;
+        // core's receipt store's file calls and SQL at once on this thread, as op-sqlite's executeSync runs on RN's JS thread.
+        gmail?.let { authorization -> bridge.setProperty("gmailCall", guarded { args -> io.gmail(args[0] as String, authorization) }) }
+        gmailReceipts?.let { receipts ->
+            bridge.setProperty("gmailFile", guarded { args -> receipts.file(args[0] as String, args[1] as String, args[2] as String) })
+            bridge.setProperty("gmailSql", guarded { args -> receipts.sql(args[0] as String, args[1] as String, args[2] as String) })
+        }
         engine.globalObject.setProperty("__mindwtrNative", bridge)
         // The build's flavor (D8): core reads it as RN's isFossBuild.
         engine.globalObject.setProperty("__mindwtrFossBuild", BuildConfig.FOSS)
@@ -1492,6 +1503,7 @@ class CoreHost(
         io.close()
         // Every File Sync lease this process still holds (its JNI and private authority locks) goes with the host.
         runCatching { syncLock?.close() }
+        runCatching { gmailReceipts?.close() }
         try {
             sqlite?.close()
         } finally {

@@ -24,6 +24,10 @@
         android:dataExtractionRules="@xml/mindwtr_data_extraction_rules"
         android:theme="@style/Theme.NativeDev">
 
+        <!-- RN's Gmail build gate (plugins/android-gmail-authorization.js): app/build.gradle.kts sets it per variant from RN's
+             rule; GmailAuthorization reads it, and check-variant-identity.mjs checks it. -->
+        <meta-data android:name="MindwtrGmailEnabled" android:value="${gmailEnabled}" />
+
         <receiver
             android:name="androidx.profileinstaller.ProfileInstallReceiver"
             tools:node="remove" />

@@ -24,9 +24,10 @@ const TYPES = {
 };
 
 /** One build type's three files as Gradle would write them: the merged manifest, the shortcuts XML and BuildConfig.java. */
-async function variant(type, { pkg, scheme, label, rn } = TYPES[type]) {
+async function variant(type, { pkg, scheme, label, rn } = TYPES[type], gmail = false) {
     const main = readFileSync(resolve(import.meta.dirname, '../android/app/src/main/AndroidManifest.xml'), 'utf8')
-        .replaceAll('${applicationId}', pkg).replaceAll('${urlScheme}', scheme).replaceAll('${appLabel}', label);
+        .replaceAll('${applicationId}', pkg).replaceAll('${urlScheme}', scheme).replaceAll('${appLabel}', label)
+        .replaceAll('${gmailEnabled}', String(gmail));
     const root = (await parseStringPromise(main)).manifest;
     const application = root.application[0];
     for (const overlay of [buildWidgetManifest(pkg, label), buildShortcutsManifest()]) {
@@ -54,7 +55,7 @@ async function variant(type, { pkg, scheme, label, rn } = TYPES[type]) {
 }
 // The checker reads the heartbeat environment (RN's rule); these files carry RN's default endpoint, so the tests run without
 // either variable and put the caller's back afterwards.
-const HEARTBEAT_ENV = ['ANALYTICS_HEARTBEAT_DISABLED', 'ANALYTICS_HEARTBEAT_URL'];
+const HEARTBEAT_ENV = ['ANALYTICS_HEARTBEAT_DISABLED', 'ANALYTICS_HEARTBEAT_URL', 'MINDWTR_GMAIL_DEV_ENABLED', 'MINDWTR_GMAIL_PRODUCTION_VERIFIED'];
 const savedEnv = Object.fromEntries(HEARTBEAT_ENV.map((name) => [name, process.env[name]]));
 before(() => { for (const name of HEARTBEAT_ENV) delete process.env[name]; });
 after(() => { for (const [name, value] of Object.entries(savedEnv)) if (value === undefined) delete process.env[name]; else process.env[name] = value; });
@@ -183,4 +184,30 @@ test('missing or changed shortcuts are caught', async () => {
     const files = await variant('release');
     assert.notDeepEqual(await problems('release', { ...files, shortcuts: '<shortcuts xmlns:android="http://schemas.android.com/apk/res/android"/>' }), []);
     assert.notDeepEqual(await problems('release', { ...files, shortcuts: files.shortcuts.replace('android:shortcutId="focus"', 'android:shortcutId="today"') }), []);
+});
+
+// RN's Gmail build gate (app.config.ts gmailEnabled, plugins/android-gmail-authorization.js): MindwtrGmailEnabled is true only in a
+// Play debug build with MINDWTR_GMAIL_DEV_ENABLED=1 or a Play release with MINDWTR_GMAIL_PRODUCTION_VERIFIED=1; off everywhere else.
+test('Gmail turned on where RN\'s build gate keeps it off, or off where the gate turns it on, is caught', async () => {
+    for (const type of Object.keys(TYPES)) {
+        assert.notDeepEqual(await problems(type, await variant(type, TYPES[type], true)), [], `${type} on by default`);
+    }
+    try {
+        process.env.MINDWTR_GMAIL_DEV_ENABLED = '1';
+        assert.deepEqual(await problems('debug', await variant('debug', TYPES.debug, true)), []);
+        assert.notDeepEqual(await problems('debug', await variant('debug')), [], 'debug off with the dev flag');
+        for (const type of ['release', 'upgradetest', 'benchmark', 'benchmarkSeed', 'benchmarkTrace']) {
+            assert.notDeepEqual(await problems(type, await variant(type, TYPES[type], true)), [], `${type} on with the dev flag`);
+        }
+        const foss = await variant('debug', TYPES.debug, true);
+        assert.notDeepEqual(await problems('debug', { ...foss, buildConfig: `${foss.buildConfig}  public static final boolean FOSS = true;\n` }), [], 'FOSS on');
+        delete process.env.MINDWTR_GMAIL_DEV_ENABLED;
+        process.env.MINDWTR_GMAIL_PRODUCTION_VERIFIED = '1';
+        assert.deepEqual(await problems('release', await variant('release', TYPES.release, true)), []);
+        assert.notDeepEqual(await problems('release', await variant('release')), [], 'release off with the production flag');
+        assert.notDeepEqual(await problems('debug', await variant('debug', TYPES.debug, true)), [], 'debug on with the production flag');
+    } finally {
+        delete process.env.MINDWTR_GMAIL_DEV_ENABLED;
+        delete process.env.MINDWTR_GMAIL_PRODUCTION_VERIFIED;
+    }
 });

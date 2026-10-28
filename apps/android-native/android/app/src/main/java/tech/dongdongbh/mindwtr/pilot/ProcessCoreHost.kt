@@ -14,6 +14,7 @@ import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import tech.dongdongbh.mindwtr.pilot.core.DiagnosticsLogFile
 import tech.dongdongbh.mindwtr.pilot.core.HostAppSearch
 import tech.dongdongbh.mindwtr.pilot.core.HostCalendars
+import tech.dongdongbh.mindwtr.pilot.core.HostGmailReceipts
 import tech.dongdongbh.mindwtr.pilot.core.HostDocuments
 import tech.dongdongbh.mindwtr.pilot.core.HostSyncLock
 import tech.dongdongbh.mindwtr.pilot.core.HostFiles
@@ -131,7 +132,8 @@ internal object ProcessCoreHost {
             scheduleBackgroundSync = { on -> CoreWork.scheduleSyncStored(app, on) }, appInfo = aboutAppInfo(),
             backups = BackupOperations(File(app.noBackupFilesDir, "backup-operations"), File(app.filesDir, "snapshots"), maxPlanBytes = DataTransferLimits.MAX_PLAN_BYTES),
             calendars = HostCalendars(app), documents = HostDocuments(app), syncLock = HostSyncLock(app),
-            appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)))
+            appSearch = HostAppSearch(app, app.getString(R.string.mindwtr_link_scheme)),
+            gmail = (gmail ?: GmailAuthorization(app).also { gmail = it })::call, gmailReceipts = HostGmailReceipts(File(app.filesDir, "GmailCapture")))
         try {
             runtime.start(coreBundle(app), legacy?.bootState ?: "", legacy?.backup ?: "", legacy?.preflight == true)
             // After the boot, so the line reaches RN's diagnostics log with the settings loaded.
@@ -354,6 +356,8 @@ internal object ProcessCoreHost {
     @Volatile private var askedNotifications = false
     /** The process's application, for what a start or a resume posts (the persistent capture notification). */
     @Volatile private var application: Application? = null
+    /** RN's Gmail authorization, once per process: its pending consent outlives a host that boots again. */
+    private var gmail: GmailAuthorization? = null
     /** Done once the reminder alarms started (with sync, after the first screen's content): the permission question waits for it. */
     val remindersStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
 

@@ -10,7 +10,7 @@
 // permissions are RN's, so an upgrade keeps every grant. The alias takes RN's shares (app.json's expo-share-intent filters). The
 // debug build's check entries (its widget host, quick capture alias, and file share provider and sender) are in no other build. A
 // FOSS build (BuildConfig.FOSS) declares no Google Play services entry and no install referrer permission, as RN's FOSS build
-// strips them (df75a3584, a13d1184e); checkFossDependencies checks its libraries. Every variant launches from @mipmap/ic_launcher
+// strips them (df75a3584, a13d1184e); checkFossDependencies checks its libraries. Gmail capture is on only where RN's build gate puts it. Every variant launches from @mipmap/ic_launcher
 // and ic_launcher_round, and every adaptive launcher icon keeps its monochrome layer for themed icons (RN's 55049a2e0). Gradle's checkVariantIdentity runs it for each variant (app/build.gradle.kts);
 // it prints every problem and fails on any; check-variant-identity.test.mjs proves what it catches.
 // Usage: node check-variant-identity.mjs <build type> <merged AndroidManifest.xml> <mindwtr_shortcuts.xml> <BuildConfig.java>
@@ -166,6 +166,11 @@ export async function identityProblems(type, manifest, shortcuts, buildConfig, l
             problems.push(`a FOSS build declares the Google service entry ${name}`);
         }
     }
+    // RN's Gmail build gate (app.config.ts gmailEnabled): never in a FOSS, benchmark or upgrade harness build; a debug build with
+    // MINDWTR_GMAIL_DEV_ENABLED=1, a release with MINDWTR_GMAIL_PRODUCTION_VERIFIED=1. GmailAuthorization reads it as RN's module does.
+    const gmailFlag = { debug: 'MINDWTR_GMAIL_DEV_ENABLED', release: 'MINDWTR_GMAIL_PRODUCTION_VERIFIED' }[type];
+    const gmail = field(buildConfig, 'FOSS') !== 'true' && gmailFlag !== undefined && process.env[gmailFlag] === '1';
+    expect('MindwtrGmailEnabled', attr(named(application['meta-data'], 'MindwtrGmailEnabled'), 'value'), String(gmail));
     expect('supportsRtl', attr(application, 'supportsRtl'), 'true');
     // The launcher icons whose adaptive XML keeps the monochrome layer (launcherIconProblems).
     expect('the launcher icon', attr(application, 'icon'), '@mipmap/ic_launcher');

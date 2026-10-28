@@ -158,6 +158,9 @@ android {
         // RN's File Sync folder calls, lock and transition rename (rnFileSync below), with their JVM tests.
         getByName("main").java.srcDir(layout.buildDirectory.dir("generated/rnFileSync/main/java"))
         getByName("test").java.srcDir(layout.buildDirectory.dir("generated/rnFileSync/test/java"))
+        // RN's Gmail session, request allowlist and bounded reads (rnGmail below), with their JVM tests: the Play channel only.
+        getByName("play").java.srcDir(layout.buildDirectory.dir("generated/rnGmail/main/java"))
+        getByName("testPlay").java.srcDir(layout.buildDirectory.dir("generated/rnGmail/test/java"))
         urlSchemes.keys.forEach { type ->
             val widgets = layout.buildDirectory.dir("generated/widgets/$type").get().asFile
             getByName(type).res.srcDir(widgets.resolve("res"))
@@ -187,6 +190,13 @@ androidComponents {
         listOf("widgets", "shortcuts").forEach { set ->
             variant.sources.manifests?.addStaticManifestFile(layout.buildDirectory.file("generated/$set/${variant.buildType}/AndroidManifest.xml").get().asFile.path)
         }
+    }
+    // RN's Gmail build gate (app.config.ts gmailEnabled): the Play channel's debug build with MINDWTR_GMAIL_DEV_ENABLED=1 and its
+    // release with MINDWTR_GMAIL_PRODUCTION_VERIFIED=1; off in FOSS, the benchmarks and the upgrade harness (check-variant-identity.mjs).
+    onVariants { variant ->
+        val flag = mapOf("debug" to "MINDWTR_GMAIL_DEV_ENABLED", "release" to "MINDWTR_GMAIL_PRODUCTION_VERIFIED")[variant.buildType]
+        val gmail = variant.flavorName == "play" && flag != null && System.getenv(flag) == "1"
+        variant.manifestPlaceholders.put("gmailEnabled", gmail.toString())
     }
     onVariants(selector().withBuildType("upgradetest")) { variant ->
         variant.applicationId.set("tech.dongdongbh.mindwtr.upgradetest")
@@ -248,6 +258,8 @@ dependencies {
     "playImplementation"("com.google.android.play:app-update:2.1.0")
     "playImplementation"("com.google.android.play:review:2.0.1")
     "playImplementation"("com.android.installreferrer:installreferrer:2.2")
+    // RN's Gmail authorization (modules/gmail-authorization): Google Identity Services' AuthorizationClient and account picker.
+    "playImplementation"("com.google.android.gms:play-services-auth:22.0.0")
     implementation("androidx.activity:activity-compose:1.10.1")
     // RN's start screen (expo-splash-screen's, same version): held until the first screen is ready (MainActivity).
     implementation("androidx.core:core-splashscreen:1.2.0-alpha02")
@@ -373,7 +385,17 @@ val rnPersistentCapture by tasks.registering(Sync::class) {
     }
     into(layout.buildDirectory.dir("generated/rnPersistentCapture"))
 }
-tasks.named("preBuild") { dependsOn(buildCoreBundle, buildShortcuts, buildWidgets, rnAttachmentInstaller, rnPersistentCapture, rnFileSync) }
+// RN's GmailAuthorizationCore (modules/gmail-authorization), byte for byte, with its JVM tests: one file, so an RN fix reaches this
+// app without a port. GmailAuthorization.kt (src/play) is the port of its Expo module around it.
+val rnGmail by tasks.registering(Sync::class) {
+    val gmail = "tech/dongdongbh/mindwtr/gmailauthorization"
+    from(rootProject.projectDir.resolve("../../mobile/modules/gmail-authorization/android/src")) {
+        include("main/java/$gmail/GmailAuthorizationCore.kt")
+        include("test/java/$gmail/GmailAuthorizationCoreTest.kt")
+    }
+    into(layout.buildDirectory.dir("generated/rnGmail"))
+}
+tasks.named("preBuild") { dependsOn(buildCoreBundle, buildShortcuts, buildWidgets, rnAttachmentInstaller, rnPersistentCapture, rnFileSync, rnGmail) }
 tasks.matching { it.name.startsWith("pre") && it.name.endsWith("BenchmarkTraceBuild") }.configureEach { dependsOn(buildTracedCoreBundle) }
 // Both channels' JVM tests under the one name the gates and CI run (flavors leave no testDebugUnitTest), with the widget module's
 // RN tests (Robolectric) and every variant's identity check.
