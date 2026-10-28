@@ -82,6 +82,11 @@ const val DONE_VIEW_KEY = "mindwtr:view:done:v1"
 const val REFERENCE_GROUP_BY_KEY = "mindwtr:view:reference:groupBy:v1"
 /** Valid values in core's Reference group picker, checked when reading the saved choice. */
 val REFERENCE_GROUP_BY_OPTIONS = setOf("none", "context", "area", "project", "tag")
+/**
+ * Reference's grouping for a read (RN's ReferenceScreen, 51703a756): this visit's choice, else the one saved on the device
+ * ([REFERENCE_GROUP_BY_KEY], written at each choice), when core's picker offers it; null is core's default.
+ */
+fun referenceGroupBy(visit: String?, saved: String?): String? = visit ?: saved?.takeIf { it in REFERENCE_GROUP_BY_OPTIONS }
 /** RN's ARCHIVED_LIST_VIEW_STATE_STORAGE_KEY (lib/view-state/archived-list-view-state.ts). */
 const val ARCHIVED_VIEW_KEY = "mindwtr:view:archived:v1"
 

@@ -477,9 +477,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             "waiting" -> JSONObject().put("person", own.optString("person"))
             // RN draws parked projects inside their section group (#1319).
             "someday" -> kept(listOf("sortBy", "groupBy", "showDetails", "filters")).put("projectsInSections", true)
-            "reference" -> kept(listOf("groupBy", "includeArchivedProjects", "filters")).apply {
-                if (!has("groupBy")) prefs.getString(REFERENCE_GROUP_BY_KEY, null)
-                    ?.takeIf { it in REFERENCE_GROUP_BY_OPTIONS }?.let { put("groupBy", it) }
+            "reference" -> kept(listOf("includeArchivedProjects", "filters")).apply {
+                referenceGroupBy(own.optString("groupBy").ifEmpty { null }, prefs.getString(REFERENCE_GROUP_BY_KEY, null))?.let { put("groupBy", it) }
             }.put("collapsedGroupIds", GroupCollapse.all(prefs, "reference", 200))
             "done" -> ListViewState.read(prefs, DONE_VIEW_KEY).into(kept(listOf("filters"))).put("collapsedGroupIds", GroupCollapse.all(prefs, "done", 200))
             // The Inbox's grouping and filters are RN's session choices; its folds are the device's, for the grouping shown.
