@@ -940,6 +940,7 @@ private fun GtdCapture(model: InboxViewModel, capture: JSONObject) = with(model.
         for (name in listOf("quickAddAutoClean", "naturalLanguageDates", "markdownEditorAssist")) ToggleRow(model, capture.getJSONObject(name), true, write = settings::gtd)
     }
     capture.optJSONObject("captureIntent")?.let { CaptureIntentCard(model, it) }
+    GmailCaptureSection(model)
 }
 
 /**
@@ -1126,6 +1127,7 @@ private fun SettingsDialogs(model: InboxViewModel, page: SettingsPage) = with(mo
         )
     }
     if (settings.screen == "calendar") CalendarSettingsDialogs(model)
+    if (settings.screen == "gtd-capture") GmailLabelPicker(model)
     if (settings.screen == "gtd-task-editor") settings.local.optString("sheetField").ifEmpty { null }?.let { id ->
         val field = page.view.getJSONObject("taskEditor").menuObjects("groups").flatMap { it.menuObjects("fields") }.firstOrNull { it.getString("id") == id }
         if (field != null) FieldSheet(model, field)

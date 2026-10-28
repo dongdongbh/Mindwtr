@@ -10054,7 +10054,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const { readdirSync } = await import('node:fs');
     const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
     const all = readdirSync(dir).filter((file) => file.endsWith('.kt')).map((file) => readFileSync(resolve(dir, file), 'utf8')).join('\n');
-    assert.equal(all.match(/\.hairline\(/g)?.length, 17 + 1, 'the 17 hairline sites and the helper itself');
+    assert.equal(all.match(/\.hairline\(/g)?.length, 18 + 1, 'the 17 hairline sites, the Gmail section\'s body (G4), and the helper itself');
     assert.ok((all.match(/\.rnBorder(Bottom|Top)\(/g)?.length ?? 0) >= 68, 'RN\'s borderWidth 1 lines are rnBorderBottom / rnBorderTop');
 }
 // The failure banner is RN's persistence-failure-banner card (tabbar-borders ruling): radius 12 with a 1 dp danger border, 12 from
@@ -10091,7 +10091,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(hostEntry, /gmailLifecycle\(\(\) => nativeGmail\?\.appState\(appState\)\);\s*return requireSync\(\)\.appState\(appState\);/);
     assert.match(coreHost, /fun gmailRequest\(name: String, json: String\): JSONObject = callLong\("gmailRequest", name, json\)/);
     // Mail captured outside any host call shows: the status event of a cycle that imported reads the lists again.
-    assert.match(source('InboxViewModel.kt'), /"gmailStatus" -> event\.optJSONObject\("status"\)\?\.let \{ status ->\s*if \(status\.optInt\("lastImportCount"\) > 0 && status\.isNull\("lastError"\)\) menu\.whenIdle \{ if \(writable\) refreshAll\(synced = true\) \}/);
+    assert.match(source('InboxViewModel.kt'), /"gmailStatus" -> event\.optJSONObject\("status"\)\?\.let \{ status ->\s*menu\.settings\.gmail\.statusChanged\(status\)\s*if \(status\.optInt\("lastImportCount"\) > 0 && status\.isNull\("lastError"\)\) menu\.whenIdle \{ if \(writable\) refreshAll\(synced = true\) \}/);
     assert.match(hostEntry, /statusChanged: \(status\) => \{ checked\(native\(\)\.hostEvent\(JSON\.stringify\(\{ type: 'gmailStatus', status \}\)\)\); \},/);
     // The polyfill's channel: a failure rejects with Kotlin's text, RN's fixed code, which host-gmail.ts reads as the code.
     const answers = [];
@@ -10128,5 +10128,34 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.doesNotMatch(receiptsKt, /android\.database/);
     const gmailTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-gmail.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(gmailTested.status, 0, `bundle/host-gmail.test.ts: ${gmailTested.stderr.slice(-1500)}`);
+}
+// G4: RN's Gmail section (GmailCapture.kt): every word one of RN's keys (gmail-capture-section.tsx and the failure keys core's
+// gmailCaptureErrorTranslation gives host-gmail.ts), each in LABEL_KEYS, no Kotlin literal standing in for one (RN's 73d3f7ab6
+// wording fix reaches it through the keys), RN's order, and the section placed under the capture intent card as RN places it.
+{
+    const gmailKt = source('GmailCapture.kt');
+    const rnSection = readFileSync(resolve(app, '../mobile/components/settings/gmail-capture-section.tsx'), 'utf8');
+    const coreGmail = readFileSync(resolve(app, '../../packages/core/src/gmail-capture.ts'), 'utf8');
+    const rnKeys = new Set([...rnSection.matchAll(/'(settings\.gmailCapture[A-Za-z]*)'/g), ...coreGmail.matchAll(/'(settings\.gmailCapture[A-Za-z]*)'/g)].map((m) => m[1]));
+    const nativeKeys = new Set([...gmailKt.matchAll(/"(settings\.gmailCapture[A-Za-z]*)"/g)].map((m) => m[1]));
+    const errorKeys = [...coreGmail.matchAll(/'(settings\.gmailCapture[A-Za-z]*Failed|settings\.gmailCaptureCancelled)'/g)].map((m) => m[1]);
+    assert.equal(rnKeys.size, 30, 'RN\'s section and core\'s failure keys were read');
+    // The failure keys reach Kotlin as host-gmail.ts's errorKey and lastErrorKey; every other key is named in GmailCapture.kt.
+    assert.deepEqual([...rnKeys].filter((key) => !nativeKeys.has(key) && !errorKeys.includes(key)).sort(), [], 'every RN key the section shows is GmailCapture.kt\'s');
+    assert.deepEqual([...nativeKeys].filter((key) => !rnKeys.has(key)).sort(), [], 'GmailCapture.kt shows no key RN\'s section lacks');
+    for (const key of rnKeys) assert(labelKeys.includes(key), `LABEL_KEYS lacks ${key}`);
+    const shown = gmailKt.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+    for (const [, literal] of shown.matchAll(/Text\("([^"$]*)"/g)) assert.fail(`GmailCapture.kt draws the literal "${literal}"`);
+    assert.match(shown, /Text\(if \(gmail\.open\) "▾" else "▸"/, 'RN\'s disclosure glyphs');
+    // RN's order: the disclosure, unavailable or (account, label, hint, active) then the buttons, last checked, error, notice.
+    const order = ['settings.gmailCaptureDisclosure', 'settings.gmailCaptureUnavailable', 'settings.gmailCaptureAccount', 'settings.gmailCaptureLabelHint',
+        'settings.gmailCaptureActive', 'settings.gmailCaptureConnecting', 'settings.gmailCaptureCancel"', 'settings.gmailCaptureDisconnect"',
+        'settings.gmailCaptureChecking', 'settings.gmailCaptureSaving', 'settings.gmailCaptureLastChecked', 'gmail.shownError', 'gmail.notice?.let'].map((text) => shown.indexOf(text));
+    assert(order.every((index, i) => index > (i ? order[i - 1] : -1)), `the Gmail section's order ${order}`);
+    const settingsKt = source('SettingsScreen.kt');
+    assert.match(settingsKt, /capture\.optJSONObject\("captureIntent"\)\?\.let \{ CaptureIntentCard\(model, it\) \}\s*GmailCaptureSection\(model\)/);
+    assert.match(settingsKt, /if \(settings\.screen == "gtd-capture"\) GmailLabelPicker\(model\)/);
+    // Back leaves the section (RN unmounts it): an answer on its way counts for nothing.
+    assert.match(source('SettingsModel.kt'), /if \(screen == "gtd-capture"\) gmail\.leave\(\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

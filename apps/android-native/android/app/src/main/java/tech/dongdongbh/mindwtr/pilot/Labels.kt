@@ -96,6 +96,15 @@ val LABEL_KEYS = listOf(
     "projects.projectName", "task.keepChecklistDescription", "task.expandChecklist", "task.expandChecklistDescription",
     "reference.convertToAction", "task.convertToSection",
     "task.convertToSectionCreated", "task.skipOccurrence", "task.cancelledWithRestore", "list.taskDeleted", "common.undo", "common.success",
+    // RN's Gmail section (GmailCapture.kt, gmail-capture-section.tsx), and the failure keys host-gmail.ts sends (core's gmailCaptureErrorTranslation).
+    "settings.gmailCapture", "settings.gmailCaptureDesc", "settings.gmailCaptureDisclosure", "settings.gmailCaptureUnavailable",
+    "settings.gmailCaptureAccount", "settings.gmailCaptureLabel", "settings.gmailCaptureChooseLabel", "settings.gmailCaptureLabelHint",
+    "settings.gmailCaptureActive", "settings.gmailCapturePaused", "settings.gmailCaptureConnect", "settings.gmailCaptureConnecting",
+    "settings.gmailCaptureReconnect", "settings.gmailCaptureCancel", "settings.gmailCaptureDisconnect", "settings.gmailCaptureCheckNow",
+    "settings.gmailCaptureChecking", "settings.gmailCaptureSave", "settings.gmailCaptureSaving", "settings.gmailCaptureLastChecked",
+    "settings.gmailCaptureImportedCount", "settings.gmailCaptureReceiptsReset", "settings.gmailCaptureCancelled",
+    "settings.gmailCaptureDisconnected", "settings.gmailCaptureRevokeManually", "settings.gmailCaptureAuthFailed",
+    "settings.gmailCaptureNetworkFailed", "settings.gmailCaptureConfigFailed", "settings.gmailCaptureStorageFailed", "settings.gmailCaptureFailed",
 )
 
 /** The label map: core's text for each of [LABEL_KEYS]. It has no fallback text; a key core lacks shows as the key. */

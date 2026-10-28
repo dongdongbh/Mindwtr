@@ -127,6 +127,8 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     val transfer = DataTransferModel(menu, saved)
     /** Settings › Calendar's screen state and commands (CalendarSettings.kt). */
     val calendar = CalendarSettingsModel(menu)
+    /** Settings › GTD › Capture's Gmail section (GmailCapture.kt). */
+    val gmail = GmailCaptureModel(menu)
 
     /** RN's settings stack: "main", then "general", "manage", "data", "advanced", or a GTD screen ("gtd", "gtd-pomodoro", ...). */
     var stack by mutableStateOf(saved.get<String>("settingsStack")?.split(',') ?: listOf("main")); private set
@@ -164,6 +166,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
         ai.leave()
         about.leave()
         calendar.leave()
+        gmail.leave()
         keepStack(listOf("main"))
         logToShare = null
         query = ""
@@ -189,6 +192,7 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
         if (screen == "ai") ai.leave()
         if (screen == "about") about.leave()
         if (screen == "calendar") calendar.leave()
+        if (screen == "gtd-capture") gmail.leave()
         keepStack(stack.dropLast(1))
         logToShare = null
         keepLocal(JSONObject())

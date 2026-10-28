@@ -330,6 +330,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             "toast" -> showToast(event, event.optString("action").ifEmpty { null }) { if (event.optString("open") == "sync") menu.openSyncSettings() }
             // Gmail capture put mail in the Inbox (host-gmail.ts, outside any host call): the lists read again, as RN's store redraws.
             "gmailStatus" -> event.optJSONObject("status")?.let { status ->
+                menu.settings.gmail.statusChanged(status)
                 if (status.optInt("lastImportCount") > 0 && status.isNull("lastError")) menu.whenIdle { if (writable) refreshAll(synced = true) }
             }
         }
