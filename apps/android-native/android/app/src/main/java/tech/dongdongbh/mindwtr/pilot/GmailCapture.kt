@@ -198,6 +198,17 @@ class GmailCaptureModel(private val menu: MenuModel) {
         ?: status?.takeUnless { it.isNull("lastErrorKey") }?.optString("lastErrorKey")
 }
 
+/**
+ * The time of a capture cycle whose mail the lists must read again (InboxViewModel's `gmailStatus` event), or null: a cycle with
+ * a new `lastPollAt` that saved mail, or that failed partway (a failed round may follow rounds that saved). A status republished
+ * with its old time (dispose, a config change) or a cycle that found nothing reads nothing.
+ */
+internal fun gmailCycleToShow(seen: String?, status: JSONObject): String? {
+    if (status.isNull("lastPollAt")) return null
+    val at = status.optString("lastPollAt")
+    return at.takeIf { it != seen && (status.optInt("lastImportCount") > 0 || !status.isNull("lastError")) }
+}
+
 /** RN's GmailCaptureSection: a disclosure card under the Capture cards, its body while open, in RN's order. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

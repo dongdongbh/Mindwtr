@@ -10090,8 +10090,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(hostEntry, /const state = requireSync\(\)\.start\(appState\);\s*\/\/[^\n]*\s*gmailLifecycle\(\(\) => nativeGmail\?\.start\(appState\)\);/);
     assert.match(hostEntry, /gmailLifecycle\(\(\) => nativeGmail\?\.appState\(appState\)\);\s*return requireSync\(\)\.appState\(appState\);/);
     assert.match(coreHost, /fun gmailRequest\(name: String, json: String\): JSONObject = callLong\("gmailRequest", name, json\)/);
-    // Mail captured outside any host call shows: the status event of a cycle that imported reads the lists again.
-    assert.match(source('InboxViewModel.kt'), /"gmailStatus" -> event\.optJSONObject\("status"\)\?\.let \{ status ->\s*menu\.settings\.gmail\.statusChanged\(status\)\s*if \(status\.optInt\("lastImportCount"\) > 0 && status\.isNull\("lastError"\)\) menu\.whenIdle \{ if \(writable\) refreshAll\(synced = true\) \}/);
+    // Mail captured outside any host call shows: a cycle with a new time that saved mail or failed partway reads the lists again (GmailCycleTest).
+    assert.match(source('InboxViewModel.kt'), /"gmailStatus" -> event\.optJSONObject\("status"\)\?\.let \{ status ->\s*menu\.settings\.gmail\.statusChanged\(status\)\s*gmailCycleToShow\(gmailShown, status\)\?\.let \{ at -> gmailShown = at; menu\.whenIdle \{ if \(writable\) refreshAll\(synced = true\) \} \}/);
     assert.match(hostEntry, /statusChanged: \(status\) => \{ checked\(native\(\)\.hostEvent\(JSON\.stringify\(\{ type: 'gmailStatus', status \}\)\)\); \},/);
     // The polyfill's channel: a failure rejects with Kotlin's text, RN's fixed code, which host-gmail.ts reads as the code.
     const answers = [];

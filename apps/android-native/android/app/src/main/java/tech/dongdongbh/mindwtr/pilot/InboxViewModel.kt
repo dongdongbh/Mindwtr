@@ -306,6 +306,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     private var syncCycles = ProcessCoreHost.syncState?.optInt("cycles") ?: 0
     /** The JS host's events arrive on the engine thread; each is handed to the main thread. */
     private val syncListener: (JSONObject) -> Unit = { event -> ui { syncEvent(event) } }
+    /** The last Gmail capture cycle whose mail the lists read (gmailCycleToShow); main thread. */
+    private var gmailShown: String? = null
 
     private fun badgeOf(event: JSONObject?) = SyncBadge(event?.optString("badge")?.ifEmpty { null } ?: "hidden", event?.takeUnless { it.isNull("color") }?.optString("color"))
 
@@ -331,7 +333,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             // Gmail capture put mail in the Inbox (host-gmail.ts, outside any host call): the lists read again, as RN's store redraws.
             "gmailStatus" -> event.optJSONObject("status")?.let { status ->
                 menu.settings.gmail.statusChanged(status)
-                if (status.optInt("lastImportCount") > 0 && status.isNull("lastError")) menu.whenIdle { if (writable) refreshAll(synced = true) }
+                gmailCycleToShow(gmailShown, status)?.let { at -> gmailShown = at; menu.whenIdle { if (writable) refreshAll(synced = true) } }
             }
         }
     }
