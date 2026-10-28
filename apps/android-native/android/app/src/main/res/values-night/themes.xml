@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- RN's window theme is DayNight: at night it is not a light theme. A light one makes Android 15+ force dark navigation
+         buttons, drawn gray on the dark tab bar under three-button navigation (RN's are white). -->
+    <style name="Theme.NativeDev" parent="android:Theme.Material.NoActionBar" />
     <!-- RN's splash background in dark mode (app.json's expo-splash-screen "dark"). -->
     <color name="splashscreen_background">#0b1020</color>
 </resources>

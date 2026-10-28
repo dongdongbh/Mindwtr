@@ -728,6 +728,14 @@ assert.match(processUi, /var shownTask by rememberSaveable \{ mutableStateOf<Str
 // RN's system bars (SystemBarsTest): set by the screens and the lock screen, only when the background or darkness changes.
 assert.match(activity, /LaunchedEffect\(c\.bg, theme\.isDark\) \{ window\.applySystemBars\(c\.bg\.toArgb\(\), theme\.isDark\) \}/);
 assert.match(source('AppLock.kt'), /LaunchedEffect\(c\.bg, theme\.isDark\) \{ activity\?\.window\?\.applySystemBars\(c\.bg\.toArgb\(\), theme\.isDark\) \}/);
+// RN's window theme is DayNight (Theme.AppCompat.DayNight.NoActionBar): at night the window is not a light theme. From Android 15 a
+// light window theme makes the system force dark navigation buttons (APPEARANCE_FORCE_LIGHT_NAVIGATION_BARS), which three-button
+// navigation then draws gray on the dark tab bar while RN's are white (nav3-voice-20261028-04, emulator pairs).
+{
+    const res = resolve(app, 'android/app/src/main/res');
+    assert.match(readFileSync(resolve(res, 'values/themes.xml'), 'utf8'), /<style name="Theme\.NativeDev" parent="android:Theme\.Material\.Light\.NoActionBar"/);
+    assert.match(readFileSync(resolve(res, 'values-night/themes.xml'), 'utf8'), /<style name="Theme\.NativeDev" parent="android:Theme\.Material\.NoActionBar"/);
+}
 assert.match(processUi, /\.verticalScroll\(scroll\)/);
 const captureUi = source('CaptureScreen.kt');
 // RN's quick capture TextInputs (title and notes) keep RN's default autoCapitalize ("sentences"): the keyboard opens with Shift on.
