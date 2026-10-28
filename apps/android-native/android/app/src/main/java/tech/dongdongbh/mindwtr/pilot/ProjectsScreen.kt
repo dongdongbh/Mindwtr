@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
@@ -491,32 +492,35 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             ProjectReorderList(model, Modifier.weight(1f))
             return@Column
         }
-        LazyColumn(Modifier.weight(1f).background(c.bg).imePadding(), state = listState, contentPadding = PaddingValues(12.dp)) {
-            // RN's Details toggle and panel (its Attachments card inside), scrolling away with the rows as RN's list header.
-            openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
-            for (entry in detail?.items.orEmpty()) when (entry) {
-                is DetailSection -> item(key = "section:${entry.id}") {
-                    if (entry.collapsible) CompletedHeading(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted)
-                    else SectionTitle(entry.title, entry.count,
-                        Modifier.fillMaxWidth().fade(if (entry.muted) 0.6f else 1f).padding(top = 12.dp, bottom = 8.dp, start = 4.dp), note = entry.flowLabel)
-                }
-                is DetailTask -> item(key = "task:${entry.row.id}") {
-                    TaskRowItem(model, entry.row, status = RowStatus.Badge, completable = completable,
-                        note = entry.sequenceCue?.let(CUE_KEYS::get)?.let(::t), available = entry.sequenceCue == "available")
-                }
-            }
-            // RN's ListEmptyState: core's words when the filters match nothing (with Clear), or the plain empty list.
-            detail?.listFilters?.optJSONObject("empty")?.takeIf { detail.items.none { it is DetailTask } }?.let { empty ->
-                item(key = "empty") {
-                    val clear = empty.optJSONObject("action")?.optJSONObject("filterEdit")
-                    EmptyState(empty.getString("message"), empty.optString("hint").ifEmpty { null }, empty.menuText("actionLabel")) {
-                        clear?.let(projectDetails::filterEdit)
+        // RN's pull down to sync (ProjectTaskList's TaskList, 5bb0ea8f).
+        PullToSync(model, Modifier.weight(1f).background(c.bg).imePadding()) {
+            LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(12.dp)) {
+                // RN's Details toggle and panel (its Attachments card inside), scrolling away with the rows as RN's list header.
+                openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
+                for (entry in detail?.items.orEmpty()) when (entry) {
+                    is DetailSection -> item(key = "section:${entry.id}") {
+                        if (entry.collapsible) CompletedHeading(entry, enabled = !busy && failedAction == null, toggle = model::toggleProjectCompleted)
+                        else SectionTitle(entry.title, entry.count,
+                            Modifier.fillMaxWidth().fade(if (entry.muted) 0.6f else 1f).padding(top = 12.dp, bottom = 8.dp, start = 4.dp), note = entry.flowLabel)
+                    }
+                    is DetailTask -> item(key = "task:${entry.row.id}") {
+                        TaskRowItem(model, entry.row, status = RowStatus.Badge, completable = completable,
+                            note = entry.sequenceCue?.let(CUE_KEYS::get)?.let(::t), available = entry.sequenceCue == "available")
                     }
                 }
-            }
-            if (detail != null && detail.items.size < detail.total) item(key = "more") {
-                Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
-                    PillButton(t("common.more"), onClick = model::loadMoreProject, enabled = writable && !busy && failedAction == null)
+                // RN's ListEmptyState: core's words when the filters match nothing (with Clear), or the plain empty list.
+                detail?.listFilters?.optJSONObject("empty")?.takeIf { detail.items.none { it is DetailTask } }?.let { empty ->
+                    item(key = "empty") {
+                        val clear = empty.optJSONObject("action")?.optJSONObject("filterEdit")
+                        EmptyState(empty.getString("message"), empty.optString("hint").ifEmpty { null }, empty.menuText("actionLabel")) {
+                            clear?.let(projectDetails::filterEdit)
+                        }
+                    }
+                }
+                if (detail != null && detail.items.size < detail.total) item(key = "more") {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        PillButton(t("common.more"), onClick = model::loadMoreProject, enabled = writable && !busy && failedAction == null)
+                    }
                 }
             }
         }

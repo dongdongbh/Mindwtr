@@ -1205,6 +1205,37 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     fun showStatusMenu(task: TaskRow?) { statusMenu = task }
 
+    /** RN's PullSyncIndicator for the lists' pull down to sync: "idle", "syncing", then core's "success" or "error" flash. */
+    var pullSync by mutableStateOf("idle"); private set
+    private var pullRunning = false
+    private var pullShown = 0
+
+    /**
+     * A list's pull down to sync (RN's useManualPullSync, 5bb0ea8f): one at a time, core's rules over one manual cycle
+     * (CoreHost.pullSync, off the engine: a cycle can take minutes). The bar shows core's result for RN's 900 ms, then core's toast;
+     * a deferred result ends the bar at once. The sync's own event reads the lists again.
+     */
+    fun pullToSync() {
+        val runtime = host ?: return
+        if (pullRunning) return
+        pullRunning = true
+        pullSync = "syncing"
+        val mine = ++pullShown
+        Thread({
+            val outcome = runCatching { runtime.pullSync() }.getOrElse { failure ->
+                Log.w(CoreHost.TAG, "Pull to sync failed ${failureForLog(failure)}")
+                JSONObject().put("indicator", "error")
+            }
+            ui {
+                pullRunning = false
+                val indicator = outcome.optString("indicator", "error")
+                pullSync = if (indicator == "idle") "idle" else indicator
+                if (indicator != "idle") main.postDelayed({ if (mine == pullShown && !pullRunning) pullSync = "idle" }, 900)
+                outcome.optJSONObject("toast")?.let { showToast(it) }
+            }
+        }, "mindwtr-pull-sync").start()
+    }
+
     private var toastShown = 0
     /** RN's toast for 3.2 s, or 5.2 s with an action (RN's Undo), which runs [onAction] and dismisses it. */
     internal fun showToast(title: String?, message: String, tone: String = "warning", action: String? = null, durationMs: Long? = null,

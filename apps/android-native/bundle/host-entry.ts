@@ -5636,6 +5636,13 @@ globalThis.MindwtrHost = {
         });
     },
     /**
+     * A list's pull down to sync (RN's useManualPullSync, 5bb0ea8f): core's rules over one manual cycle, answered as
+     * `{ indicator, toast }`. A long call (CoreHost.callLong): it settles with the cycle.
+     */
+    pullSync(): string {
+        return submit(async () => requireSync().pullSync());
+    },
+    /**
      * The pending-captures queue drained into the store (core's ingestPendingCaptures): at every boot after the journal's replay,
      * and for CoreWork's ingest job. A journaled write; its replay drains again.
      */

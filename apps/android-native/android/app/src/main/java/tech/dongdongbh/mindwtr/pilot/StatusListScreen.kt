@@ -32,30 +32,33 @@ fun StatusList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
     val view = shown.view
     val clear = view.getJSONObject("filters").getJSONObject("clearEdit")
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-        if (view.getBoolean("hasActiveFilters")) item(key = "filters") {
-            Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 6.dp)) {
-                ActiveFiltersButton("${t("filters.label")} · ${view.getInt("filterActiveCount")}", idle) { openDialog("filters") }
-            }
-        }
-        item(key = "chips") { ActiveChips(model, view.menuObjects("chips")) { filterEdit(clear) } }
-        if (shown.items.isEmpty()) item(key = "empty") {
-            val empty = view.getJSONObject("empty")
-            Box(Modifier.padding(12.dp)) {
-                EmptyState(empty.getString("message"), empty.getString("hint").ifEmpty { null }, empty.menuText("actionLabel")) { filterEdit(clear) }
-            }
-        }
-        items(shown.items, key = { it.key }) { item ->
-            Box(Modifier.padding(horizontal = 12.dp)) {
-                val row = item.row
-                if (row == null) GroupHeading(model, item.json)
-                else {
-                    val readOnly = item.json.getJSONObject("row").optBoolean("readOnly")
-                    TaskRowItem(model, row, status = RowStatus.Icon, completable = !readOnly, actions = bulkRow(row, readOnly))
+    // RN's pull down to sync (TaskList, 5bb0ea8f).
+    PullToSync(model, Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
+            if (view.getBoolean("hasActiveFilters")) item(key = "filters") {
+                Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 6.dp)) {
+                    ActiveFiltersButton("${t("filters.label")} · ${view.getInt("filterActiveCount")}", idle) { openDialog("filters") }
                 }
             }
+            item(key = "chips") { ActiveChips(model, view.menuObjects("chips")) { filterEdit(clear) } }
+            if (shown.items.isEmpty()) item(key = "empty") {
+                val empty = view.getJSONObject("empty")
+                Box(Modifier.padding(12.dp)) {
+                    EmptyState(empty.getString("message"), empty.getString("hint").ifEmpty { null }, empty.menuText("actionLabel")) { filterEdit(clear) }
+                }
+            }
+            items(shown.items, key = { it.key }) { item ->
+                Box(Modifier.padding(horizontal = 12.dp)) {
+                    val row = item.row
+                    if (row == null) GroupHeading(model, item.json)
+                    else {
+                        val readOnly = item.json.getJSONObject("row").optBoolean("readOnly")
+                        TaskRowItem(model, row, status = RowStatus.Icon, completable = !readOnly, actions = bulkRow(row, readOnly))
+                    }
+                }
+            }
+            if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
         }
-        if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
     }
 }
 

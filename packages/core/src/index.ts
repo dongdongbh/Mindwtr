@@ -111,6 +111,7 @@ export * from './sync-encryption-local-state';
 export * from './sync-encryption-service';
 export * from './mobile-sync-utils';
 export * from './mobile-sync-service';
+export * from './manual-pull-sync';
 export * from './mobile-background-sync';
 export * from './mobile-sync-triggers';
 export * from './mobile-reminder-alarms';

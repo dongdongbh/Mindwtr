@@ -866,6 +866,28 @@ describe('invocation-owned iOS service settlement', () => {
     }
 });
 
+// 5bb0ea8f: a list's pull down to sync runs RN's useManualPullSync rules (core's runManualPullSync) through the manual cycle.
+describe('pull down to sync', () => {
+    it('asks for setup while sync is off, runs no cycle, and logs the outcome', async () => {
+        const fixture = host();
+        expect(await fixture.sync.pullSync()).toEqual({ indicator: 'error', toast: {
+            title: 'Notice', message: 'Please set up sync first', tone: 'warning', durationMs: 3600,
+        } });
+        expect(fixture.sync.state().cycles).toBe(0);
+        expect(fixture.entries.filter((entry) => entry.context?.releaseCheck === 'v1.3.8/native-pull-sync').map((entry) => entry.context))
+            .toEqual([{ releaseCheck: 'v1.3.8/native-pull-sync', outcome: 'error', toast: 'yes' }]);
+    });
+
+    it('runs one manual cycle on a configured backend, and a failed one ends on the error flash', async () => {
+        globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;
+        const fixture = host({ [SYNC_BACKEND_KEY]: 'webdav', [WEBDAV_URL_KEY]: 'https://dav.example.com' }, false, async () => {
+            throw new Error('ordinary local read failure');
+        });
+        expect(await fixture.sync.pullSync()).toMatchObject({ indicator: 'error', toast: { title: 'Sync failed', tone: 'error' } });
+        expect(fixture.sync.state().cycles).toBe(1);
+    });
+});
+
 describe('native background sync binding', () => {
     it('manual sync preserves fatal cleanup identity without a cycle increment or any post-fatal host work', async () => {
         globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch;

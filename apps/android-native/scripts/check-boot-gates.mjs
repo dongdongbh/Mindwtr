@@ -1556,8 +1556,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // only an unjournaled write or a read, so no journaled write can skip the journal through it.
         assert.match(journalKt, /fun unjournaled\(method: String, args: List<Any\?>\): Boolean = method in WRITES && key\(method, args\) in UNJOURNALED/);
         assert.match(coreHost, /private fun callLong\(method: String, vararg args: Any\?, handle: LongCall = LongCall\(\)\): JSONObject \{\s+require\(method !in WriteJournal\.WRITES \|\| WriteJournal\.unjournaled\(method, args\.toList\(\)\)\)/);
-        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['ingestAudio', 'backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest', 'voiceRequest'],
-            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s, Gmail\'s and voice capture\'s requests and the widget\'s recordings take the long path');
+        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['ingestAudio', 'backgroundSync', 'pullSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest', 'voiceRequest'],
+            'only CoreWork\'s background sync run, a list\'s pull down to sync, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s, Gmail\'s and voice capture\'s requests and the widget\'s recordings take the long path');
         // O1: About's requests (an update check, a feedback send, the heartbeat, the prompts) are reads of core: never journaled.
         assert(!writes.includes('aboutRequest'), 'an About request is no journaled write');
         assert.match(coreHost, /fun calendarRequest\(name: String, json: String\): JSONObject = callLong\("calendarRequest", name, json\)/);
@@ -1566,6 +1566,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // S4a: CoreWork's background run (core's runner) is a read-and-sync like Sync now: no journaled write.
         assert.match(coreHost, /fun backgroundSync\(trigger: String, stored: Int\): JSONObject =\s+callLong\("backgroundSync", trigger, stored, debugFault\("bgsync_deadline_ms"\)\.toIntOrNull\(\) \?: 0\)/);
         assert(!writes.includes('backgroundSync'), 'a background sync run is no journaled write');
+        assert.match(coreHost, /fun pullSync\(\): JSONObject = callLong\("pullSync"\)/);
+        assert(!writes.includes('pullSync'), 'a pull down to sync is no journaled write');
         assert.match(coreHost, /fun attachmentRequest\(name: String, json: String\): JSONObject = callLong\("attachmentRequest", name, json\)/);
         assert(!writes.includes('attachmentRequest'), 'an attachment request is no journaled write');
         assert.match(coreHost, /fun syncCommand\(name: String, json: String\): JSONObject = callLong\("menuCommand", name, json\)/);
@@ -2032,7 +2034,8 @@ assert.match(activity, /if \(open != null && writable\) Box\(Modifier\.fillMaxSi
 
 // Landscape: the Inbox's controls, Process button and scope line are the list's first items; only the header, the tabs (and a
 // failure, and the bulk bar while selecting) stay fixed.
-assert.match(inboxUi, /LazyColumn\(Modifier\.weight\(1f\)\.fillMaxWidth\(\), contentPadding = PaddingValues\(bottom = 12\.dp\)\) \{\s*val view = shown\?\.view \?: return@LazyColumn\s*item\(key = "toolbar"\)[\s\S]*?item\(key = "header"\)[\s\S]*?items\(shown\.items, key = \{ it\.key \}\)/);
+// The list fills RN's pull down to sync (PullToSync, 5bb0ea8f), which takes the column's remaining height.
+assert.match(inboxUi, /PullToSync\(model, Modifier\.weight\(1f\)\.fillMaxWidth\(\)\) \{\s*LazyColumn\(Modifier\.fillMaxSize\(\), contentPadding = PaddingValues\(bottom = 12\.dp\)\) \{\s*val view = shown\?\.view \?: return@LazyColumn\s*item\(key = "toolbar"\)[\s\S]*?item\(key = "header"\)[\s\S]*?items\(shown\.items, key = \{ it\.key \}\)/);
 assert.match(activity, /Screen\.Inbox -> InboxList\(model, Modifier\.fillMaxSize\(\)\)/);
 // Capture: RN's center tab button opens RN's capture popup (CaptureScreen.kt), on core's quick capture contract.
 assert.match(activity, /CaptureButton\(model\)[\s\S]*?clickable\(role = Role\.Button\) \{ model\.menu\.closeSheet\(\); model\.openCapture\(\) \}/);
@@ -9885,7 +9888,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(details, /if \(message\.startsWith\("STALE_REVISION"\)\) \{\s+answers\.remove\(action\.id\)\s+refusals\.remove\(action\.id\)\?\.let \{ refused -> shell\.ui \{ refused\(message\.substringAfter\(": "\)\) \} \}/);
     assert.match(details, /put\("destinationProjectId", destination\)\.put\("title", title\)\.put\("expected", expected\)/);
     // RN resets the detail list for each project and shows Getting Started's actions at the top again after Reactivate.
-    assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,2200}LazyColumn\([^\n]*state = listState/);
+    assert.match(header, /val listState = remember\(openProjectId\) \{ LazyListState\(\) \}[\s\S]{0,300}listState\.scrollToItem\(0\)[\s\S]{0,2600}LazyColumn\([^\n]*state = listState/);
     // A toast with an action (Undo) honors Android's "Time to take action" (TalkBack and switch users), never below RN's time.
     assert.match(source('InboxViewModel.kt'), /if \(action != null\) actionTimeout\(shown\) else shown/);
     assert.match(source('InboxViewModel.kt'), /getRecommendedTimeoutMillis\(shown\.toInt\(\),\s+android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_TEXT or android\.view\.accessibility\.AccessibilityManager\.FLAG_CONTENT_CONTROLS\)/);

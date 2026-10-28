@@ -1022,6 +1022,9 @@ class CoreHost(
     fun backgroundSync(trigger: String, stored: Int): JSONObject =
         callLong("backgroundSync", trigger, stored, debugFault("bgsync_deadline_ms").toIntOrNull() ?: 0)
 
+    /** A list's pull down to sync (host-sync.ts pullSync): one manual cycle under core's rules, `{ indicator, toast }`; long. */
+    fun pullSync(): JSONObject = callLong("pullSync")
+
     /**
      * A Settings › Sync screen command (host-entry.ts MENU_COMMANDS, one of WriteJournal.UNJOURNALED) with [json] unchanged. It
      * may sync for minutes, so it never holds the engine ([callLong]); it is never journaled (it can carry a password).

@@ -68,12 +68,15 @@ fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(16.dp)) {
-            view.optJSONObject("empty")?.takeIf { shown.items.isEmpty() }?.let { empty ->
-                item(key = "empty") { EmptyLine(model, empty) }
+        // RN's pull here reads the list again (a RefreshControl over fetchData), no sync.
+        PullToRead(Modifier.weight(1f).fillMaxWidth(), { done -> refresh(done) }) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+                view.optJSONObject("empty")?.takeIf { shown.items.isEmpty() }?.let { empty ->
+                    item(key = "empty") { EmptyLine(model, empty) }
+                }
+                items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge) } }
+                if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
             }
-            items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge) } }
-            if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
         }
     }
 }

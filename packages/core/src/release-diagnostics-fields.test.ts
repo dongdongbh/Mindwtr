@@ -36,6 +36,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'restored',
     // native-background-reminders reuses reason and outcome; the core work line beside it adds job and reminders (cycled/failed).
     'job', 'reminders',
+    // native-pull-sync reuses outcome; toast is yes/no.
+    'toast',
 
     // web-attachment-upload reuses releaseCheck, stage and count; only acknowledged PUTs.
     // android-widget-capture-status: bounded creation status and picker origin; kind/outcome below.

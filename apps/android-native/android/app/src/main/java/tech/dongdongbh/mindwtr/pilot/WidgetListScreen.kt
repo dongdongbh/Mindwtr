@@ -25,14 +25,17 @@ import androidx.compose.ui.unit.dp
 fun WidgetList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
     val c = LocalTheme.current.colors
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
-        shown.view.optJSONObject("empty")?.takeIf { shown.items.isEmpty() }?.let { empty ->
-            item(key = "empty") {
-                Text(empty.getString("message"), style = rnText(14, 400), color = c.secondaryText, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth().padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite })
+    // RN's pull here reads the list again (a RefreshControl over fetchData), no sync.
+    PullToRead(Modifier.fillMaxSize(), { done -> refresh(done) }) {
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+            shown.view.optJSONObject("empty")?.takeIf { shown.items.isEmpty() }?.let { empty ->
+                item(key = "empty") {
+                    Text(empty.getString("message"), style = rnText(14, 400), color = c.secondaryText, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth().padding(24.dp).semantics { liveRegion = LiveRegionMode.Polite })
+                }
             }
+            items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge) } }
+            if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
         }
-        items(shown.items, key = { it.key }) { item -> item.row?.let { TaskRowItem(model, it, status = RowStatus.Badge) } }
-        if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
     }
 }

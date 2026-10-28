@@ -91,6 +91,7 @@ export const ANDROID_HOST_METHODS = [
     'projectFocus',
     'projects',
     'pruneReceipts',
+    'pullSync',
     'reminderDone',
     'reminderSnooze',
     'remindersCycle',

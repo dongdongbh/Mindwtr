@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -61,42 +62,45 @@ fun InboxList(model: InboxViewModel, modifier: Modifier) = with(model.menu) {
     val c = LocalTheme.current.colors
     Column(modifier) {
         BulkBar(model)
-        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 12.dp)) {
-            val view = shown?.view ?: return@LazyColumn
-            item(key = "toolbar") { InboxToolbar(model, view) }
-            item(key = "chips") { ActiveChips(model, view.menuObjects("chips")) { filterEdit(view.getJSONObject("filters").getJSONObject("clearEdit")) } }
-            item(key = "header") {
-                // RN's action row (16 from the edges, 6 under the controls), then the scope line where the rows start.
-                Column(Modifier.padding(top = 6.dp)) {
-                    Box(Modifier.padding(horizontal = 16.dp)) {
-                        view.optJSONObject("process")?.let { ProcessButton(model, it) }
-                            ?: view.getJSONObject("mindSweep").let { sweep ->
-                                ActionButton(Lucide.Brain, sweep.getString("label"), idle, sweep.getString("accessibilityLabel")) { openMindSweep() }
-                            }
-                    }
-                    Text(view.getString("scopeLabel"), style = rnText(13, 600), color = c.secondaryText, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
-                }
-            }
-            if (shown.items.isEmpty()) item(key = "empty") {
-                val empty = view.getJSONObject("empty")
-                Box(Modifier.padding(horizontal = 12.dp)) {
-                    // Core's action: its filter edit (Clear) with filters on, else quick capture.
-                    EmptyState(empty.getString("message"), empty.getString("hint").ifEmpty { null }, empty.menuText("actionLabel")) {
-                        empty.getJSONObject("action").optJSONObject("filterEdit")?.let(::filterEdit) ?: model.openCapture()
+        // RN's pull down to sync (5bb0ea8f).
+        PullToSync(model, Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 12.dp)) {
+                val view = shown?.view ?: return@LazyColumn
+                item(key = "toolbar") { InboxToolbar(model, view) }
+                item(key = "chips") { ActiveChips(model, view.menuObjects("chips")) { filterEdit(view.getJSONObject("filters").getJSONObject("clearEdit")) } }
+                item(key = "header") {
+                    // RN's action row (16 from the edges, 6 under the controls), then the scope line where the rows start.
+                    Column(Modifier.padding(top = 6.dp)) {
+                        Box(Modifier.padding(horizontal = 16.dp)) {
+                            view.optJSONObject("process")?.let { ProcessButton(model, it) }
+                                ?: view.getJSONObject("mindSweep").let { sweep ->
+                                    ActionButton(Lucide.Brain, sweep.getString("label"), idle, sweep.getString("accessibilityLabel")) { openMindSweep() }
+                                }
+                        }
+                        Text(view.getString("scopeLabel"), style = rnText(13, 600), color = c.secondaryText, modifier = Modifier.padding(start = 16.dp, bottom = 8.dp))
                     }
                 }
-            }
-            items(shown.items, key = { it.key }) { item ->
-                Box(Modifier.padding(horizontal = 12.dp)) {
-                    val row = item.row
-                    if (row == null) GroupHeading(model, item.json)
-                    else {
-                        val readOnly = item.json.getJSONObject("row").optBoolean("readOnly")
-                        TaskRowItem(model, row, status = RowStatus.Icon, completable = !readOnly, actions = bulkRow(row, readOnly))
+                if (shown.items.isEmpty()) item(key = "empty") {
+                    val empty = view.getJSONObject("empty")
+                    Box(Modifier.padding(horizontal = 12.dp)) {
+                        // Core's action: its filter edit (Clear) with filters on, else quick capture.
+                        EmptyState(empty.getString("message"), empty.getString("hint").ifEmpty { null }, empty.menuText("actionLabel")) {
+                            empty.getJSONObject("action").optJSONObject("filterEdit")?.let(::filterEdit) ?: model.openCapture()
+                        }
                     }
                 }
+                items(shown.items, key = { it.key }) { item ->
+                    Box(Modifier.padding(horizontal = 12.dp)) {
+                        val row = item.row
+                        if (row == null) GroupHeading(model, item.json)
+                        else {
+                            val readOnly = item.json.getJSONObject("row").optBoolean("readOnly")
+                            TaskRowItem(model, row, status = RowStatus.Icon, completable = !readOnly, actions = bulkRow(row, readOnly))
+                        }
+                    }
+                }
+                if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
             }
-            if (shown.items.size < shown.total) item(key = "more") { MoreRow(model) }
         }
     }
 }

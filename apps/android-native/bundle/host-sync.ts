@@ -57,6 +57,7 @@ import {
     getInMemorySyncChangeFingerprint,
     getMobileAutoSyncCadence,
     getMobileWebDavRequestOptions,
+    getSyncConflictCount,
     isLikelyOfflineSyncError,
     loadWebDavSyncConfig,
     nameNotifyListener,
@@ -65,6 +66,7 @@ import {
     readSyncLocationScope,
     resolveBackend,
     resolveSyncBadgeState,
+    runManualPullSync,
     sanitizeLogMessage,
     setSha256HexProvider,
     shouldScheduleMobileBackgroundSync,
@@ -887,8 +889,28 @@ export const createNativeSync = (bindings: NativeSyncBindings) => {
         bindings.emit({ type: 'toast', title: t('settings.syncBadgeWarning'), message: t(key), tone: 'warning', durationMs: 5200, action: t('common.open'), open: 'sync' });
     };
 
+    /**
+     * A list's pull down to sync (RN's useManualPullSync, 5bb0ea8f): core's rules over one manual cycle through performSync, so
+     * the lists read again once it ends. Kotlin keeps one at a time and draws the indicator; this answers how it ended.
+     */
+    const pullSync = async () => {
+        const outcome = await runManualPullSync({
+            getConfigurationStatus: () => service.getMobileSyncConfigurationStatus(),
+            getActivityState: () => service.getMobileSyncActivityState(),
+            performSync: () => performSync(undefined, { manual: true }),
+            isLikelyOfflineSyncError,
+            getSyncConflictCount,
+            t: bindings.translate,
+        });
+        await logLine('info', 'Native Android pull to sync', { scope: 'sync', force: true, extra: {
+            releaseCheck: 'v1.3.8/native-pull-sync', outcome: outcome.indicator, toast: outcome.toast ? 'yes' : 'no',
+        } });
+        return outcome;
+    };
+
     return {
         settingsHost,
+        pullSync,
         assertSelfHostedSyncAdmission,
         performStoredAutomaticSync,
         /** The editor's and the project screen's attachment IO (core's NativeAttachmentsHost); null without app files. */
