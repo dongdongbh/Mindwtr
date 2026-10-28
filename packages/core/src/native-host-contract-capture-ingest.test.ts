@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createNativeHostContract, type NativeHostResult } from './native-host-contract';
-import type { PendingCaptureQueuePort, PendingCaptureRecordPort } from './pending-captures';
+import type { PendingCaptureAudioPort, PendingCaptureQueuePort, PendingCaptureRecordPort } from './pending-captures';
 import { acquireWorkspaceTransitionLock } from './sandbox';
 import { openScreenHost, requestId, restartScreenHost, value } from './screen-parity.replay';
 import { flushPendingSave, resetForTests, useTaskStore } from './store';
@@ -256,6 +256,83 @@ describe('ingestPendingCaptures', () => {
             release();
         }
         expect(queue.port.list).not.toHaveBeenCalled();
+    });
+});
+
+/** The widget's WAVs as Kotlin's files would show them; `transcript` is what the host's speech provider answers (null: none set up). */
+function fakeAudio(transcript: () => string | null) {
+    const wavs = new Set([`file:///data/files/quick-capture-audio/${AUDIO_ID}.wav`]);
+    const port: PendingCaptureAudioPort = {
+        resolvePath: (capture) => (capture.audioPath === `file:///data/files/quick-capture-audio/${capture.id}.wav` ? capture.audioPath : null),
+        transcribe: vi.fn(async () => transcript()),
+        delete: vi.fn(async (path: string) => { wavs.delete(path); }),
+    };
+    return { port, wavs };
+}
+
+describe('ingestPendingAudio', () => {
+    it('turns a queued widget recording into one task under its capture id, removes its file and WAV, and leaves every other item', async () => {
+        const host = await openScreenHost({ data: { tasks: [task('open'), task('later')] }, record: {}, log: [] });
+        const queue = fakeQueue(queueItems);
+        const audio = fakeAudio(() => 'Buy milk');
+
+        expect(value(await host.ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: audio.port }))).toEqual({ ingested: 1 });
+
+        const created = useTaskStore.getState()._allTasks.filter((entry) => entry.id === AUDIO_ID);
+        expect(created.map((entry) => [entry.title, entry.status])).toEqual([['Buy milk', 'inbox']]);
+        expect(queue.stored.has(`${AUDIO_ID}.json`)).toBe(false);
+        expect(audio.wavs.size).toBe(0);
+        // Text captures, check-offs, defers and Pomodoro commands stay for the journaled ingest.
+        expect([...queue.stored.keys()].sort()).toEqual([`${CAPTURE_ID}.json`, `${INTENT_ID}.json`, 'c.json', 'd.json', 'timer.json']);
+        expect(useTaskStore.getState()._allTasks.find((entry) => entry.id === 'open')?.status).toBe('next');
+
+        // Again (the file already gone): nothing twice.
+        expect(value(await host.ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: audio.port }))).toEqual({ ingested: 0 });
+        expect(useTaskStore.getState()._allTasks.filter((entry) => entry.id === AUDIO_ID)).toHaveLength(1);
+    });
+
+    it('a kill before the deletes replays without a second task', async () => {
+        const host = await openScreenHost({ data: { tasks: [] }, record: {}, log: [] });
+        const queue = fakeQueue({ [`${AUDIO_ID}.json`]: queueItems[`${AUDIO_ID}.json`] });
+        queue.failDelete.add(`${AUDIO_ID}.json`);
+        const audio = fakeAudio(() => 'Call the bank');
+
+        expect(value(await host.ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: audio.port }))).toEqual({ ingested: 0 });
+        expect(queue.stored.has(`${AUDIO_ID}.json`)).toBe(true);
+
+        await reloadStore();
+        const restarted = await restartScreenHost();
+        expect(value(await restarted.ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: audio.port }))).toEqual({ ingested: 1 });
+        expect(useTaskStore.getState()._allTasks.filter((entry) => entry.id === AUDIO_ID).map((entry) => entry.title)).toEqual(['Call the bank']);
+        expect(queue.stored.size).toBe(0);
+        expect(audio.wavs.size).toBe(0);
+    });
+
+    it('with no speech provider set up keeps the item and its WAV, and after a restart with one set up makes it once', async () => {
+        const host = await openScreenHost({ data: { tasks: [] }, record: {}, log: [] });
+        const queue = fakeQueue({ [`${AUDIO_ID}.json`]: queueItems[`${AUDIO_ID}.json`] });
+        let transcript: string | null = null;
+        const audio = fakeAudio(() => transcript);
+
+        expect(value(await host.ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: audio.port }))).toEqual({ ingested: 0 });
+        expect(queue.stored.has(`${AUDIO_ID}.json`)).toBe(true);
+        expect(audio.wavs.size).toBe(1);
+        expect(useTaskStore.getState()._allTasks).toEqual([]);
+
+        await reloadStore();
+        const restarted = await restartScreenHost();
+        transcript = 'Pick up the parcel';
+        expect(value(await restarted.ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: audio.port }))).toEqual({ ingested: 1 });
+        expect(value(await restarted.ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: audio.port }))).toEqual({ ingested: 0 });
+        expect(useTaskStore.getState()._allTasks.map((entry) => [entry.id, entry.title])).toEqual([[AUDIO_ID, 'Pick up the parcel']]);
+    });
+
+    it('answers NOT_READY before the validated load and refuses a call without an audio port', async () => {
+        const queue = fakeQueue({});
+        expect(await createNativeHostContract().ingestPendingAudio({ queue: queue.port, lastApplied: record(), audio: fakeAudio(() => null).port }))
+            .toMatchObject({ ok: false, error: { code: 'NOT_READY' } });
+        const host = await openScreenHost({ data: { tasks: [] }, record: {}, log: [] });
+        expect(await host.ingestPendingAudio({ queue: queue.port, lastApplied: record() } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 });
 

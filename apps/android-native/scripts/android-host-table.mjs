@@ -63,6 +63,7 @@ export const ANDROID_HOST_METHODS = [
     'inboxStart',
     'inboxStep',
     'ingest',
+    'ingestAudio',
     'language',
     'languageSaved',
     'legacyCheck',

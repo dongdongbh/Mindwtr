@@ -365,6 +365,11 @@ export type PendingCaptureDrainDeps = PendingCaptureStoreDeps & {
     /** Without it every `audio` item stays in the queue untouched. */
     audio?: PendingCaptureAudioPort;
     /**
+     * Drains only the `audio` items and leaves every other item for another drain (the native host's journaled ingest): a
+     * transcription waits on the network, which a journaled operation's deadline must not.
+     */
+    audioOnly?: boolean;
+    /**
      * Told of each capture, check-off or defer a failure left unfinished: `owed` once its store write landed but its save, its
      * applied-command record or its file delete did not finish (a later change to that task must wait for the retry);
      * `queued` when nothing of it landed (a later drain is enough).
@@ -582,6 +587,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
         lastApplied,
         log,
         audio,
+        audioOnly,
         onUnfinished,
     } = deps;
 
@@ -700,6 +706,7 @@ export async function drainPendingCaptureQueue(deps: PendingCaptureDrainDeps): P
 
     let ingested = 0;
     for (const { capture, name } of orderedEntries) {
+        if (audioOnly && capture?.kind !== 'audio') continue;
         if (!capture) {
             // Only our own native writers write here, so an unparsable file is
             // corruption, not a transient failure — retrying forever would

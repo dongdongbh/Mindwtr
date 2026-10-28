@@ -747,6 +747,12 @@ class CoreHost(
     fun ingestPendingCaptures(requestId: String): JSONObject = callAsync("ingest", requestId)
 
     /**
+     * The widget's queued recordings made into tasks (host-entry.ts ingestAudio, core's ingestPendingAudio). A transcription waits
+     * on the network, so it never holds the engine ([callLong]); not journaled, since each task takes its capture's UUID.
+     */
+    fun ingestPendingAudio(): JSONObject = callLong("ingestAudio")
+
+    /**
      * A line of the runner's (CoreWork, the queue drain) through core's logger: logcat, and RN's diagnostics log file while Debug
      * logging is on, its fields in [context]. It never fails its caller: a line that cannot go through core goes to logcat.
      */

@@ -21,6 +21,7 @@ import type { NativeHostResult } from './native-host-contract';
 import { fail, isObjectRecord, isText } from './native-host-contract-menu-views';
 import {
     drainPendingCaptureQueue,
+    type PendingCaptureAudioPort,
     type PendingCaptureLog,
     type PendingCaptureQueuePort,
     type PendingCaptureRecordPort,
@@ -55,6 +56,13 @@ const isQueuePort = (value: unknown): value is PendingCaptureQueuePort => (
 
 const isRecordPort = (value: unknown): value is PendingCaptureRecordPort => (
     isObjectRecord(value) && typeof value.read === 'function' && typeof value.write === 'function'
+);
+
+const isAudioPort = (value: unknown): value is PendingCaptureAudioPort => (
+    isObjectRecord(value)
+    && typeof value.resolvePath === 'function'
+    && typeof value.transcribe === 'function'
+    && typeof value.delete === 'function'
 );
 
 const isOptionalText = (value: unknown) => value === undefined || value === null || isText(value, 2000);
@@ -149,6 +157,44 @@ export function createCaptureIngestMethods(deps: CaptureIngestDeps) {
             if (thrown !== undefined) return fail('ACTION_FAILED', thrown instanceof Error ? thrown.message : String(thrown));
             if (unfinished.queued > 0) return fail('ACTION_FAILED', `${unfinished.queued} queued item(s) left for a later drain`);
             return { ok: true, value: { ingested } };
+        },
+
+        /**
+         * The queued voice captures (an Android widget recording), as React Native's foreground drain turns them into tasks:
+         * each `audio` item's recording goes through [audio]'s transcription, and a transcript becomes one task under the
+         * capture's UUID, so a replay never makes a second one; its file and recording then go. No transcript (no speech
+         * provider set up, or one this host cannot reach yet) leaves the item and its recording for a later run, as in RN.
+         * Every other item is left for [ingestPendingCaptures]. Not journaled: a transcription waits on the network, and the
+         * capture UUID makes a repeat exact. Runs in the same chain as the journaled drain, never beside it.
+         */
+        async ingestPendingAudio(input: {
+            queue: PendingCaptureQueuePort;
+            lastApplied: PendingCaptureRecordPort;
+            audio: PendingCaptureAudioPort;
+        }): Promise<NativeHostResult<{ ingested: number }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || !isQueuePort(input.queue) || !isRecordPort(input.lastApplied) || !isAudioPort(input.audio)) {
+                return fail('INVALID_INPUT', 'A queue, a lastApplied record and an audio port with resolvePath, transcribe and delete are required');
+            }
+            const { queue, lastApplied, audio } = input;
+            const run = drainChain.then(async () => {
+                if (isSandboxMode() || isWorkspaceTransitionActive()) return 0;
+                const { addTask, updateTask, addProject, projects, areas, tasks, people, settings } = useTaskStore.getState();
+                return drainPendingCaptureQueue({
+                    addTask, updateTask, addProject, projects, areas, tasks, people, settings,
+                    getTasks: () => useTaskStore.getState()._allTasks,
+                    getProjects: () => useTaskStore.getState()._allProjects,
+                    flushPendingSave: flushDurably,
+                    queue, lastApplied, log, audio, audioOnly: true,
+                });
+            });
+            drainChain = run.catch(() => undefined);
+            try {
+                return { ok: true, value: { ingested: await run } };
+            } catch (error) {
+                return fail('ACTION_FAILED', error instanceof Error ? error.message : String(error));
+            }
         },
 
         /**

@@ -1555,8 +1555,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // only an unjournaled write or a read, so no journaled write can skip the journal through it.
         assert.match(journalKt, /fun unjournaled\(method: String, args: List<Any\?>\): Boolean = method in WRITES && key\(method, args\) in UNJOURNALED/);
         assert.match(coreHost, /private fun callLong\(method: String, vararg args: Any\?, handle: LongCall = LongCall\(\)\): JSONObject \{\s+require\(method !in WriteJournal\.WRITES \|\| WriteJournal\.unjournaled\(method, args\.toList\(\)\)\)/);
-        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest'],
-            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s and Gmail\'s requests take the long path');
+        assert.deepEqual([...coreHost.matchAll(/\bcallLong\("(\w+)"/g)].map((m) => m[1]), ['ingestAudio', 'backgroundSync', 'menuCommand', 'aiRequest', 'aboutRequest', 'attachmentRequest', 'calendarRequest', 'gmailRequest'],
+            'only CoreWork\'s background sync run, Settings › Sync\'s commands, the AI\'s and About\'s requests, the attachments\' downloads, the calendar\'s and Gmail\'s requests and the widget\'s recordings take the long path');
         // O1: About's requests (an update check, a feedback send, the heartbeat, the prompts) are reads of core: never journaled.
         assert(!writes.includes('aboutRequest'), 'an About request is no journaled write');
         assert.match(coreHost, /fun calendarRequest\(name: String, json: String\): JSONObject = callLong\("calendarRequest", name, json\)/);
@@ -4776,7 +4776,8 @@ export function setSha256HexProvider() {
 // calendar bridge (C3), which it lacks as well. host-gmail.ts's need Kotlin's Gmail calls (G3), which it lacks too.
 const hostSyncTs = readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-attachments.ts'), 'utf8')
     + readFileSync(resolve(app, 'bundle/host-reminders.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-widgets.ts'), 'utf8')
-    + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8');
+    + readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8') + readFileSync(resolve(app, 'bundle/host-gmail.ts'), 'utf8')
+    + readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8');
 const syncOnly = [...new Set([...hostSyncTs.matchAll(/^import \{([\s\S]*?)\} from '@mindwtr\/core';/gm)].flatMap((m) => [...m[1].matchAll(/^\s+(\w+),$/gm)].map((n) => n[1])))]
     .filter((name) => !new RegExp(`export (?:async )?(?:function|const|class) ${name}\\b|export \\{[^}]*\\b${name}\\b`).test(fakeCore));
 assert(syncOnly.includes('createMobileSyncService') && syncOnly.includes('createMobileSyncTriggers'), 'host-sync.ts\'s core imports parsed');
@@ -10204,5 +10205,22 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     for (const name of ['FocusControls.kt', 'FocusModel.kt', 'Pomodoro.kt', 'InboxViewModel.kt']) {
         assert.doesNotMatch(readFileSync(resolve(app, `android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/${name}`), 'utf8'), /focus\?\.revision(?!\.orEmpty\(\)\s*$)/m, `${name} pages at focusRevision`);
     }
+}
+// widget-audio-20261028-05: the widget's queued recordings become tasks as RN's foreground drain makes them (core's
+// ingestPendingAudio with RN's audio port), apart from the journaled ingest (a transcription waits on the network), after the sync
+// start and on each resume; Gemini reaches its provider, any other provider leaves the recording queued, as RN without speech.
+{
+    const audioTs = readFileSync(resolve(app, 'bundle/host-widget-audio.ts'), 'utf8');
+    const processHost = source('ProcessCoreHost.kt');
+    assert.match(coreHost, /fun ingestPendingAudio\(\): JSONObject = callLong\("ingestAudio"\)/);
+    assert.match(hostEntry, /ingestAudio\(\): string \{\s*return submit\(async \(\) => \{\s*if \(!widgetAudioPort\) return \{ ingested: 0 \};\s*const result = unwrap\(await contract\.ingestPendingAudio\(\{ queue: pendingCaptureQueue, lastApplied: lastAppliedRecord, audio: widgetAudioPort \}\)\);/);
+    // The journaled ingest still passes no audio port: a transcription must never run inside its deadline.
+    assert.match(hostEntry, /contract\.ingestPendingCaptures\(\{ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord \}\)/);
+    assert.match(processHost, /syncHost = runtime\s*network\.start\(\)\s*drainAudio\(app, runtime\)/);
+    assert.match(processHost, /if \(state == "active"\) application\?\.let \{ drainAudio\(it, runtime\) \}/);
+    assert.match(audioTs, /if \(provider !== 'gemini'\) \{ bindings\.logWaiting\('provider-unsupported'\); return null; \}/);
+    assert.doesNotMatch(audioTs.replace(/\/\*\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''), /logWaiting\([^)]*transcript/, 'no transcript text in a log line');
+    const audioTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-widget-audio.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
+    assert.equal(audioTested.status, 0, `bundle/host-widget-audio.test.ts: ${audioTested.stderr.slice(-1500)}`);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

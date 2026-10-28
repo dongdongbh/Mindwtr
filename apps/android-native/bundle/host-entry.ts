@@ -145,6 +145,9 @@ import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundl
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
 import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
 import { createNativeGmail } from './host-gmail';
+import { createWidgetAudioPort } from './host-widget-audio';
+import { createAIKeyStore } from '../../../packages/core/src/ai-config';
+import { createSyncSecretVault } from '../../../packages/core/src/sync-secret-storage';
 import { createNativeLocalAttachmentsForHost, nativeFileChannels, prepareNativeTaskAttachmentAvailabilityPreflight,
     prepareNativeTaskAttachmentAvailability, prepareNativeProjectFileAvailability, nativeProjectFileAvailabilityInitialURL,
     createNativeReadOnlySelfHostedAttachments, assertNativeSelfHostedAttachmentEncryptionAdmission } from './host-attachments';
@@ -722,6 +725,33 @@ const nativeGmail = nativeSync && typeof globalThis.__mindwtrGmailCall === 'func
         statusChanged: (status) => { checked(native().hostEvent(JSON.stringify({ type: 'gmailStatus', status }))); },
     })
     : null;
+/**
+ * The home-screen widget's queued recordings (core's ingestPendingAudio, host-widget-audio.ts): RN's audio port, on a host with
+ * the app's file calls and AI keys (Android). Its transcription waits on the network, so it runs apart from the journaled ingest.
+ */
+const widgetAudioPort = (() => {
+    const channels = nativeAI && nativeSync ? nativeFileChannels() : null;
+    if (!channels || !nativeAI) return null;
+    const ai = nativeAI;
+    const keys = createAIKeyStore({
+        storage: ai.storage,
+        secrets: { getItem: (key) => ai.secrets.get(key), setItem: (key, value) => ai.secrets.set(key, value), deleteItem: (key) => ai.secrets.delete(key) },
+        vault: createSyncSecretVault({ isAvailable: async () => true }),
+    });
+    return createWidgetAudioPort({
+        documentDirectory: channels.directories.document,
+        readBytes: async (uri) => await channels.files({ op: 'readBytes', uri }) as Uint8Array,
+        deleteFile: (path) => { checked(native().fileDelete(path)); },
+        loadKey: (provider) => keys.load(provider),
+        isFossBuild,
+        logWaiting: (outcome) => {
+            try {
+                logInfo('Native Android widget recording waits for transcription', { scope: 'capture',
+                    context: { releaseCheck: 'v1.3.8/native-widget-audio-ingest', outcome } });
+            } catch { /* a diagnostic line never changes the drain */ }
+        },
+    });
+})();
 /** Gmail follows the sync start and RN's AppState; a failure there never fails sync's. */
 const gmailLifecycle = (work: () => void) => {
     try { work(); } catch { logWarn('Native Android Gmail capture lifecycle failed', { scope: 'gmail-capture' }); }
@@ -5527,6 +5557,24 @@ globalThis.MindwtrHost = {
      */
     ingest(requestId: string): string {
         return submit(async () => taskResult('ingest', await contract.ingestPendingCaptures({ requestId, queue: pendingCaptureQueue, lastApplied: lastAppliedRecord })));
+    },
+    /**
+     * The widget's queued recordings made into tasks (core's ingestPendingAudio): after the sync start and on each resume, as RN's
+     * foreground drain. A transcription waits on the network, so CoreHost.ingestPendingAudio waits without holding the engine;
+     * not journaled, since a recording's task takes its capture UUID and a repeat finds it.
+     */
+    ingestAudio(): string {
+        return submit(async () => {
+            if (!widgetAudioPort) return { ingested: 0 };
+            const result = unwrap(await contract.ingestPendingAudio({ queue: pendingCaptureQueue, lastApplied: lastAppliedRecord, audio: widgetAudioPort }));
+            if (result.ingested > 0) {
+                try {
+                    logInfo('Native Android widget recordings became tasks', { scope: 'capture', force: true,
+                        context: { releaseCheck: 'v1.3.8/native-widget-audio-ingest', outcome: 'created', count: String(result.ingested) } });
+                } catch { /* a diagnostic line never changes the drain */ }
+            }
+            return result;
+        });
     },
     /**
      * An automation trigger (`json`: the receiver's `{ action, context }`): core's notification as the details RN's alarm
