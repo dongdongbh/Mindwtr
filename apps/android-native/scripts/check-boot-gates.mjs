@@ -1848,15 +1848,16 @@ assert.match(editorUi, /BackHandler\(enabled = !failed\)/);
 assert.match(editorUi, /clickable\(enabled = !busy && !failed, role = Role\.Button, onClick = leave\)/);
 
 // Focus reaches core only through CoreHost's two calls, which reach only core's two Focus queries. Kotlin sends Focus's control
-// state (FocusModel) with both, and a control's edit with the first; a read that sends neither keeps the flat Focus.
-assert.match(coreHost, /fun focus\(limit: Int, controls: String = "", controlEdit: String = ""\): JSONObject = callAsync\("focus", limit, controls, controlEdit\)/);
-assert.match(coreHost, /fun focusWindow\(key: String, offset: Int, limit: Int, revision: String, controls: String = ""\): JSONObject =\s*callAsync\("focusWindow", key, offset, limit, revision, controls\)/);
-assert.match(hostEntry, /focus\(limit: number, controls = '', controlEdit = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*const focus = unwrap\(contract\.getFocus\(\{ limit, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\), \.\.\.\(controlEdit \? \{ controlEdit: JSON\.parse\(controlEdit\) \} : \{\}\) \}\)\);/);
-assert.match(hostEntry, /focusWindow\(key: string, offset: number, limit: number, revision: string, controls = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getFocusSectionWindow\(\{ key: key as FocusTaskSectionKey, offset, limit, revision, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\) \}\)\);/);
+// state (FocusModel) and the device's group folds (#1444) with both, and a control's edit with the first; a read that sends
+// none of them keeps the flat Focus.
+assert.match(coreHost, /fun focus\(limit: Int, controls: String = "", controlEdit: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focus", limit, controls, controlEdit, folds\)/);
+assert.match(coreHost, /fun focusWindow\(key: String, offset: Int, limit: Int, revision: String, controls: String = "", folds: String = ""\): JSONObject =\s*callAsync\("focusWindow", key, offset, limit, revision, controls, folds\)/);
+assert.match(hostEntry, /focus\(limit: number, controls = '', controlEdit = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*const focus = unwrap\(contract\.getFocus\(\{ limit, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\), \.\.\.\(controlEdit \? \{ controlEdit: JSON\.parse\(controlEdit\) \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);/);
+assert.match(hostEntry, /focusWindow\(key: string, offset: number, limit: number, revision: string, controls = '', folds = ''\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getFocusSectionWindow\(\{ key: key as FocusTaskSectionKey, offset, limit, revision, \.\.\.\(controls \? \{ controls: JSON\.parse\(controls\) \} : \{\}\),\s*\.\.\.\(folds \? \{ collapsedGroupIds: JSON\.parse\(folds\) \} : \{\}\) \}\)\);/);
 assert.equal(model.match(/runtime\.focus\(/g).length, 1);
 assert.equal(model.match(/runtime\.focusWindow\(/g).length, 1);
-assert.match(model, /FocusView\.parse\(runtime\.focus\(PAGE, controls, edit\)\)/, 'every Focus read sends the control state');
-assert.match(model, /view\.append\(runtime\.focusWindow\(key, loaded\.rows\.size, PAGE, view\.revision, state\)\)/, 'later windows go with the state core answered');
+assert.match(model, /FocusView\.parse\(runtime\.focus\(PAGE, controls, edit, folds\)\)/, 'every Focus read sends the control state and the folds');
+assert.match(model, /view\.append\(runtime\.focusWindow\(key, loaded\.rows\.size, PAGE, view\.revision, state, folds\)\)/, 'later windows go with the state core answered');
 assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/\.focus\(|focusWindow\(/g), null);
 // Rows render in core's order: sections and rows are walked as parsed, never sorted, filtered, or regrouped.
 const focusCode = code(focusUi) + code(model.slice(model.indexOf('fun JSONObject.taskRows()'), model.indexOf('private const val PAGE')));
@@ -1865,10 +1866,11 @@ assert.match(focusUi, /return FocusView\(json\.getString\("revision"\), json\.ge
 assert.match(model, /fun JSONObject\.taskRows\(\): List<TaskRow> = getJSONArray\("rows"\)\.let \{ items ->\s*List\(items\.length\(\)\) \{ index ->/);
 assert.match(focusUi, /for \(section in focus\?\.sections\.orEmpty\(\)\) \{/);
 assert.match(focusUi, /section\.rows\.forEachIndexed \{ index, task ->/);
-// Core's row data is the only row data Focus acts on: laterToday places one subheading, revealLabel is shown as text,
-// and the row's focusBlockedLabel disables the star with core's reason (#1277: per row).
-assert.match(focusUi, /val laterToday = section\.rows\.indexOfFirst \{ it\.laterToday \}/);
-assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/(?<!"agenda)\.laterToday\b/g).length, 1); // not the label key
+// Core's row data is the only row data Focus acts on: core's group headings (Today's Later today among them, #1444) go in
+// core's order before the row at their start, revealLabel is shown as text, and the row's focusBlockedLabel disables the star
+// with core's reason (#1277: per row).
+assert.match(focusUi, /while \(nextHeading < section\.groups\.size && section\.groups\[nextHeading\]\.getInt\("start"\) <= index\)/);
+assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/(?<!"agenda)\.laterToday\b/g), null); // not the label key
 assert.match(rowUi, /task\.revealLabel\?\.let \{ MetaText\(it, c\.secondaryText, 600, Modifier\.padding\(top = 4\.dp\)\) \}/);
 assert.equal(code([focusUi, activity, model, rowUi].join('\n')).match(/\.revealLabel\b/g).length, 1);
 assert.doesNotMatch(code([focusUi, activity, model, rowUi].join('\n')), /revealDate/);
@@ -1879,7 +1881,7 @@ assert.match(rowUi, /val label = blocked \?: t\(if \(task\.isFocusedToday\) "age
 assert.match(model, /if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure[\s\S]{0,200}?readFocus\(runtime, null, depth, state\)/);
 // Time-aware refresh: on resume and each minute, only while the Focus list is composed and resumed.
 assert.match(focusUi, /LaunchedEffect\(owner\) \{\s*owner\.repeatOnLifecycle\(Lifecycle\.State\.RESUMED\) \{\s*while \(true\) \{\s*model\.refreshFocus\(\)\s*delay\(60_000\)/);
-assert.equal(code([activity, model, focusUi].join('\n')).match(/(?<!fun )refreshFocus\(\)/g).length, 3, 'the lifecycle loop, and the boot\'s deferred read (first content, or the tab chosen while the boot ran)');
+assert.equal(code([activity, model, focusUi].join('\n')).match(/(?<!fun )refreshFocus\(\)/g).length, 4, 'the lifecycle loop, the boot\'s deferred read (first content, or the tab chosen while the boot ran), and a group fold (#1444)');
 assert.match(activity, /Screen\.Focus -> FocusList\(model, Modifier\.fillMaxSize\(\)\)/);
 // Commands from Focus and a project use the Inbox's command path and its exact-retry lock.
 assert.match(rowUi, /fun TaskRowItem\(\s*model: InboxViewModel, task: TaskRow, status: RowStatus = RowStatus\.Hidden, star: RowStar = RowStar\.Hidden,/);

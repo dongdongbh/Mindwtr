@@ -450,13 +450,13 @@ const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; error: { code:
 };
 
 export function createContractFocusDriver(host: Host, t: Translate) {
-    const tf = (key: string, fallback: string) => tFallback(t, key, fallback);
     let state: FocusControlState = DEFAULT_FOCUS_CONTROL_STATE;
     let reorderMode = false;
     let saveName: string | null = null;
     const widget = createWidgetMirror();
     const read = (controlEdit?: FocusControlEdit): NativeFocusView => {
-        const view = unwrap(host.getFocus({ limit: 100, controls: state, ...(controlEdit ? { controlEdit } : {}) }));
+        // As Android reads: with the device's folds (none here), so Today's Later today comes as core's heading.
+        const view = unwrap(host.getFocus({ limit: 100, controls: state, collapsedGroupIds: [], ...(controlEdit ? { controlEdit } : {}) }));
         state = view.controls.state;
         return view;
     };
@@ -475,14 +475,12 @@ export function createContractFocusDriver(host: Host, t: Translate) {
         const sheet = controls.filterSheet;
         const sections = view.sections.map((section) => {
             const items: string[] = [];
-            const laterTodayCount = section.rows.filter((row) => row.laterToday).length;
+            // Core's headings (Next groups, Today's Later today); the rows from the first heading on sit under one.
+            const firstHeading = section.groups?.[0]?.start ?? Infinity;
             section.rows.forEach((row, index) => {
                 const group = section.groups?.find(({ start }) => start === index);
                 if (group) items.push(`#${group.id}|${group.title}|${group.count}|${group.muted ? 1 : 0}|${group.dotColor ?? ''}`);
-                if (row.laterToday && !section.rows[index - 1]?.laterToday) {
-                    items.push(`#focus:schedule:later-today|${tf('agenda.laterToday', 'Later today')}|${laterTodayCount}|1|`);
-                }
-                items.push(`${row.id}${section.groups || row.laterToday ? '~' : ''}`);
+                items.push(`${row.id}${index >= firstHeading ? '~' : ''}`);
             });
             return { type: section.key, title: section.title, total: section.total, items };
         });

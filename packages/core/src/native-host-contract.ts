@@ -85,10 +85,12 @@ import {
     applyFocusControlEdit,
     buildFocusControlsModel,
     buildFocusNextItems,
+    buildFocusScheduleItems,
     DEFAULT_FOCUS_CONTROL_STATE,
     type FocusControlEdit,
     type FocusControlsModel,
     type FocusControlState,
+    type FocusListItem,
 } from './focus-controls';
 import { themeDescriptor } from './theme-scheme';
 import { formatLocalDate } from './import-source-reader';
@@ -266,6 +268,7 @@ import {
     isFilterEdit,
     isPreservedFilterCriteria,
     firstWindow,
+    isTextList,
     matchesPickerQuery,
     nativeFilterView,
     paramsKey,
@@ -396,6 +399,8 @@ import { createCaptureModalMethods } from './native-host-contract-capture-modal'
 
 export const NATIVE_HOST_CONTRACT_VERSION = 1;
 export const NATIVE_HOST_MAX_WINDOW = 100;
+/** Focus group folds a read may send: the Next groupings' and Later today's together (each device list keeps 200). */
+const FOCUS_MAX_FOLDS = 400;
 export const NATIVE_HOST_EDITOR_FIELDS = ['title', 'description', 'status', 'priority', 'projectId', 'startTime', 'dueDate'] as const;
 export type NativeEditableFields = {
     title: string;
@@ -551,7 +556,13 @@ export type NativeFocusSection = {
      */
     groups?: NativeFocusGroup[] | null;
 };
-export type NativeFocusGroup = { id: string; title: string; count: number; muted: boolean; dotColor: string | null; start: number };
+/**
+ * A Focus group heading (Next actions under a grouping, Today's "Later today"). `axis` is the grouping RN keeps its fold under
+ * ('schedule' for Later today); `collapsed`: the read's `collapsedGroupIds` fold it, so its rows are left out (#1444).
+ */
+export type NativeFocusGroup = {
+    id: string; title: string; count: number; muted: boolean; dotColor: string | null; start: number; axis: string; collapsed: boolean;
+};
 type CachedFocusSection = FocusTaskSection & { total: number; groups: NativeFocusGroup[] | null };
 export type NativeFocusView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
@@ -1319,13 +1330,20 @@ export function createNativeHostContract(options: {
                 return value === key ? undefined : value;
             }, model.selection.globalCount).map((section): CachedFocusSection => {
                 if (section.key === 'focus') return { ...section, total: model.selection.globalCount, groups: null };
-                if (section.key === 'schedule') {
-                    return { ...section, items: [...schedule.ready, ...schedule.laterToday], total: section.items.length, groups: null };
-                }
+                const grouped = (axis: string, built: FocusListItem[]): CachedFocusSection => {
+                    const items: Task[] = [];
+                    const groups: NativeFocusGroup[] = [];
+                    for (const item of built) {
+                        if (item.type === 'task') items.push(item.task);
+                        else groups.push({ id: item.id, title: item.title, count: item.count, muted: item.muted === true,
+                            dotColor: item.dotColor ?? null, start: items.length, axis, collapsed: false });
+                    }
+                    return { ...section, items, total: section.items.length, groups };
+                };
+                // RN's Today: the ready rows, then the "Later today" heading over the timed starts still to come.
+                if (section.key === 'schedule') return grouped('schedule', buildFocusScheduleItems(schedule, translate));
                 if (section.key !== 'next' || groupBy === 'none') return { ...section, total: section.items.length, groups: null };
-                const items: Task[] = [];
-                const groups: NativeFocusGroup[] = [];
-                for (const item of buildFocusNextItems({
+                return grouped(groupBy, buildFocusNextItems({
                     groupBy,
                     tasks: section.items,
                     projects: state.projects,
@@ -1333,11 +1351,7 @@ export function createNativeHostContract(options: {
                     t: translate,
                     // RN's theme preset, for the context and tag swatches.
                     theme: themeDescriptor(state.settings.theme)?.statusPreset ?? 'default',
-                })) {
-                    if (item.type === 'task') items.push(item.task);
-                    else groups.push({ id: item.id, title: item.title, count: item.count, muted: item.muted === true, dotColor: item.dotColor ?? null, start: items.length });
-                }
-                return { ...section, items, total: section.items.length, groups };
+                }));
             });
             cachedFocusProjectTitles = new Map(state.projects.map((project) => [project.id, project.title]));
             cachedRevealDates = new Map(model.pools.upcoming.map(({ task, appearsAt }) => [task.id, appearsAt]));
@@ -1382,10 +1396,39 @@ export function createNativeHostContract(options: {
         return next ? { controls: next } : null;
     };
 
-    // A heading belongs to the window holding the row it precedes.
+    // A heading belongs to the window holding the row it precedes; a folded heading after the last row, to the window that
+    // ends the section.
     const windowGroups = (section: CachedFocusSection, offset: number, limit: number) => (
-        section.groups?.filter(({ start }) => start >= offset && start < offset + limit) ?? null
+        section.groups?.filter(({ start }) => start >= offset
+            && (start < offset + limit || (start === section.items.length && offset + limit >= start))) ?? null
     );
+
+    /**
+     * The device's folds over a cached section (RN's collapsedGroupIds, #1444): a folded heading stays with its count and
+     * `collapsed`, its rows go. Applied per read, so a fold never rebuilds the Focus cache.
+     */
+    const foldFocusSection = (section: CachedFocusSection, folds: ReadonlySet<string>): CachedFocusSection => {
+        const { groups } = section;
+        if (!groups?.some((group) => folds.has(group.id))) return section;
+        const items: Task[] = section.items.slice(0, groups[0].start);
+        const kept: NativeFocusGroup[] = [];
+        groups.forEach((group, index) => {
+            const collapsed = folds.has(group.id);
+            kept.push({ ...group, start: items.length, collapsed });
+            if (!collapsed) items.push(...section.items.slice(group.start, groups[index + 1]?.start ?? section.items.length));
+        });
+        return { ...section, items, groups: kept };
+    };
+    /**
+     * `folds` null: a host that sends no `collapsedGroupIds` (iOS) draws Today's Later today from the rows' `laterToday` and
+     * gets no Today heading.
+     */
+    const foldedFocusSections = (now: Date, controls: FocusControlState | null, folds: ReadonlySet<string> | null) => (
+        focusSections(now, controls).map((section) => (!folds ? (section.key === 'schedule' ? { ...section, groups: null } : section)
+            : folds.size === 0 ? section : foldFocusSection(section, folds)))
+    );
+    /** The folds belong to the view: a page asked under other folds is another revision. */
+    const foldsRevision = (folds: ReadonlySet<string> | null) => (!folds?.size ? '' : `:folds:${paramsKey([...folds].sort())}`);
 
     const focusRows = (section: CachedFocusSection, offset: number, limit: number, now: Date): NativeTaskRow[] => {
         const formatDate = createDateFormatter(dateFormatting());
@@ -2435,21 +2478,26 @@ export function createNativeHostContract(options: {
          * default sort); a control's `edit` sent as `controlEdit` changes it first.
          * Keep the returned `controls.state` and send it with later reads.
          */
-        getFocus(input: { limit: number; controls?: NativeFocusControlsInput; controlEdit?: FocusControlEdit }): NativeHostResult<NativeFocusView> {
+        getFocus(input: {
+            limit: number; controls?: NativeFocusControlsInput; controlEdit?: FocusControlEdit; collapsedGroupIds?: string[];
+        }): NativeHostResult<NativeFocusView> {
             const ready = readiness();
             if (!ready.ok) return ready;
-            if (!input || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > NATIVE_HOST_MAX_WINDOW) {
-                return fail('INVALID_INPUT', 'A bounded limit is required');
+            if (!input || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > NATIVE_HOST_MAX_WINDOW
+                || (input.collapsedGroupIds !== undefined && !isTextList(input.collapsedGroupIds, FOCUS_MAX_FOLDS))) {
+                return fail('INVALID_INPUT', 'A bounded limit and valid group folds are required');
             }
             const now = new Date();
             const read = readFocusControls(input, now);
             if (!read) return fail('INVALID_INPUT', 'The Focus controls or control edit are not valid');
             const { controls } = read;
-            const { model, revision: currentRevision } = focusModel(controls, now);
+            const folds = input.collapsedGroupIds ? new Set(input.collapsedGroupIds) : null;
+            const { model, revision: modelRevision } = focusModel(controls, now);
+            const currentRevision = modelRevision + foldsRevision(folds);
             if (model.selection.hiddenByAreaCount) void logInfo('Focus area selection projected', {
                 scope: 'focus', force: true, context: { releaseCheck: 'v1.3.7/focus-area-selection', ...model.selection },
             });
-            const sections = focusSections(now, controls).map((section) => ({
+            const sections = foldedFocusSections(now, controls, folds).map((section) => ({
                 key: section.key,
                 title: section.title,
                 total: section.total,
@@ -2874,6 +2922,7 @@ export function createNativeHostContract(options: {
         /** A later window of one Focus section's rows. Send the `controls.state` the Focus read returned. */
         getFocusSectionWindow(input: {
             key: FocusTaskSectionKey; offset: number; limit: number; revision: string; controls?: NativeFocusControlsInput;
+            collapsedGroupIds?: string[];
         }): NativeHostResult<{
             version: typeof NATIVE_HOST_CONTRACT_VERSION;
             revision: string;
@@ -2889,13 +2938,15 @@ export function createNativeHostContract(options: {
             if (!input || typeof input.key !== 'string' || (input.controls !== undefined && !controls)
                 || !Number.isSafeInteger(input.offset) || input.offset < 0
                 || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > NATIVE_HOST_MAX_WINDOW
-                || typeof input.revision !== 'string') {
-                return fail('INVALID_INPUT', 'A valid section, offset, bounded limit, revision and Focus controls are required');
+                || typeof input.revision !== 'string'
+                || (input.collapsedGroupIds !== undefined && !isTextList(input.collapsedGroupIds, FOCUS_MAX_FOLDS))) {
+                return fail('INVALID_INPUT', 'A valid section, offset, bounded limit, revision, Focus controls and group folds are required');
             }
             const now = new Date();
-            const { revision: currentRevision } = focusModel(controls, now);
+            const folds = input.collapsedGroupIds ? new Set(input.collapsedGroupIds) : null;
+            const currentRevision = focusModel(controls, now).revision + foldsRevision(folds);
             if (input.revision !== currentRevision) return fail('STALE_REVISION', 'Focus changed; restart paging');
-            const section = focusSections(now, controls).find(({ key }) => key === input.key);
+            const section = foldedFocusSections(now, controls, folds).find(({ key }) => key === input.key);
             if (!section) return fail('INVALID_INPUT', 'Focus section is not available');
             return {
                 ok: true,

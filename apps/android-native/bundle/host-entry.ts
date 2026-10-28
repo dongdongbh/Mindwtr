@@ -2307,22 +2307,24 @@ globalThis.MindwtrHost = {
     },
     /**
      * `controls` is the control state Kotlin keeps and `controlEdit` a control's edit, as JSON; "" leaves either out, so a read
-     * that sends neither keeps the flat Focus it always had.
+     * that sends neither keeps the flat Focus it always had. `folds` is the device's folded group ids (a JSON array, #1444).
      */
-    focus(limit: number, controls = '', controlEdit = ''): string {
+    focus(limit: number, controls = '', controlEdit = '', folds = ''): string {
         return submit(async () => {
             requireSaved();
-            const focus = unwrap(contract.getFocus({ limit, ...(controls ? { controls: JSON.parse(controls) } : {}), ...(controlEdit ? { controlEdit: JSON.parse(controlEdit) } : {}) }));
+            const focus = unwrap(contract.getFocus({ limit, ...(controls ? { controls: JSON.parse(controls) } : {}), ...(controlEdit ? { controlEdit: JSON.parse(controlEdit) } : {}),
+                ...(folds ? { collapsedGroupIds: JSON.parse(folds) } : {}) }));
             // The Focus screen's filter and sort, handed to the widget's Focus list as RN's Focus screen hands it (setFocusWidgetFilter).
             widgets?.focusFilter(focus.controls?.widgetFilter);
             return focus;
         });
     },
-    /** Core checks `key` and refuses a stale `revision`; Kotlin then reads Focus again from offset 0. `controls` as for focus. */
-    focusWindow(key: string, offset: number, limit: number, revision: string, controls = ''): string {
+    /** Core checks `key` and refuses a stale `revision`; Kotlin then reads Focus again from offset 0. `controls` and `folds` as for focus. */
+    focusWindow(key: string, offset: number, limit: number, revision: string, controls = '', folds = ''): string {
         return submit(async () => {
             requireSaved();
-            return unwrap(contract.getFocusSectionWindow({ key: key as FocusTaskSectionKey, offset, limit, revision, ...(controls ? { controls: JSON.parse(controls) } : {}) }));
+            return unwrap(contract.getFocusSectionWindow({ key: key as FocusTaskSectionKey, offset, limit, revision, ...(controls ? { controls: JSON.parse(controls) } : {}),
+                ...(folds ? { collapsedGroupIds: JSON.parse(folds) } : {}) }));
         });
     },
     pomodoroTasks(json: string): string {

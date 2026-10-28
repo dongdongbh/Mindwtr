@@ -1171,6 +1171,21 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         focusView.save(prefs)
     }
 
+    /**
+     * The device's Focus folds, as RN keeps them (#1444): Next actions' groups under "focus-next" by grouping, Later today under
+     * "focus-schedule". Core's group ids carry their grouping, so every grouping's folds go together.
+     */
+    private fun focusFolds() = GroupCollapse.all(prefs, "focus-next", 200).apply {
+        GroupCollapse.axis(prefs, "focus-schedule", "schedule", 200).let { later -> for (index in 0 until later.length()) put(later.getString(index)) }
+    }
+
+    /** RN's toggleGroup on a Focus heading: core's [heading] folds or unfolds on this device, and Focus reads again. */
+    fun toggleFocusGroup(heading: JSONObject) {
+        val axis = heading.getString("axis")
+        GroupCollapse.toggle(prefs, if (axis == "schedule") "focus-schedule" else "focus-next", axis, heading.getString("id"))
+        refreshFocus()
+    }
+
     /** RN's toggleShowDetails (View options): rows show their detail parts, kept with the open sections. */
     fun setFocusDetails(on: Boolean) {
         focusView = focusView.withDetails(on)
@@ -2093,14 +2108,15 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * answered. STALE_REVISION is never an error: Focus changed (an edit, a new minute, midnight), so read again from offset 0.
      */
     private fun readFocus(runtime: CoreHost, start: FocusView?, depth: Map<String, Int>, controls: String, edit: String = ""): FocusView {
-        var view = start ?: FocusView.parse(runtime.focus(PAGE, controls, edit))
+        val folds = focusFolds().toString()
+        var view = start ?: FocusView.parse(runtime.focus(PAGE, controls, edit, folds))
         val state = view.state.toString()
         for ((key, want) in depth) {
             while (true) {
                 val loaded = view.section(key) ?: break
                 if (loaded.rows.size >= minOf(want, loaded.rowTotal)) break
                 val next = try {
-                    view.append(runtime.focusWindow(key, loaded.rows.size, PAGE, view.revision, state))
+                    view.append(runtime.focusWindow(key, loaded.rows.size, PAGE, view.revision, state, folds))
                 } catch (failure: Exception) {
                     if (failure.message?.startsWith("STALE_REVISION") != true) throw failure
                     // A fresh read that went stale keeps its first windows; the next refresh reads deeper.

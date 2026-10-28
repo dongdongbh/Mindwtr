@@ -213,15 +213,23 @@ fun ReorderToggle(model: InboxViewModel, label: String, hint: String) {
     }
 }
 
-/** RN's group heading in a grouped Next actions: core's dot (muted: the secondary text), title in capitals, and count. */
+/**
+ * RN's group heading (a grouped Next actions, Today's Later today): ▾ or ▸, core's dot (muted: the secondary text), title in
+ * capitals, and count. A tap folds or unfolds it on this device (#1444).
+ */
 @Composable
-fun FocusGroupHeading(heading: JSONObject) {
+fun FocusGroupHeading(heading: JSONObject, onToggle: () -> Unit) {
     val c = LocalTheme.current.colors
     val muted = heading.getBoolean("muted")
     val title = heading.getString("title")
     val count = heading.getInt("count")
-    Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 6.dp, start = 4.dp, end = 4.dp).clearAndSetSemantics { contentDescription = "$title $count"; heading() },
+    val collapsed = heading.optBoolean("collapsed")
+    val state = t(if (collapsed) "markdown.expand" else "markdown.collapse")
+    Row(Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp).heightIn(min = 44.dp)
+        .clearAndSetSemantics { contentDescription = "$title $count"; role = Role.Button; onClick(label = state) { onToggle(); true } }
+        .clickable(onClick = onToggle).padding(top = 4.dp, start = 4.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(if (collapsed) "▸" else "▾", style = rnText(12, 400), color = c.secondaryText, textAlign = TextAlign.Center, modifier = Modifier.width(14.dp))
         Box(Modifier.size(8.dp).clip(CircleShape).background(if (muted) c.secondaryText else coreColorOrNull(heading.menuText("dotColor")) ?: c.tint))
         Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (muted) c.secondaryText else c.text, maxLines = 1,
             overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))

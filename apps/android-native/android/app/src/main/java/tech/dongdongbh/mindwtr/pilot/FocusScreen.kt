@@ -109,8 +109,8 @@ data class FocusView(val revision: String, val dateLabel: String, val sections: 
  * (FocusControls.kt), then each section with RN's triangle, title and count (Today's Focus with
  * RN's Reorder while core allows it). A section core counts as empty is not drawn, as in RN. A tap
  * on a title folds the section; the open sections are kept on the device as RN keeps them. Core's
- * "Later today" label goes before the first row core flags `laterToday`; core's group headings go
- * before the row each starts, the rows under them indented. "Projects to review" follows. While
+ * group headings (Next actions' groups, Today's "Later today") go before the row each starts, the
+ * rows under them indented; a tap folds one. "Projects to review" follows. While
  * reordering, RN's reorder screen takes the list's place.
  */
 @Composable
@@ -198,18 +198,19 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                 }
                 first = false
                 if (!open) continue
-                val laterToday = section.rows.indexOfFirst { it.laterToday }
-                // Core's group headings (Next actions under a grouping), each before the row at its start.
-                val headings = section.groups.associateBy { it.getInt("start") }
+                // Core's group headings (Next actions under a grouping, Today's Later today) in core's order, each before the row
+                // at its start; a folded one has no rows, so several can share a start, or follow the last row.
                 var group: String? = null
+                var nextHeading = 0
+                fun headingsTo(index: Int) {
+                    while (nextHeading < section.groups.size && section.groups[nextHeading].getInt("start") <= index) {
+                        val shown = section.groups[nextHeading++]
+                        group = shown.getString("id")
+                        item(key = "group:${section.key}:${shown.getString("id")}") { FocusGroupHeading(shown) { toggleFocusGroup(shown) } }
+                    }
+                }
                 section.rows.forEachIndexed { index, task ->
-                    if (index == laterToday) item(key = "later:${section.key}") {
-                        SectionTitle(t("agenda.laterToday"), null, Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 10.dp, start = 4.dp))
-                    }
-                    headings[index]?.let { heading ->
-                        group = heading.getString("id")
-                        item(key = "group:${section.key}:${heading.getString("id")}") { FocusGroupHeading(heading) }
-                    }
+                    headingsTo(index)
                     val grouped = group != null
                     // RN's itemWrapper: 8 dp below each Focus row, past the row's own 6.
                     item(key = "${section.key}:${group}:${task.id}") {
@@ -220,6 +221,8 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                         } }
                     }
                 }
+                // Folded headings after the last row (core sends them with the window that ends the section).
+                headingsTo(section.rows.size)
                 if (section.rows.size < section.rowTotal) item(key = "more:${section.key}") {
                     Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
                         PillButton(more, onClick = { loadMoreFocus(section.key) }, enabled = writable && !busy && failedAction == null,

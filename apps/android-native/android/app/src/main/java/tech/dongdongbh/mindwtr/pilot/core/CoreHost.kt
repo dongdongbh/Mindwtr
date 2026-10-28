@@ -565,13 +565,14 @@ class CoreHost(
 
     /**
      * Core's getFocus: its sections in its order, the first [limit] rows of each, for the control state [controls] (JSON; ""
-     * reads the flat Focus) after a control's [controlEdit] (JSON, or "").
+     * reads the flat Focus) after a control's [controlEdit] (JSON, or ""), with the device's group [folds] (a JSON id array, or "").
      */
-    fun focus(limit: Int, controls: String = "", controlEdit: String = ""): JSONObject = callAsync("focus", limit, controls, controlEdit)
+    fun focus(limit: Int, controls: String = "", controlEdit: String = "", folds: String = ""): JSONObject =
+        callAsync("focus", limit, controls, controlEdit, folds)
 
-    /** Core's getFocusSectionWindow for the same [controls]. A changed Focus fails with "STALE_REVISION: …". */
-    fun focusWindow(key: String, offset: Int, limit: Int, revision: String, controls: String = ""): JSONObject =
-        callAsync("focusWindow", key, offset, limit, revision, controls)
+    /** Core's getFocusSectionWindow for the same [controls] and [folds]. A changed Focus fails with "STALE_REVISION: …". */
+    fun focusWindow(key: String, offset: Int, limit: Int, revision: String, controls: String = "", folds: String = ""): JSONObject =
+        callAsync("focusWindow", key, offset, limit, revision, controls, folds)
 
     /** Core's openQuickCapture: the popup's empty draft and its starting options. */
     fun openQuickCapture(): JSONObject = callAsync("captureOpen")

@@ -248,11 +248,11 @@ describe('native host contract: Focus controls', () => {
         // Call bank has two contexts: it is listed under each, and counted once in the header.
         expect({ total: next.total, rowTotal: next.rowTotal, rows: next.rows.map((row) => row.id), groups: next.groups }).toEqual({
             total: 1, rowTotal: 2, rows: ['n2'],
-            groups: [{ id: 'context:@office', title: '@office', count: 1, muted: false, dotColor: '#2563eb', start: 0 }],
+            groups: [{ id: 'context:@office', title: '@office', count: 1, muted: false, dotColor: '#2563eb', start: 0, axis: 'context', collapsed: false }],
         });
         const page = value(host.getFocusSectionWindow({ key: 'next', offset: 1, limit: 1, revision: view.revision, controls: view.controls.state }));
         expect({ rows: page.rows.map((row) => row.id), groups: page.groups, total: page.total, rowTotal: page.rowTotal }).toEqual({
-            rows: ['n2'], groups: [{ id: 'context:@phone', title: '@phone', count: 1, muted: false, dotColor: '#15803d', start: 1 }], total: 1, rowTotal: 2,
+            rows: ['n2'], groups: [{ id: 'context:@phone', title: '@phone', count: 1, muted: false, dotColor: '#15803d', start: 1, axis: 'context', collapsed: false }], total: 1, rowTotal: 2,
         });
         // Paging with another control state is another view.
         expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: view.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });

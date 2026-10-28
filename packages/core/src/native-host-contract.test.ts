@@ -18,6 +18,7 @@ import { DEFAULT_PROJECT_COLOR } from './color-constants';
 import { getProjectAccentColor } from './task-accent-color';
 import * as projectGrouping from './project-grouping';
 import * as focusDerivation from './focus-sections';
+import { DEFAULT_FOCUS_CONTROL_STATE } from './focus-controls';
 import * as projectTaskListModel from './project-task-list-model';
 import * as logger from './logger';
 import { formatLocalDate } from './import-source-reader';
@@ -2636,6 +2637,58 @@ describe('native host contract', () => {
         expect(chinese.value.revision).not.toBe(english.value.revision);
         expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: english.value.revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
+    // #1444 (7ecbd5be3): RN folds a grouped Next actions heading and Today's "Later today" heading (buildFocusNextItems,
+    // buildFocusScheduleItems with the device's collapsedGroupIds); the header counts stay, the folded rows go.
+    it('folds Next action groups and Later today with the device folds, as RN does (#1444)', async () => {
+        const now = new Date(2026, 8, 23, 10);
+        const host = await activateWith([
+            task('due-today', '2026-09-02T00:00:00.000Z', { status: 'next', dueDate: formatLocalDate(now) }),
+            task('later-today', '2026-09-03T00:00:00.000Z', { status: 'next', startTime: new Date(2026, 8, 23, 17).toISOString() }),
+            task('home', '2026-09-04T00:00:00.000Z', { status: 'next', contexts: ['@home'] }),
+            task('phone', '2026-09-05T00:00:00.000Z', { status: 'next', contexts: ['@phone'] }),
+        ]);
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(now);
+        useTaskStore.setState((state) => ({ settings: { ...state.settings, gtd: { ...state.settings.gtd, focusGroupBy: 'context' } } }));
+        const read = (collapsedGroupIds?: string[]) => {
+            const result = host.getFocus({ limit: 20, controls: DEFAULT_FOCUS_CONTROL_STATE, ...(collapsedGroupIds ? { collapsedGroupIds } : {}) });
+            if (!result.ok) throw new Error(result.error.message);
+            return result.value;
+        };
+        const shape = (view: ReturnType<typeof read>, key: string) => {
+            const section = view.sections.find((entry) => entry.key === key)!;
+            return { total: section.total, rowTotal: section.rowTotal, rows: section.rows.map(({ id }) => id),
+                groups: section.groups?.map(({ id, count, collapsed, axis, start }) => ({ id, count, collapsed, axis, start })) };
+        };
+        // A host that sends no folds (iOS) keeps drawing Later today from the rows' laterToday: no Today heading.
+        const plain = host.getFocus({ limit: 20, controls: DEFAULT_FOCUS_CONTROL_STATE });
+        expect(plain.ok && shape(plain.value, 'schedule').groups).toBeUndefined();
+        const open = read([]);
+        expect(shape(open, 'schedule')).toEqual({ total: 2, rowTotal: 2, rows: ['due-today', 'later-today'],
+            groups: [{ id: 'focus:schedule:later-today', count: 1, collapsed: false, axis: 'schedule', start: 1 }] });
+        expect(shape(open, 'next').groups?.map(({ id, collapsed }) => ({ id, collapsed })))
+            .toEqual([{ id: 'context:@home', collapsed: false }, { id: 'context:@phone', collapsed: false }]);
+        const folded = read(['focus:schedule:later-today', 'context:@home', 'project:elsewhere']);
+        expect(shape(folded, 'schedule')).toEqual({ total: 2, rowTotal: 1, rows: ['due-today'],
+            groups: [{ id: 'focus:schedule:later-today', count: 1, collapsed: true, axis: 'schedule', start: 1 }] });
+        expect(shape(folded, 'next')).toEqual({ total: 2, rowTotal: 1, rows: ['phone'], groups: [
+            { id: 'context:@home', count: 1, collapsed: true, axis: 'context', start: 0 },
+            { id: 'context:@phone', count: 1, collapsed: false, axis: 'context', start: 0 },
+        ] });
+        // A folded last group has no row to precede: its heading comes with the window that ends the section.
+        const trailing = host.getFocus({ limit: 1, controls: DEFAULT_FOCUS_CONTROL_STATE, collapsedGroupIds: ['context:@phone'] });
+        expect(trailing.ok && shape(trailing.value, 'next')).toEqual({ total: 2, rowTotal: 1, rows: ['home'], groups: [
+            { id: 'context:@home', count: 1, collapsed: false, axis: 'context', start: 0 },
+            { id: 'context:@phone', count: 1, collapsed: true, axis: 'context', start: 1 },
+        ] });
+        // The folds are part of the view: a page read under other folds is stale.
+        expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE,
+            collapsedGroupIds: ['focus:schedule:later-today', 'context:@home', 'project:elsewhere'] })).toMatchObject({ ok: true, value: { rows: [{ id: 'phone' }] } });
+        expect(host.getFocus({ limit: 20, controls: DEFAULT_FOCUS_CONTROL_STATE, collapsedGroupIds: [7] as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('matches React Native Upcoming reveal text in English and Chinese with explicit date settings', async () => {
