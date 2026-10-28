@@ -547,7 +547,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
         error?.let { message ->
             // Reload waits while control edits are with core, so it never leaves them unsent.
             FailureBanner(message) {
-                if (conflict) TextButton(onClick = model::reloadEditor, enabled = !busy && !failed && !editsPending) { Text(t("common.retry")) }
+                if (conflict) RetryButton(model::reloadEditor, !busy && !failed && !editsPending)
                 else OwedRetry(model)
             }
         }

@@ -210,7 +210,7 @@ class MainActivity : FragmentActivity() {
                         // A failure stays in view above the list. A failed read offers Try again; a failed command only its exact retry.
                         error?.let { message ->
                             FailureBanner(message) {
-                                if (failedAction == null) TextButton(onClick = { refresh() }, enabled = !busy, modifier = Modifier.testTag("read-retry")) { Text(t("common.retry")) }
+                                if (failedAction == null) RetryButton({ refresh() }, !busy, "read-retry")
                                 else OwedRetry(model)
                             }
                         }
@@ -315,16 +315,34 @@ private fun TopBar(model: InboxViewModel, title: String) {
 @Composable
 fun FailureBanner(message: String, action: @Composable RowScope.() -> Unit) {
     val c = LocalTheme.current.colors
+    // RN's persistence-failure-banner card: 12 from the sides and 8 below the bar, radius 12, a 1 dp danger border, its shadow.
+    val shape = RoundedCornerShape(12.dp)
     Row(
-        Modifier.fillMaxWidth().zIndex(1f).background(c.cardBg).hairline(c.border, top = false)
+        Modifier.fillMaxWidth().zIndex(1f).padding(start = 12.dp, end = 12.dp, top = 8.dp)
+            .shadow(8.dp, shape).clip(shape).background(c.cardBg).rnBorder(1.dp, c.danger, shape)
             .semantics { isTraversalGroup = true; traversalIndex = -1f }
-            .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp).heightIn(min = 44.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(Lucide.TriangleAlert, null, tint = c.danger, modifier = Modifier.size(16.dp))
-        Text(message, style = rnText(13, 600), color = c.danger,
-            modifier = Modifier.weight(1f).padding(start = 8.dp).semantics { liveRegion = LiveRegionMode.Assertive })
+        Icon(Lucide.TriangleAlert, null, tint = c.danger, modifier = Modifier.size(20.dp))
+        Text(message, style = rnText(14, 400, 19), color = c.text,
+            modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Assertive })
         action()
+    }
+}
+
+/** RN's banner Retry: a filled tint button, radius 8, at least 40 tall, 12 inside, white 14/600 (0.82 opacity pressed). */
+@Composable
+fun RetryButton(onClick: () -> Unit, enabled: Boolean, tag: String? = null) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val shape = RoundedCornerShape(8.dp)
+    val press = remember { MutableInteractionSource() }
+    val pressed by press.collectIsPressedAsState()
+    Box(Modifier.fade(if (!enabled) 0.65f else if (pressed) 0.82f else 1f).heightIn(min = 40.dp).clip(shape).background(c.tint)
+        .clickable(press, null, enabled = enabled, role = Role.Button, onClick = onClick)
+        .then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+        Text(t("common.retry"), style = rnText(14, 600), color = theme.onAction)
     }
 }
 
@@ -334,7 +352,7 @@ fun FailureBanner(message: String, action: @Composable RowScope.() -> Unit) {
  */
 @Composable
 fun OwedRetry(model: InboxViewModel) {
-    if (model.failedAction != null) TextButton(onClick = model::retryOwed, enabled = !model.busy, modifier = Modifier.testTag("owed-retry")) { Text(t("common.retry")) }
+    if (model.failedAction != null) RetryButton(model::retryOwed, !model.busy, "owed-retry")
 }
 
 /**

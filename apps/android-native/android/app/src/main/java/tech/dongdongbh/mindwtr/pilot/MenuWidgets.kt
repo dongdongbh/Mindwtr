@@ -137,7 +137,7 @@ fun MenuScreenHost(model: InboxViewModel, screen: MenuScreen) = with(model) {
                     right = if (list == "reference" || list == "done") { { OverflowTrigger(plain = true) { menu.openDialog("overflow") } } } else null)
                 error?.let { message ->
                     FailureBanner(message) {
-                        if (failedAction == null) TextButton(onClick = { menu.retryRead() }, enabled = !busy, modifier = Modifier.testTag("read-retry")) { Text(t("common.retry")) }
+                        if (failedAction == null) RetryButton({ menu.retryRead() }, !busy, "read-retry")
                         else OwedRetry(model)
                     }
                 }

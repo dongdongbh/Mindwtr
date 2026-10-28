@@ -768,10 +768,10 @@ const snapshotsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/do
 // Comments may name the rules below; only code is checked against them.
 const code = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 // A failed read offers Try again; while a failed command's retry is owed, nothing else is offered.
-assert.match(activity, /if \(failedAction == null\) TextButton\(onClick = \{ refresh\(\) \}, enabled = !busy, modifier = Modifier\.testTag\("read-retry"\)\)/);
+assert.match(activity, /if \(failedAction == null\) RetryButton\(\{ refresh\(\) \}, !busy, "read-retry"\)/);
 // Every owed command keeps a reachable retry: each screen's failure banner offers Try again (retryOwed), which re-sends the
 // exact recorded FailedAction, whatever screen or control started it (a status change from Focus's menu included).
-assert.match(activity, /fun OwedRetry\(model: InboxViewModel\) \{\s+if \(model\.failedAction != null\) TextButton\(onClick = model::retryOwed, enabled = !model\.busy, modifier = Modifier\.testTag\("owed-retry"\)\)/);
+assert.match(activity, /fun OwedRetry\(model: InboxViewModel\) \{\s+if \(model\.failedAction != null\) RetryButton\(model::retryOwed, !model\.busy, "owed-retry"\)/);
 // The read refresh and the owed retry are told apart (test tags): the checks assert the owed one only while a retry is owed.
 assert.match(activity, /\} else OwedRetry\(model\)|else OwedRetry\(model\)/);
 for (const [name, text] of Object.entries({ activity, editorUi, searchUi, processUi, menuUi, weeklyUi, dailyUi })) {
@@ -1758,7 +1758,7 @@ assert.match(model, /restored\?\.let \{ resumeEditor\(it, savedDraft\.optJSONObj
 // A refused edit cancels a queued Save and keeps core's message; typed text keeps newer typing; Reload waits for the queue.
 assert.match(model, /error = editRefusal\s+saveQueued = false/);
 assert.match(editorUi, /LaunchedEffect\(coreValue\) \{ if \(!pending\) text = coreValue \}/);
-assert.match(editorUi, /enabled = !busy && !failed && !editsPending\) \{ Text\(t\("common\.retry"\)\) \}/);
+assert.match(editorUi, /RetryButton\(model::reloadEditor, !busy && !failed && !editsPending\)/);
 assert.match(model, /\.put\("amount", amount \?: latest\?\.get\("amount"\) \?: shown\.getInt\("amount"\)\)/);
 assert.match(model, /fun editFields\(values: Map<String, Any\?>\) =\s*editDraft\(JSONObject\(\)\.put\("type", "fields"\)/);
 assert.match(editorUi, /if \(\(current\[field\] \?: "null"\) != \(sent\[field\] \?: "null"\)\) current\[field\] \?: "null" else reply\.draft\[field\] \?: "null"/);
@@ -10030,13 +10030,22 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 }
 // The border sweep (tabbar-borders-20261027-06): a 1 px hairline only where RN draws StyleSheet.hairlineWidth (17 sites: the tab
 // and title bars, the menu and filter-sheet rows, the Markdown toolbar, review area and project headers, history tabs, project
-// metadata and option rows, the expanded editors' headers, the capture-intent token row) and the native-only failure banner;
+// metadata and option rows, the expanded editors' headers, the capture-intent token row); the failure banner is RN's card;
 // every RN borderWidth 1 is rnBorderBottom / rnBorderTop. Organize's picker rows and Manage's create row draw none, as RN.
 {
     const { readdirSync } = await import('node:fs');
     const dir = resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot');
     const all = readdirSync(dir).filter((file) => file.endsWith('.kt')).map((file) => readFileSync(resolve(dir, file), 'utf8')).join('\n');
-    assert.equal(all.match(/\.hairline\(/g)?.length, 18 + 1, 'the 18 hairline sites and the helper itself');
+    assert.equal(all.match(/\.hairline\(/g)?.length, 17 + 1, 'the 17 hairline sites and the helper itself');
     assert.ok((all.match(/\.rnBorder(Bottom|Top)\(/g)?.length ?? 0) >= 68, 'RN\'s borderWidth 1 lines are rnBorderBottom / rnBorderTop');
+}
+// The failure banner is RN's persistence-failure-banner card (tabbar-borders ruling): radius 12 with a 1 dp danger border, 12 from
+// the sides and 8 below the bar, the 20 dp warning glyph, the message in the text color, and RN's filled tint Retry (radius 8).
+{
+    const activity = source('MainActivity.kt');
+    assert.match(activity, /fun FailureBanner\(message: String, action: @Composable RowScope\.\(\) -> Unit\) \{[\s\S]{0,900}\.shadow\(8\.dp, shape\)\.clip\(shape\)\.background\(c\.cardBg\)\.rnBorder\(1\.dp, c\.danger, shape\)/);
+    assert.match(activity, /fun RetryButton\(onClick: \(\) -> Unit, enabled: Boolean, tag: String\? = null\)/);
+    const all = ['MainActivity.kt', 'DailyReviewScreen.kt', 'MenuWidgets.kt', 'MindSweep.kt', 'TaskEditor.kt', 'WeeklyReviewScreen.kt'].map(source).join('\n');
+    assert.doesNotMatch(all, /TextButton\([^\n]*\) \{ Text\(t\("common\.retry"\)\) \}/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

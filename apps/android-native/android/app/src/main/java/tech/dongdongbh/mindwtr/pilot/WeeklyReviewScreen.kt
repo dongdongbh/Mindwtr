@@ -114,7 +114,7 @@ fun WeeklyReview(model: InboxViewModel) = with(model.menu) {
         view?.let { StepRail(it) }
         model.error?.let { message ->
             FailureBanner(message) {
-                if (model.failedAction == null) TextButton(onClick = { retryRead() }, enabled = !model.busy, modifier = Modifier.testTag("read-retry")) { Text(t("common.retry")) }
+                if (model.failedAction == null) RetryButton({ retryRead() }, !model.busy, "read-retry")
                 else OwedRetry(model)
             }
         }
