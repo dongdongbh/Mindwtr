@@ -177,7 +177,6 @@ import {
   resolveWhisperModelPathForConfigAsync,
   processAudioCapture,
   REMOTE_SPEECH_TO_TEXT_FOSS_ERROR,
-  resolveSpeechToTextRuntimeSettings,
   startWhisperRealtimeCapture,
 } from './speech-to-text';
 
@@ -227,46 +226,6 @@ describe('speech-to-text', () => {
     fileSystemMock.emulateDirectoryFileConstructorBug = false;
     reactNativeMock.NativeModules.RNFSManager = {};
     vi.clearAllMocks();
-  });
-
-  it('forces synced remote speech settings to local Whisper in FOSS builds', () => {
-    expect(
-      resolveSpeechToTextRuntimeSettings(
-        {
-          enabled: true,
-          provider: 'openai',
-          model: 'gpt-4o-transcribe',
-          offlineModelPath: 'file:///document/whisper-models/ggml-tiny.bin',
-          language: 'en',
-          mode: 'transcribe_only',
-          fieldStrategy: 'description_only',
-        },
-        { isFossBuild: true }
-      )
-    ).toMatchObject({
-      provider: 'whisper',
-      enabled: true,
-      model: 'whisper-tiny',
-      modelPath: 'file:///document/whisper-models/ggml-tiny.bin',
-      language: 'en',
-      mode: 'transcribe_only',
-      fieldStrategy: 'description_only',
-      isFossBuild: true,
-    });
-  });
-
-  it('keeps synced Parakeet disabled outside FOSS builds', () => {
-    expect(
-      resolveSpeechToTextRuntimeSettings(
-        { enabled: true, provider: 'parakeet', model: 'parakeet-tdt-0.6b-v3-int8' },
-        { isFossBuild: false }
-      )
-    ).toMatchObject({
-      provider: 'whisper',
-      enabled: false,
-      model: 'whisper-tiny',
-      isFossBuild: false,
-    });
   });
 
   it('blocks remote speech-to-text transport in FOSS builds', async () => {

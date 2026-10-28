@@ -301,6 +301,7 @@ export * from './focus-widget-selection';
 export * from './context-color';
 export * from './capture';
 export * from './capture-session';
+export * from './quick-capture-audio';
 export * from './quick-capture-model';
 export * from './apple-reminders-import-model';
 export * from './capture-deeplink';

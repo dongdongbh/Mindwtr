@@ -5,7 +5,6 @@ import {
     buildCaptureFileUri,
     getCaptureFileExtension,
     getCaptureMimeType,
-    isQuickCaptureSpeechReady,
     selectExistingCaptureFile,
     selectQuickCaptureSettings,
 } from './quick-capture-sheet.utils';
@@ -77,55 +76,6 @@ describe('quick-capture utils', () => {
             error: 'boom',
         });
         expect(buildCaptureExtra()).toBeUndefined();
-    });
-
-    it('treats a ready local Whisper model as quick-capture speech ready', () => {
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'whisper',
-            whisperModelReady: true,
-        })).toBe(true);
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'whisper',
-            whisperModelReady: false,
-        })).toBe(false);
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'whisper',
-            whisperModelReady: false,
-            whisperModelPath: 'file:///document/whisper-models/ggml-tiny.en.bin',
-        })).toBe(true);
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'gemini',
-            apiKey: '',
-            whisperModelReady: true,
-        })).toBe(false);
-    });
-
-    it('treats a custom OpenAI base URL as ready without a key, but not for gemini (#930)', () => {
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'openai',
-            apiKey: '',
-            baseUrl: 'http://localhost:8000/v1',
-            whisperModelReady: false,
-        })).toBe(true);
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'openai',
-            apiKey: '',
-            baseUrl: '',
-            whisperModelReady: false,
-        })).toBe(false);
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'gemini',
-            apiKey: '',
-            baseUrl: 'http://localhost:8000/v1',
-            whisperModelReady: false,
-        })).toBe(false);
     });
 
     it('uses the latest store speech settings over a stale capture snapshot', () => {

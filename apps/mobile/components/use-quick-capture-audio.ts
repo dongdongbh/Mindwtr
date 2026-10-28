@@ -9,20 +9,24 @@ import {
 } from 'expo-audio';
 import { Directory, File, Paths } from 'expo-file-system';
 import {
-  DEFAULT_PROJECT_COLOR,
-  buildTaskUpdatesFromSpeechResult,
+  applySpeechResult as applySpeechResultInStore,
+  buildAudioNoteTitle,
+  buildQuickCaptureAudioAttachment,
+  discardEmptySpeechTask as discardEmptySpeechTaskInStore,
   generateUUID,
+  isQuickCaptureSpeechReady,
   isSandboxMode,
-  findSelectableProjectByTitleAndArea,
+  resolveQuickCaptureAudioFormat,
   safeFormatDate,
+  shouldSaveQuickCaptureAudio,
   type AppSettings,
   type Attachment,
   type CaptureSessionCoordinator,
   type CaptureSessionId,
+  type SpeechApplyResult,
   type SpeechToTextSettings,
   type Task,
   useTaskStore,
-  runStoreCommand,
 } from '@mindwtr/core';
 import { loadAIKey } from '../lib/ai-config';
 import { logInfo } from '../lib/app-log';
@@ -47,7 +51,6 @@ import {
   buildCaptureFileUri,
   getCaptureFileExtension,
   getCaptureMimeType,
-  isQuickCaptureSpeechReady,
   selectExistingCaptureFile,
   selectQuickCaptureSettings,
 } from './quick-capture-sheet.utils';
@@ -58,7 +61,6 @@ type BuildTaskPropsResult = {
   props: Partial<Task>;
   invalidDateCommands?: string[];
 };
-type SpeechApplyResult = 'applied' | 'empty' | 'skipped';
 
 export type RecordingState =
   | { kind: 'expo'; recorder: ExpoAudioRecorder }
@@ -352,55 +354,14 @@ export function useQuickCaptureAudio({
     };
   }, [isSpeechSettingsLeaseCurrent, onWarn, resolveWhisperModelAsync, settings.ai?.speechToText, visible]);
 
-  const applySpeechResult = useCallback(async (taskId: string, result: SpeechToTextResult): Promise<SpeechApplyResult> => {
-    const { tasks: currentTasks, projects: currentProjects, addProject: addProjectNow, settings: currentSettings } = useTaskStore.getState();
-    const existing = currentTasks.find((task) => task.id === taskId);
-    if (!existing) return 'skipped';
+  // Core's rules (quick-capture-audio.ts) on this app's store.
+  const applySpeechResult = useCallback((taskId: string, result: SpeechToTextResult): Promise<SpeechApplyResult> => (
+    applySpeechResultInStore(taskId, result, useTaskStore)
+  ), []);
 
-    const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
-    if (suggestedProjectTitle && !existing.projectId) {
-      const targetAreaId = updates.areaId ?? existing.areaId;
-      const match = findSelectableProjectByTitleAndArea(currentProjects, suggestedProjectTitle, targetAreaId);
-      if (match) {
-        updates.projectId = match.id;
-      } else {
-        const created = await addProjectNow(
-          suggestedProjectTitle,
-          DEFAULT_PROJECT_COLOR,
-          targetAreaId ? { areaId: targetAreaId } : undefined
-        );
-        if (!created) return 'skipped';
-        updates.projectId = created.id;
-      }
-    }
-
-    if (!Object.keys(updates).length) return 'empty';
-    // Built again on the task as stored when the write is admitted: a sync save admitted first may publish newer tags.
-    await runStoreCommand(async () => {
-      const state = useTaskStore.getState();
-      const latest = state.tasks.find((task) => task.id === taskId);
-      if (!latest) return;
-      const rebuilt = buildTaskUpdatesFromSpeechResult(latest, result, state.settings).updates;
-      if (updates.projectId && !latest.projectId) rebuilt.projectId = updates.projectId;
-      if (Object.keys(rebuilt).length) await state.updateTask(taskId, rebuilt);
-    });
-    return 'applied';
-  }, []);
-
-  const discardEmptySpeechTask = useCallback(async (taskId: string, files: (File | null | undefined)[], reason = 'empty_transcript') => {
-    try {
-      await useTaskStore.getState().deleteTask(taskId);
-    } catch (error) {
-      onWarn('Failed to discard empty speech task', error);
-    }
-    const seen = new Set<string>();
-    for (const file of files) {
-      const uri = file?.uri ?? '';
-      if (!file || !uri || seen.has(uri)) continue;
-      seen.add(uri);
-      safeDeleteFile(file, reason);
-    }
-  }, [onWarn, safeDeleteFile]);
+  const discardEmptySpeechTask = useCallback((taskId: string, files: (File | null | undefined)[], reason = 'empty_transcript') => (
+    discardEmptySpeechTaskInStore(taskId, files, reason, { store: useTaskStore, deleteFile: safeDeleteFile, onWarn })
+  ), [onWarn, safeDeleteFile]);
 
   const startRecording = useCallback((): Promise<void> => {
     if (isSandboxMode()) {
@@ -480,9 +441,11 @@ export function useQuickCaptureAudio({
         const resolvedModelPath = provider === 'whisper'
           ? (whisperResolved?.exists ? whisperResolved.path : modelPath)
           : undefined;
-        const useWhisperRealtime = speechRuntime.enabled
-          && provider === 'whisper'
-          && whisperModelReady;
+        const useWhisperRealtime = resolveQuickCaptureAudioFormat({
+          speechEnabled: speechRuntime.enabled,
+          provider,
+          whisperModelReady,
+        }) === 'wav';
         if (useWhisperRealtime) {
           try {
             const now = new Date();
@@ -690,19 +653,15 @@ export function useQuickCaptureAudio({
           onWarn('Audio info lookup failed', error);
         }
         const now = new Date();
-        const nowIso = now.toISOString();
-        const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
-        const recoveryAudioAttachment: Attachment = {
-          id: generateUUID(),
-          kind: 'file',
+        const displayTitle = buildAudioNoteTitle(t('quickAdd.audioNoteTitle'), now, safeFormatDate);
+        const recoveryAudioAttachment: Attachment = buildQuickCaptureAudioAttachment({
           title: displayTitle,
           uri: finalFile.uri,
           mimeType: getCaptureMimeType('.wav'),
           size: fileInfo?.exists && fileInfo.size ? fileInfo.size : undefined,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          localStatus: 'available',
-        };
+          now,
+          newId: generateUUID,
+        });
         recoveryAttachments = [...(initialAttachments ?? []), recoveryAudioAttachment];
         activitySubmissionId = beginActivitySubmission(
           recoveryAttachments,
@@ -760,7 +719,7 @@ export function useQuickCaptureAudio({
         const canTranscribeSpeech = provider === 'whisper'
           ? realtimeTranscriptReady || Boolean(localWhisperInput)
           : speechReady;
-        const saveAudioAttachments = currentSettings.gtd?.saveAudioAttachments !== false || !canTranscribeSpeech;
+        const saveAudioAttachments = shouldSaveQuickCaptureAudio(currentSettings, canTranscribeSpeech);
 
         let attachment: Attachment | null = saveAudioAttachments ? recoveryAudioAttachment : null;
         if (attachment) {
@@ -908,18 +867,14 @@ export function useQuickCaptureAudio({
       const timestamp = safeFormatDate(now, 'yyyyMMdd-HHmmss');
       const extension = getCaptureFileExtension(uri);
       const fileName = `mindwtr-audio-${timestamp}-${generateUUID()}${extension}`;
-      const nowIso = now.toISOString();
-      const displayTitle = `${t('quickAdd.audioNoteTitle')} ${safeFormatDate(now, 'Pp')}`;
-      let recoveryAudioAttachment: Attachment = {
-        id: generateUUID(),
-        kind: 'file',
+      const displayTitle = buildAudioNoteTitle(t('quickAdd.audioNoteTitle'), now, safeFormatDate);
+      let recoveryAudioAttachment: Attachment = buildQuickCaptureAudioAttachment({
         title: displayTitle,
         uri: sourceFile.uri,
         mimeType: getCaptureMimeType(extension),
-        createdAt: nowIso,
-        updatedAt: nowIso,
-        localStatus: 'available',
-      };
+        now,
+        newId: generateUUID,
+      });
       recoveryAttachments = [...(initialAttachments ?? []), recoveryAudioAttachment];
       activitySubmissionId = beginActivitySubmission(
         recoveryAttachments,
@@ -1011,7 +966,7 @@ export function useQuickCaptureAudio({
         : null;
       if (!isSubmissionCurrent()) return;
       const canTranscribeSpeech = provider === 'whisper' ? Boolean(localWhisperInput) : speechReady;
-      const saveAudioAttachments = currentSettings.gtd?.saveAudioAttachments !== false || !canTranscribeSpeech;
+      const saveAudioAttachments = shouldSaveQuickCaptureAudio(currentSettings, canTranscribeSpeech);
 
       let attachment: Attachment | null = saveAudioAttachments ? recoveryAudioAttachment : null;
       if (attachment) {
