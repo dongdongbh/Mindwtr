@@ -378,9 +378,14 @@ try {
     const savedBefore = completes(processId, 'saved');
     // Core's Today total drops by one; a section core counts as empty is hidden, as in RN.
     const todayAfter = (current) => sectionTotal(current, TODAY) ?? (headers(current).length > 0 ? 0 : undefined);
-    nodes = await completeUntil(first, `${first} to leave Focus`,
-        (current) => !rowNode(current, first) && todayAfter(current) === todayTotal - 1);
+    nodes = await completeUntil(first, `${first} to leave Focus`, (current) => !rowNode(current, first));
+    // The list keeps its place after the row leaves, which can leave Today's header above the screen (10-28, the taller list
+    // under the RN tab bar): read core's new total at the top.
+    nodes = await device.toTop();
+    nodes = await waitFor(`Today's total ${todayTotal - 1}`, (current) => !rowNode(current, first) && todayAfter(current) === todayTotal - 1, 10_000);
     check(true, `(c) ${first} left Focus; Today total ${todayTotal} -> ${todayTotal - 1}`);
+    // Back to the rows, where (d) rotates: at the very top the landscape screen is all Pomodoro card and date header.
+    nodes = await device.reveal(second, 80);
     expectStored(first, { status: 'done', dueDate: today, rev: due.rev + 1 }, '(c) done stored in one write');
     check(completes(processId, 'saved') === savedBefore + 1, '(c) task-command log shows one operation=complete saved');
 
