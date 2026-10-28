@@ -6,7 +6,13 @@ import type { AppSettings, Project, Task } from './types';
 
 // The native Focus model is built once and kept until getFocusModelValidUntil's instant (native-host-contract.ts focusSections).
 // Here, minute by minute, a model kept that way must equal one built fresh: across two midnights, New York's spring-forward and
-// fall-back, and every start, due-soon and review instant of a randomized 5,000-task store (also 1 ms either side of each).
+// fall-back, and every start, due-soon and review instant of a randomized store (also 1 ms either side of each).
+
+// The full sweep (48 h minute by minute, every control state, every threshold, 5,000 tasks) runs on demand:
+// MINDWTR_FOCUS_SWEEP=full, a few minutes; run it on a change to a clock predicate. The suite runs 6 h around the spring-forward
+// night, two control states, 500 tasks.
+const FULL = process.env.MINDWTR_FOCUS_SWEEP === 'full';
+const TASKS = FULL ? 5000 : 500;
 
 const ZONE = 'America/New_York';
 const MINUTE = 60_000;
@@ -30,7 +36,10 @@ const localDateTime = (at: Date, second = 0) => `${localDay(at)}T${pad(at.getHou
 function store(from: number, to: number, seed: number, timedOnly = false): { tasks: Task[]; projects: Project[] } {
     const next = random(seed);
     const pick = <T,>(values: readonly T[]) => values[Math.floor(next() * values.length)];
-    const instant = () => new Date(from - 3 * 24 * 60 * MINUTE + Math.floor(next() * (to - from + 6 * 24 * 60 * MINUTE) / MINUTE) * MINUTE);
+    // Half inside the swept window (its thresholds), half within 3 days either side (the days around it).
+    const instant = () => (next() < 0.5
+        ? new Date(from + Math.floor(next() * (to - from) / MINUTE) * MINUTE)
+        : new Date(from - 3 * 24 * 60 * MINUTE + Math.floor(next() * (to - from + 6 * 24 * 60 * MINUTE) / MINUTE) * MINUTE));
     // Due dates partly 30 days out, so their due-soon thresholds (due less the window) fall inside the sweep.
     const DUE_SOON = 30 * 24 * 60 * MINUTE;
     const date = (shift = 0) => {
@@ -47,7 +56,7 @@ function store(from: number, to: number, seed: number, timedOnly = false): { tas
         ...(next() < 0.3 ? { dueDate: date() } : {}),
         ...(next() < 0.2 ? { isSequential: true } : {}),
     } as Project));
-    const tasks: Task[] = Array.from({ length: 5000 }, (_, index) => {
+    const tasks: Task[] = Array.from({ length: TASKS }, (_, index) => {
         const status = pick(['next', 'next', 'next', 'inbox', 'waiting', 'someday', 'done', 'reference'] as const);
         return {
             id: `t${index}`, title: `Task ${index}`, status, tags: next() < 0.3 ? [`#tag${index % 5}`] : [],
@@ -100,9 +109,6 @@ function sweep(input: { tasks: Task[]; projects: Project[]; settings: AppSetting
 
 const minutes = (from: number, to: number) => Array.from({ length: Math.floor((to - from) / MINUTE) }, (_, index) => from + index * MINUTE);
 
-// The full sweep (48 h minute by minute, every control state, every threshold) runs on demand: MINDWTR_FOCUS_SWEEP=full,
-// a few minutes; run it on a change to a clock predicate. The suite runs 6 h around the spring-forward night, two control states.
-const FULL = process.env.MINDWTR_FOCUS_SWEEP === 'full';
 
 describe('the native Focus model kept until its next-change instant', () => {
     const originalTz = process.env.TZ;

@@ -76,6 +76,24 @@ describe('native host contract: the kept Focus model', () => {
         same();
     });
 
+    // A language change keeps the clock and the store: the kept model's titles and labels must follow it at the next read.
+    it('follows a language change at the next read', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        vi.setSystemTime(new Date(2026, 2, 7, 21, 0));
+        const open = await seed();
+        const kept = await open(true);
+        const fresh = await open(false);
+        const read = (host: ReturnType<typeof createNativeHostContract>) => JSON.stringify(
+            host.getFocus({ limit: 100, controls: { ...DEFAULT_FOCUS_CONTROL_STATE, sortBy: 'due' } }),
+            (key, value) => (key === 'revision' ? undefined : value));
+        const english = read(kept);
+        expect(english).toBe(read(fresh));
+        // The same system locale: only the language changes.
+        for (const host of [kept, fresh]) expect(await host.setLanguage({ storedLanguage: 'de', systemLocale: 'en-US' })).toMatchObject({ ok: true });
+        expect(read(kept)).toBe(read(fresh));
+        expect(read(kept)).not.toBe(english);
+    });
+
     // A time zone change while the app runs moves the local day: Today must follow at once, not at the old zone's midnight.
     it('follows a time zone change at the next read', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
