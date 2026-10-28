@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { buildCaptureModalRequest, formatCaptureModalCopilotApplied, planCaptureModalRequest, saveCaptureModalLines } from './capture-modal-model';
+import { buildCaptureModalRequest, buildCaptureModalView, createCaptureModalDraft, formatCaptureModalCopilotApplied, planCaptureModalRequest, saveCaptureModalLines } from './capture-modal-model';
 import { parseQuickAdd } from './quick-add';
-import type { Project, Task } from './types';
+import type { AppSettings, Project, Task } from './types';
 
 const NOW = new Date('2026-09-28T14:00:00.000Z');
 const request = (text: string, extra: { projects?: readonly Project[]; initialProps?: Partial<Task>; description?: string } = {}) => {
@@ -62,5 +62,29 @@ describe('capture confirmation screen model', () => {
         expect(formatCaptureModalCopilotApplied(t, { context: '@computer', tags: [] }, true)).toBe('Applied @computer');
         expect(formatCaptureModalCopilotApplied(t, { timeEstimate: '15min', tags: ['#urgent'] }, false)).toBe('Applied #urgent');
         expect(formatCaptureModalCopilotApplied(t, { tags: [] }, true)).toBeNull();
+    });
+
+    // RN 318edcba8 (#828): the capture screen's AI copilot also offers the saved contexts and tags no task uses yet, after the
+    // used ones (apps/mobile/app/capture-modal.tsx contextOptions, tagOptions).
+    it('offers the AI the saved contexts and tags after the used ones', () => {
+        const at = '2026-10-20T00:00:00.000Z';
+        const saved = (token: string) => ({ token, rev: 1, revBy: 'device', updatedAt: at });
+        const settings = {
+            ai: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:11434/v1' },
+            taxonomy: { contexts: [saved('@errands'), saved('@phone')], tags: [saved('#someday'), { ...saved('#gone'), deletedAt: at }] },
+        } as unknown as AppSettings;
+        const tasks = [{ id: 't1', title: 'Call', status: 'next', contexts: ['@phone'], tags: ['#finance'], createdAt: at, updatedAt: at }] as Task[];
+        const view = buildCaptureModalView(createCaptureModalDraft({ initialValue: 'Call the bank' }, {}), {
+            t: (key: string) => key,
+            settings,
+            projects: [],
+            areas: [],
+            tasks,
+            initialProps: {},
+            parsed: parseQuickAdd('Call the bank', [], NOW, []),
+            formatDate: () => '',
+            aiKey: { required: false, available: false },
+        });
+        expect(view.copilot.request).toEqual({ title: 'Call the bank', contexts: ['@phone', '@errands'], tags: ['#finance', '#someday'] });
     });
 });

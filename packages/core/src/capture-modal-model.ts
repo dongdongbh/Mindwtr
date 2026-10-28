@@ -28,6 +28,7 @@ import { resolveFeatureFlags } from './resolve-feature-flags';
 import { isSandboxMode } from './sandbox';
 import type { StoreActionResult } from './store-types';
 import { sanitizeAttachmentUriForSyncMerge } from './sync-normalization';
+import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 import { getUsedTaskTokens } from './task-token-usage';
 import type { AppSettings, Area, Attachment, Project, Task, TimeEstimate } from './types';
 
@@ -644,8 +645,9 @@ export function buildCaptureModalView(draft: CaptureModalDraft, context: {
             request: asksCopilot(copilotSettings, title)
                 ? {
                     title,
-                    contexts: getUsedTaskTokens(context.tasks, (task) => task.contexts, { prefix: '@' }),
-                    tags: getUsedTaskTokens(context.tasks, (task) => task.tags, { prefix: '#' }),
+                    // RN's contextOptions and tagOptions (#828): the used tokens, then the saved ones no task uses yet.
+                    contexts: Array.from(new Set([...getUsedTaskTokens(context.tasks, (task) => task.contexts, { prefix: '@' }), ...getSavedTaxonomyTokens(settings, 'context')])),
+                    tags: Array.from(new Set([...getUsedTaskTokens(context.tasks, (task) => task.tags, { prefix: '#' }), ...getSavedTaxonomyTokens(settings, 'tag')])),
                 }
                 : null,
             suggested: parts.length > 0
