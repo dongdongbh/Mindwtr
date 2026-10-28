@@ -11,7 +11,11 @@
  *   and for the empty state's Back, mobile goes back, or to the Inbox when there is
  *   nothing to go back to; the empty state's Inbox replaces the screen with the Inbox.
  *
- * deleteSavedSearch takes a request UUID and retries exactly
+ * - Sort (RN's TaskListSortButton, #1453) opens `sort`: "Use global setting (...)"
+ *   first, then the sort options; a choice sends its `edit` to setSavedSearchSort,
+ *   which keeps the saved search's own sort (null: the global sort again).
+ *
+ * deleteSavedSearch and setSavedSearchSort take a request UUID and retry exactly
  * (native-request-receipts.ts). It deletes by ID against the settings as they are
  * when it runs (deleteSavedSearchById), and it is target-state: a saved search
  * already gone writes nothing.
@@ -29,16 +33,21 @@ import {
 } from './native-host-contract';
 import { fail, isObjectRecord, isPaging, isText, page, paramsKey } from './native-host-contract-menu-views';
 import { createNativeRequestReceipts, runStoreWrite, settleWrite } from './native-request-receipts';
+import { getTaskListHeaderText } from './menu-views-model';
 import {
     buildSavedSearchScreenText,
     deleteSavedSearchById,
     findSavedSearch,
+    getSavedSearchGlobalSortLabel,
+    getSavedSearchOwnSortBy,
     resolveSavedSearchSortBy,
     selectSavedSearchTasks,
+    setSavedSearchSortById,
     type SavedSearchScreenText,
 } from './saved-search-view-model';
 import { useTaskStore } from './store';
-import type { Task } from './types';
+import { getTaskSortByLabel, getVisibleTaskSortOptions, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
+import type { Task, TaskSortBy } from './types';
 
 export type NativeSavedSearchView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
@@ -51,6 +60,15 @@ export type NativeSavedSearchView = {
     /** The query under the title; null when there is none to show. */
     query: string | null;
     delete: SavedSearchScreenText['deleteAction'];
+    /**
+     * RN's Sort button and modal (#1453); null when the saved search is gone. The first option is "Use global setting (...)";
+     * while it is selected no other option is. Send an option's `edit` with setSavedSearchSort.
+     */
+    sort: {
+        title: string;
+        accessibilityLabel: string;
+        options: { label: string; selected: boolean; edit: { sortBy: TaskSortBy | null } }[];
+    } | null;
     /** Every row the query finds; `rows` is the requested window. */
     total: number;
     rows: NativeTaskRow[];
@@ -111,7 +129,9 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
                 areaById: new Map(areas.map((area) => [area.id, area])),
                 sortBy: resolveSavedSearchSortBy(savedSearch, state.settings),
             });
-            const text = buildSavedSearchScreenText({ savedSearch, savedSearches, t: deps.t() });
+            const t = deps.t();
+            const text = buildSavedSearchScreenText({ savedSearch, savedSearches, t });
+            const ownSortBy = getSavedSearchOwnSortBy(savedSearch, state.settings);
             return {
                 ok: true,
                 value: {
@@ -122,6 +142,19 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
                     title: text.title,
                     query: text.query || null,
                     delete: text.deleteAction,
+                    sort: savedSearch ? {
+                        title: t('sort.label'),
+                        accessibilityLabel: getTaskListHeaderText({
+                            sortByLabel: getTaskSortByLabel(resolveSavedSearchSortBy(savedSearch, state.settings), t),
+                            hasActiveFilters: false, filterActiveCount: 0, t,
+                        }).sortAccessibilityLabel,
+                        options: [
+                            { label: getSavedSearchGlobalSortLabel(state.settings, t), selected: ownSortBy === null, edit: { sortBy: null } },
+                            ...getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, state.settings).map((sortBy) => ({
+                                label: getTaskSortByLabel(sortBy, t), selected: ownSortBy === sortBy, edit: { sortBy },
+                            })),
+                        ],
+                    } : null,
                     total: tasks.length,
                     rows: deps.rows(page(tasks, window), now),
                     empty: tasks.length === 0 ? text.empty : null,
@@ -143,6 +176,26 @@ export function createSavedSearchMethods(deps: SavedSearchDeps) {
                 const written = await runStoreWrite(async () => { deleted.found = await deleteSavedSearchById(id); });
                 // Target state: a saved search already gone is deleted.
                 if (!deleted.found) return written.ok ? { ok: true, value: { changed: false } } : written;
+                return settleWrite(written, { changed: true });
+            });
+        },
+
+        /**
+         * The Sort modal's choice: the saved search's own sort, or null for the global one (setSavedSearchSortById, by ID against
+         * the saved searches as they are when it runs). Target-state: a search gone, or already on that sort, writes nothing.
+         */
+        async setSavedSearchSort(input: { requestId: string; id: string; sortBy: TaskSortBy | null }): Promise<NativeHostResult<{ changed: boolean }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || !isText(input.id, 200) || !input.id
+                || (input.sortBy !== null && !TASK_LIST_SORT_OPTIONS.includes(input.sortBy as TaskSortBy))) {
+                return fail('INVALID_INPUT', 'A request UUID, a saved search ID and a list sort (or null) are required');
+            }
+            const { id, sortBy } = input;
+            return receipts.run<{ changed: boolean }>(input.requestId, JSON.stringify(['setSavedSearchSort', id, sortBy]), async () => {
+                const set = { changed: false };
+                const written = await runStoreWrite(async () => { set.changed = await setSavedSearchSortById(id, sortBy); });
+                if (!set.changed) return written.ok ? { ok: true, value: { changed: false } } : written;
                 return settleWrite(written, { changed: true });
             });
         },

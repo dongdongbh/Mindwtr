@@ -39,7 +39,7 @@ import org.json.JSONObject
 
 /**
  * RN's saved search screen (app/(drawer)/saved-search/[id].tsx) on core's getSavedSearchView, under RN's stack header: the saved
- * search's name and query with Delete (RN's red trash; core's question first, then core's deleteSavedSearch, and RN goes back), then
+ * search's name and query with RN's Sort (core's modal, #1453) and Delete (RN's red trash; core's question first, then core's deleteSavedSearch, and RN goes back), then
  * core's rows as the lists draw them (RN's task row with its status badge; their swipes, status menu and editor are the lists' own
  * commands), read in windows of 50 with More, and core's empty line, with core's Inbox and Back when the saved search is gone.
  */
@@ -53,6 +53,10 @@ fun SavedSearchList(model: InboxViewModel) = with(model.menu) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(view.getString("title"), style = rnText(20, 700), color = c.text, modifier = Modifier.semantics { heading() })
                 view.menuText("query")?.let { Text(it, style = rnText(12, 400), color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            }
+            // RN's TaskListSortButton: core's "Sort: <current>" label opens core's modal.
+            view.optJSONObject("sort")?.let { sort ->
+                DirectControl(Lucide.ArrowUpDown, sort.getString("accessibilityLabel"), null, null, idle) { openDialog("savedSearchSort") }
             }
             view.optJSONObject("delete")?.let { delete ->
                 val label = delete.getString("label")

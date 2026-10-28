@@ -6,13 +6,16 @@ import {
     buildSavedSearchScreenText,
     deleteSavedSearchById,
     findSavedSearch,
+    getSavedSearchGlobalSortLabel,
     removeSavedSearch,
     selectSavedSearchTasks,
+    setSavedSearchSortById,
     type SavedSearchScreenText,
 } from './saved-search-view-model';
 import { loadScreenFixture, normalize, openScreenHost, replayAfterRestart, requestId, value, type ScreenHost } from './screen-parity.replay';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
-import { resolveNonDoneTaskSortBy } from './task-list-sort-options';
+import { getTaskSortByLabel, getVisibleTaskSortOptions, resolveNonDoneTaskSortBy, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
+import { getTaskListHeaderText } from './menu-views-model';
 import type { AppSettings, Area, Project, Task, TaskStatus } from './types';
 
 type Action = [string, ...unknown[]];
@@ -220,6 +223,53 @@ describe('saved search screen: core and the native host contract', () => {
             found: false, title: 'Saved Searches', query: null, delete: null, total: 0, rows: [],
             empty: { message: 'No results found', actions: { inboxLabel: 'Inbox', backLabel: 'Back' } },
         });
+    });
+
+    // #1453 (352686e64): RN's saved search screen has a Sort button; its modal starts with "Use global setting (...)", and a
+    // choice is setSavedSearchSortById (null clears the search's own sort).
+    it("draws RN's Sort control and keeps the saved search's own sort, as RN does (#1453)", async () => {
+        freezeClock();
+        const core = await open();
+        await setSavedSearchSortById('ss-errands', 'title');
+        await setSavedSearchSortById('ss-errands', null);
+        const expected = [...core.log];
+
+        const { host, log } = await open();
+        const sortOf = () => value(host.getSavedSearchView({ id: 'ss-errands' })).sort!;
+        const settings = () => useTaskStore.getState().settings;
+        const labels = getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, settings());
+        expect(sortOf()).toEqual({
+            title: t('sort.label'),
+            accessibilityLabel: getTaskListHeaderText({
+                sortByLabel: getTaskSortByLabel(resolveNonDoneTaskSortBy(settings().taskSortBy, settings()), t), hasActiveFilters: false, filterActiveCount: 0, t,
+            }).sortAccessibilityLabel,
+            options: [
+                { label: getSavedSearchGlobalSortLabel(settings(), t), selected: true, edit: { sortBy: null } },
+                ...labels.map((sortBy) => ({ label: getTaskSortByLabel(sortBy, t), selected: false, edit: { sortBy } })),
+            ],
+        });
+        const titled = requestId();
+        expect(value(await host.setSavedSearchSort({ requestId: titled, id: 'ss-errands', sortBy: 'title' }))).toEqual({ changed: true });
+        expect(sortOf().options.filter((option) => option.selected)).toEqual([{ label: getTaskSortByLabel('title', t), selected: true, edit: { sortBy: 'title' } }]);
+        const state = useTaskStore.getState();
+        const areas = sortAreasForDisplay(state.areas);
+        expect(value(host.getSavedSearchView({ id: 'ss-errands' })).rows.map((row) => row.id)).toEqual(selectSavedSearchTasks({
+            query: '@errand', tasks: state.tasks, projects: state.projects,
+            areaFilter: resolveAreaFilterSelection(state.settings.filters, areas), areaById: new Map(areas.map((area) => [area.id, area])), sortBy: 'title',
+        }).map((task) => task.id));
+        // A replay of the same request answers from its receipt and writes nothing.
+        const written = log.length;
+        expect(value(await host.setSavedSearchSort({ requestId: titled, id: 'ss-errands', sortBy: 'title' }))).toEqual({ changed: true });
+        expect(log).toHaveLength(written);
+        expect(value(await host.setSavedSearchSort({ requestId: requestId(), id: 'ss-errands', sortBy: null }))).toEqual({ changed: true });
+        expect(value(await host.setSavedSearchSort({ requestId: requestId(), id: 'ss-errands', sortBy: null }))).toEqual({ changed: false });
+        expect(log).toEqual(expected);
+        expect(value(await host.setSavedSearchSort({ requestId: requestId(), id: 'ss-gone', sortBy: 'title' }))).toEqual({ changed: false });
+        for (const input of [{ requestId: requestId(), id: 'ss-errands', sortBy: 'nope' }, { requestId: requestId(), id: 'ss-errands' },
+            { requestId: 'not-a-uuid', id: 'ss-errands', sortBy: 'title' }]) {
+            expect(await host.setSavedSearchSort(input as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        }
+        expect(value(host.getSavedSearchView({ id: 'ss-gone' })).sort).toBeNull();
     });
 
     it('deletes as mobile does, and a replay after it landed writes nothing', async () => {

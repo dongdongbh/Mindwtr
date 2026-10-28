@@ -502,6 +502,12 @@ fun MenuDialogs(model: InboxViewModel) = with(model.menu) {
                 Choice(option.getString("label"), option.getBoolean("selected")) { group(option.optJSONObject("edit")?.getString("groupBy") ?: option.getString("value")) }
             })
         }
+        // A saved search's Sort (#1453): "Use global setting (...)" first; each option carries core's edit.
+        "savedSearchSort" -> view?.optJSONObject("sort")?.let { modal ->
+            ChoiceModal(model, modal.getString("title"), modal.menuObjects("options").map { option ->
+                Choice(option.getString("label"), option.getBoolean("selected")) { savedSearchSort(option.getJSONObject("edit")) }
+            })
+        }
         "completedAt" -> CompletedAtPicker(model, open)
         "bulkTag" -> AddTagDialog(model, open)
         "organize" -> OrganizeDialog(model, open)

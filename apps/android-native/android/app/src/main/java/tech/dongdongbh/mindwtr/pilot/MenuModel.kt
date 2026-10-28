@@ -36,7 +36,7 @@ private const val WINDOW = 100
 /** The Menu tab's commands (host-entry.ts MENU_COMMANDS); core can refuse each before writing. */
 val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
-    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "savedSearchDelete") + SETTINGS_KINDS
+    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 /**
  * The creates whose exact request waits on disk until core answers: Someday's, the Weekly Review's project Add task, the
  * Calendar composer's Save, the Board's Duplicate, a saved Focus filter, Settings › Manage's editor Save (a new area or person),
@@ -834,6 +834,10 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         }
     }
 
+    /** A saved search's Sort choice (#1453): core's option edit (sortBy, null for the global sort) for the open search. */
+    fun savedSearchSort(edit: JSONObject) =
+        act("savedSearchSort", JSONObject().put("id", own("savedSearch").optString("id")).put("sortBy", edit.opt("sortBy") ?: JSONObject.NULL))
+
     /** Someday's Details toggle. */
     fun details(on: Boolean) { editOwn("someday") { put("showDetails", on) }; reload() }
 
@@ -1388,8 +1392,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         "calendarAction", "calendarCreate", "boardAction", "boardCreate" -> JSONObject(action.title).put("requestId", action.id)
         // A bulk action (its list and core's action) and Focus's commands (the control state and the command's own input).
         "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder" -> JSONObject(action.title).put("requestId", action.id)
-        // Bulk organize's create, Mind Sweep's Add and a saved search's Delete: core's whole input and the request UUID.
-        "bulkCreate", "mindSweepAdd", "savedSearchDelete" -> JSONObject(action.title).put("requestId", action.id)
+        // Bulk organize's create, Mind Sweep's Add and a saved search's Delete and Sort: core's whole input and the request UUID.
+        "bulkCreate", "mindSweepAdd", "savedSearchDelete", "savedSearchSort" -> JSONObject(action.title).put("requestId", action.id)
         // Settings: core's whole input and the request UUID; Manage's Someday section writes are target-state and take none.
         "generalSetting", "gtdSetting", "manageEditor", "manageDelete", "dataSetting", "syncPreference", "setAISetting", "calendarSetting" -> JSONObject(action.title).put("requestId", action.id)
         // Settings › Notifications' edit, as core gave it.
