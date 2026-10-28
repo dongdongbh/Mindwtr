@@ -323,11 +323,24 @@ describe('runLoadMigrations', () => {
 
     it('promote-scheduled-tasks: promotes an inbox task whose due date has passed', () => {
         const data = settledData({
-            tasks: [{ id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: NOW_ISO, updatedAt: NOW_ISO } as unknown as Task],
+            tasks: [{ id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-03-20T00:00:00.000Z' } as unknown as Task],
         });
         const { data: result, applied } = runLoadMigrations(data, ctxFor(data));
         expect(applied).toEqual(['promote-scheduled-tasks']);
         expect(result.tasks[0].status).toBe('next');
+    });
+
+    it('promote-scheduled-tasks: keeps a task the user put in Inbox after its date arrived (#1452)', () => {
+        const data = settledData({
+            tasks: [{
+                id: 't1', title: 'T', status: 'inbox', tags: [], contexts: [],
+                startTime: '2026-04-01', dueDate: '2026-04-01T21:00:00.000Z',
+                createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-04-05T00:00:00.000Z',
+            } as unknown as Task],
+        });
+        const { data: result, applied } = runLoadMigrations(data, ctxFor(data));
+        expect(applied).not.toContain('promote-scheduled-tasks');
+        expect(result.tasks[0].status).toBe('inbox');
     });
 
     // `settledSettings` carries `lastAutoArchiveAt: NOW_ISO`, i.e. a pass that just
@@ -438,7 +451,7 @@ describe('runLoadMigrations', () => {
         // tombstone to purge. Everything else in this fixture is already settled.
         const data = settledData({
             tasks: [
-                { id: 't-due', title: 'Due', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: NOW_ISO, updatedAt: NOW_ISO } as unknown as Task,
+                { id: 't-due', title: 'Due', status: 'inbox', tags: [], contexts: [], dueDate: '2026-04-01', createdAt: '2026-03-20T00:00:00.000Z', updatedAt: '2026-03-20T00:00:00.000Z' } as unknown as Task,
                 {
                     id: 't-tombstone', title: 'Old', status: 'done', tags: [], contexts: [],
                     createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z',
@@ -608,7 +621,7 @@ describe('runLoadMigrations', () => {
                 {
                     id: 't-scheduled', title: 'Was due', status: 'inbox',
                     tags: [], contexts: [], dueDate: '2026-04-01',
-                    createdAt: RECENT_AT, updatedAt: RECENT_AT,
+                    createdAt: ARCHIVED_AT, updatedAt: ARCHIVED_AT,
                 } as unknown as Task,
             ],
             projects: [

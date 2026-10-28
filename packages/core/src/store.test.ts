@@ -3138,10 +3138,10 @@ describe('TaskStore', () => {
 
         // The second read drops both existing tasks entirely (simulating a bad or
         // truncated storage read) while carrying an overdue inbox task, which
-        // always trips the unconditional promote-scheduled-tasks migration --
+        // trips the promote-scheduled-tasks migration (its due date arrived after its last edit) --
         // proving the guard fires on a genuine gap, not just "nothing changed".
         mockStorage.getData = vi.fn().mockResolvedValue({
-            tasks: [createStoreTask('task-trigger', { dueDate: '2020-01-01' })],
+            tasks: [createStoreTask('task-trigger', { dueDate: '2020-01-01', createdAt: '2019-12-01T00:00:00.000Z', updatedAt: '2019-12-01T00:00:00.000Z' })],
             projects: [],
             sections: [],
             areas: [],

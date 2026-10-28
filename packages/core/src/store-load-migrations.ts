@@ -317,7 +317,7 @@ const recoverLegacyProjectReferencesMigration: LoadMigration = {
     },
 };
 
-function shouldPromoteScheduledTask(task: Task, nowMs: number): boolean {
+function shouldPromoteScheduledTask(task: Task, nowMs: number, respectLastEdit = true): boolean {
     if (task.deletedAt || task.purgedAt) return false;
     // Only Inbox means "unclarified", so only Inbox is promoted when its date
     // arrives. Every other status is a decision the user already made: Waiting
@@ -326,19 +326,35 @@ function shouldPromoteScheduledTask(task: Task, nowMs: number): boolean {
     // agree — while they did not, filing a dated task into Someday saved, and
     // the next load promoted it straight back to Next (#1248).
     if (task.status !== 'inbox') return false;
-    const startMs = safeParseDate(task.startTime)?.getTime() ?? NaN;
-    if (Number.isFinite(startMs) && startMs <= nowMs) return true;
-    const dueMs = safeParseDate(task.dueDate)?.getTime() ?? NaN;
-    if (Number.isFinite(dueMs) && dueMs <= nowMs) return true;
-    return false;
+    // Promote only a date that arrived after the task's last edit. A task the
+    // user put in Inbox once its date had passed stays there; otherwise every
+    // load (startup, each sync) undid that choice (#1452).
+    const editedMs = respectLastEdit ? safeParseDate(task.updatedAt)?.getTime() ?? 0 : 0;
+    const arrived = (value: string | undefined) => {
+        const ms = safeParseDate(value)?.getTime() ?? NaN;
+        return Number.isFinite(ms) && ms <= nowMs && ms > editedMs;
+    };
+    return arrived(task.startTime) || arrived(task.dueDate);
 }
+
+let loggedInboxChoiceKept = false;
 
 const promoteScheduledTasksMigration: LoadMigration = {
     name: 'promote-scheduled-tasks',
     run: (data, ctx) => {
         let count = 0;
         const tasks = data.tasks.map((task) => {
-            if (!shouldPromoteScheduledTask(task, ctx.nowMs)) return task;
+            if (!shouldPromoteScheduledTask(task, ctx.nowMs)) {
+                if (!loggedInboxChoiceKept && shouldPromoteScheduledTask(task, ctx.nowMs, false)) {
+                    loggedInboxChoiceKept = true;
+                    logInfo('Dated Inbox task kept in Inbox after its date', {
+                        scope: 'store',
+                        category: 'storage',
+                        context: { releaseCheck: 'v1.3.8/inbox-choice-after-date-kept' },
+                    });
+                }
+                return task;
+            }
             count += 1;
             return {
                 ...task,
