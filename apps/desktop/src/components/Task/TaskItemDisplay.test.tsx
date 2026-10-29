@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import type { Area, Project, Task } from '@mindwtr/core';
-import { configureDateFormatting, getDateFormattingConfig, getTaskAgeLabel, hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
+import { configureDateFormatting, formatTimeEstimateLabel, getDateFormattingConfig, getTaskAgeLabel, hasTimeComponent, safeFormatDate, useTaskStore } from '@mindwtr/core';
 
 import { LanguageProvider } from '../../contexts/language-context';
 import { TaskItemDisplay } from './TaskItemDisplay';
@@ -440,6 +440,26 @@ describe('TaskItemDisplay', () => {
         );
 
         expect(getByText('Starts after due date')).toBeInTheDocument();
+    });
+
+    it.each([
+        { compactMetaEnabled: true, isViewOpen: false, timeEstimatesEnabled: true, shown: true },
+        { compactMetaEnabled: false, isViewOpen: false, timeEstimatesEnabled: true, shown: false },
+        { compactMetaEnabled: false, isViewOpen: true, timeEstimatesEnabled: true, shown: true },
+        { compactMetaEnabled: true, isViewOpen: true, timeEstimatesEnabled: true, shown: true },
+        { compactMetaEnabled: true, isViewOpen: false, timeEstimatesEnabled: false, shown: false },
+    ])('shows an estimate-only task\'s estimate once with Show details on (#1476): %o', ({ compactMetaEnabled, isViewOpen, timeEstimatesEnabled, shown }) => {
+        const label = formatTimeEstimateLabel('30min');
+        const { queryAllByText } = render(<LanguageProvider><TaskItemDisplay
+            task={{ ...baseTask, status: 'next', timeEstimate: '30min' }} language="en" selectionMode={false}
+            isViewOpen={isViewOpen} compactMetaEnabled={compactMetaEnabled}
+            actions={{ onToggleView: vi.fn(), onEdit: vi.fn(), onDelete: vi.fn(),
+                onDuplicate: vi.fn(), onStatusChange: vi.fn(), openAttachment: vi.fn() }}
+            visibleAttachments={[]} recurrenceRule="" recurrenceStrategy="strict"
+            prioritiesEnabled={false} timeEstimatesEnabled={timeEstimatesEnabled} isStagnant={false}
+            showQuickDone={false} readOnly={false} t={(key) => key}
+        /></LanguageProvider>);
+        expect(queryAllByText(label)).toHaveLength(shown ? 1 : 0);
     });
 
     it('shows the daily recurrence interval in task metadata', () => {

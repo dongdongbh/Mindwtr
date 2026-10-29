@@ -251,6 +251,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
             || (task.contexts?.length ?? 0) > 0
             || checklistProgress
             || waitingAssignee
+            || (timeEstimatesEnabled && task.timeEstimate)
         );
     const resolvedDirection = resolveTaskTextDirection(task);
     const isRtl = resolvedDirection === 'rtl';
@@ -643,7 +644,7 @@ export const TaskItemDisplay = memo(function TaskItemDisplay({
                     )}
                 />
             )}
-            {expanded && !isReference && timeEstimatesEnabled && task.timeEstimate && (
+            {(expanded || showCompactMeta) && !isReference && timeEstimatesEnabled && task.timeEstimate && (
                 <MetadataBadge
                     variant="estimate"
                     icon={Timer}
