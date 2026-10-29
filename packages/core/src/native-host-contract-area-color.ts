@@ -108,7 +108,7 @@ export function createAreaColorMethods(deps: {
     revision: () => string;
     sortedAreas: () => Area[];
 }) {
-    return {
+    const methods = {
         getAreaColorOptions(): NativeHostResult<{ revision: string; colors: string[];
             areas: Array<{ id: string } & NativeAreaColorToken> }> {
             const ready = deps.readiness();
@@ -171,5 +171,43 @@ export function createAreaColorMethods(deps: {
             const saved = await deps.save();
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },
+
+        /**
+         * Android's Manage areas sheet (#1263): the area's color as RN's swatch row sets it (a preset, or null for None), prepared and
+         * committed here (Android journals the request). The color already in place (a replay) answers unchanged; a sync landing
+         * between the steps prepares again. A save owed from before is finished first.
+         */
+        async runAreaColor(input: { requestId: string; areaId: string; color: string | null }): Promise<NativeHostResult<{ outcome: 'saved' | 'unchanged' } & NativeAreaColorResult>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!record(input) || !exact(input, ['requestId', 'areaId', 'color'])
+                || !readRequest({ ...input, expected: { name: '', color: null, rev: null, revBy: null, updatedAt: '' } }))
+                return fail('INVALID_INPUT', 'A bounded Area color request is required');
+            try {
+                if (useTaskStore.getState().persistenceFailure) await useTaskStore.getState().retryPersistence();
+            } catch (error) { return fail('SAVE_FAILED', error instanceof Error ? error.message : String(error)); }
+            let stale = 'Area changed; refresh before changing its color';
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+                const current = useTaskStore.getState()._allAreas.find((area) => area.id === input.areaId && !area.deletedAt);
+                if (!current) return fail('STALE_REVISION', 'The Area is no longer there');
+                if ((current.color ?? null) === input.color) {
+                    const saved = await deps.save();
+                    return saved.ok ? { ok: true, value: { outcome: 'unchanged', id: current.id, color: input.color } } : saved;
+                }
+                const request = { ...input, expected: token(current) };
+                const prepared = methods.prepareAreaColor(request);
+                if (!prepared.ok) {
+                    if (prepared.error.code !== 'STALE_REVISION') return prepared;
+                    stale = prepared.error.message;
+                    continue;
+                }
+                const committed = await methods.commitPreparedAreaColor({ request, prepared: prepared.value.prepared });
+                if (committed.ok) return { ok: true, value: { outcome: 'saved', ...committed.value } };
+                if (committed.error.code !== 'STALE_REVISION') return committed;
+                stale = committed.error.message;
+            }
+            return fail('STALE_REVISION', stale);
+        },
     };
+    return methods;
 }

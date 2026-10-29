@@ -32,7 +32,9 @@
 // on screen), with a Focus view-options read held 15 s (debug delay_action_ms), Projects chosen meanwhile fills once the
 // read ends, without reopening the tab; (o) #1263: a long-press on the fixture area's second project offers RN's Move up, which
 // stores it above the first, and the Areas sheet's ↑ moves the fixture area up one in core's stored order; both orders hold
-// after a restart (the list and the reopened sheet). Core's expected lists
+// after a restart (the list and the reopened sheet); the sheet's other controls: the fixture area's Delete is off (it holds
+// projects), a typed name and Save store a new area (Sheet plus the marker) with the chosen swatch, its swatch row stores a color
+// and None clears it, and its Delete removes it. Core's expected lists
 // come from core's own contract run on a fresh host copy of the database. It
 // touches only the development package (it refuses any other APK), never
 // launches over another app, leaves the app on its Inbox tab, and restores
@@ -77,7 +79,7 @@ const coreSrc = resolve(app, '../../packages/core/src');
 // The fixture's stable marker: every run finds the same projects and tasks, so it injects them only once.
 // Digits only in task titles (the editor step picks a task by its digits-only title).
 const run = '424242424242';
-const names = { area: `Area${run}`, sequential: `Seq${run}`, archived: `Arch${run}`, many: `Many${run}`, added: `67${run}` };
+const names = { area: `Area${run}`, sequential: `Seq${run}`, archived: `Arch${run}`, many: `Many${run}`, added: `67${run}`, sheetArea: `Sheet${run}` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, reveal, toTop, completeUntil } = device;
@@ -125,6 +127,10 @@ const showTab = async (name) => {
     const nodes = await waitFor('the tabs', (current) => tab(current, name), 60_000);
     if (!tabSelected(nodes, name)) await tap(tab(nodes, name));
     await waitFor(`the ${name} tab`, (current) => tabSelected(current, name), 10_000);
+};
+const hideKeyboard = async () => {
+    // Back while the keyboard shows only hides it.
+    if (/mInputShown=true/.test(sh('dumpsys input_method'))) { requireAppFront(); sh('input keyevent KEYCODE_BACK'); await sleep(800); }
 };
 const hasError = (nodes) => nodes.some((node) => node.text?.includes('Injected commit failure'));
 /** Taps the control labelled [label] until [done] holds; a tap can land while the list still moves, so tap again. */
@@ -324,6 +330,12 @@ const core = (db, mode, extra = {}) => JSON.parse(execFileSync('bun', ['-e', `
         // This check reads the Projects tab: RN's quick-access view set to Projects (RN's default is Review, which takes the slot).
         if (store().settings.appearance?.mobileQuickAccessView !== 'projects') {
             await store().updateSettings({ appearance: { mobileQuickAccessView: 'projects' } });
+            await flushPendingSave();
+        }
+        // The Areas sheet's new area (o), left by a run that stopped before its Delete.
+        for (const area of live(store()._allAreas).filter((item) => item.name === names.sheetArea)) {
+            const result = await store().deleteArea(area.id);
+            if (!result.success) throw new Error('removing the sheet area failed: ' + result.error);
             await flushPendingSave();
         }
         for (const project of live(store()._allProjects).filter((item) => item.title === names.added)) {
@@ -750,6 +762,45 @@ try {
     const rowTop = (id) => box(tagged(nodes, `project-area-row-${id}`) ?? fail(`area ${id} is not in the sheet`))[1];
     check(rowTop(mover) < rowTop(expectedAreas[at]) && isDeepStrictEqual(storedAreas(), expectedAreas),
         '(o) after a restart the reopened sheet shows the moved area above its old neighbour, as stored');
+    // The sheet's other controls (RN's ProjectAreaModals): Delete off while an area holds projects; Save, a swatch, None, Delete.
+    const storedArea = (name) => sqlite(pullDatabase('o-area'), `SELECT id, color FROM areas WHERE name = '${name}' AND deletedAt IS NULL`);
+    nodes = await sheetRow(ids.area);
+    check(tagged(nodes, `project-area-delete-${ids.area}`)?.enabled === 'false', `(o) ${names.area} holds projects: its Delete is off, as RN's`);
+    await tap(tagged(nodes, 'project-area-new-name') ?? fail('no new area field'));
+    requireAppFront();
+    sh(`input text ${names.sheetArea}`);
+    await waitFor('the typed area name', (current) => tagged(current, 'project-area-new-name')?.text === names.sheetArea, 10_000);
+    await hideKeyboard();
+    nodes = await screen();
+    const swatches = nodes.filter((node) => (node['resource-id'] ?? '').startsWith('project-area-new-color-'));
+    const picked = swatches.at(-1) ?? fail('no new area swatches');
+    const pickedColor = picked['resource-id'].replace('project-area-new-color-', '');
+    await tap(picked);
+    await tap(tagged(await screen(), 'project-area-save') ?? fail('no Save'));
+    await waitFor(`${names.sheetArea} stored`, () => storedArea(names.sheetArea).length === 1, 30_000);
+    check(storedArea(names.sheetArea)[0].color === pickedColor, `(o) Save stored ${names.sheetArea} once with the swatch ${pickedColor}; the sheet closed`);
+    await waitFor('the sheet closed after Save', (current) => !tagged(current, 'project-area-manager'), 10_000);
+    const sheetAreaId = storedArea(names.sheetArea)[0].id;
+    nodes = await toTop();
+    await tap(tagged(nodes, 'projects-manage-areas') ?? fail('no Areas button'));
+    nodes = await sheetRow(sheetAreaId);
+    await tap(tagged(nodes, `project-area-color-${sheetAreaId}`));
+    nodes = await waitFor('the area\'s swatch row', (current) => Boolean(tagged(current, `project-area-color-none-${sheetAreaId}`)), 10_000);
+    const other = nodes.find((node) => (node['resource-id'] ?? '').startsWith(`project-area-swatch-${sheetAreaId}-`) && !node['resource-id'].endsWith(pickedColor))
+        ?? fail('no other swatch');
+    const otherColor = other['resource-id'].replace(`project-area-swatch-${sheetAreaId}-`, '');
+    await tap(other);
+    await waitFor(`${names.sheetArea} colored ${otherColor}`, () => storedArea(names.sheetArea)[0]?.color === otherColor, 30_000);
+    check(true, `(o) the swatch row stored ${otherColor}`);
+    nodes = await sheetRow(sheetAreaId);
+    await tap(tagged(nodes, `project-area-color-${sheetAreaId}`));
+    await tap(tagged(await waitFor('the None swatch', (current) => Boolean(tagged(current, `project-area-color-none-${sheetAreaId}`)), 10_000), `project-area-color-none-${sheetAreaId}`));
+    await waitFor(`${names.sheetArea} without a color`, () => storedArea(names.sheetArea)[0]?.color === null, 30_000);
+    check(true, '(o) None cleared the area\'s color, as RN\'s None does');
+    nodes = await sheetRow(sheetAreaId);
+    await tap(tagged(nodes, `project-area-delete-${sheetAreaId}`) ?? fail('no Delete for the new area'));
+    await waitFor(`${names.sheetArea} deleted`, () => storedArea(names.sheetArea).length === 0, 30_000);
+    check(true, `(o) Delete removed ${names.sheetArea}`);
     sh('input keyevent KEYCODE_BACK');
     await waitFor('the Areas sheet to close', (current) => !tagged(current, 'project-area-manager'), 10_000);
 

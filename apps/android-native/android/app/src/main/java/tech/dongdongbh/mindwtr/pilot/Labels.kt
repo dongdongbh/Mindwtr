@@ -93,7 +93,7 @@ val LABEL_KEYS = listOf(
     "projects.reviewAt", "projects.sectionPlaceholder", "projects.moveUp", "projects.moveDown", "projects.deleteSectionConfirm", "common.add",
     "projects.parallel", "projects.sequential", "projects.perSection", "projects.perSectionTooltip", "projects.sequenceMode",
     // The Projects screen's Move up / Move down and Manage areas sheet (#1263).
-    "projects.moveProjectFailed", "areas.manage", "projects.sortByName", "projects.sortByColor",
+    "projects.moveProjectFailed", "areas.manage", "projects.sortByName", "projects.sortByColor", "projects.colorNone", "projects.color",
     // The welcome sheet's Sync and Data handoff card (RN's sync-settings-screen.tsx onboardingHandoffCard).
     "settings.gettingStartedContentContinueTitle", "settings.gettingStartedContentContinueDesc", "onboarding.startFreshTitle",
     // The task editor's "..." menu (RN's TaskEditHeader and use-task-edit-actions.ts), its toasts and Create project's dialog.

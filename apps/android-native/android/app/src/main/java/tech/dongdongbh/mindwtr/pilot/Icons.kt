@@ -57,6 +57,8 @@ object Lucide {
     /** RN's capture button draws Plus at stroke 3. */
     val Plus = lucide("Plus", "M5 12h14", "M12 5v14", stroke = 3f)
     val Check = lucide("Check", "M20 6 9 17l-5-5")
+    /** The Manage areas sheet's None swatch (RN's Ban). */
+    val Ban = lucide("Ban", "M4.929 4.929 19.07 19.071", circle(12, 12, 10))
     /** RN's Notifications day picker draws Check at stroke 2.5. */
     val CheckPicked = lucide("CheckPicked", "M20 6 9 17l-5-5", stroke = 2.5f)
     val Circle = lucide("Circle", circle(12, 12, 10))

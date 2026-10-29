@@ -276,3 +276,29 @@ describe('prepared native Area color', () => {
         expect(saves()).toBe(before);
     });
 });
+
+// Android's Manage areas sheet (#1263, RN ProjectAreaModals.tsx): a swatch, or None, is the area's color as a target state, run
+// over the prepared color above. Settings' editor cannot clear a color (its color is a preset or the one it opened with).
+describe('runAreaColor (#1263)', () => {
+    const run = (methods: Awaited<ReturnType<typeof open>>['methods'], color: string | null, areaId = 'area-work') =>
+        methods.runAreaColor({ requestId: id, areaId, color });
+
+    it('stores a swatch and None once each, and a replay writes nothing', async () => {
+        const { methods, data, saves } = await open({ areas: [area()], projects: [project('p1')] });
+        expect(await run(methods, '#ef4444')).toEqual({ ok: true, value: { outcome: 'saved', id: 'area-work', color: '#ef4444' } });
+        expect(data().areas[0].color).toBe('#ef4444');
+        const count = saves();
+        expect(await run(methods, '#ef4444')).toEqual({ ok: true, value: { outcome: 'unchanged', id: 'area-work', color: '#ef4444' } });
+        expect(saves()).toBe(count);
+        expect(await run(methods, null)).toMatchObject({ ok: true, value: { outcome: 'saved', color: null } });
+        expect(data().areas[0].color).toBeUndefined();
+    });
+
+    it('refuses a color RN does not offer and a gone area, writing nothing', async () => {
+        const { methods, saves } = await open({ areas: [area()] });
+        const count = saves();
+        expect(await run(methods, '#123456')).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await run(methods, '#ef4444', 'gone')).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+    });
+});

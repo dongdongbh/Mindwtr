@@ -913,7 +913,7 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
     return input as { projectId: string; attachmentId?: string };
 };
 type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
-    | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'areaOrder' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
+    | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'areaOrder' | 'areaColor' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
     | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | TaskEditorCommand | DataCommand | StartupPromptCommand;
 /** Settings › Data's own write (DataTransfer.kt's DATA_COMMANDS): Getting Started's seed, journaled with its frozen language. */
@@ -1305,8 +1305,9 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     projectDetailFilterOptions: (input) => contract.getProjectDetailFilterOptions(input),
     // The project's view options Sort (ProjectsScreen.kt): core's choices for the project; the write is projectEdit's sort.
     projectTaskSortOptions: (input) => contract.getProjectTaskSortOptions(input),
-    // The Projects screen's Manage areas sheet (#1263): the areas in their order; the write is the areaOrder command.
-    areaOrderOptions: () => contract.getAreaOrderOptions(),
+    // The Projects screen's Manage areas sheet (#1263): the areas in their order, with Settings' revisions and RN's in-use rule (its
+    // writes: areaOrder, areaColor, and Settings' manageEditor and manageDelete). iOS keeps reading getAreaOrderOptions.
+    projectAreaManager: () => contract.getProjectAreaManager(),
     waiting: (input) => contract.getWaitingView(input),
     someday: (input) => contract.getSomedayView(input),
     reference: (input) => contract.getReferenceView(input),
@@ -1596,6 +1597,8 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     projectEdit: (input) => contract.runProjectEdit(input),
     // The Projects screen's Manage areas sheet (#1263): Sort by name, Sort by color, an area's ↑ on the order the sheet showed.
     areaOrder: (input) => contract.runAreaOrder(input),
+    // Its swatch row: a preset, or None (RN clears the color; Settings' editor cannot).
+    areaColor: (input) => contract.runAreaColor(input),
     // The task editor's "..." menu (Convert to section, Create project, Delete, Cancel, Skip and the Undos): journaled ahead of its send.
     taskEditorAction: (input) => contract.runTaskEditorAction(input),
 };

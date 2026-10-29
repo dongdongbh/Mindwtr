@@ -36,7 +36,7 @@ private const val WINDOW = 100
 /** The Menu tab's commands (host-entry.ts MENU_COMMANDS); core can refuse each before writing. */
 val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
-    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "areaOrder", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
+    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 /**
  * The creates whose exact request waits on disk until core answers: Someday's, the Weekly Review's project Add task, the
  * Calendar composer's Save, the Board's Duplicate, a saved Focus filter, Settings › Manage's editor Save (a new area or person),
@@ -1402,7 +1402,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         "notificationsSetting" -> JSONObject(action.title).put("requestId", action.id)
         "somedayRename", "somedayReorder", "somedayDelete" -> JSONObject(action.title)
         // The Projects screen's Manage areas order (#1263): RN's intent, the order the sheet showed, and the request UUID.
-        "areaOrder" -> JSONObject(action.title).put("requestId", action.id)
+        "areaOrder", "areaColor" -> JSONObject(action.title).put("requestId", action.id)
         else -> JSONObject().put("requestId", action.id).put("action", JSONObject(action.title))
     }.toString()
 

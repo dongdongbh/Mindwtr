@@ -272,3 +272,27 @@ describe('runAreaOrder (#1263)', () => {
         expect(data().areas.filter((row) => !row.deletedAt).sort((x, y) => x.order - y.order).map((row) => row.id)).toEqual(['b', 'a', 'c']);
     });
 });
+
+// The sheet's own read (Android only; getAreaOrderOptions keeps the exact keys iOS reads): each area with Settings' revision for its
+// writes and whether it holds a live project (RN's Delete is off then), and RN's swatches.
+describe('getProjectAreaManager (#1263)', () => {
+    it('lists the live areas in order with RN\'s in-use rule and Settings\' revisions', async () => {
+        const { methods } = await open({ projects: [{ id: 'p', title: 'P', status: 'active', color: '#000000', order: 0, tagIds: [], areaId: 'c',
+            createdAt: now, updatedAt: now }, { id: 'gone', title: 'G', status: 'active', color: '#000000', order: 0, tagIds: [], areaId: 'a',
+            createdAt: now, updatedAt: now, deletedAt: now }] });
+        const read = methods.getProjectAreaManager();
+        if (!read.ok) throw new Error(read.error.message);
+        const target = (areaId: string) => ({ type: 'area', id: areaId, revision: `3:old-device:${now}` });
+        expect(read.value.areas).toEqual([
+            { id: 'b', name: 'Alpha', color: '#3b82f6', inUse: false, delete: target('b') },
+            { id: 'c', name: 'Beta', color: null, inUse: true, delete: target('c') },
+            { id: 'a', name: 'Zulu', color: '#3b82f6', inUse: false, delete: target('a') },
+        ]);
+        expect(read.value.newArea).toEqual({ type: 'newArea' });
+        expect(read.value.colors[0]).toBe('#3b82f6');
+        const ios = methods.getAreaOrderOptions();
+        if (!ios.ok) throw new Error(ios.error.message);
+        expect(Object.keys(ios.value).sort()).toEqual(['areas', 'revision']);
+        expect(Object.keys(ios.value.areas[0]).sort()).toEqual(['color', 'id', 'name', 'order', 'rev', 'revBy', 'updatedAt']);
+    });
+});

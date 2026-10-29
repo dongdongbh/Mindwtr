@@ -67,6 +67,8 @@ class WriteJournal(
             "projectEdit" to "{requestId,projectId,kind}",
             // The Projects screen's Manage areas sheet (#1263): its request UUID and the order it showed (core's runAreaOrder).
             "areaOrder" to "{requestId,order[]}",
+            // Its swatch row (#1263): the request UUID and the area (core's runAreaColor; null clears the color as RN's None does).
+            "areaColor" to "{requestId,areaId}",
             // Settings › Data's Getting Started row: the request UUID and the app language, both frozen at the tap.
             "gettingStarted" to "{requestId,language}",
             // The donation ask's synced record: the request UUID and the time the ask showed, both frozen at the showing.

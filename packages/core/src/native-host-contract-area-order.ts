@@ -7,6 +7,9 @@ import { areaOrderEffect, sameAreaAdditionRow } from './store-projects/area-acti
 import type { PreparedAreaOrder } from './store-types';
 import { taskEditValuesEqual } from './store-tasks';
 import type { Area } from './types';
+import { AREA_PRESET_COLORS } from './color-constants';
+import { countLiveProjectsByArea } from './area-project-usage';
+import { revisionOf } from './native-request-receipts';
 
 export type NativeAreaOrderToken = { id: string; name: string; color: string | null; order: number;
     rev: number | null; revBy: string | null; updatedAt: string };
@@ -129,6 +132,24 @@ export function createAreaOrderMethods(deps: {
             const value = { revision: deps.revision(), areas: deps.sortedAreas().filter((area) => !area.deletedAt).map(token) };
             return isNativeJsonWithinBytes(value) ? { ok: true, value }
                 : fail('INVALID_INPUT', 'Area order options exceed the bounded native response');
+        },
+        /**
+         * Android's Manage areas sheet (#1263, RN ProjectAreaModals.tsx): the live areas in order, each with Settings' revision (its
+         * swatch-free writes are Settings' manageEditor and manageDelete) and whether a live project uses it (RN's Delete is off
+         * then), and RN's swatches. iOS keeps reading getAreaOrderOptions, whose keys stay exact.
+         */
+        getProjectAreaManager(): NativeHostResult<{ revision: string; colors: string[]; newArea: { type: 'newArea' };
+            areas: Array<{ id: string; name: string; color: string | null; inUse: boolean; delete: { type: 'area'; id: string; revision: string } }> }> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const usage = countLiveProjectsByArea(useTaskStore.getState().projects);
+            // Settings' targets, sent as given: the new area's (manageCheck, manageEditor) and each row's Delete (manageDelete).
+            const value = { revision: deps.revision(), colors: [...AREA_PRESET_COLORS], newArea: { type: 'newArea' as const },
+                areas: deps.sortedAreas().filter((area) => !area.deletedAt).map((area) => ({ id: area.id, name: area.name,
+                    color: area.color ?? null, inUse: (usage.get(area.id) ?? 0) > 0,
+                    delete: { type: 'area' as const, id: area.id, revision: revisionOf(area) } })) };
+            return isNativeJsonWithinBytes(value) ? { ok: true, value }
+                : fail('INVALID_INPUT', 'Area manager exceeds the bounded native response');
         },
         probeAreaOrderOutcome(input: NativeAreaOrderRequest): NativeHostResult<NativeAreaOrderResult> {
             const ready = deps.readiness();

@@ -1220,14 +1220,50 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     /** RN's toggleAreaCollapse: [areaId] is the area's id, "no-area" without one. */
-    /** RN's Manage areas sheet on the Projects screen (#1263): core's areas in their order while open (empty until read), null while shut. */
+    /**
+     * RN's Manage areas sheet on the Projects screen (#1263): core's areas in their order, each with its Settings revision and whether
+     * a project uses it, and RN's swatches, while open (empty until read); null while shut.
+     */
     var areaManager by mutableStateOf<JSONObject?>(null); private set
-    fun openAreaManager() { areaManager = JSONObject().put("areas", JSONArray()); readAreaManager() }
-    fun closeAreaManager() { areaManager = null }
+    /** The sheet's draft: the area whose swatch row is open, the new area's name and swatch, and core's check of that name. */
+    var areaManagerDraft by mutableStateOf(AreaManagerDraft()); private set
+    fun openAreaManager() {
+        areaManager = JSONObject().put("areas", JSONArray()).put("colors", JSONArray())
+        areaManagerDraft = AreaManagerDraft()
+        readAreaManager()
+    }
+    fun closeAreaManager() { areaManager = null; areaManagerDraft = AreaManagerDraft() }
+    fun expandAreaColor(areaId: String?) { areaManagerDraft = areaManagerDraft.copy(expanded = areaId) }
+    fun pickNewAreaColor(color: String) { areaManagerDraft = areaManagerDraft.copy(color = color) }
+    /** The new area's name as typed, and core's checkManageEditor for it (Settings' taken-name line and Save state). */
+    fun editNewAreaName(name: String) {
+        areaManagerDraft = areaManagerDraft.copy(name = name, check = null)
+        val target = areaManager?.optJSONObject("newArea") ?: return
+        background(emptyList(), { runtime -> runtime.menuRead("manageCheck", JSONObject().put("target", target).put("name", name).toString()) }) { check, _ ->
+            if (areaManagerDraft.name == name) areaManagerDraft = areaManagerDraft.copy(check = check)
+        }
+    }
+    /** RN's swatch row: a preset, or null for None (core's runAreaColor; Settings' editor cannot clear a color). */
+    fun setAreaColor(areaId: String, color: String?) {
+        areaManagerDraft = areaManagerDraft.copy(expanded = null)
+        menu.command("areaColor", JSONObject().put("areaId", areaId).put("color", color ?: JSONObject.NULL))
+    }
+    /** RN's Delete, offered only while no project uses the area: Settings' manageDelete with core's target (the revision the sheet showed). */
+    fun deleteArea(area: JSONObject) = menu.command("manageDelete", JSONObject().put("target", area.getJSONObject("delete")))
+    /** RN's Save: Settings' manageEditor create (its exact request kept on disk first, as Settings' Save does), then the sheet closes. */
+    fun addArea() {
+        val draft = areaManagerDraft
+        val name = draft.name.trim()
+        if (name.isEmpty() || draft.check?.optBoolean("saveDisabled") == true) return
+        val sheet = areaManager ?: return
+        val color = draft.color ?: sheet.optJSONArray("colors")?.optString(0) ?: return
+        menu.settings.createArea(sheet.getJSONObject("newArea"), name, color)
+        closeAreaManager()
+    }
     /** Core's areas again: on open, and after every command and its stale refusal (the Projects list is read again then too). */
     fun readAreaManager() {
         if (areaManager == null) return
-        background(emptyList(), { runtime -> runtime.menuRead("areaOrderOptions", "{}") }) { reply, _ -> if (areaManager != null) areaManager = reply }
+        background(emptyList(), { runtime -> runtime.menuRead("projectAreaManager", "{}") }) { reply, _ -> if (areaManager != null) areaManager = reply }
     }
     /** RN's Sort by name, Sort by color or an area's ↑ ([intent]: core's AreaOrderIntent) on the order the sheet shows. */
     fun orderAreas(intent: JSONObject) {
@@ -2404,3 +2440,6 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         return true
     }
 }
+
+/** The Manage areas sheet's draft (#1263): RN's open swatch row, the new area's name and swatch (null: core's first), core's name check. */
+data class AreaManagerDraft(val expanded: String? = null, val name: String = "", val color: String? = null, val check: JSONObject? = null)

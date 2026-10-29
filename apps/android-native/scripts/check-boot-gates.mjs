@@ -1372,7 +1372,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // Project details: the user's edit (journaled ahead; core reads, prepares and commits it, a replay of an applied edit unchanged).
         'runProjectEdit',
         // The Projects screen's Manage areas order (#1263): RN's intent on the order shown, prepared and committed inside (a target state).
-        'runAreaOrder',
+        'runAreaOrder', 'runAreaColor',
         // Settings › Notifications' controls (pass R2): each the state it asks for, under its receipt.
         'setNotificationsSetting',
         // Settings › Calendar (pass C3): an edit the view gave (a receipt of its own), and a new subscription (never journaled).

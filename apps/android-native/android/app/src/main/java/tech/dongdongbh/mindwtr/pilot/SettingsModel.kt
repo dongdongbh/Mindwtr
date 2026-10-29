@@ -421,6 +421,10 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     /** The editor's Save: its exact request, on disk (synced) before the call (a new area or person is a create). */
     fun saveEditor(action: FailedAction) = menu.create(action)
 
+    /** The Projects screen's Manage areas Save (#1263, RN's addArea): this editor's new-area create with the sheet's name and swatch. */
+    fun createArea(target: JSONObject, name: String, color: String) = saveEditor(FailedAction("manageEditor", UUID.randomUUID().toString(),
+        JSONObject().put("target", target).put("name", name).put("color", color).toString()))
+
     /** A Notifications control's edit (core's `edit`, or a time row's `{ type, value: 'HH:MM' }`), with a new request UUID. */
     fun notifications(edit: JSONObject) = menu.command("notificationsSetting", JSONObject().put("edit", edit))
 
