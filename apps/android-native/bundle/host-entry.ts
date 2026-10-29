@@ -2651,6 +2651,13 @@ globalThis.MindwtrHost = {
             return unwrap(contract.getProjects());
         });
     },
+    /** Android's Projects list (#1263): getProjects with RN's long-press moves per project; `projects` keeps its exact keys for iOS. */
+    projectList(): string {
+        return submit(async () => {
+            requireSaved();
+            return unwrap(contract.getProjects({ moves: true }));
+        });
+    },
     /** Native Projects quick-add choices, including the current Area filter default. */
     projectCreateOptions(): string {
         return submit(async () => {

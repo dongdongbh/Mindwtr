@@ -4,12 +4,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.CustomAccessibilityAction
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.ui.semantics.testTagsAsResourceId
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -94,8 +88,11 @@ data class ProjectGroup(val areaId: String?, val areaName: String?, val areaColo
 /** Core's three buckets, in the order the handoff and mobile show them, with mobile's heading key for each. */
 val PROJECT_BUCKETS = listOf("active" to "projects.activeSection", "deferred" to "projects.deferredSection", "archived" to "projects.closed")
 
-/** Core's getProjects reply. Groups, areas, rows, and counts stay exactly as core sent them. */
-data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>) {
+/**
+ * Core's getProjects reply. Groups, areas, rows, and counts stay exactly as core sent them; [moves] is core's RN long-press Move up and
+ * Move down per project id (planProjectMove's rule, #1263).
+ */
+data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>, val moves: Map<String, Pair<Boolean, Boolean>> = emptyMap()) {
     fun title(id: String) = buckets.values.firstNotNullOfOrNull { groups ->
         groups.firstNotNullOfOrNull { group -> group.projects.firstOrNull { it.id == id }?.title }
     }
@@ -120,18 +117,10 @@ data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>) {
                         }
                     }
                 }
-            })
+            }, json.optJSONObject("moves")?.let { moves -> moves.keys().asSequence().associateWith { id ->
+                moves.getJSONObject(id).let { it.getBoolean("up") to it.getBoolean("down") } } }.orEmpty())
         }
     }
-}
-
-/**
- * Whether RN offers Move up and Move down for [projects]' row [index] (#1263): only past a shown neighbour with the same star, as
- * core's planProjectMove allows (core decides; a refused move writes nothing).
- */
-internal fun projectMoves(projects: List<ProjectRow>, index: Int): Pair<Boolean, Boolean> {
-    val row = projects[index]
-    return (projects.getOrNull(index - 1)?.isFocused == row.isFocused) to (projects.getOrNull(index + 1)?.isFocused == row.isFocused)
 }
 
 sealed interface DetailItem
@@ -274,8 +263,8 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
                 val areaKey = group.areaId ?: "no-area"
                 val folded = areaKey in projectsView.collapsedAreas
                 item(key = "area:$bucket:${group.areaId}") { AreaHeader(model, group, areaKey, folded) }
-                if (!folded) for ((index, row) in group.projects.withIndex()) item(key = "project:${row.id}") {
-                    val (up, down) = projectMoves(group.projects, index)
+                if (!folded) for (row in group.projects) item(key = "project:${row.id}") {
+                    val (up, down) = projects?.moves?.get(row.id) ?: (false to false)
                     ProjectRowItem(model, row, group.projects.map { it.id }, up, down)
                 }
             }

@@ -22,7 +22,7 @@ import {
     type ProjectTaskListItem,
 } from './project-task-list-model';
 import { buildProjectTaskReorderModel, projectTaskOrderIdentities, projectTaskOrderToken } from './project-task-reorder';
-import { buildProjectGroups, type ProjectAreaGroup, type ProjectTagFilter } from './project-grouping';
+import { buildProjectGroups, getProjectMoveOptions, type ProjectAreaGroup, type ProjectTagFilter } from './project-grouping';
 import { isTaskFutureFocusCandidate, resolveTaskSortByForFeatures, sortTasksBy, splitTodayTasksByStartTime } from './task-utils';
 import { isCustomTimeEstimate, TIME_ESTIMATE_OPTIONS } from './calendar-scheduling';
 import { isRecurrenceRule, parseRRuleString } from './recurrence';
@@ -2540,10 +2540,19 @@ export function createNativeHostContract(options: {
             };
         },
 
-        getProjects(): NativeHostResult<NativeProjectsView> {
+        /** [input].moves (Android's Projects list, #1263): also RN's long-press moves per project id, from core's planProjectMove rule. */
+        getProjects(input?: { moves?: true }): NativeHostResult<NativeProjectsView & { moves?: Record<string, { up: boolean; down: boolean }> }> {
             const ready = readiness();
             if (!ready.ok) return ready;
-            return { ok: true, value: readProjectsView(null) };
+            const view = readProjectsView(null);
+            if (input?.moves !== true) return { ok: true, value: view };
+            const byId = useTaskStore.getState()._projectsById;
+            const moves: Record<string, { up: boolean; down: boolean }> = {};
+            for (const group of [...view.active, ...view.deferred, ...view.archived]) {
+                const projects = group.projects.map((row) => byId.get(row.id)).filter((row): row is Project => Boolean(row));
+                getProjectMoveOptions({ areaId: group.areaId ?? undefined, projects }).forEach((options, index) => { moves[projects[index].id] = options; });
+            }
+            return { ok: true, value: { ...view, moves } };
         },
 
         getFilteredProjects(input: { tagFilter: string }): NativeHostResult<NativeFilteredProjectsView> {

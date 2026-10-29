@@ -57,7 +57,9 @@ fun AreaOrderSheet(model: InboxViewModel, sheet: JSONObject) = with(model) {
     val c = LocalTheme.current.colors
     LaunchedEffect(projects, busy) { if (!busy) readAreaManager() }
     BackHandler(onBack = ::closeAreaManager)
-    val enabled = writable && !busy && failedAction == null
+    // Until core's read lands the sheet shows its frame only, every control off (review NOTE 5).
+    val loaded = sheet.has("areas")
+    val enabled = loaded && writable && !busy && failedAction == null
     val draft = areaManagerDraft
     val colors = sheet.optJSONArray("colors")?.let { list -> List(list.length()) { list.getString(it) } }.orEmpty()
     val danger = Color(0xFFEF4444)
@@ -84,8 +86,8 @@ fun AreaOrderSheet(model: InboxViewModel, sheet: JSONObject) = with(model) {
                 }
             }
             val areas = sheet.menuObjects("areas")
-            if (areas.isEmpty()) Text(t("projects.noArea"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
-            else Column(Modifier.heightIn(min = 120.dp, max = min(height * 0.45f, 320.dp)).verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
+            if (loaded && areas.isEmpty()) Text(t("projects.noArea"), style = rnText(13, 400), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
+            else if (loaded) Column(Modifier.heightIn(min = 120.dp, max = min(height * 0.45f, 320.dp)).verticalScroll(rememberScrollState()).padding(bottom = 8.dp)) {
                 areas.forEachIndexed { index, area ->
                     val id = area.getString("id")
                     val name = area.getString("name")

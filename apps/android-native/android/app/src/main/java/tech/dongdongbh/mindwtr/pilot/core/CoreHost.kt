@@ -1107,7 +1107,8 @@ class CoreHost(
     }
 
     /** Core's getProjects: its Active, Deferred, and Archived groups in its order. */
-    fun projects(): JSONObject = callAsync("projects")
+    /** The Projects list with core's long-press moves (#1263): Android's own read, so iOS's `projects` keys stay exact. */
+    fun projects(): JSONObject = callAsync("projectList")
 
     /** Core's getProjectDetail. A changed project fails with "STALE_REVISION: …". */
     fun projectDetail(id: String, offset: Int, limit: Int, revision: String): JSONObject =

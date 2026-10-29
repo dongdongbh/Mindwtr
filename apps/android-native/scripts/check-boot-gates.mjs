@@ -2144,7 +2144,7 @@ assert.match(iconsKt, /Lucide is ISC licensed/);
 assert.match(iconsKt, /val Target = lucide\("Target", circle\(12, 12, 10\), circle\(12, 12, 6\), circle\(12, 12, 2\)\)/);
 
 // Projects: read only through CoreHost's two calls, which reach only core's two project queries.
-assert.match(coreHost, /fun projects\(\): JSONObject = callAsync\("projects"\)/);
+assert.match(coreHost, /fun projects\(\): JSONObject = callAsync\("projectList"\)/);
 assert.match(coreHost, /fun projectDetail\(id: String, offset: Int, limit: Int, revision: String\): JSONObject =\s*callAsync\("projectDetail", id, offset, limit, revision\)/);
 assert.match(coreHost, /fun strings\(keys: List<String>\): JSONObject = callAsync\("strings", JSONArray\(keys\)\.toString\(\)\)/);
 assert.match(hostEntry, /projects\(\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getProjects\(\)\);/);
@@ -2166,7 +2166,7 @@ assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/
 assert.doesNotMatch(code(projectsUi) + code(model), /\.(sort\w*|sorted\w*|filter(?!Bg\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/);
 assert.match(projectsUi, /val PROJECT_BUCKETS = listOf\("active" to "projects\.activeSection", "deferred" to "projects\.deferredSection", "archived" to "projects\.closed"\)/);
 for (const walk of [/List\(groups\.length\(\)\) \{ index ->/, /List\(rows\.length\(\)\) \{ row ->/, /List\(items\.length\(\)\) \{ index ->/,
-    /for \(\(bucket, heading\) in PROJECT_BUCKETS\) \{/, /for \(group in groups\) \{/, /for \(\(index, row\) in group\.projects\.withIndex\(\)\) item/,
+    /for \(\(bucket, heading\) in PROJECT_BUCKETS\) \{/, /for \(group in groups\) \{/, /for \(row in group\.projects\) item/,
     /for \(entry in detail\?\.items\.orEmpty\(\)\) when \(entry\)/]) assert.match(projectsUi, walk);
 assert.match(projectsUi, /group\.areaName \?: t\("projects\.noArea"\)/);
 // The project status line is core's text (Completed or Cancelled for a closed project).

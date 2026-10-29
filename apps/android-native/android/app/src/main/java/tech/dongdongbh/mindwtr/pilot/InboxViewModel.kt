@@ -1219,16 +1219,15 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         projectsView.save(prefs)
     }
 
-    /** RN's toggleAreaCollapse: [areaId] is the area's id, "no-area" without one. */
     /**
      * RN's Manage areas sheet on the Projects screen (#1263): core's areas in their order, each with its Settings revision and whether
-     * a project uses it, and RN's swatches, while open (empty until read); null while shut.
+     * a project uses it, and RN's swatches, while open (no "areas" until the read lands: the sheet's controls stay off); null while shut.
      */
     var areaManager by mutableStateOf<JSONObject?>(null); private set
     /** The sheet's draft: the area whose swatch row is open, the new area's name and swatch, and core's check of that name. */
     var areaManagerDraft by mutableStateOf(AreaManagerDraft()); private set
     fun openAreaManager() {
-        areaManager = JSONObject().put("areas", JSONArray()).put("colors", JSONArray())
+        areaManager = JSONObject()
         areaManagerDraft = AreaManagerDraft()
         readAreaManager()
     }
@@ -1267,10 +1266,11 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
     /** RN's Sort by name, Sort by color or an area's ↑ ([intent]: core's AreaOrderIntent) on the order the sheet shows. */
     fun orderAreas(intent: JSONObject) {
-        val shown = areaManager?.menuObjects("areas")?.map { it.getString("id") } ?: return
+        val shown = areaManager?.takeIf { it.has("areas") }?.menuObjects("areas")?.map { it.getString("id") } ?: return
         menu.command("areaOrder", JSONObject().put("intent", intent).put("order", JSONArray(shown)))
     }
 
+    /** RN's toggleAreaCollapse: [areaId] is the area's id, "no-area" without one. */
     fun toggleArea(areaId: String) {
         val collapsed = projectsView.collapsedAreas
         projectsView = projectsView.copy(collapsedAreas = if (areaId in collapsed) collapsed - areaId else collapsed + areaId)

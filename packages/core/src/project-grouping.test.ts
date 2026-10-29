@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { AREA_FILTER_NONE } from './area-filter';
-import { buildProjectGroups, planProjectMove } from './project-grouping';
+import { buildProjectGroups, getProjectMoveOptions, planProjectMove } from './project-grouping';
 import type { Area, Project } from './types';
 
 const now = '2026-08-09T00:00:00.000Z';
@@ -207,5 +207,20 @@ describe('planProjectMove', () => {
         expect(planProjectMove(shown, projects, 'a', 'up')).toBeNull();
         expect(planProjectMove(shown, projects, 'starred', 'down')).toBeNull();
         expect(planProjectMove(shown, projects, 'b', 'down')).toBeNull();
+    });
+});
+
+// Android offers RN's long-press moves from core's own rule (#1263 review NOTE 3, 4): the same check planProjectMove makes.
+describe('getProjectMoveOptions', () => {
+    it('offers a move only past a shown neighbour with the same star and the same stored area', () => {
+        const home = area('home', 0);
+        const rows = [project('s1', 'active', { areaId: home.id, isFocused: true }), project('s2', 'active', { areaId: home.id, isFocused: true }),
+            project('a', 'active', { areaId: home.id })];
+        expect(getProjectMoveOptions({ areaId: home.id, projects: rows })).toEqual([
+            { up: false, down: true }, { up: true, down: false }, { up: false, down: false }]);
+        // The No area group also holds a project whose area is gone: planProjectMove never swaps it with an area-less one.
+        const orphan = [project('none', 'active'), project('orphan', 'active', { areaId: 'deleted-area' }), project('none2', 'active')];
+        expect(getProjectMoveOptions({ projects: orphan })).toEqual([{ up: false, down: false }, { up: false, down: false }, { up: false, down: false }]);
+        expect(planProjectMove({ projects: orphan }, orphan, 'none2', 'up')).toBeNull();
     });
 });

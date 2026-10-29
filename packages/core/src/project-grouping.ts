@@ -117,6 +117,19 @@ export function buildProjectGroups({
     };
 }
 
+/** planProjectMove's swap rule: a shown neighbour with the same star state and the same stored area. */
+const canSwapProjects = (project: Project | undefined, neighbour: Project | undefined): boolean =>
+    Boolean(project && neighbour) && (project!.isFocused === true) === (neighbour!.isFocused === true)
+    && (project!.areaId ?? undefined) === (neighbour!.areaId ?? undefined);
+
+/** Which of RN's long-press moves a shown area group's rows offer (#1263): exactly the ones planProjectMove makes. */
+export function getProjectMoveOptions(group: ProjectAreaGroup): Array<{ up: boolean; down: boolean }> {
+    return group.projects.map((project, index) => ({
+        up: canSwapProjects(project, group.projects[index - 1]),
+        down: canSwapProjects(project, group.projects[index + 1]),
+    }));
+}
+
 /**
  * Move up or Move down in a shown area group (#1263): the project swaps places with its shown neighbour.
  * A list with starred projects pinned on top only moves a project past one with the same star state.
@@ -131,9 +144,8 @@ export function planProjectMove(
     const index = group.projects.findIndex((project) => project.id === projectId);
     const project = group.projects[index];
     const neighbour = project ? group.projects[index + (direction === 'up' ? -1 : 1)] : undefined;
-    if (!project || !neighbour || (project.isFocused === true) !== (neighbour.isFocused === true)) return null;
+    if (!project || !neighbour || !canSwapProjects(project, neighbour)) return null;
     const areaId = project.areaId ?? undefined;
-    if ((neighbour.areaId ?? undefined) !== areaId) return null;
     const orderedIds = projects
         .filter((candidate) => !candidate.deletedAt && (candidate.areaId ?? undefined) === areaId)
         .sort((a, b) => projectOrder(a) - projectOrder(b) || a.title.localeCompare(b.title))

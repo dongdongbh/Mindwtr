@@ -90,6 +90,7 @@ export const ANDROID_HOST_METHODS = [
     'pomodoroTransitionValidate',
     'projectDetail',
     'projectFocus',
+    'projectList',
     'projects',
     'pruneReceipts',
     'pullSync',

@@ -176,6 +176,27 @@ export function createProjectEditMethods(deps: {
         if (map.size > 20) map.delete(map.keys().next().value as string);
     };
 
+    /**
+     * The Projects list as Kotlin reads it (core's getProjects, called synchronously): the area group that holds [projectId] and its
+     * ids as shown, or null when the list no longer shows it.
+     */
+    type ShownGroup = { areaId: string | null; shown: string[] };
+    const shownGroup = (projectId: string): NativeHostResult<ShownGroup | null> => {
+        const port = deps.contract();
+        const read = (port.getProjects as () => NativeHostResult<Record<'active' | 'deferred' | 'archived', Array<{ areaId: string | null; projects: Json[] }>>>)
+            .call(port);
+        if (!read.ok) return read;
+        const group = [...read.value.active, ...read.value.deferred, ...read.value.archived]
+            .find((entry) => entry.projects.some((row) => row.id === projectId));
+        return { ok: true, value: group ? { areaId: group.areaId, shown: group.projects.map((row) => row.id as string) } : null };
+    };
+    /** Core's planProjectMove on the store as it is now, for a group as shown. */
+    const planShownMove = (group: ShownGroup, projectId: string, direction: 'up' | 'down') => {
+        const state = useTaskStore.getState();
+        const projects = group.shown.map((id) => state._projectsById.get(id)).filter((row): row is Project => Boolean(row));
+        return planProjectMove({ areaId: group.areaId ?? undefined, projects }, state._allProjects, projectId, direction);
+    };
+
     /** The request one edit makes from core's options for the project as it is now. */
     const plan = async (edit: NativeProjectEdit): Promise<NativeHostResult<Plan>> => {
         const base = { requestId: edit.requestId, projectId: edit.projectId };
@@ -288,20 +309,19 @@ export function createProjectEditMethods(deps: {
                     : { command: 'ProjectSectionDelete', request: { ...base, sectionId: edit.sectionId, expected: read.value.token } } };
             }
             case 'move': {
-                // The Projects list as Kotlin reads it (getProjects): the area group that holds the project.
-                const read = await call('getProjects', undefined) as NativeHostResult<Record<'active' | 'deferred' | 'archived', Array<{ areaId: string | null; projects: Json[] }>>>;
-                if (!read.ok) return read;
-                const group = [...read.value.active, ...read.value.deferred, ...read.value.archived]
-                    .find((entry) => entry.projects.some((row) => row.id === edit.projectId));
-                if (!group) return { ok: true, value: { conflict: 'The Project is no longer in the list' } };
-                const shown = group.projects.map((row) => row.id as string);
-                if (same(shown, moved(edit.order, edit.projectId, edit.direction))) return { ok: true, value: { outcome: 'unchanged' } };
-                if (!same(shown, edit.order)) return { ok: true, value: { conflict: 'The Projects changed since they were shown' } };
-                const state = useTaskStore.getState();
-                const projects = shown.map((projectId) => state._projectsById.get(projectId)).filter((row): row is Project => Boolean(row));
-                const planned = planProjectMove({ areaId: group.areaId ?? undefined, projects }, state._allProjects, edit.projectId, edit.direction);
-                if (!planned) return { ok: true, value: { outcome: 'blocked' } };
+                const first = shownGroup(edit.projectId);
+                if (!first.ok) return first;
+                if (!first.value) return { ok: true, value: { conflict: 'The Project is no longer in the list' } };
+                if (same(first.value.shown, moved(edit.order, edit.projectId, edit.direction))) return { ok: true, value: { outcome: 'unchanged' } };
+                if (!same(first.value.shown, edit.order)) return { ok: true, value: { conflict: 'The Projects changed since they were shown' } };
+                if (!planShownMove(first.value, edit.projectId, edit.direction)) return { ok: true, value: { outcome: 'blocked' } };
                 return { ok: true, value: { run: async () => {
+                    // Read, plan and start the write in one synchronous step (review NOTE 2): a sync landing after the read above is
+                    // seen here and refused, never overwritten by an order planned on the older list.
+                    const read = shownGroup(edit.projectId);
+                    if (!read.ok) return read;
+                    const planned = read.value && same(read.value.shown, edit.order) ? planShownMove(read.value, edit.projectId, edit.direction) : null;
+                    if (!planned) return fail('STALE_REVISION', 'The Projects changed since they were shown');
                     await useTaskStore.getState().reorderProjects(planned.orderedIds, planned.areaId);
                     return { ok: true, value: {} };
                 } } };

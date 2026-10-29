@@ -1,18 +1,17 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** RN's long-press Move up / Move down on the Projects list (#1263, 2678f9a44): offered only where core's planProjectMove moves. */
+/** RN's long-press Move up / Move down (#1263): the Projects list offers exactly core's moves (planProjectMove's rule), as sent. */
 class ProjectMovesTest {
-    private fun row(id: String, starred: Boolean = false) = ProjectRow(id, id, "active", "Active", starred, false, 0, null, false, "1")
-
-    @Test fun movesStayInsideTheAreaAndNeverPassAStar() {
-        val group = listOf(row("star", starred = true), row("a"), row("b"), row("c"))
-        assertEquals(false to false, projectMoves(group, 0))
-        assertEquals(false to true, projectMoves(group, 1))
-        assertEquals(true to true, projectMoves(group, 2))
-        assertEquals(true to false, projectMoves(group, 3))
-        assertEquals(false to false, projectMoves(listOf(row("only")), 0))
+    @Test fun theListTakesCoreMovesPerProject() {
+        val json = JSONObject("""{"version":1,"active":[],"deferred":[],"archived":[],
+            "moves":{"s1":{"up":false,"down":true},"s2":{"up":true,"down":false},"a":{"up":false,"down":false}}}""")
+        val view = ProjectsView.parse(json)
+        assertEquals(mapOf("s1" to (false to true), "s2" to (true to false), "a" to (false to false)), view.moves)
+        // A reply without moves (an older bundle) offers none.
+        assertEquals(emptyMap<String, Pair<Boolean, Boolean>>(), ProjectsView.parse(JSONObject("""{"version":1,"active":[],"deferred":[],"archived":[]}""")).moves)
     }
 }

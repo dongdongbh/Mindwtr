@@ -480,6 +480,45 @@ describe('runProjectEdit move (#1263)', () => {
         expect(saves()).toBe(count);
     });
 
+    it('owes a failed save, and the retry moves the project once (review NOTE 4)', async () => {
+        let failing = false;
+        const { host, data } = await open(fixture(), () => failing);
+        failing = true;
+        const edit = move(98, 'p3', 'up', ['star', 'p1', 'p2', 'p3']);
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        expect(await host.runProjectEdit(edit)).toMatchObject({ ok: true });
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p3', 'p2']);
+        const stored = data().projects.filter((row) => row.areaId === 'a').sort((x, y) => (x.order ?? 0) - (y.order ?? 0)).map((row) => row.id);
+        expect(stored.indexOf('p3')).toBeLessThan(stored.indexOf('p2'));
+        expect(stored.indexOf('p1')).toBeLessThan(stored.indexOf('p3'));
+    });
+
+    it('plans and writes in one step: an order synced after the read is refused, never overwritten (review NOTE 2)', async () => {
+        const { host } = await open(fixture());
+        const read = host.getProjects.bind(host);
+        let reads = 0;
+        // The second read is the write's own: a sync swapped p1 and p2 just before it.
+        vi.spyOn(host, 'getProjects').mockImplementation((...args) => {
+            reads += 1;
+            if (reads === 2) void useTaskStore.getState().reorderProjects(['p2', 'p1', 'p3', 'star'], 'a');
+            return read(...args);
+        });
+        expect(await host.runProjectEdit(move(99, 'p3', 'up', ['star', 'p1', 'p2', 'p3']))).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        vi.restoreAllMocks();
+        expect(group(host, 'a')).toEqual(['star', 'p2', 'p1', 'p3']);
+    });
+
+    // iOS's CoreHostTests pins getProjects()' exact keys: the moves ride only on Android's flag (projectList).
+    it('keeps getProjects at its five keys unless Android asks for the moves', async () => {
+        const { host } = await open(fixture());
+        const ios = host.getProjects() as { ok: true; value: Record<string, unknown> };
+        expect(Object.keys(ios.value).sort()).toEqual(['active', 'archived', 'deferred', 'revision', 'version']);
+        const android = host.getProjects({ moves: true }) as { ok: true; value: { moves: Record<string, unknown> } };
+        expect(android.value.moves.p2).toEqual({ up: true, down: true });
+        expect(android.value.moves.star).toEqual({ up: false, down: false });
+    });
+
     it('refuses an order that changed since it was shown, and writes nothing', async () => {
         const { host, saves } = await open(fixture());
         const count = saves();
