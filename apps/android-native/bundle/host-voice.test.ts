@@ -71,6 +71,8 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: { settings
         newId: () => `00000000-0000-4000-8000-00000000000${++next}`,
         log: (line) => { lines.push(line); },
         formatDate: () => '06/29/2026, 9:00 AM',
+        // Another bundle test file can leave core's sandbox on for the process.
+        sandbox: () => false,
         fetcher: (async () => new Response(JSON.stringify({
             candidates: [{ content: { parts: [{ text: JSON.stringify({ transcript: await transcript, title: (await transcript) || null }) }] } }],
         }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
@@ -201,6 +203,23 @@ describe('native voice capture', () => {
         const { session } = await h.voice.open();
         expect(await h.voice.start(session)).toEqual({ status: 'recording', format: 'm4a' });
         expect(starts).toEqual(['wav', 'm4a']);
+    });
+
+    it('a start the app left before the microphone opened does nothing: no m4a retry, no error', async () => {
+        const starts: string[] = [];
+        const h = harness({
+            whisperModelReady: () => true,
+            recorder: {
+                permission: async () => 'granted',
+                start: async (format) => { starts.push(format); throw new Error('E_VOICE_CANCELLED'); },
+                stop: async () => ({ uri: '', size: 0 }),
+                cancel: async () => undefined,
+            },
+        }, { settings: gemini({ provider: 'whisper' }) });
+        const { session } = await h.voice.open();
+        expect(await h.voice.start(session)).toEqual({ status: 'stale' });
+        expect(starts).toEqual(['wav']);
+        expect(h.voice.state()).toEqual({ recording: false, busy: false, format: null });
     });
 
     it('a cancel deletes the recording and saves nothing', async () => {

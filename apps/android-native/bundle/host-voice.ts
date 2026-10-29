@@ -67,6 +67,8 @@ export type NativeVoiceBindings = {
     fetcher?: typeof fetch;
     formatDate?: (value: Date, pattern: string) => string;
     now?: () => Date;
+    /** core's isSandboxMode unless set: a sandboxed capture records nothing, as RN's. */
+    sandbox?: () => boolean;
 };
 
 type Active = { id: string; session: number; format: 'm4a' | 'wav'; provider: string; startedAt: number };
@@ -140,7 +142,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
     const deleteQuietly = (uri: string) => { try { bindings.deleteFile(uri); } catch { /* best effort, as RN's safeDeleteFile */ } };
 
     const start = async (session: number): Promise<{ status: string; format?: 'm4a' | 'wav' }> => {
-        if (isSandboxMode()) return { status: 'sandbox' };
+        if ((bindings.sandbox ?? isSandboxMode)()) return { status: 'sandbox' };
         if (active || starting || stopping) return { status: 'busy' };
         if (!coordinator.isCurrent(session)) return { status: 'stale' };
         const owner = { session };
@@ -178,7 +180,9 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             }
             active = { id: started.id, session, format, provider: runtime.provider, startedAt: now().getTime() };
             return { status: 'recording', format };
-        } catch {
+        } catch (error) {
+            // The app left before the microphone opened: nothing recorded, nothing to retry or show, as RN's stale start.
+            if (errorCode(error) === 'E_VOICE_CANCELLED') return { status: 'stale' };
             return { status: 'failed' };
         } finally {
             if (starting === owner) starting = null;
