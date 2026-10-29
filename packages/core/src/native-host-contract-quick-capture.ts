@@ -979,34 +979,47 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             }
             const { text, options } = draft.value;
             const captureId = input.captureId.toLowerCase();
-            const existing = useTaskStore.getState()._allTasks.find((task) => task.id === captureId);
-            if (existing) return { ok: true, value: { kind: 'saved', taskId: existing.id, projectId: existing.projectId, next: 'close', reset: null } };
-            try {
-                const projects = captureProjects(captureId);
-                const outcome = await saveQuickCapture({
-                    text: text.trim(),
-                    options,
-                    context: context(),
-                    actions: {
-                        addProject: projects.addProject,
-                        addTask: (title, props) => useTaskStore.getState().addTask(title, props, { captureId }),
-                    },
-                    fallbackTitle: input.fallbackTitle.trim(),
-                    extraProps: { attachments: input.attachments },
-                });
-                if (outcome.kind === 'refused') {
-                    return outcome.reason === 'invalid-date-command'
-                        ? { ok: true, value: { kind: 'refused', notice: outcome.notice } }
-                        : notApplied(outcome.error ?? outcome.notice.message);
-                }
-                if (!outcome.taskId) return notApplied('Task creation failed');
-                const saved = await durableSave();
-                if (!saved.ok) return saved;
-                rebuildParseOptions();
-                return { ok: true, value: { kind: 'saved', taskId: outcome.taskId, projectId: outcome.projectId, next: 'close', reset: null } };
-            } catch (error) {
-                return caught(error);
-            }
+            const fallbackTitle = input.fallbackTitle.trim();
+            // Through the receipts, as submitQuickCapture: a write whose save failed is owed that save, and its retry makes it.
+            return receipts.run<NativeQuickCaptureSubmitResult>(
+                input.captureId,
+                JSON.stringify(['captureAudio', text, options, fallbackTitle, input.attachments]),
+                async () => {
+                    const saved = (taskId: string, projectId: string | undefined): NativeHostResult<NativeQuickCaptureSubmitResult> => {
+                        rebuildParseOptions();
+                        return { ok: true, value: { kind: 'saved', taskId, projectId, next: 'close', reset: null } };
+                    };
+                    // After a restart the receipt is gone: the live task this capture ID made answers the retry; a deleted one does not.
+                    const existing = useTaskStore.getState()._allTasks.find((task) => task.id === captureId);
+                    if (existing) {
+                        return existing.deletedAt ? fail('INVALID_INPUT', 'Capture ID already belongs to a deleted task')
+                            : saved(existing.id, existing.projectId);
+                    }
+                    try {
+                        const projects = captureProjects(captureId);
+                        const outcome = await saveQuickCapture({
+                            text: text.trim(),
+                            options,
+                            context: context(),
+                            actions: {
+                                addProject: projects.addProject,
+                                addTask: (title, props) => useTaskStore.getState().addTask(title, props, { captureId }),
+                            },
+                            fallbackTitle,
+                            extraProps: { attachments: input.attachments },
+                        });
+                        if (outcome.kind === 'refused') {
+                            return outcome.reason === 'invalid-date-command'
+                                ? { ok: true, value: { kind: 'refused', notice: outcome.notice } }
+                                : notApplied(outcome.error ?? outcome.notice.message);
+                        }
+                        if (!outcome.taskId) return notApplied('Task creation failed');
+                        return saved(outcome.taskId, outcome.projectId);
+                    } catch (error) {
+                        return caught(error);
+                    }
+                },
+            );
         },
 
         /**

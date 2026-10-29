@@ -74,13 +74,37 @@ describe('native host contract: the capture popup', () => {
         expect(task.title).toBe('Audio note 9:00 AM');
         expect(task.attachments?.map((entry) => entry.uri)).toEqual([attachment.uri]);
         const count = useTaskStore.getState()._allTasks.length;
-        value(await host.submitQuickCaptureAudio({ text: '', options: opened.options, captureId, fallbackTitle: 'Audio note 9:00 AM', attachments: [attachment] }));
+        value(await host.submitQuickCaptureAudio({ text: '  ', options: opened.options, captureId, fallbackTitle: 'Audio note 9:00 AM', attachments: [attachment] }));
         expect(useTaskStore.getState()._allTasks.length).toBe(count);
 
         const typed = value(await host.submitQuickCaptureAudio({ text: 'Call the bank', options: opened.options, captureId: generateUUID(), fallbackTitle: 'Audio note', attachments: [] }));
         expect(useTaskStore.getState()._allTasks.find((entry) => entry.id === (typed as { taskId: string }).taskId)?.title).toBe('Call the bank');
         expect(await host.submitQuickCaptureAudio({ text: '', options: opened.options, captureId: 'not-a-uuid', fallbackTitle: 'Audio note', attachments: [] }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    // Voice V3 review N1: a voice capture's retry owes the save its first call could not make, as submitQuickCapture's receipts do,
+    // and a capture ID whose task was deleted since answers no "saved".
+    it('retries a voice capture whose save failed by saving it, and refuses a capture ID whose task was deleted', async () => {
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host } = await openHost('base', saveData);
+        const options = value(host.openQuickCapture()).options;
+        const captureId = generateUUID();
+        const input = { text: '', options, captureId, fallbackTitle: 'Audio note 9:00 AM', attachments: [] };
+        saveData.mockRejectedValue(new Error('disk unavailable'));
+        expect(await host.submitQuickCaptureAudio(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        // The task landed in the store; only its save failed.
+        expect(useTaskStore.getState().tasks.some((task) => task.id === captureId.toLowerCase())).toBe(true);
+        saveData.mockClear();
+        saveData.mockResolvedValue(undefined);
+        expect(value(await host.submitQuickCaptureAudio(input))).toMatchObject({ kind: 'saved', taskId: captureId.toLowerCase() });
+        expect(saveData).toHaveBeenCalled();
+
+        // After a restart (no receipt), a capture ID whose task was deleted since writes nothing and answers no "saved".
+        const deletedId = generateUUID().toLowerCase();
+        await useTaskStore.getState().addTask('Audio note', {}, { captureId: deletedId });
+        await useTaskStore.getState().deleteTask(deletedId);
+        expect(await host.submitQuickCaptureAudio({ ...input, captureId: deletedId })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
     it('offers saved unused contexts and invalidates retained context choices when only settings changes', async () => {

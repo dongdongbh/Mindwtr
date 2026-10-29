@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AppSettings, Attachment, Project, QuickCaptureAudioStore, QuickCaptureOptions, Task } from '@mindwtr/core';
-import { createNativeVoice, type NativeVoiceBindings, type VoiceCaptureLine } from './host-voice';
+import { createNativeVoice, persistIntoManagedStorage, type NativeVoiceBindings, type VoiceCaptureLine } from './host-voice';
 
 // Voice pass V3: RN's quick capture recording on this host (use-quick-capture-audio.ts), with stand-ins for Kotlin's recorder,
 // the store, the attachment port and the provider. Each RN fix this pass carries has its test, named by its commit.
@@ -18,7 +18,9 @@ const deferred = <T,>() => {
     return { promise, resolve };
 };
 
-const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: { settings?: AppSettings; key?: string; transcript?: string | Promise<string> } = {}) => {
+const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
+    settings?: AppSettings; key?: string; transcript?: string | Promise<string>; tags?: string[]; projectTitle?: string; save?: 'fails' | 'refused-before-landing';
+} = {}) => {
     const deleted: string[] = [];
     const persisted: string[] = [];
     const lines: VoiceCaptureLine[] = [];
@@ -62,7 +64,10 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: { settings
             submitted.push(input);
             const task = { id: input.captureId, title: input.text.trim() || input.fallbackTitle, status: 'inbox', tags: ['#synced'], contexts: [],
                 attachments: input.attachments, createdAt: '', updatedAt: '' } as unknown as Task;
+            // Core's addTask lands the task before the save; a save that fails leaves it in the store (SAVE_FAILED).
+            if (setup.save === 'refused-before-landing') return { ok: false, error: { code: 'ACTION_FAILED', message: 'Write failed' } };
             state.tasks = [...state.tasks, task];
+            if (setup.save === 'fails') return { ok: false, error: { code: 'SAVE_FAILED', message: 'disk unavailable' } };
             return { ok: true, value: { kind: 'saved', taskId: task.id, projectId: undefined, next: 'close', reset: null } };
         },
         readBytes: async () => new Uint8Array([1, 2, 3]),
@@ -74,7 +79,7 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: { settings
         // Another bundle test file can leave core's sandbox on for the process.
         sandbox: () => false,
         fetcher: (async () => new Response(JSON.stringify({
-            candidates: [{ content: { parts: [{ text: JSON.stringify({ transcript: await transcript, title: (await transcript) || null }) }] } }],
+            candidates: [{ content: { parts: [{ text: JSON.stringify({ transcript: await transcript, title: (await transcript) || null, tags: setup.tags ?? null, projectTitle: setup.projectTitle ?? null }) }] } }],
         }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
         ...overrides,
     });
@@ -90,20 +95,27 @@ const record = async (h: ReturnType<typeof harness>) => {
 describe('native voice capture', () => {
     it('saves the task first with its recording, then a late transcript updates the latest row (RN 78c151b2e)', async () => {
         const late = deferred<string>();
-        const h = harness({}, { transcript: late.promise });
+        const h = harness({}, { transcript: late.promise, tags: ['#errand'], projectTitle: 'Errands' });
         const session = await record(h);
         const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS });
         expect(saved.status).toBe('saved');
         const taskId = (saved as { taskId: string }).taskId;
         expect(h.submitted[0]?.fallbackTitle).toBe('Audio note 06/29/2026, 9:00 AM');
         expect(h.submitted[0]?.attachments.map((attachment) => attachment.uri)).toEqual([`${DOCS}attachments/${h.submitted[0]!.attachments[0]!.id}.m4a`]);
-        // A sync landed meanwhile: the transcript is applied on the row as it is now.
-        h.state.tasks = h.state.tasks.map((task) => (task.id === taskId ? { ...task, tags: ['#synced', '#later'] } : task));
+        // A sync lands while the transcript's suggested project is made, after the first read of the row: the write is built
+        // again on the row as it is then.
+        const makeProject = h.state.addProject;
+        h.state.addProject = async (title: string, color: string) => {
+            h.state.tasks = h.state.tasks.map((task) => (task.id === taskId ? { ...task, tags: ['#synced', '#later'] } : task));
+            return makeProject(title, color);
+        };
         late.resolve('Buy milk');
         await h.voice.settled();
         const task = h.state.tasks.find((entry) => entry.id === taskId)!;
         expect(task.title).toBe('Buy milk');
-        expect(task.tags).toEqual(['#synced', '#later']);
+        // The transcript's tag joins the row as stored now: the tag the sync added meanwhile survives.
+        expect(task.tags).toEqual(expect.arrayContaining(['#synced', '#later', '#errand']));
+        expect(task.projectId).toBe('p-Errands');
         // The original recording goes once its managed copy is the task's.
         expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-1.m4a`]);
         expect(h.lines.map((line) => `${line.kind}:${line.outcome}`)).toEqual(['capture:saved', 'transcribe:applied']);
@@ -220,6 +232,39 @@ describe('native voice capture', () => {
         expect(await h.voice.start(session)).toEqual({ status: 'stale' });
         expect(starts).toEqual(['wav']);
         expect(h.voice.state()).toEqual({ recording: false, busy: false, format: null });
+    });
+
+    it('a save that landed but could not reach the disk keeps its files and transcribes, as RN keeps them once addTask succeeded (review B1)', async () => {
+        const h = harness({}, { save: 'fails' });
+        const session = await record(h);
+        const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS }) as { status: string; taskId: string };
+        expect(saved.status).toBe('saved');
+        await h.voice.settled();
+        // The managed copy stays with the task; only the original recording goes, after the transcription, as on a saved capture.
+        expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-1.m4a`]);
+        expect(h.state.tasks.find((task) => task.id === saved.taskId)?.title).toBe('Buy milk');
+        expect(h.lines.map((line) => `${line.kind}:${line.outcome}:${'errorKind' in line ? line.errorKind ?? '' : ''}`))
+            .toEqual(['capture:failed:save-pending', 'transcribe:applied:']);
+    });
+
+    it('a save refused before the task landed leaves no file and says why, by kind only', async () => {
+        const h = harness({}, { save: 'refused-before-landing' });
+        const session = await record(h);
+        expect(await h.voice.stop({ session, save: true, text: '', options: OPTIONS })).toEqual({ status: 'failed' });
+        expect(h.deleted.length).toBe(2);
+        expect(h.lines).toEqual([{ kind: 'capture', outcome: 'failed', provider: 'gemini', errorKind: 'save' }]);
+    });
+
+    it('the managed copy must be a file under the attachments folder before the task saves (RN cacheAudioAttachmentOrThrow)', async () => {
+        const attachment = { id: 'a1', kind: 'file', title: 'Audio note', uri: `${DOCS}voice-captures/r.m4a`, createdAt: '', updatedAt: '' } as Attachment;
+        const check = (uri: string, info: { exists?: boolean; isDirectory?: boolean } | null) => persistIntoManagedStorage(attachment, {
+            persist: async (entry) => ({ ...entry, uri }), getInfo: async () => info, managedDirectory: `${DOCS}attachments/`,
+        });
+        await expect(check(`${DOCS}attachments/a1.m4a`, { exists: true, isDirectory: false })).resolves.toMatchObject({ uri: `${DOCS}attachments/a1.m4a` });
+        await expect(check(`${DOCS}voice-captures/r.m4a`, { exists: true })).rejects.toThrow('not cached');
+        await expect(check(`${DOCS}attachments/a1.m4a`, { exists: false })).rejects.toThrow('not cached');
+        await expect(check(`${DOCS}attachments/a1.m4a`, null)).rejects.toThrow('not cached');
+        await expect(check(`${DOCS}attachments/a1.m4a`, { exists: true, isDirectory: true })).rejects.toThrow('not cached');
     });
 
     it('a cancel deletes the recording and saves nothing', async () => {

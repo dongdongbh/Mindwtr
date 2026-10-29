@@ -145,7 +145,7 @@ import { createIOSCalendarHost, type CalendarCall } from '../../ios-native/bundl
 import type { NativeCalendarPushLifecycle } from '../../../packages/core/src/native-host-contract-settings-calendar';
 import { createCalendarFeeds, createNativeCalendar } from './host-calendar';
 import { createNativeGmail } from './host-gmail';
-import { createNativeVoice, type VoiceCaptureLine } from './host-voice';
+import { createNativeVoice, managedAttachmentsDirectory, persistIntoManagedStorage, type VoiceCaptureLine } from './host-voice';
 import { createWidgetAudioPort } from './host-widget-audio';
 import { createAIKeyStore } from '../../../packages/core/src/ai-config';
 import { createSyncSecretVault } from '../../../packages/core/src/sync-secret-storage';
@@ -730,15 +730,19 @@ const nativeGmail = nativeSync && typeof globalThis.__mindwtrGmailCall === 'func
  * The home-screen widget's queued recordings (core's ingestPendingAudio, host-widget-audio.ts): RN's audio port, on a host with
  * the app's file calls and AI keys (Android). Its transcription waits on the network, so it runs apart from the journaled ingest.
  */
-const widgetAudioPort = (() => {
-    const channels = nativeAI && nativeSync ? nativeFileChannels() : null;
-    if (!channels || !nativeAI) return null;
+/** RN's loadAIKey over the AI device's stores, for the widget's recordings and voice capture. */
+const speechKeys = nativeAI ? (() => {
     const ai = nativeAI;
-    const keys = createAIKeyStore({
+    return createAIKeyStore({
         storage: ai.storage,
         secrets: { getItem: (key) => ai.secrets.get(key), setItem: (key, value) => ai.secrets.set(key, value), deleteItem: (key) => ai.secrets.delete(key) },
         vault: createSyncSecretVault({ isAvailable: async () => true }),
     });
+})() : null;
+const widgetAudioPort = (() => {
+    const channels = nativeAI && nativeSync ? nativeFileChannels() : null;
+    if (!channels || !speechKeys) return null;
+    const keys = speechKeys;
     return createWidgetAudioPort({
         documentDirectory: channels.directories.document,
         readBytes: async (uri) => await channels.files({ op: 'readBytes', uri }) as Uint8Array,
@@ -761,24 +765,23 @@ const nativeVoice = (() => {
     const call = (globalThis as { __mindwtrVoiceCall?: (request: Record<string, unknown>) => Promise<unknown> }).__mindwtrVoiceCall;
     const channels = nativeAI && nativeSync && call ? nativeFileChannels() : null;
     const host = attachmentsHost;
-    if (!channels || !nativeAI || !call || !host) return null;
-    const ai = nativeAI;
-    const keys = createAIKeyStore({
-        storage: ai.storage,
-        secrets: { getItem: (key) => ai.secrets.get(key), setItem: (key, value) => ai.secrets.set(key, value), deleteItem: (key) => ai.secrets.delete(key) },
-        vault: createSyncSecretVault({ isAvailable: async () => true }),
-    });
+    if (!channels || !speechKeys || !call || !host) return null;
+    const keys = speechKeys;
     const documents = channels.directories.document;
-    // core's ATTACHMENTS_DIR_NAME under the documents folder, as RN's getAttachmentsDir.
-    const managed = `${documents}attachments/`;
+    const managed = managedAttachmentsDirectory(documents);
     const recordings = `${documents}voice-captures/`;
     const voiceLine = (line: VoiceCaptureLine) => {
         try {
+            // A save, a transcript applied and a failure reach release logs (forced, as the widget's created line); the rest
+            // show with Debug logging on.
+            const failed = line.outcome === 'failed';
+            const force = failed || line.outcome === 'saved' || line.outcome === 'applied';
             if (line.kind === 'capture') {
-                logInfo('Native Android voice capture', { scope: 'capture', context: { releaseCheck: 'v1.3.8/native-voice-capture',
-                    outcome: line.outcome, provider: line.provider, ...(line.durationMs ? { durationMs: line.durationMs } : {}) } });
+                (failed ? logWarn : logInfo)('Native Android voice capture', { scope: 'capture', force, context: { releaseCheck: 'v1.3.8/native-voice-capture',
+                    outcome: line.outcome, provider: line.provider, ...('durationMs' in line && line.durationMs ? { durationMs: line.durationMs } : {}),
+                    ...('errorKind' in line ? { errorKind: line.errorKind } : {}) } });
             } else {
-                (line.outcome === 'failed' ? logWarn : logInfo)('Native Android voice transcription', { scope: 'capture',
+                (failed ? logWarn : logInfo)('Native Android voice transcription', { scope: 'capture', force,
                     context: { releaseCheck: 'v1.3.8/native-voice-transcribe', outcome: line.outcome, provider: line.provider,
                         ...(line.errorKind ? { errorKind: line.errorKind } : {}) } });
             }
@@ -797,13 +800,11 @@ const nativeVoice = (() => {
         loadKey: (provider) => keys.load(provider),
         // Local Whisper comes with voice pass V4.
         whisperModelReady: () => false,
-        persistAttachment: async (attachment) => {
-            // RN's cacheAudioAttachmentOrThrow: the copy is a file in managed storage before the task saves (#788).
-            const cached = await host.persistAttachmentLocally(attachment);
-            const info = await channels.files({ op: 'getInfo', uri: cached.uri }) as { exists?: boolean; isDirectory?: boolean } | null;
-            if (!cached.uri.startsWith(managed) || info?.exists !== true || info.isDirectory) throw new Error('Audio attachment was not cached into managed storage');
-            return cached;
-        },
+        persistAttachment: (attachment) => persistIntoManagedStorage(attachment, {
+            persist: (entry) => host.persistAttachmentLocally(entry),
+            getInfo: async (uri) => await channels.files({ op: 'getInfo', uri }) as { exists?: boolean; isDirectory?: boolean } | null,
+            managedDirectory: managed,
+        }),
         submit: (input) => contract.submitQuickCaptureAudio(input),
         readBytes: async (uri) => await channels.files({ op: 'readBytes', uri }) as Uint8Array,
         deleteFile: (uri) => {

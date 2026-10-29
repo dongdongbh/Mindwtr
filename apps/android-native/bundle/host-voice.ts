@@ -1,5 +1,6 @@
 import {
     applySpeechResult,
+    ATTACHMENTS_DIR_NAME,
     buildAudioNoteTitle,
     buildQuickCaptureAudioAttachment,
     CaptureSessionCoordinator,
@@ -40,6 +41,8 @@ export type VoiceRecorderCalls = {
 
 export type VoiceCaptureLine =
     | { kind: 'capture'; outcome: 'saved' | 'cancelled' | 'permission-denied' | 'not-configured'; provider: string; durationMs?: string }
+    /** A stop that saved no durable task: `save-pending` landed in the store and its save is retried; the others saved nothing. */
+    | { kind: 'capture'; outcome: 'failed'; provider: string; errorKind: 'recorder' | 'attachment' | 'save' | 'save-pending' }
     | { kind: 'transcribe'; outcome: 'applied' | 'empty' | 'skipped' | 'failed'; provider: string; errorKind?: string };
 
 export type NativeVoiceBindings = {
@@ -82,8 +85,8 @@ export const createNativeSpeechPorts = (bindings: { readBytes: (uri: string) => 
     readBytes: async () => ({ bytes: await bindings.readBytes(uri), mimeType }),
     withOpenAIUpload: async (send) => {
         const bytes = await bindings.readBytes(uri);
-        // A copy on its own ArrayBuffer, as RN's buildMultipartAudioPart makes it.
-        return send({ part: new Blob([new Uint8Array(bytes)], { type: mimeType }), fileName: uri.slice(uri.lastIndexOf('/') + 1) });
+        // The recording's own bytes: the file port answers them on a plain ArrayBuffer, so no copy is needed.
+        return send({ part: new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mimeType }), fileName: uri.slice(uri.lastIndexOf('/') + 1) });
     },
     transcribeLocal: async () => { throw new Error('Local Whisper is not available on this host yet'); },
     // Core's warning carries the provider's error text in `extra`: only the message goes to the log.
@@ -229,6 +232,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         // Files this stop made: deleted at the end unless a saved task adopted them (RN 47b2f11a1).
         const owned = new Set<string>();
         let adopted = false;
+        let stage: 'recorder' | 'attachment' | 'save' = 'recorder';
         try {
             // RN d596ecce6: the recorder is stopped and released before anything reads the file.
             const stopped = await bindings.recorder.stop(current.id);
@@ -250,24 +254,36 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const mimeType = MIME[current.format];
             const recovery = buildQuickCaptureAudioAttachment({ title, uri: stopped.uri, mimeType, size: stopped.size || undefined, now: at, newId: bindings.newId });
             // RN 763c5192c / 67b707e3e / a11bc850d (#788): the attachment is durable in managed storage before the task saves.
+            stage = 'attachment';
             const attachment = shouldSaveQuickCaptureAudio(settings, canTranscribe) ? await bindings.persistAttachment(recovery) : null;
             if (attachment) owned.add(attachment.uri);
             if (!coordinator.isCurrent(input.session)) return { status: 'stale' };
+            stage = 'save';
+            const captureId = bindings.newId();
             const saved = await bindings.submit({
-                text: input.text ?? '', options: input.options!, captureId: bindings.newId(), fallbackTitle: title,
-                attachments: attachment ? [attachment] : [],
+                text: input.text ?? '', options: input.options!, captureId, fallbackTitle: title, attachments: attachment ? [attachment] : [],
             });
-            if (!saved.ok) return { status: 'failed' };
-            if (saved.value.kind === 'refused') return { status: 'refused', notice: saved.value.notice };
-            if (saved.value.kind !== 'saved' || !saved.value.taskId) return { status: 'failed' };
+            if (saved.ok && saved.value.kind === 'refused') return { status: 'refused', notice: saved.value.notice };
+            // Review B1: a task with this capture ID in the store points to these files, saved or not (core's addTask landed it and
+            // the store retries its save), so they stay, as RN keeps them once addTask succeeded.
+            const landed = bindings.store.getState().tasks.find((task) => task.id === captureId.toLowerCase());
+            const taskId = saved.ok && saved.value.kind === 'saved' && saved.value.taskId ? saved.value.taskId : landed?.id;
+            if (!taskId) {
+                bindings.log({ kind: 'capture', outcome: 'failed', provider: runtime.provider, errorKind: 'save' });
+                return { status: 'failed' };
+            }
             adopted = true;
-            const taskId = saved.value.taskId;
-            bindings.log({ kind: 'capture', outcome: 'saved', provider: runtime.provider, durationMs: durationBucket(at.getTime() - current.startedAt) });
+            if (saved.ok) {
+                bindings.log({ kind: 'capture', outcome: 'saved', provider: runtime.provider, durationMs: durationBucket(at.getTime() - current.startedAt) });
+            } else {
+                bindings.log({ kind: 'capture', outcome: 'failed', provider: runtime.provider, errorKind: 'save-pending' });
+            }
             const cleanupSource = !attachment || attachment.uri !== stopped.uri;
             if (canTranscribe) transcribe(taskId, stopped.uri, attachment, cleanupSource, runtime, apiKey, settings, mimeType);
             else if (cleanupSource) deleteQuietly(stopped.uri);
             return { status: 'saved', taskId };
         } catch {
+            if (input.save) bindings.log({ kind: 'capture', outcome: 'failed', provider: current.provider, errorKind: stage });
             return { status: 'failed' };
         } finally {
             if (input.save) coordinator.finishSubmission(input.session);
@@ -319,3 +335,23 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
 }
 
 export type NativeVoice = ReturnType<typeof createNativeVoice>;
+
+/** RN's getAttachmentsDir: core's ATTACHMENTS_DIR_NAME under the app's documents folder (`file:///…/files/`). */
+export const managedAttachmentsDirectory = (documents: string): string => `${documents}${ATTACHMENTS_DIR_NAME}/`;
+
+/**
+ * RN's cacheAudioAttachmentOrThrow: the recording copied into managed attachment storage (the attachment port), then checked
+ * there, a file under [managedDirectory], before any task points to it (#788).
+ */
+export const persistIntoManagedStorage = async (attachment: Attachment, ports: {
+    persist: (attachment: Attachment) => Promise<Attachment>;
+    getInfo: (uri: string) => Promise<{ exists?: boolean; isDirectory?: boolean } | null>;
+    managedDirectory: string;
+}): Promise<Attachment> => {
+    const cached = await ports.persist(attachment);
+    const info = await ports.getInfo(cached.uri);
+    if (!cached.uri.startsWith(ports.managedDirectory) || info?.exists !== true || info.isDirectory) {
+        throw new Error('Audio attachment was not cached into managed storage');
+    }
+    return cached;
+};

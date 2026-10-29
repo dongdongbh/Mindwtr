@@ -83,11 +83,24 @@ describe('the widget audio port', () => {
         expect(empty.waiting).toEqual(['empty']);
     });
 
-    it('reads Parakeet as speech off through core\'s resolver, even with a key on hand', async () => {
+    // Core's resolver, not an inline copy: Parakeet reads as speech off even with a key on hand, and OpenAI with its key reaches
+    // OpenAI. The old inline code agreed on Parakeet (it mapped it to off as well) but answered provider-unsupported for OpenAI.
+    it('reads the provider through core\'s resolver: Parakeet off, OpenAI with a key transcribed', async () => {
         const path = `${DOCS}quick-capture-audio/${ID}.wav`;
-        const { port, requests, waiting } = harness({ loadKey: async () => 'any-key' });
-        expect(await port.transcribe!(path, settings({ enabled: true, provider: 'parakeet', model: 'parakeet-tdt-0.6b-v3-int8' }))).toBeNull();
-        expect([requests.length, waiting]).toEqual([0, ['not-configured']]);
+        const parakeet = harness({ loadKey: async () => 'any-key' });
+        expect(await parakeet.port.transcribe!(path, settings({ enabled: true, provider: 'parakeet', model: 'parakeet-tdt-0.6b-v3-int8' }))).toBeNull();
+        expect([parakeet.requests.length, parakeet.waiting]).toEqual([0, ['not-configured']]);
+        const urls: string[] = [];
+        const openai = harness({
+            loadKey: async (provider) => (provider === 'openai' ? 'openai-key' : ''),
+            fetcher: (async (url: string) => {
+                urls.push(url);
+                return new Response(JSON.stringify(url.endsWith('/audio/transcriptions') ? { text: 'Call the bank' }
+                    : { choices: [{ message: { content: JSON.stringify({ transcript: 'Call the bank', title: 'Call the bank' }) } }] }), { status: 200 });
+            }) as never,
+        });
+        expect(await openai.port.transcribe!(path, settings({ enabled: true, provider: 'openai' }))).toBe('Call the bank');
+        expect(urls.some((url) => url.startsWith('https://api.openai.com/') && url.endsWith('/audio/transcriptions'))).toBe(true);
     });
 
     it('reaches a self-hosted OpenAI-compatible server with a multipart upload of the WAV', async () => {
@@ -106,12 +119,5 @@ describe('the widget audio port', () => {
         const form = upload.init.body as FormData;
         expect(form.get('file')).toBeInstanceOf(Blob);
         expect((form.get('file') as Blob).type).toBe('audio/wav');
-    });
-
-    it('keeps the empty-transcript case', async () => {
-        const path = `${DOCS}quick-capture-audio/${ID}.wav`;
-        const empty = harness({}, { transcript: '   ' });
-        expect(await empty.port.transcribe!(path, settings({ enabled: true, provider: 'gemini' }))).toBeNull();
-        expect(empty.waiting).toEqual(['empty']);
     });
 });

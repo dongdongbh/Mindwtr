@@ -10249,6 +10249,13 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(hostEntrySource, /voiceRequest\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*if \(!nativeVoice\) throw new Error\('Voice capture is not available on this host'\);\s*return nativeVoice\.request\(name, JSON\.parse\(json\) as Record<string, unknown>\);/);
     assert.match(hostEntrySource, /whisperModelReady: \(\) => false,/);
     assert.match(hostEntrySource, /submit: \(input\) => contract\.submitQuickCaptureAudio\(input\),/);
+    // Review N3/N9: the managed-copy check is host-voice's tested persistIntoManagedStorage under core's ATTACHMENTS_DIR_NAME, and
+    // one AI key store serves the widget and voice capture. Review N4: a save, an applied transcript and a failure are forced.
+    assert.match(hostEntrySource, /const managed = managedAttachmentsDirectory\(documents\);/);
+    assert.match(hostEntrySource, /persistAttachment: \(attachment\) => persistIntoManagedStorage\(attachment, \{\s*persist: \(entry\) => host\.persistAttachmentLocally\(entry\),/);
+    assert.match(voiceTs, /export const managedAttachmentsDirectory = \(documents: string\): string => `\$\{documents\}\$\{ATTACHMENTS_DIR_NAME\}\/`;/);
+    assert.equal((hostEntrySource.match(/createAIKeyStore\(\{/g) ?? []).length, 1, 'one AI key store for speech');
+    assert.match(hostEntrySource, /const force = failed \|\| line\.outcome === 'saved' \|\| line\.outcome === 'applied';/);
     const voiceCallBlock = polyfills.slice(polyfills.indexOf('global.__mindwtrVoiceCall = function'), polyfills.indexOf('__mindwtrCalendarPushCall'));
     assert(voiceCallBlock.includes("native().voiceCall(JSON.stringify(request))") && !voiceCallBlock.includes('refuseIfCancelled'), 'a microphone call is never refused by a host deadline');
     assert.doesNotMatch(voiceTs, /whisperModelPath/, 'no stored Whisper model path counts as ready');

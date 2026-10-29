@@ -147,6 +147,7 @@ class VoiceRecorder(
         fun create(context: Context): VoiceRecorder {
             val app = context.applicationContext
             val directory = File(app.filesDir, DIRECTORY)
+            sweep(directory)
             val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-voice") }
             return VoiceRecorder(directory, executor, AndroidAudioFocus(app), { format, id ->
                 when (format) {
@@ -157,6 +158,30 @@ class VoiceRecorder(
         }
 
         const val DIRECTORY = "voice-captures"
+
+        private val RECORDING = Regex("^\\.?[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\\.(?:m4a|wav)(?:\\.tmp)?$")
+
+        /**
+         * Review N6: run when the process makes its recorder, before anything records. Every recording in [directory] is then
+         * left from an earlier process: a stopped one whose transcription died with it, or a staged `.tmp`. A task's recording
+         * is its managed copy under attachments/, never one of these. Deletes only the names this recorder gives, as direct
+         * regular files of [directory] or of the WAV recorder's staging folder, as QuickCaptureAudioCleanup does. Answers how many.
+         */
+        fun sweep(directory: File): Int {
+            val staging = File(directory, "quick-capture-audio")
+            var deleted = 0
+            for (folder in listOf(directory, staging)) {
+                val owner = runCatching { folder.canonicalFile }.getOrNull() ?: continue
+                for (file in folder.listFiles() ?: continue) {
+                    val name = file.name
+                    val staged = name.startsWith(".") && name.endsWith(".tmp")
+                    if (!RECORDING.matches(name) || (folder == staging && !staged)) continue
+                    if (!file.isFile || runCatching { file.canonicalFile.parentFile }.getOrNull() != owner) continue
+                    if (file.delete()) deleted += 1
+                }
+            }
+            return deleted
+        }
     }
 }
 

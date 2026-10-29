@@ -211,6 +211,19 @@ class VoiceRecorderTest {
         assertEquals(listOf("start", "stop", "release"), eventsAtAnswer)
     }
 
+    // Voice V3 review N6: a recording left by an earlier process (its transcription died with it) or a staged .tmp is swept when
+    // the recorder is made; a file this recorder did not name, or a folder, is left alone.
+    @Test fun aNewRecorderSweepsLeftoverRecordingsAndStagedFilesOnly() {
+        val dir = folder()
+        val id = "01234567-89ab-cdef-0123-456789abcdef"
+        val ours = listOf("$id.m4a", ".$id.m4a.tmp", "$id.wav", "quick-capture-audio/.$id.wav.tmp")
+        val theirs = listOf("notes.txt", "keep/$id.m4a", "quick-capture-audio/$id.wav", "not-a-uuid.m4a")
+        (ours + theirs).forEach { File(dir, it).apply { parentFile.mkdirs() }.writeBytes(ByteArray(4)) }
+        assertEquals(ours.size, VoiceRecorder.sweep(dir))
+        assertEquals(theirs.sorted(), filesUnder(dir))
+        assertEquals(0, VoiceRecorder.sweep(File(dir, "missing")))
+    }
+
     @Test fun microphonePromptsShareOneAnswerAndNoScreenAnswersNo() {
         val prompt = PermissionPrompt { it() }
         var answered: Boolean? = null
