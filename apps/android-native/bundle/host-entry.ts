@@ -913,7 +913,7 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
         })) throw new Error('Invalid project attachment request');
     return input as { projectId: string; attachmentId?: string };
 };
-type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
+type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayProjectMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
     | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'taskCompletedAt' | 'areaOrder' | 'areaColor' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
     | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | TaskEditorCommand | DataCommand | StartupPromptCommand;
@@ -1529,6 +1529,8 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     // The donation ask's synced record (native-host-contract-startup-prompts.ts), with the time the ask showed.
     supportPromptShown: (input) => contract.supportPromptShown(input),
     somedayMove: (input) => contract.moveSomedayTasksToSection(input),
+    // A parked project's Move to section… (#1319).
+    somedayProjectMove: (input) => contract.moveSomedayProjectToSection(input),
     somedayUndo: (input) => contract.undoSomedaySectionMove(input),
     somedayTask: (input) => contract.addSomedaySectionTask(input),
     somedaySection: (input) => contract.createSomedaySection(input),

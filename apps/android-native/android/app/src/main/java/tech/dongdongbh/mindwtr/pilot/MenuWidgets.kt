@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.draggable
@@ -448,7 +449,7 @@ fun DeferredProjects(model: InboxViewModel, page: MenuPage) = with(model.menu) {
  * RN's onSwipeableLeftOpen does. Someday's section groups draw it too (#1319).
  */
 @Composable
-internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate: String) = with(model) {
+internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate: String, moveLabel: String? = null) = with(model) {
     val c = LocalTheme.current.colors
     val density = LocalDensity.current
     val offset = remember { Animatable(0f) }
@@ -470,10 +471,13 @@ internal fun ParkedProject(model: InboxViewModel, project: JSONObject, activate:
                     scope.launch { offset.animateTo(0f) }
                     if (opened) menu.activate(id, revision)
                 })
-            .clickable(enabled = failedAction == null && !busy, role = Role.Button) { menu.openProjects(id) }
+            // RN's DeferredProjectRow: in its Someday section a long press (and TalkBack's action) offers Move to section… (#1319).
+            .combinedClickable(enabled = failedAction == null && !busy, role = Role.Button,
+                onLongClick = moveLabel?.let { { if (enabled) menu.openProjectMove(id, revision) } }) { menu.openProjects(id) }
             .semantics {
                 contentDescription = title
-                customActions = listOf(CustomAccessibilityAction(activate) { if (enabled) menu.activate(id, revision); enabled })
+                customActions = listOf(CustomAccessibilityAction(activate) { if (enabled) menu.activate(id, revision); enabled }) +
+                    listOfNotNull(moveLabel?.let { CustomAccessibilityAction(it) { if (enabled) menu.openProjectMove(id, revision); enabled } })
             }.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Icon(Lucide.Folder, null, tint = coreColorOrNull(project.menuText("color")) ?: c.secondaryText, modifier = Modifier.size(18.dp))
@@ -901,8 +905,10 @@ internal fun SheetField(value: String, placeholder: String, description: String,
 private fun MoveDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
     val c = theme.colors
-    val taskIds = open.getJSONArray("taskIds").strings()
+    val taskIds = open.optJSONArray("taskIds")?.strings().orEmpty()
     val taskRevisions = open.optJSONObject("taskRevisions") ?: JSONObject()
+    // A parked project's move (openProjectMove), at its row's revision.
+    val project = open.optString("projectId").ifEmpty { null }?.let { it to open.getString("projectRevision") }
     val reply = moveChoices
     DialogCard(model, dismissible = true) {
         val title = reply?.getString("title") ?: page?.view?.getJSONObject("text")?.getString("moveToSection").orEmpty()
@@ -915,13 +921,15 @@ private fun MoveDialog(model: InboxViewModel, open: JSONObject) = with(model.men
                 val title = choice.getString("title")
                 Text(title, style = rnText(15, 400), color = if (selected) c.onTint else c.text, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp)
                     .clip(RoundedCornerShape(8.dp)).background(if (selected) c.tint else c.filterBg).rnBorder(1.dp, if (selected) c.tint else c.border, RoundedCornerShape(8.dp))
-                    .selectable(selected = selected, enabled = idle, role = Role.Button) { move(taskIds, choice.menuText("sectionId"), taskRevisions) }
+                    .selectable(selected = selected, enabled = idle, role = Role.Button) {
+                        if (project != null) moveProject(project.first, choice.menuText("sectionId"), project.second) else move(taskIds, choice.menuText("sectionId"), taskRevisions)
+                    }
                     .semantics { contentDescription = title }.padding(horizontal = 12.dp, vertical = 12.dp))
             }
             if (choices != null && choices.menuObjects("items").size < choices.getInt("total")) MoreChip(idle) { moreMoveChoices() }
             reply?.getString("newSectionLabel")?.let { label ->
                 Text(label, style = rnText(15, 400), color = c.tint, modifier = Modifier.fillMaxWidth().heightIn(min = 44.dp).clip(RoundedCornerShape(8.dp))
-                    .background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(enabled = idle, role = Role.Button) { openNewSection(taskIds, taskRevisions) }
+                    .background(c.filterBg).rnBorder(1.dp, c.border, RoundedCornerShape(8.dp)).clickable(enabled = idle, role = Role.Button) { if (project != null) openNewSection(project = project) else openNewSection(taskIds, taskRevisions) }
                     .semantics { contentDescription = label }.padding(horizontal = 12.dp, vertical = 12.dp))
             }
         }

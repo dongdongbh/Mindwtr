@@ -816,6 +816,9 @@ assert.match(rowUi, /val canMove = writable && !busy && \(failedAction == null \
 assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision, askNext = true\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
 assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete, onLongDone = onLongDone\)/);
 assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
+// RN's long press on a parked project in its Someday section opens Move to section… for it (#1319, 8fd2cab96).
+assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if \(enabled\) menu\.openProjectMove\(id, revision\) \} \}/);
+assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
 // RN's reveal-then-tap (#1275): the swipe only reveals the button; its tap runs the action, its long-press opens the status menu.
 assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClick = \{ settle\(0f\); \(onLongDone \?: onMenu\)\(\) \}\) \{ settle\(0f\); onSwipe\(\) \}/);
@@ -1364,7 +1367,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     // Core's write commands: every command of the crash-safe table (native-request-receipts.ts states the rule each follows).
     const coreWrites = ['setTaskFocus', 'completeTask', 'undoTaskCompletion', 'undoInboxDecision', 'setProjectFocus', 'createProject', 'saveSearch', 'updateTask', 'saveTaskDraft', 'resetTaskChecklist',
         'submitQuickCapture', 'submitQuickCaptureLines', 'submitQuickCapturePickerQuery', 'commitInboxProcessingStep', 'skipInboxProcessingTask', 'setAreaFilter',
-        'activateProject', 'moveSomedayTasksToSection', 'undoSomedaySectionMove', 'addSomedaySectionTask', 'createSomedaySection', 'setTaskListSort',
+        'activateProject', 'moveSomedayTasksToSection', 'moveSomedayProjectToSection', 'undoSomedaySectionMove', 'addSomedaySectionTask', 'createSomedaySection', 'setTaskListSort',
         'runArchiveAction', 'runContextsAction', 'runTrashAction', 'runReviewAction', 'runCalendarAction', 'runBoardAction', 'runBulkAction', 'setFocusGroupBy',
         'saveFocusFilter', 'removeFocusFilterCriterion', 'deleteFocusFilter', 'reorderFocus', 'createBulkOrganizeDestination', 'addMindSweepItem', 'deleteSavedSearch', 'setSavedSearchSort',
         'setGeneralSetting', 'setGtdSetting', 'setDataSetting', 'saveManageEditor', 'deleteManageItem', 'renameSomedaySection', 'reorderSomedaySections', 'deleteSomedaySection',
@@ -2510,7 +2513,7 @@ assert.match(menuModel, /runtime\.menuRead\("collection", JSONObject\(\)\.put\("
 assert.match(menuModel, /"inbox", "archive" -> runtime\.menuRead\(if \(list == "inbox"\) "inboxTokens" else "archiveTokens", JSONObject\(\)\.put\("params", page\.params\)\s+\.put\("offset", offset\)\.put\("limit", WINDOW\)\.put\("revision", page\.revision\)\.apply \{ query\?\.let \{ put\("query", it\) \} \}/);
 assert.equal(code(menuModel).match(/if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/g).length, 5,
     'read, More, a collection\'s More, the move dialog\'s choices and a picker search treat a stale window as a reread, never an error');
-assert.match(menuModel, /private fun readMoveChoices\(depth: Int = WINDOW\) \{[\s\S]*?\.put\("offset", 0\)[\s\S]*?\.put\("revision", first\.getString\("revision"\)\)[\s\S]*?if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/,
+assert.match(menuModel, /private fun readMoveChoices\(depth: Int = WINDOW\) \{[\s\S]*?fun query\(offset: Int\) = JSONObject\(target\.toString\(\)\)\.put\("offset", offset\)\.put\("limit", WINDOW\)[\s\S]*?runtime\.menuRead\("moveDialog", query\(0\)\.toString\(\)\)[\s\S]*?query\(items\.length\(\)\)\.put\("revision", first\.getString\("revision"\)\)[\s\S]*?if \(failure\.message\?\.startsWith\("STALE_REVISION"\) != true\) throw failure/,
     'the move dialog pages its choices under the first window\'s revision and rereads from the first window');
 assert.match(menuModel, /fun moreMoveChoices\(\) \{ moveChoices\?\.getJSONObject\("choices"\)\?\.getJSONArray\("items"\)\?\.length\(\)\?\.let \{ readMoveChoices\(it \+ WINDOW\) \} \}/);
 assert.match(model, /if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)\s+menu\.refresh\(\)/, 'the open Menu list is read again after every sync');

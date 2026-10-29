@@ -69,7 +69,7 @@ fun SomedayList(model: InboxViewModel) = with(model.menu) {
                     row != null -> TaskRowItem(model, row, status = RowStatus.Icon, details = details, actions = bulkRow(row))
                     // A parked project in its section, before the section's tasks (#1319); RN's sectionProjectRow adds 8 below.
                     item.type == "project" -> Box(Modifier.padding(bottom = 8.dp)) {
-                        ParkedProject(model, item.json.getJSONObject("project"), item.json.getString("activateLabel"))
+                        ParkedProject(model, item.json.getJSONObject("project"), item.json.getString("activateLabel"), view.getJSONObject("text").getString("moveToSection"))
                     }
                     else -> Heading(model, item.json)
                 }

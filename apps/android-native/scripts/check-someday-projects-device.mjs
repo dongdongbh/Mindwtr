@@ -3,13 +3,15 @@
 //   node apps/android-native/scripts/check-someday-projects-device.mjs <adb-serial> [apk]
 //
 // RN draws a parked (Someday) project inside its Someday section group, before the group's tasks, and no Projects block above the
-// list. The native app cannot put a project in a section yet (RN's long-press Move to section…), so the first run INJECTS, through
+// list. The first run INJECTS, through
 // core's own store on a host copy of the database, one fixed Someday section ("P3 1319") and one fixed Someday project in it
 // ("P3 1319 project"); every later run REUSES them, so the development data does not grow. Installs the debug APK with
 // `install -r`, then checks against core's own Someday view (projectsInSections, grouped by section) on a copy: the project row
 // sits under its section's heading, before that group's first task, and no Projects block shows; its tap opens the project, and
-// Back returns. A screenshot goes to the harness folder (MINDWTR_HARNESS_DIR) for the side-by-side with RN. It writes nothing
-// through the UI, touches only the development package (it refuses any other APK), never launches over another app, leaves the
+// Back returns. Then RN's long press on the row (8fd2cab96) opens core's Move to section… for the project: No section moves it
+// under "No section" (core stores no section), and a second long press puts it back in "P3 1319" (the fixture as it was). Screenshots
+// go to the harness folder (MINDWTR_HARNESS_DIR) for the side-by-side with RN. Its only UI writes are those two moves; it touches
+// only the development package (it refuses any other APK), never launches over another app, leaves the
 // app on its Inbox tab and restores rotation on exit. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -190,6 +192,33 @@ try {
     check(true, `the project row's tap opens "${PROJECT}"`);
     requireAppFront();
     sh('input keyevent KEYCODE_BACK');
+
+    // RN's long press (8fd2cab96): Move to section… for the project, out to No section and back into its section.
+    const noSection = en['viewSections.noSection'];
+    const moveTitle = en['viewSections.moveToSection'];
+    const longPress = (node) => {
+        requireAppFront();
+        const [x1, y1, x2, y2] = box(node);
+        sh(`input swipe ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)} ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)} 900`);
+    };
+    const moveTo = async (choice, shot) => {
+        nodes = await device.reveal(PROJECT, 60);
+        nodes = await device.settle(nodes);
+        longPress(withDescription(nodes, PROJECT) ?? textNode(nodes, PROJECT) ?? fail(`no project row "${PROJECT}"`));
+        nodes = await waitFor('the Move to section dialog', (current) => Boolean(textNode(current, moveTitle)) && Boolean(withDescription(current, choice)), 15_000);
+        if (shot) writeFileSync(resolve(shots, 'someday-project-move-native.png'), adbRaw('exec-out', 'screencap', '-p'));
+        await tap(withDescription(nodes, choice));
+        await waitFor('the dialog closed', (current) => !textNode(current, moveTitle), 15_000);
+        await sleep(1500);
+        return core('view');
+    };
+    await waitFor('Someday again', (current) => Boolean(textNode(current, en['someday.title'])), 15_000);
+    seen = await moveTo(noSection, true);
+    const noSectionHeading = seen.items.findIndex((item) => item[0] === 'heading' && item[2] === noSection);
+    check(seen.project?.section === null && noSectionHeading >= 0 && seen.items.slice(noSectionHeading + 1).some((item) => item[0] === 'project' && item[1] === seen.project.id),
+        `a long press on "${PROJECT}" and "${noSection}" moves it under "${noSection}" (core stores no section)`);
+    seen = await moveTo(SECTION, false);
+    check(seen.project?.section === seen.section, `a second long press puts "${PROJECT}" back in "${SECTION}"`);
     console.log('Someday projects in sections device check passed');
 } catch (error) {
     evidenced(error);

@@ -93,7 +93,7 @@ import type { TaskGroupBy } from './task-group-sections';
 import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
 import { tFallback } from './i18n';
 import type { MultiValueFilterMatchMode, Task, TaskEnergyLevel, TaskPriority, TaskSortBy, TaskStatus, TimeEstimate, ViewSectionDefinition } from './types';
-import { buildTaskViewSectionUndoUpdates, sortViewSectionDefinitions } from './view-sections';
+import { buildProjectViewSectionUpdate, buildTaskViewSectionUndoUpdates, sortViewSectionDefinitions } from './view-sections';
 
 type NativeHostErrorCode = Extract<NativeHostResult<never>, { ok: false }>['error']['code'];
 
@@ -787,6 +787,11 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
     };
 
     const somedaySections = () => useTaskStore.getState().settings.gtd?.viewSections?.someday;
+    /** A live parked Someday project by id, or null. */
+    const parkedSomedayProject = (id: unknown) => {
+        const project = isText(id) ? useTaskStore.getState()._projectsById.get(id) : undefined;
+        return project && !project.deletedAt && project.status === 'someday' ? project : null;
+    };
 
     const updateSomedaySections = async (next: ViewSectionDefinition[]) => {
         const state = useTaskStore.getState();
@@ -1078,8 +1083,11 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             };
         },
 
-        /** The Move to section dialog for these tasks: choices ("No section" first) with the current one selected. */
-        getSomedayMoveDialog(input: { taskIds: string[]; offset?: number; limit?: number; revision?: string }): NativeHostResult<
+        /**
+         * The Move to section dialog for these tasks, or for one parked Someday project (`projectId`, #1319): choices ("No section"
+         * first) with the current one selected.
+         */
+        getSomedayMoveDialog(input: { taskIds?: string[]; projectId?: string; offset?: number; limit?: number; revision?: string }): NativeHostResult<
             Omit<ReturnType<typeof buildSomedaySectionMoveDialog>, 'choices'> & {
                 version: typeof NATIVE_HOST_CONTRACT_VERSION;
                 revision: string;
@@ -1089,14 +1097,18 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const window = isObjectRecord(input) ? { offset: input.offset ?? 0, limit: input.limit ?? NATIVE_HOST_MAX_WINDOW, revision: input.revision } : null;
-            if (!window || !isTextList(input.taskIds) || input.taskIds.length === 0 || !isPaging(window)) {
-                return fail('INVALID_INPUT', 'Task IDs and a valid window are required');
+            const project = window && input.projectId !== undefined ? parkedSomedayProject(input.projectId) : null;
+            if (!window || !isPaging(window) || (input.projectId !== undefined
+                ? !project || input.taskIds !== undefined
+                : !isTextList(input.taskIds) || input.taskIds.length === 0)) {
+                return fail('INVALID_INPUT', 'Task IDs or a parked Someday project, and a valid window, are required');
             }
-            const ids = Array.from(new Set(input.taskIds));
-            const revision = `${deps.revision(new Date())}:${paramsKey(ids)}`;
+            const ids = project ? [project.id] : Array.from(new Set(input.taskIds));
+            const revision = `${deps.revision(new Date())}:${paramsKey(project ? ['project', ...ids] : ids)}`;
             if (window.revision !== undefined && window.revision !== revision) return fail('STALE_REVISION', 'Sections changed; read them again');
             const taskById = new Map(useTaskStore.getState().tasks.map((task) => [task.id, task]));
-            const dialog = buildSomedaySectionMoveDialog(ids.map((id) => taskById.get(id)), somedaySections(), deps.t());
+            // A project's section sits in the same field as a task's (viewSectionIds.someday).
+            const dialog = buildSomedaySectionMoveDialog(project ? [project as unknown as Task] : ids.map((id) => taskById.get(id)), somedaySections(), deps.t());
             return {
                 ok: true,
                 value: {
@@ -1134,6 +1146,43 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             const saved = await deps.save();
             if (!saved.ok) return saved;
             return { ok: true, value: { id: project.id, changed: true } };
+        },
+
+        /**
+         * Move one parked Someday project to a section (null = No section), as React Native's project row does (#1319,
+         * someday-view.tsx moveProjectToSection): buildProjectViewSectionUpdate through updateProject. Target state: a project
+         * already there is not written. `projectRevision` is the row's: a project changed since is not written (STALE_REVISION).
+         * A section that is gone answers RN's failure words (`refused`). Reusing `requestId` returns the first outcome.
+         */
+        async moveSomedayProjectToSection(input: {
+            projectId: string;
+            sectionId: string | null;
+            projectRevision: string;
+            requestId: string;
+        }): Promise<NativeHostResult<{ moved: number } | { refused: { title: string; message: string } }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || !isText(input.projectId) || !input.projectId
+                || (input.sectionId !== null && !isText(input.sectionId)) || !isRevision(input.projectRevision)
+                || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)) {
+                return fail('INVALID_INPUT', 'A project ID, a section ID or null, the revision the view showed, and a request UUID are required');
+            }
+            const { projectId, sectionId, projectRevision, requestId } = input;
+            return receipts.run<{ moved: number } | { refused: { title: string; message: string } }>(requestId,
+                JSON.stringify(['moveProject', projectId, sectionId, projectRevision]), async () => {
+                    const project = parkedSomedayProject(projectId);
+                    if (!project) return fail('INVALID_INPUT', 'Only a parked Someday project can move to a section');
+                    const t = deps.t();
+                    if (sectionId !== null && !sortViewSectionDefinitions(somedaySections()).some((entry) => entry.id === sectionId)) {
+                        return { ok: true, value: { refused: { title: tFallback(t, 'common.error', 'Error'),
+                            message: tFallback(t, 'viewSections.updateFailed', 'Could not update Someday sections.') } } };
+                    }
+                    const update = buildProjectViewSectionUpdate(project, 'someday', sectionId ?? undefined);
+                    if (!update) return { ok: true, value: { moved: 0 } };
+                    const stale = refuseStaleProjects([projectId], { [projectId]: projectRevision });
+                    if (stale) return stale;
+                    return settleWrite(await runStoreWrite(() => useTaskStore.getState().updateProject(projectId, update)), { moved: 1 });
+                });
         },
 
         /**

@@ -136,6 +136,48 @@ describe('native host contract: More sheet and list views', () => {
         // Any grouping other than sections keeps the block.
         expect(value(host.getSomedayView({ groupBy: 'project', projectsInSections: true, offset: 0, limit: 100 })).deferred).not.toBeNull();
     });
+    // RN 8fd2cab96 (#1319): a parked project in its section moves to another section from its row (long press), through updateProject.
+    it('moves a parked Someday project to a section, as React Native does (#1319)', async () => {
+        freezeClock();
+        const saveData = vi.fn().mockResolvedValue(undefined);
+        const { host, recorder } = await openHost(scenario('someday', 'sections'), saveData);
+        const project = useTaskStore.getState()._allProjects.find((row) => row.status === 'someday')!;
+        const section = () => useTaskStore.getState()._projectsById.get(project.id)!.viewSectionIds?.someday;
+        expect(section()).toBeUndefined();
+        // The dialog for the project: core's choices, No section first and selected.
+        const dialog = value(host.getSomedayMoveDialog({ projectId: project.id }));
+        expect(dialog.title).toBe('Move to section…');
+        expect(dialog.choices.items[0]).toEqual({ sectionId: null, title: 'No section', selected: true });
+
+        const input = { projectId: project.id, sectionId: 's-later', projectRevision: projectRevision(project.id), requestId: generateUUID() };
+        expect(value(await host.moveSomedayProjectToSection(input))).toEqual({ moved: 1 });
+        expect(section()).toBe('s-later');
+        expect(recorder.log).toHaveLength(1);
+        // A repeat answers from its receipt: no second write.
+        expect(value(await host.moveSomedayProjectToSection(input))).toEqual({ moved: 1 });
+        expect(recorder.log).toHaveLength(1);
+        expect(value(host.getSomedayMoveDialog({ projectId: project.id })).choices.items.find((choice) => choice.selected)?.sectionId).toBe('s-later');
+
+        // The revision the row showed before the move is stale now: nothing is written.
+        expect(await host.moveSomedayProjectToSection({ ...input, sectionId: null, requestId: generateUUID() }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        // A section that is gone is refused in RN's words; No section clears the project's.
+        const fresh = () => ({ projectRevision: projectRevision(project.id), requestId: generateUUID() });
+        expect(value(await host.moveSomedayProjectToSection({ ...input, ...fresh(), sectionId: 'gone' })))
+            .toEqual({ refused: { title: 'Error', message: 'Could not update Someday sections.' } });
+        expect(value(await host.moveSomedayProjectToSection({ ...input, ...fresh(), sectionId: null }))).toEqual({ moved: 1 });
+        expect(section()).toBeUndefined();
+        // Already there: target state, no write.
+        const writes = recorder.log.length;
+        expect(value(await host.moveSomedayProjectToSection({ ...input, ...fresh(), sectionId: null }))).toEqual({ moved: 0 });
+        expect(recorder.log).toHaveLength(writes);
+        // Only a parked Someday project moves; the input is checked.
+        const active = useTaskStore.getState()._allProjects.find((row) => row.status === 'active')!;
+        expect(await host.moveSomedayProjectToSection({ projectId: active.id, sectionId: null, projectRevision: projectRevision(active.id), requestId: generateUUID() }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.moveSomedayProjectToSection({ ...input, requestId: 'nope' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(host.getSomedayMoveDialog({ projectId: active.id })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
     it('returns what core\'s models return when called directly', async () => {
         freezeClock();
         const { host } = await openHost(scenario('someday', 'sections'));

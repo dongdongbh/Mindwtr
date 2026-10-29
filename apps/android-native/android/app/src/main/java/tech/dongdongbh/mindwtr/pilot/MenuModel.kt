@@ -34,7 +34,7 @@ private const val PAGE = 50
 private const val WINDOW = 100
 
 /** The Menu tab's commands (host-entry.ts MENU_COMMANDS); core can refuse each before writing. */
-val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
+val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
     "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 /**
@@ -1022,6 +1022,13 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         readMoveChoices()
     }
 
+    /** RN's Move to section… for a parked project in its section (#1319): the same dialog, for [projectId] at its row's revision. */
+    fun openProjectMove(projectId: String, projectRevision: String) {
+        moveChoices = null
+        keepDialog(JSONObject().put("kind", "move").put("projectId", projectId).put("projectRevision", projectRevision))
+        readMoveChoices()
+    }
+
     /**
      * Core's move dialog from its first window, its choices read to [depth] at one revision. Choices that changed between
      * windows (STALE_REVISION) are never an error: the dialog stays open with what it read, as the lists do, and its More
@@ -1029,15 +1036,18 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
      */
     private fun readMoveChoices(depth: Int = WINDOW) {
         val open = dialog?.takeIf { it.optString("kind") == "move" } ?: return
-        val ids = open.getJSONArray("taskIds")
+        // The tasks moved, or a parked project (openProjectMove).
+        val target = open.optString("projectId").ifEmpty { null }?.let { JSONObject().put("projectId", it) }
+            ?: JSONObject().put("taskIds", open.getJSONArray("taskIds"))
+        fun query(offset: Int) = JSONObject(target.toString()).put("offset", offset).put("limit", WINDOW)
         shell.background(listOf(Part.MenuDialog), { runtime ->
-            val first = runtime.menuRead("moveDialog", JSONObject().put("taskIds", ids).put("offset", 0).put("limit", WINDOW).toString())
+            val first = runtime.menuRead("moveDialog", query(0).toString())
             val choices = first.getJSONObject("choices")
             val items = choices.getJSONArray("items")
             try {
                 while (items.length() < minOf(depth, choices.getInt("total"))) {
-                    val next = runtime.menuRead("moveDialog", JSONObject().put("taskIds", ids).put("offset", items.length()).put("limit", WINDOW)
-                        .put("revision", first.getString("revision")).toString()).getJSONObject("choices").getJSONArray("items")
+                    val next = runtime.menuRead("moveDialog", query(items.length()).put("revision", first.getString("revision")).toString())
+                        .getJSONObject("choices").getJSONArray("items")
                     if (next.length() == 0) break // core sent no choices: stop, never spin
                     for (index in 0 until next.length()) items.put(next.get(index))
                 }
@@ -1057,6 +1067,10 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     /** A move dialog choice: core's moveSomedayTasksToSection with a new request UUID and the tasks' revisions the dialog opened with. */
     fun move(taskIds: List<String>, sectionId: String?, taskRevisions: JSONObject) = send(moveAction(taskIds, sectionId, taskRevisions))
 
+    /** A project move dialog choice: core's moveSomedayProjectToSection with a new request UUID and the row's revision. */
+    fun moveProject(projectId: String, sectionId: String?, projectRevision: String) = send(FailedAction("somedayProjectMove", UUID.randomUUID().toString(),
+        projectId, patch = mapOf("sectionId" to sectionId, "projectRevision" to projectRevision)))
+
     /** The toast's Undo: core's undoSomedaySectionMove for the move's request, with its own request UUID. */
     private fun undo(moveRequestId: String) {
         Log.i(CoreHost.TAG, "Someday Undo requested busy=${shell.busy}")
@@ -1064,8 +1078,11 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     }
 
     /** RN's New section… (the list menu's, or the move dialog's "+ New section…", which then moves the tasks into it, at their [taskRevisions]). */
-    fun openNewSection(taskIds: List<String>? = null, taskRevisions: JSONObject? = null) = keepDialog(JSONObject().put("kind", "newSection").put("text", "")
-        .put("requestId", UUID.randomUUID().toString()).apply { taskIds?.let { put("taskIds", JSONArray(it)).put("taskRevisions", taskRevisions ?: JSONObject()) } })
+    fun openNewSection(taskIds: List<String>? = null, taskRevisions: JSONObject? = null, project: Pair<String, String>? = null) = keepDialog(JSONObject()
+        .put("kind", "newSection").put("text", "").put("requestId", UUID.randomUUID().toString()).apply {
+            taskIds?.let { put("taskIds", JSONArray(it)).put("taskRevisions", taskRevisions ?: JSONObject()) }
+            project?.let { (id, revision) -> put("projectId", id).put("projectRevision", revision) }
+        })
 
     /** A heading's Add task: RN's dialog for that section (null = No section), titled with core's label. */
     fun openAddTask(heading: JSONObject) {
@@ -1384,6 +1401,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         "activateProject" -> JSONObject().put("projectId", action.id).put("projectRevision", action.patch["projectRevision"])
         "somedayMove" -> JSONObject().put("taskIds", JSONArray(action.patch["taskIds"].orEmpty().split(","))).put("requestId", action.id)
             .put("sectionId", action.patch["sectionId"] ?: JSONObject.NULL).put("taskRevisions", JSONObject(action.patch["taskRevisions"] ?: "{}"))
+        "somedayProjectMove" -> JSONObject().put("projectId", action.title).put("sectionId", action.patch["sectionId"] ?: JSONObject.NULL)
+            .put("projectRevision", action.patch["projectRevision"]).put("requestId", action.id)
         "somedayUndo" -> JSONObject().put("moveRequestId", action.title).put("requestId", action.id)
         "somedayTask" -> JSONObject().put("title", action.title).put("captureId", action.id).put("sectionId", action.patch["sectionId"] ?: JSONObject.NULL)
         "somedaySection" -> JSONObject().put("title", action.title).put("requestId", action.id)
@@ -1500,6 +1519,11 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
                     shell.showToast(toast, toast.getString("undoLabel"), "success") { undo(moveRequestId) }
                 }
             }
+            // RN's project move shows nothing on success, and its error toast on a refusal.
+            "somedayProjectMove" -> {
+                reply.optJSONObject("refused")?.let { refused -> shell.showToast(refused, tone = "error"); return }
+                closeDialog("move")
+            }
             "somedayTask" -> {
                 val refused = reply.optJSONObject("refused")
                 // Core's refusal (the section is gone) wrote nothing: its words show, and the next Save gets a fresh capture UUID.
@@ -1515,6 +1539,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
                 closeDialog("newSection")
                 // From the move dialog's "+ New section…": the tasks go into the new section, as RN's picker selects it.
                 open?.optJSONArray("taskIds")?.let { ids -> whenIdle { move(ids.strings(), reply.getString("id"), open.optJSONObject("taskRevisions") ?: JSONObject()) } }
+                open?.optString("projectId")?.ifEmpty { null }?.let { id -> whenIdle { moveProject(id, reply.getString("id"), open.getString("projectRevision")) } }
             }
             "archiveAction" -> {
                 if (JSONObject(action.title).optString("type") in setOf("moveTasksToInbox", "trashTasks")) selecting(false)
