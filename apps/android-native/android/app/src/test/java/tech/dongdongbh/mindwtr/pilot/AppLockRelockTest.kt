@@ -59,4 +59,15 @@ class AppLockRelockTest {
         assertFalse(lock.returned())
         assertEquals(0, lock.delayMinutes)
     }
+
+    /** Review note 2: a resume while the prompt is up still uses the leave, so a later resume (a rotation) asks. */
+    @Test fun aResumeWhileThePromptIsUpUsesTheLeave() {
+        val clock = Clock()
+        val lock = relock(5, clock)
+        lock.left(unlocked = true)
+        clock.now += 1_000
+        assertFalse(lock.returned(authenticating = true))
+        clock.now += 1_000
+        assertFalse(lock.returned())
+    }
 }

@@ -98,11 +98,14 @@ internal class Relock(private val clock: () -> Long = SystemClock::elapsedRealti
     /** The app left the foreground; [unlocked]: it was open, not on the lock screen. */
     fun left(unlocked: Boolean) { leftUnlockedAt = if (unlocked) clock() else null }
 
-    /** The app is back: whether this return may skip the prompt. Each leave counts once. */
-    fun returned(): Boolean {
+    /**
+     * The app is back: whether this return may skip the prompt. Each leave counts once, a resume while the prompt is up
+     * ([authenticating]) included, so a leave time never outlives a resume that could not use it.
+     */
+    fun returned(authenticating: Boolean = false): Boolean {
         val left = leftUnlockedAt
         leftUnlockedAt = null
-        return withinRelockDelay(delayMinutes, left, clock())
+        return !authenticating && withinRelockDelay(delayMinutes, left, clock())
     }
 }
 
@@ -162,8 +165,8 @@ class AppLock(private val shell: InboxViewModel) {
 
     /** RN's return to active: within the relock delay of leaving unlocked, the app opens again without asking (#1423). */
     fun resumed() {
-        if (!enabled || authenticating) return
-        if (relock.returned()) { locked = false; failure = null }
+        if (!enabled) return
+        if (relock.returned(authenticating)) { locked = false; failure = null }
     }
 
     /** RN's shouldAttemptMobileAppLockAuthentication. */

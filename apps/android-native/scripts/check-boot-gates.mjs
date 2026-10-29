@@ -3115,7 +3115,9 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockKt, /if \(!enabled \|\| authenticating \|\| rotating\) return\s+relock\.left\(unlocked = !locked\)\s+locked = true\s+failure = null\s+locks \+= 1/);
     // RN's relock delay (#1423): a return within it of leaving unlocked opens the app without asking; not while the prompt is up.
     assert.match(lockKt, /Lifecycle\.Event\.ON_RESUME -> model\.lock\.resumed\(\)/);
-    assert.match(lockKt, /fun resumed\(\) \{\s+if \(!enabled \|\| authenticating\) return\s+if \(relock\.returned\(\)\) \{ locked = false; failure = null \}/);
+    assert.match(lockKt, /fun resumed\(\) \{\s+if \(!enabled\) return\s+if \(relock\.returned\(authenticating\)\) \{ locked = false; failure = null \}/);
+    // Review note 2: a resume while the prompt is up still uses the leave (AppLockRelockTest.aResumeWhileThePromptIsUpUsesTheLeave).
+    assert.match(lockKt, /val left = leftUnlockedAt\s+leftUnlockedAt = null\s+return !authenticating && withinRelockDelay\(delayMinutes, left, clock\(\)\)/);
     assert.match(lockKt, /fun shouldPrompt\(resumed: Boolean\) = enabled && locked && !authenticating && resumed && prompted != locks/);
     assert.match(lockKt, /private const val PROMPT_DELAY_MS = 250L/);
     // The device lock as expo-local-authentication asks it (correction pass, finding 4): AndroidX BiometricPrompt at Expo's version on
@@ -3160,6 +3162,11 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(lockKt, /if \(!edit\.getBoolean\("value"\)\) return settings\.general\(edit\)\s+ask\(row\.getJSONObject\("enablePrompt"\)\.getString\("promptMessage"\)\) \{ reason ->\s+if \(reason == null\) shell\.menu\.whenIdle \{ settings\.general\(edit\) \} else settings\.editLocal \{ put\(SWITCH_FAILURE, reason\) \}/);
     assert.match(lockKt, /row\.getJSONObject\("errors"\)\.getString\(it\)/);
     assert.match(settingsUi, /RnSwitch\(lock\.getBoolean\("value"\), model\.failedAction == null && !model\.lock\.authenticating, lock\.getString\("label"\), theme\.generalSwitch\) \{ model\.lock\.toggle\(lock\) \}/);
+    // RN's relock delay row (#1423), only while App lock is on, and its picker (core's appLockRelockDelay).
+    assert.match(settingsUi, /privacy\.optJSONObject\("appLockRelockDelay"\)\?\.let \{ PressRow\(it\.getString\("label"\), it\.getString\("value"\), true, idle\) \{ open\("appLockRelockDelay"\) \} \}/);
+    assert.match(settingsUi, /"appLockRelockDelay" -> view\.getJSONObject\("privacy"\)\.optJSONObject\("appLockRelockDelay"\)/);
+    // RN's "Include start dates in Today" switch (#1325) in Settings › GTD, between the focus limit and the flow mode (review note 3).
+    assert.match(settingsUi, /for \(name in listOf\("focusTaskLimit", "focusIncludeStartDates", "defaultProjectFlowMode"\)\) \{[\s\S]{0,200}?if \(name == "focusIncludeStartDates"\) \{ ToggleRow\(model, control, true, write = \{ gtd\(it\) \}\); continue \}/);
     assert.match(settingsModel, /"appLock" -> shell\.lock\.stored\(input\.getJSONObject\("edit"\)\.getBoolean\("value"\)\)/);
     // The phone check (findings 6 and 7): each database change happens with the app's process gone, from an untouched pulled copy,
     // staged and size-checked beside the database, the old WAL and SHM removed, then renamed over it; the restore proves core's value,
