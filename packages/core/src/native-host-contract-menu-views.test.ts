@@ -178,6 +178,60 @@ describe('native host contract: More sheet and list views', () => {
         expect(await host.moveSomedayProjectToSection({ ...input, requestId: 'nope' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getSomedayMoveDialog({ projectId: active.id })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
+    // RN 43479990e: the status menu's Move to project or area… (TaskEditDestinationPicker, then updateTask with buildTaskMovePatch).
+    it('moves a task to a project or an area from its status menu, as React Native does', async () => {
+        freezeClock();
+        const { host, recorder } = await openHost(scenario('someday', 'sections'));
+        const state = useTaskStore.getState();
+        const task = state.tasks.find((row) => !row.deletedAt && !row.projectId && !row.areaId)!;
+        const project = state.projects.find((row) => row.status === 'active' && !row.deletedAt)!;
+        const area = state.areas.find((row) => !row.deletedAt)!;
+        expect([task, project, area].every(Boolean)).toBe(true);
+        const picker = value(host.getTaskDestinationPicker({ id: task.id }));
+        expect(picker).toMatchObject({ title: 'Destination', searchLabel: 'Search...', cancelLabel: 'Cancel',
+            none: { title: 'None', selected: true, destination: { kind: 'none' } } });
+        expect(picker.projectGroups[0].title).toBe('Projects');
+        expect(picker.projectGroups[0].rows).toContainEqual({ title: project.title, accessibilityLabel: `Projects: ${project.title}`, selected: false,
+            destination: { kind: 'project', id: project.id } });
+        expect(picker.areas.rows.map((row) => row.destination)).toContainEqual({ kind: 'area', id: area.id });
+        // The search narrows projects and areas by name; a search nothing matches says so.
+        const query = project.title.slice(0, 3).toLowerCase();
+        const searched = value(host.getTaskDestinationPicker({ id: task.id, query }));
+        expect(searched.projectGroups.flatMap((group) => group.rows).every((row) => row.title.toLowerCase().includes(query))).toBe(true);
+        expect(searched.areas.rows.every((row) => row.title.toLowerCase().includes(query))).toBe(true);
+        expect(value(host.getTaskDestinationPicker({ id: task.id, query: 'zzzz-no-such' })).noMatches).toBe('No matches');
+
+        const input = { id: task.id, taskRevision: revisionOf(task), destination: { kind: 'project' as const, id: project.id }, requestId: generateUUID() };
+        expect(value(await host.moveTaskToDestination(input))).toEqual({ id: task.id, changed: true });
+        expect(useTaskStore.getState()._tasksById.get(task.id)!.projectId).toBe(project.id);
+        expect(recorder.log).toHaveLength(1);
+        // A repeat answers from its receipt; the picker now selects the project.
+        expect(value(await host.moveTaskToDestination(input))).toEqual({ id: task.id, changed: true });
+        expect(recorder.log).toHaveLength(1);
+        expect(value(host.getTaskDestinationPicker({ id: task.id })).projectGroups[0].rows.find((row) => row.selected)?.destination).toEqual(input.destination);
+        // The row's revision from before the move is stale: nothing is written.
+        expect(await host.moveTaskToDestination({ ...input, destination: { kind: 'area', id: area.id }, requestId: generateUUID() }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const fresh = () => ({ taskRevision: revisionOf(useTaskStore.getState()._tasksById.get(task.id)!), requestId: generateUUID() });
+        // An area clears the project (buildTaskMovePatch); None clears both; already there writes nothing.
+        expect(value(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'area', id: area.id } }))).toEqual({ id: task.id, changed: true });
+        expect(useTaskStore.getState()._tasksById.get(task.id)).toMatchObject({ projectId: undefined, areaId: area.id });
+        expect(value(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'none' } }))).toEqual({ id: task.id, changed: true });
+        expect(useTaskStore.getState()._tasksById.get(task.id)).toMatchObject({ projectId: undefined, areaId: undefined });
+        const writes = recorder.log.length;
+        expect(value(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'none' } }))).toEqual({ id: task.id, changed: false });
+        expect(recorder.log).toHaveLength(writes);
+        // Refused: a project that cannot take tasks, an unknown area, a malformed destination or request.
+        const archived = useTaskStore.getState()._allProjects.find((row) => row.status === 'archived');
+        if (archived) expect(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'project', id: archived.id } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'area', id: 'no-such-area' } }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.moveTaskToDestination({ ...input, ...fresh(), destination: { kind: 'section', id: 'x' } as never }))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.moveTaskToDestination({ ...input, requestId: 'nope' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(host.getTaskDestinationPicker({ id: 'no-such-task' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
     it('returns what core\'s models return when called directly', async () => {
         freezeClock();
         const { host } = await openHost(scenario('someday', 'sections'));

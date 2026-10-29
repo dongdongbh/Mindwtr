@@ -913,7 +913,7 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
         })) throw new Error('Invalid project attachment request');
     return input as { projectId: string; attachmentId?: string };
 };
-type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayProjectMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
+type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayProjectMove' | 'taskDestinationMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
     | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'taskCompletedAt' | 'areaOrder' | 'areaColor' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
     | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | TaskEditorCommand | DataCommand | StartupPromptCommand;
@@ -1315,6 +1315,8 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     done: (input) => contract.getDoneView(input),
     collection: (input) => contract.getMenuViewCollection(input),
     moveDialog: (input) => contract.getSomedayMoveDialog(input),
+    // The status menu's Move to project or area… picker (TaskRowView.kt).
+    taskDestination: (input) => contract.getTaskDestinationPicker(input),
     history: (input) => contract.getHistoryView(input),
     archive: (input) => contract.getArchiveView(input),
     contexts: (input) => contract.getContextsView(input),
@@ -1531,6 +1533,8 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     somedayMove: (input) => contract.moveSomedayTasksToSection(input),
     // A parked project's Move to section… (#1319).
     somedayProjectMove: (input) => contract.moveSomedayProjectToSection(input),
+    // The status menu's Move to project or area… (TaskRowView.kt).
+    taskDestinationMove: (input) => contract.moveTaskToDestination(input),
     somedayUndo: (input) => contract.undoSomedaySectionMove(input),
     somedayTask: (input) => contract.addSomedaySectionTask(input),
     somedaySection: (input) => contract.createSomedaySection(input),

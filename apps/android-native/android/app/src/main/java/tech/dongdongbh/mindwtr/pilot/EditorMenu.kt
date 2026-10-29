@@ -96,8 +96,8 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         open = false
         val editor = shell.editor ?: return
         when (action) {
-            EditorMenuAction.CopyLink -> copy(context, "${BuildConfig.URL_SCHEME}://open?task=${Uri.encode(editor.id)}")
-            EditorMenuAction.CopyId -> copy(context, editor.id)
+            EditorMenuAction.CopyLink -> shell.copyTaskReference(context, editor.id, link = true)
+            EditorMenuAction.CopyId -> shell.copyTaskReference(context, editor.id, link = false)
             EditorMenuAction.Share -> share(context, editor)
             // RN duplicates the saved task, closes the editor, and opens the copy on its Form tab (Board's duplicate does the opening).
             EditorMenuAction.Duplicate -> { shell.closeEditor(); shell.menu.board.duplicate(editor.id) }
@@ -248,13 +248,6 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         }
     }
 
-    private fun copy(context: Context, text: String) {
-        val copied = runCatching {
-            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Mindwtr", text))
-        }.isSuccess
-        shell.showToast(null, t(if (copied) "list.taskCopied" else "list.taskCopyFailed"), if (copied) "success" else "error")
-    }
-
     /** RN's Share.share: core's text for the draft (getTaskShare), in the system share sheet; its title rides as the subject. */
     private fun share(context: Context, editor: TaskEditor) = shell.perform { runtime ->
         val input = JSONObject().put("id", editor.id).put("taskRevision", editor.model.taskRevision)
@@ -372,4 +365,16 @@ private fun PromoteDialog(model: InboxViewModel) = with(model) {
             }
         }
     }
+}
+
+/**
+ * RN's copyTaskReference (lib/task-reference-clipboard.ts), for the editor's menu and the status menu: the task's link in this
+ * build's scheme ([link]) or its ID on the clipboard, then RN's copied or failed toast.
+ */
+internal fun InboxViewModel.copyTaskReference(context: Context, taskId: String, link: Boolean) {
+    val text = if (link) "${BuildConfig.URL_SCHEME}://open?task=${Uri.encode(taskId)}" else taskId
+    val copied = runCatching {
+        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Mindwtr", text))
+    }.isSuccess
+    showToast(null, t(if (copied) "list.taskCopied" else "list.taskCopyFailed"), if (copied) "success" else "error")
 }

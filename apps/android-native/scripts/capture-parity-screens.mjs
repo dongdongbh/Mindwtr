@@ -13,6 +13,7 @@
 // (PARITY_ONLY=d1b shoots only pass D1b's: Settings › Data with the Backup fold's end (Getting Started), the Import fold open,
 // and in light mode the Todoist question and the invalid-import warning.)
 // (PARITY_ONLY=gtd-hub shoots only Settings › GTD in light mode, scrolled to RN's "Include start dates in Today" switch, #1325.)
+// (PARITY_ONLY=status-menu shoots only an Inbox row's status menu and its Move to project or area… picker, in light mode, 43479990e.)
 // (PARITY_ONLY=s5 shoots only pass S5's: Settings › Sync with File chosen, at its top and at the folder card.)
 // (PARITY_ONLY=r2b shoots only pass R2b's Pomodoro card on Focus, in light mode, with the Pomodoro feature and Link task on in the
 // fixture: idle with Timer only, the task picker, a linked task, running, paused, the break, and folded. RN's run ends back at
@@ -74,6 +75,7 @@ const R2B_ONLY = process.env.PARITY_ONLY === 'r2b';
 const A13_ONLY = process.env.PARITY_ONLY === '13a';
 const GTD_HUB_ONLY = process.env.PARITY_ONLY === 'gtd-hub';
 const SMALL2_ONLY = process.env.PARITY_ONLY === 'small2';
+const STATUS_MENU_ONLY = process.env.PARITY_ONLY === 'status-menu';
 let apks;
 try {
     const built = JSON.parse(readFileSync(resolve(harness, 'apks/manifest.json'), 'utf8'));
@@ -801,6 +803,37 @@ const shootR2 = async (prefix, suffix, rn) => {
         await sleep(900);
     }
 };
+/** PARITY_ONLY=status-menu: the status menu of the Inbox row T.call, then its Move to project or area… picker; Back closes both. */
+const shootStatusMenu = async (prefix, rn) => {
+    if (rn) openLink('inbox');
+    else {
+        const tabs = await waitFor('the native tabs', (current) => Boolean(tab(current, 'Inbox')), 60_000);
+        if (!tabSelected(tabs, 'Inbox')) await tap(tab(tabs, 'Inbox'));
+    }
+    const label = en['task.aria.changeStatus'].replace(/\{\{?status\}?\}/, en['status.inbox']);
+    const beside = (current) => {
+        const row = current.find((node) => node.text === T.call);
+        if (!row) return undefined;
+        const [, top, , bottom] = box(row);
+        return current.find((node) => node['content-desc'] === label && box(node)[1] <= (top + bottom) / 2 && box(node)[3] >= (top + bottom) / 2);
+    };
+    const nodes = await waitFor(`the status control beside "${T.call}"`, (current) => Boolean(beside(current)), 30_000);
+    await tap(beside(nodes));
+    await shoot(`${prefix}-status-menu-light`, (current) => hasText(current, en['task.copyTaskId']));
+    const menu = await screen();
+    const move = menu.find((node) => node.text === en['task.moveToProjectOrArea']) ?? withDescription(menu, en['task.moveToProjectOrArea']);
+    if (move) {
+        await tap(move);
+        await shoot(`${prefix}-destination-picker-light`, (current) => hasText(current, en['common.none']) && hasText(current, en['taskEdit.areaLabel']));
+    } else console.log(`warn - ${prefix}: no "${en['task.moveToProjectOrArea']}" in the status menu`);
+    for (let step = 0; step < 3; step += 1) {
+        const current = await screen();
+        if (!hasText(current, en['task.copyTaskId']) && !hasText(current, en['common.none'])) break;
+        requireAppFront();
+        sh('input keyevent KEYCODE_BACK');
+        await sleep(900);
+    }
+};
 /** PARITY_ONLY=gtd-hub: Settings › GTD from the Menu sheet with the "Include start dates in Today" switch on screen, then Back to the tabs. */
 const shootGtdHub = async (prefix, rn) => {
     if (rn) openLink('focus');
@@ -1154,6 +1187,7 @@ try {
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('rn', true); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('rn', true); continue; }
         if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('rn', true); continue; }
+        if (STATUS_MENU_ONLY) { if (mode === 'no') await shootStatusMenu('rn', true); continue; }
         if (A13_ONLY) { if (mode === 'no') await shoot13a('rn', true); continue; }
         if (R2_ONLY) { await shootR2('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
         if (S5_ONLY) { await shootS5('rn', mode === 'yes' ? 'dark' : 'light', true); continue; }
@@ -1201,6 +1235,7 @@ try {
         if (R2B_ONLY) { if (mode === 'no') await shootR2b('native', false); continue; }
         if (GTD_HUB_ONLY) { if (mode === 'no') await shootGtdHub('native', false); continue; }
         if (SMALL2_ONLY) { if (mode === 'no') await shootSmall2('native', false); continue; }
+        if (STATUS_MENU_ONLY) { if (mode === 'no') await shootStatusMenu('native', false); continue; }
         if (A13_ONLY) { if (mode === 'no') await shoot13a('native', false); continue; }
         if (R2_ONLY) { await shootR2('native', mode === 'yes' ? 'dark' : 'light', false); continue; }
         if (S5_ONLY) { await shootS5('native', mode === 'yes' ? 'dark' : 'light', false); continue; }

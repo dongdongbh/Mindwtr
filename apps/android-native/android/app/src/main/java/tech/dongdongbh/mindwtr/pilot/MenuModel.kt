@@ -34,7 +34,7 @@ private const val PAGE = 50
 private const val WINDOW = 100
 
 /** The Menu tab's commands (host-entry.ts MENU_COMMANDS); core can refuse each before writing. */
-val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
+val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "taskDestinationMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
     "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 /**
@@ -1417,6 +1417,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         "projectNextAction" -> JSONObject(action.title).put("requestId", action.id)
         // A row's Done at a picked time, or a finished row's time (CompletedAtFlow.kt): core's input and the request UUID.
         "taskCompletedAt" -> JSONObject(action.title).put("requestId", action.id)
+        // The status menu's Move to project or area… (InboxViewModel.moveToDestination): core's whole input and the request UUID.
+        "taskDestinationMove" -> JSONObject(action.title).put("requestId", action.id)
         // Settings: core's whole input and the request UUID; Manage's Someday section writes are target-state and take none.
         "generalSetting", "gtdSetting", "manageEditor", "manageDelete", "dataSetting", "syncPreference", "setAISetting", "calendarSetting" -> JSONObject(action.title).put("requestId", action.id)
         // Settings › Notifications' edit, as core gave it.

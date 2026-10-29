@@ -197,7 +197,7 @@ private fun TextAction(label: String, color: Color, enabled: Boolean, action: ()
 
 /** RN's modal input: bordered, radius 8, the input background; [value] as typed; [onDone] is the keyboard's Done (RN's onSubmitEditing). */
 @Composable
-private fun ModalInput(value: String, placeholder: String, description: String, modifier: Modifier = Modifier, enabled: Boolean = true, onDone: (() -> Unit)? = null,
+internal fun ModalInput(value: String, placeholder: String, description: String, modifier: Modifier = Modifier, enabled: Boolean = true, onDone: (() -> Unit)? = null,
                        onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)

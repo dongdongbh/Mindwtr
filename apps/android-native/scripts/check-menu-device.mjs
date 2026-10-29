@@ -8,7 +8,10 @@
 // screens this app lacks drawn disabled; (b) Waiting shows core's stats and rows, and the person chip narrows them as
 // core does; (c) Someday: New section… stores the fixed section 6000 once (later runs find it), Move to section… moves the
 // Someday capture into it and the toast's Undo moves it back (one write each), and a failed commit of a heading's Add task
-// keeps its exact retry (the capture UUID on disk) and Try again stores it once; (d) Reference opens on core's list;
+// keeps its exact retry (the capture UUID on disk) and Try again stores it once; (c2) the Someday row's status menu draws RN's
+// Destination group (Move to project or area…, Move to section…, as written) and Copy task link / Copy task ID (43479990e; shot as
+// status-menu.png), Copy task ID shows RN's copied toast, and Move to project or area… opens core's picker, whose first area moves
+// the task there in one write (skipped when the development data has no area); (d) Reference opens on core's list;
 // (e) History's Done and Archived tabs show core's rows; (f) Archived's Restore (move to Inbox) stores once; (g) rotation
 // and process death keep History on its Archived tab. It touches only the development package (it refuses any other APK),
 // never launches over another app, restores rotation and clears its debug properties on exit.
@@ -16,7 +19,7 @@
 // Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { EDGE_SAFE_X, besideRow, box, button, check, chipOn, connect, evidenced, fail, hasText, inboxCount, owedRetry, Stopped, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
@@ -52,7 +55,7 @@ const SECTION = '6000';
 const PERSON = '6061';
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
-const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
+const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
 const commands = (operation, outcome = 'saved') => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
@@ -94,7 +97,8 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
     const sections = (store.settings.gtd?.viewSections?.someday ?? []).filter((section) => section.title === process.env.CHECK_SECTION);
     const live = store._allTasks.filter((task) => !task.deletedAt);
     const stored = Object.fromEntries(Object.values(JSON.parse(process.env.CHECK_TITLES)).map((title) => [title,
-        live.filter((task) => task.title === title).map((task) => ({ id: task.id, status: task.status, section: task.viewSectionIds?.someday ?? null }))]));
+        live.filter((task) => task.title === title).map((task) => ({ id: task.id, status: task.status, section: task.viewSectionIds?.someday ?? null,
+            areaId: task.areaId ?? null }))]));
     console.log(JSON.stringify({
         tiles: [...more.primary, ...more.utilities].map((item) => ({ id: item.id, label: item.label })),
         waiting: { rows: waiting.rows.map((row) => row.title), stats: waiting.stats },
@@ -103,6 +107,7 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
         archive: archive.items.map(titleOf).filter(Boolean),
         reference: { rows: reference.items.map(titleOf).filter(Boolean), empty: reference.empty.message },
         sections: sections.map((section) => section.id),
+        areas: store.areas.filter((area) => !area.deletedAt).map((area) => ({ id: area.id, name: area.name })),
         stored,
     }));
     process.exit(0);
@@ -263,6 +268,36 @@ try {
     check(commands('somedayMove') === movesBefore + 1, `(c) the move into "${SECTION}" is one write, and core's toast says "${moved}"`);
     seen = core();
     check(seen.stored[titles.someday][0].section === null && commands('somedayUndo') === undosBefore + 1, '(c) Undo is one write and puts the task back under No section');
+
+    // (c2) RN's status menu (43479990e): the Destination group and the copy rows, words as written; Copy task ID; Move to project or area….
+    const openStatusMenu = async () => {
+        nodes = await device.settle(await device.reveal(titles.someday));
+        return tapExpecting(besideRow(nodes, titles.someday, statusLabel) ?? fail('no status control on the Someday row'),
+            (current) => Boolean(withDescription(current, en['task.copyTaskId'])), 'the status menu');
+    };
+    nodes = await openStatusMenu();
+    check(hasText(nodes, en['task.destination']) && [en['task.moveToProjectOrArea'], en['viewSections.moveToSection'], en['task.copyTaskLink'], en['task.copyTaskId']]
+        .every((label) => withDescription(nodes, label) && hasText(nodes, label)), '(c2) the status menu shows Destination, Move to project or area…, Move to section…, Copy task link and Copy task ID, as RN writes them');
+    mkdirSync(work, { recursive: true });
+    writeFileSync(resolve(work, 'status-menu.png'), adbRaw('exec-out', 'screencap', '-p'));
+    await tap(withDescription(nodes, en['task.copyTaskId']));
+    await waitFor('RN\'s copied toast', (current) => hasText(current, en['list.taskCopied']), 10_000);
+    check(true, `(c2) Copy task ID shows "${en['list.taskCopied']}"`);
+    nodes = await openStatusMenu();
+    nodes = await tapExpecting(withDescription(nodes, en['task.moveToProjectOrArea']), (current) => Boolean(tagged(current, 'destination-search')), 'core\'s destination picker');
+    writeFileSync(resolve(work, 'destination-picker.png'), adbRaw('exec-out', 'screencap', '-p'));
+    check(hasText(nodes, en['task.destination']) && hasText(nodes, en['common.none']) && hasText(nodes, en['nav.projects']), '(c2) the picker shows Destination, None and Projects');
+    const area = seen.areas.map((entry) => ({ ...entry, node: withDescription(nodes, `${en['taskEdit.areaLabel']}: ${entry.name}`) })).find((entry) => entry.node);
+    if (!area) {
+        console.log('skip - (c2) no area on the picker\'s first screen of the development data');
+        sh('input keyevent KEYCODE_BACK');
+    } else {
+        const destinationsBefore = commands('taskDestinationMove');
+        await tap(area.node);
+        await waitFor('the move', () => commands('taskDestinationMove') === destinationsBefore + 1, 10_000);
+        seen = core();
+        check(seen.stored[titles.someday][0].areaId === area.id, `(c2) the area "${area.name}" is stored on the task in one write`);
+    }
 
     setProp('fail_commit', '1');
     const addLabel = en['viewSections.addTask'].replace('{section}', SECTION);

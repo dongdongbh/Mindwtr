@@ -50,7 +50,7 @@ class WriteJournal(
         )
         /** host-entry.ts's MENU_COMMANDS and the keys each one's JSON input holds (check-boot-gates.mjs keeps the names equal). */
         val MENU = mapOf(
-            "activateProject" to "{projectId,projectRevision}", "somedayMove" to "{requestId,taskIds[]}", "somedayProjectMove" to "{requestId,projectId}", "somedayUndo" to "{moveRequestId,requestId}",
+            "activateProject" to "{projectId,projectRevision}", "somedayMove" to "{requestId,taskIds[]}", "somedayProjectMove" to "{requestId,projectId}", "taskDestinationMove" to "{requestId,id}", "somedayUndo" to "{moveRequestId,requestId}",
             "somedayTask" to "{captureId}", "somedaySection" to "{requestId}", "taskListSort" to "{sortBy}", "somedayRename" to "{id}",
             "somedayReorder" to "{ids[]}", "somedayDelete" to "{id}",
             // Settings › Sync's screen commands: never on disk (UNJOURNALED), so their shapes are never checked.

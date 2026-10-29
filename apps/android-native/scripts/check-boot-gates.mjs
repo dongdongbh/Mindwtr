@@ -816,6 +816,10 @@ assert.match(rowUi, /val canMove = writable && !busy && \(failedAction == null \
 assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision, askNext = true\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
 assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete, onLongDone = onLongDone\)/);
 assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
+// RN's status menu (43479990e): the Destination group's Move to project or area… opens core's picker; its rows keep their words.
+assert.match(rowUi, /StatusMenuAction\(t\("task\.moveToProjectOrArea"\), idle\) \{ openDestination\(task\) \}/);
+assert.match(rowUi, /Text\(label, style = rnText\(14, 500\), color = c\.text, textAlign = TextAlign\.Center\)/);
+assert.doesNotMatch(rowUi, /split\(' '\)\.joinToString/, 'no capitalized words in the status menu rows');
 // RN's long press on a parked project in its Someday section opens Move to section… for it (#1319, 8fd2cab96).
 assert.match(source('MenuWidgets.kt'), /onLongClick = moveLabel\?\.let \{ \{ if \(enabled\) menu\.openProjectMove\(id, revision\) \} \}/);
 assert.match(source('SomedayScreen.kt'), /ParkedProject\(model, item\.json\.getJSONObject\("project"\), item\.json\.getString\("activateLabel"\), view\.getJSONObject\("text"\)\.getString\("moveToSection"\)\)/);
@@ -1367,7 +1371,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     // Core's write commands: every command of the crash-safe table (native-request-receipts.ts states the rule each follows).
     const coreWrites = ['setTaskFocus', 'completeTask', 'undoTaskCompletion', 'undoInboxDecision', 'setProjectFocus', 'createProject', 'saveSearch', 'updateTask', 'saveTaskDraft', 'resetTaskChecklist',
         'submitQuickCapture', 'submitQuickCaptureLines', 'submitQuickCapturePickerQuery', 'commitInboxProcessingStep', 'skipInboxProcessingTask', 'setAreaFilter',
-        'activateProject', 'moveSomedayTasksToSection', 'moveSomedayProjectToSection', 'undoSomedaySectionMove', 'addSomedaySectionTask', 'createSomedaySection', 'setTaskListSort',
+        'activateProject', 'moveSomedayTasksToSection', 'moveSomedayProjectToSection', 'moveTaskToDestination', 'undoSomedaySectionMove', 'addSomedaySectionTask', 'createSomedaySection', 'setTaskListSort',
         'runArchiveAction', 'runContextsAction', 'runTrashAction', 'runReviewAction', 'runCalendarAction', 'runBoardAction', 'runBulkAction', 'setFocusGroupBy',
         'saveFocusFilter', 'removeFocusFilterCriterion', 'deleteFocusFilter', 'reorderFocus', 'createBulkOrganizeDestination', 'addMindSweepItem', 'deleteSavedSearch', 'setSavedSearchSort',
         'setGeneralSetting', 'setGtdSetting', 'setDataSetting', 'saveManageEditor', 'deleteManageItem', 'renameSomedaySection', 'reorderSomedaySections', 'deleteSomedaySection',
@@ -10013,8 +10017,11 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     const menuKt = source('EditorMenu.kt');
     assert.match(editorUi, /EditorMoreButton\(model, editor\)/);
     assert.match(menuKt, /Icon\(Lucide\.MoreHorizontal, null, tint = c\.tint, modifier = Modifier\.size\(24\.dp\)\)/);
-    // Copy task link: this build's own scheme, so a development build's link opens the development build.
-    assert.match(menuKt, /"\$\{BuildConfig\.URL_SCHEME\}:\/\/open\?task=\$\{Uri\.encode\(editor\.id\)\}"/);
+    // Copy task link: this build's own scheme, so a development build's link opens the development build. The status menu's
+    // Copy task link and Copy task ID run the same copyTaskReference (43479990e).
+    assert.match(menuKt, /val text = if \(link\) "\$\{BuildConfig\.URL_SCHEME\}:\/\/open\?task=\$\{Uri\.encode\(taskId\)\}" else taskId/);
+    assert.match(menuKt, /EditorMenuAction\.CopyLink -> shell\.copyTaskReference\(context, editor\.id, link = true\)/);
+    assert.match(source('TaskRowView.kt'), /copyTaskReference\(context, task\.id, link = true\)[\s\S]{0,200}copyTaskReference\(context, task\.id, link = false\)/);
     assert.match(menuKt, /runtime\.menuRead\("taskShare", /);
     assert.match(menuKt, /Intent\(Intent\.ACTION_SEND\)/);
     assert.match(menuKt, /shell\.menu\.board\.duplicate\(editor\.id\)/);

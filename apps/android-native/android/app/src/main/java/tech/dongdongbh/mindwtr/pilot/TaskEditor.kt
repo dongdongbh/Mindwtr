@@ -1481,9 +1481,12 @@ private fun WaitingPrompt(model: InboxViewModel, text: String, locked: Boolean) 
     }
 }
 
-/** RN's picker modal (TaskEditDestinationPicker, TaskEditSectionPicker): a card over a dimmed screen, the list, and Cancel. Search and "New …" are not built. */
+/**
+ * RN's picker modal (TaskEditDestinationPicker, TaskEditSectionPicker): a card over a dimmed screen, the list, and Cancel. The
+ * status menu's destination picker adds RN's search field ([search]) above the list; the editor's has none yet, nor "New …".
+ */
 @Composable
-private fun PickerDialog(title: String, dismiss: () -> Unit, items: @Composable ColumnScope.() -> Unit) {
+internal fun PickerDialog(title: String, dismiss: () -> Unit, search: (@Composable () -> Unit)? = null, items: @Composable ColumnScope.() -> Unit) {
     val theme = LocalTheme.current
     val c = theme.colors
     BackHandler(onBack = dismiss)
@@ -1493,6 +1496,7 @@ private fun PickerDialog(title: String, dismiss: () -> Unit, items: @Composable 
         Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
             .pointerInput(Unit) { detectTapGestures { } }.padding(16.dp)) {
             Text(title, style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
+            search?.let { Box(Modifier.padding(bottom = 12.dp)) { it() } }
             Column(Modifier.heightIn(max = 260.dp).fillMaxWidth().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
                 .verticalScroll(rememberScrollState()).padding(vertical = 4.dp), content = items)
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.End) {
@@ -1505,15 +1509,19 @@ private fun PickerDialog(title: String, dismiss: () -> Unit, items: @Composable 
 }
 
 @Composable
-private fun PickerItem(text: String, tag: String? = null, onClick: () -> Unit) {
+internal fun PickerItem(text: String, tag: String? = null, description: String? = null, selected: Boolean? = null, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     Box(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(role = Role.Button, onClick = onClick)
+        .then(if (description != null || selected != null) Modifier.semantics {
+            description?.let { contentDescription = it }
+            selected?.let { this.selected = it }
+        } else Modifier)
         .then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.CenterStart) {
         Text(text, style = rnText(16, 400), color = c.text)
     }
 }
 
 @Composable
-private fun PickerHeading(text: String) {
+internal fun PickerHeading(text: String) {
     Text(text, style = rnText(16, 700), color = LocalTheme.current.colors.secondaryText, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
 }

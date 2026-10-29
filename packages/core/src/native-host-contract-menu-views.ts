@@ -87,7 +87,10 @@ import {
 } from './someday-sections-model';
 import { normalizeDateRange } from './saved-filters';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
+import { getProjectChoiceState, groupProjectsForPicker, isSelectableProjectForTaskAssignment } from './project-utils';
 import { useTaskStore } from './store';
+import { buildTaskMovePatch, type TaskMoveDestination } from './task-container-rules';
+import { compareAreasByOrder } from './task-utils';
 import { TASK_EDITOR_ENERGY_LEVEL_OPTIONS, TASK_EDITOR_PRIORITY_OPTIONS } from './task-editor-model';
 import type { TaskGroupBy } from './task-group-sections';
 import { DONE_TASK_LIST_SORT_OPTIONS, TASK_LIST_SORT_OPTIONS } from './task-list-sort-options';
@@ -213,6 +216,17 @@ export type NativeSomedayItem =
     | { type: 'task'; row: NativeTaskRow; groupId: string | null }
     /** With `projectsInSections`: a parked project in its section group, before the group's tasks (#1319). */
     | { type: 'project'; id: string; groupId: string; project: DeferredRow; activateLabel: string };
+
+/** getTaskDestinationPicker's answer: core's words and rows; each row's `destination` is moveTaskToDestination's. */
+export type NativeTaskDestinationPicker = {
+    title: string;
+    searchLabel: string;
+    cancelLabel: string;
+    none: { title: string; selected: boolean; destination: TaskMoveDestination };
+    projectGroups: { title: string; rows: { title: string; accessibilityLabel: string; selected: boolean; destination: TaskMoveDestination }[] }[];
+    areas: { title: string; rows: { title: string; accessibilityLabel: string; selected: boolean; destination: TaskMoveDestination }[] };
+    noMatches: string | null;
+};
 
 export type NativeSomedayView = Paged<{
     items: NativeSomedayItem[];
@@ -1146,6 +1160,86 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
             const saved = await deps.save();
             if (!saved.ok) return saved;
             return { ok: true, value: { id: project.id, changed: true } };
+        },
+
+        /**
+         * RN's status menu Move to project or area… picker (SwipeableTaskItemStatusMenu → TaskEditDestinationPicker, no create):
+         * None, then the projects matching [query] (active ones, then Someday / Waiting under their own heading when there are
+         * any, #1467), then the matching areas; the task's own destination selected. Each row's `destination` is
+         * moveTaskToDestination's.
+         */
+        getTaskDestinationPicker(input: { id: string; query?: string }): NativeHostResult<NativeTaskDestinationPicker> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            if (!isObjectRecord(input) || !isText(input.id) || !input.id || (input.query !== undefined && !isText(input.query))) {
+                return fail('INVALID_INPUT', 'A task ID and an optional search text are required');
+            }
+            const state = useTaskStore.getState();
+            const task = state._tasksById.get(input.id);
+            if (!task || task.deletedAt) return fail('INVALID_INPUT', 'Task not found');
+            const t = deps.t();
+            const query = input.query ?? '';
+            const normalized = query.trim().toLowerCase();
+            const projectsLabel = t('nav.projects');
+            const areasLabel = t('taskEdit.areaLabel');
+            const choices = getProjectChoiceState(state.projects, query);
+            const groups = groupProjectsForPicker(choices.filteredProjects, state.areas);
+            const areas = state.areas.filter((area) => !area.deletedAt).sort(compareAreasByOrder)
+                .filter((area) => !normalized || area.name.toLowerCase().includes(normalized));
+            const projectRow = (project: { id: string; title: string }) => ({ title: project.title, accessibilityLabel: `${projectsLabel}: ${project.title}`,
+                selected: task.projectId === project.id, destination: { kind: 'project' as const, id: project.id } });
+            return { ok: true, value: {
+                title: t('task.destination'),
+                searchLabel: t('common.search'),
+                cancelLabel: t('common.cancel'),
+                none: { title: t('common.none'), selected: !task.projectId && !task.areaId, destination: { kind: 'none' } },
+                projectGroups: [
+                    { title: projectsLabel, rows: groups.active.map(projectRow) },
+                    ...(groups.deferred.length > 0 ? [{ title: tFallback(t, 'projects.deferredSection', 'Someday / Waiting'), rows: groups.deferred.map(projectRow) }] : []),
+                ],
+                areas: { title: areasLabel, rows: areas.map((area) => ({ title: area.name, accessibilityLabel: `${areasLabel}: ${area.name}`,
+                    selected: task.areaId === area.id, destination: { kind: 'area' as const, id: area.id } })) },
+                noMatches: choices.filteredProjects.length === 0 ? t('common.noMatches') : null,
+            } };
+        },
+
+        /**
+         * RN's status menu move (swipeable-task-item.tsx handleMoveToDestination): core's buildTaskMovePatch for [destination]
+         * through updateTask. `taskRevision` is the row's (its status menu's): a task changed since is not written (STALE_REVISION). A project
+         * that cannot take tasks, an area that is gone, or a task in an archived project is refused (INVALID_INPUT). Target
+         * state: a task already there is not written. Reusing `requestId` returns the first outcome.
+         */
+        async moveTaskToDestination(input: { id: string; taskRevision: string; destination: TaskMoveDestination; requestId: string }):
+            Promise<NativeHostResult<{ id: string; changed: boolean }>> {
+            const ready = deps.readiness();
+            if (!ready.ok) return ready;
+            const destination = isObjectRecord(input) && isObjectRecord(input.destination) ? input.destination : null;
+            if (!isObjectRecord(input) || !isText(input.id) || !input.id || !isRevision(input.taskRevision)
+                || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId) || !destination
+                || !(destination.kind === 'none' && Object.keys(destination).length === 1
+                    || (destination.kind === 'project' || destination.kind === 'area') && Object.keys(destination).length === 2 && isText(destination.id) && destination.id)) {
+                return fail('INVALID_INPUT', 'A task ID, the revision the picker showed, a destination, and a request UUID are required');
+            }
+            const { id, taskRevision, requestId } = input;
+            const target = destination as TaskMoveDestination;
+            return receipts.run<{ id: string; changed: boolean }>(requestId, JSON.stringify(['moveTaskToDestination', id, taskRevision, target]), async () => {
+                const state = useTaskStore.getState();
+                const task = state._tasksById.get(id);
+                if (!task || task.deletedAt) return fail('INVALID_INPUT', 'Task not found');
+                const parent = task.projectId ? state._projectsById.get(task.projectId) : undefined;
+                if (parent?.status === 'archived') return fail('INVALID_INPUT', 'Task is read-only while its project is archived');
+                if (target.kind === 'project') {
+                    const project = state._projectsById.get(target.id);
+                    if (!project || !isSelectableProjectForTaskAssignment(project)) return fail('INVALID_INPUT', 'That project cannot take tasks');
+                }
+                if (target.kind === 'area' && !state.areas.some((area) => area.id === target.id && !area.deletedAt)) return fail('INVALID_INPUT', 'That area is not available');
+                const patch = buildTaskMovePatch(target, { projectId: task.projectId, sectionId: task.sectionId });
+                const changed = (['projectId', 'sectionId', 'areaId'] as const).some((field) => (patch[field] ?? undefined) !== (task[field] ?? undefined));
+                if (!changed) return { ok: true, value: { id, changed: false } };
+                const stale = refuseStaleTasks([id], { [id]: taskRevision });
+                if (stale) return stale;
+                return settleWrite(await runStoreWrite(() => useTaskStore.getState().updateTask(id, patch)), { id, changed: true });
+            });
         },
 
         /**

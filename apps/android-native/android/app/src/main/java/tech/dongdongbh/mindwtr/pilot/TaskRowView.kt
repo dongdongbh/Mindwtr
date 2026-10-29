@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import kotlinx.coroutines.launch
@@ -309,14 +310,16 @@ private fun StatusControl(model: InboxViewModel, task: TaskRow, icon: Boolean, e
 }
 
 /**
- * RN's status menu: a centered card over a dimmed screen, "Change Status", and the six statuses
- * with core's labels and colors. A choice runs core's updateTask with the status the row was
- * loaded with. On Someday's rows RN adds Move to section… (core's move dialog, MenuModel.openMove);
- * RN's Move to… needs a contract call this app lacks.
+ * RN's status menu (SwipeableTaskItemStatusMenu): a centered card over a dimmed screen, "Change Status", and the six statuses
+ * with core's labels and colors. A choice runs core's updateTask with the status the row was loaded with. Under them, RN's
+ * Destination group: Move to project or area… (core's picker, [DestinationPicker]) and, on Someday's rows, Move to section…
+ * (core's move dialog, MenuModel.openMove). Last, Copy task link and Copy task ID (RN's copyTaskReference). The rows below the
+ * statuses keep their words as written (RN 43479990e). RN's Add to checklist… is not built yet (PLAN gap 10).
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun StatusMenu(model: InboxViewModel) = with(model) {
+    DestinationPicker(model)
     val task = statusMenu ?: return
     val theme = LocalTheme.current
     val c = theme.colors
@@ -351,16 +354,67 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                     }
                 }
             }
-            // RN's Move to section… pill, full width under the statuses (its text capitalized per word, as RN's menuText).
-            menu.moveLabel(task)?.let { label ->
-                val enabled = writable && !busy && failedAction == null
-                Row(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().clip(RoundedCornerShape(20.dp)).rnBorder(1.dp, c.border, RoundedCornerShape(20.dp))
-                    .clickable(enabled = enabled, role = Role.Button) { showStatusMenu(null); menu.openMove(listOf(task.id), JSONObject().put(task.id, task.taskRevision)) }
-                    .semantics { contentDescription = label }.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                    Text(label.split(' ').joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }, style = rnText(14, 500), color = c.text)
+            val idle = writable && !busy && failedAction == null
+            // RN's Destination group (menuMoveActions): its header, Move to project or area…, then Move to section… on Someday's rows.
+            Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(t("task.destination"), style = rnText(13, 600), color = c.secondaryText, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().semantics { heading() })
+                StatusMenuAction(t("task.moveToProjectOrArea"), idle) { openDestination(task) }
+                menu.moveLabel(task)?.let { moveLabel ->
+                    StatusMenuAction(moveLabel, idle) { showStatusMenu(null); menu.openMove(listOf(task.id), JSONObject().put(task.id, task.taskRevision)) }
                 }
             }
+            // RN's Copy task link and Copy task ID, on every row.
+            val context = LocalContext.current
+            Column(Modifier.fillMaxWidth().padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatusMenuAction(t("task.copyTaskLink"), true) { showStatusMenu(null); copyTaskReference(context, task.id, link = true) }
+                StatusMenuAction(t("task.copyTaskId"), true) { showStatusMenu(null); copyTaskReference(context, task.id, link = false) }
+            }
         }
+    }
+}
+
+/**
+ * RN's TaskEditDestinationPicker as the status menu opens it (no create): its search, then core's rows: None, the projects
+ * (active, then Someday / Waiting), the areas, and core's no-matches line. A row runs core's moveTaskToDestination.
+ */
+@Composable
+private fun DestinationPicker(model: InboxViewModel) = with(model) {
+    destinationFor ?: return
+    val picker = destinationPicker
+    val c = LocalTheme.current.colors
+    PickerDialog(picker?.getString("title") ?: t("task.destination"), { closeDestination() }, search = {
+        ModalInput(destinationQuery, t("common.search"), picker?.getString("title") ?: t("task.destination"), Modifier.testTag("destination-search")) { searchDestination(it) }
+    }) {
+        picker ?: return@PickerDialog
+        val enabled = writable && !busy && failedAction == null
+        val row: @Composable (JSONObject, String?) -> Unit = { choice, description ->
+            PickerItem(choice.getString("title"), description = description, selected = choice.getBoolean("selected")) {
+                if (enabled) moveToDestination(choice.getJSONObject("destination"))
+            }
+        }
+        row(picker.getJSONObject("none"), null)
+        for (group in picker.menuObjects("projectGroups")) {
+            PickerHeading(group.getString("title"))
+            for (project in group.menuObjects("rows")) row(project, project.getString("accessibilityLabel"))
+        }
+        val areas = picker.getJSONObject("areas")
+        PickerHeading(areas.getString("title"))
+        for (area in areas.menuObjects("rows")) row(area, area.getString("accessibilityLabel"))
+        picker.menuText("noMatches")?.let { Text(it, style = rnText(16, 400), color = c.secondaryText,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
+    }
+}
+
+/** RN's menuMoveItem: a full-width pill (44 high, RN's border), its words centered as written. */
+@Composable
+private fun StatusMenuAction(label: String, enabled: Boolean, onClick: () -> Unit) {
+    val c = LocalTheme.current.colors
+    val shape = RoundedCornerShape(20.dp)
+    Box(Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth().heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape)
+        .clickable(enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = label }
+        .padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(label, style = rnText(14, 500), color = c.text, textAlign = TextAlign.Center)
     }
 }
 

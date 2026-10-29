@@ -250,6 +250,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     var areaSheet by mutableStateOf(false); private set
     /** The row whose status menu is open (RN's SwipeableTaskItemStatusMenu). */
     var statusMenu by mutableStateOf<TaskRow?>(null); private set
+    /** The status menu's Move to project or area… picker: its row, the typed search, and core's picker for them (getTaskDestinationPicker). */
+    var destinationFor by mutableStateOf<TaskRow?>(null); private set
+    var destinationQuery by mutableStateOf(""); private set
+    var destinationPicker by mutableStateOf<JSONObject?>(null); private set
     /** RN's toast: an optional title, a message, and its tone, shown for core's time or RN's 3.2 s (toastDurationMs). */
     var toast by mutableStateOf<Toast?>(null); private set
     /** The "Add new project…" draft, its area ("" = no area), and its request UUID; all survive process death. */
@@ -1383,6 +1387,41 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                 outcome.optJSONObject("toast")?.let { showToast(it) }
             }
         }, "mindwtr-pull-sync").start()
+    }
+
+    /** RN's Move to project or area…: the status menu closes and the picker opens on core's rows for [task]. */
+    fun openDestination(task: TaskRow) {
+        statusMenu = null
+        destinationFor = task
+        destinationQuery = ""
+        destinationPicker = null
+        readDestination()
+    }
+
+    /** The picker's search, as typed: core narrows the rows. */
+    fun searchDestination(text: String) {
+        destinationQuery = text
+        readDestination()
+    }
+
+    fun closeDestination() {
+        destinationFor = null
+        destinationPicker = null
+    }
+
+    private fun readDestination() {
+        val task = destinationFor ?: return
+        val query = destinationQuery
+        background(listOf(Part.MenuDialog), { runtime -> runtime.menuRead("taskDestination", JSONObject().put("id", task.id).put("query", query).toString()) }) { reply, _ ->
+            if (destinationFor?.id == task.id && destinationQuery == query) destinationPicker = reply
+        }
+    }
+
+    /** A picker row: core's moveTaskToDestination with the row's revision and a new request UUID (RN's handleMoveToDestination). */
+    fun moveToDestination(destination: JSONObject) {
+        val task = destinationFor ?: return
+        closeDestination()
+        menu.command("taskDestinationMove", JSONObject().put("id", task.id).put("taskRevision", task.taskRevision).put("destination", destination))
     }
 
     private var toastShown = 0
