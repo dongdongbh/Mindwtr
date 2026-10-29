@@ -1030,6 +1030,57 @@ describe('TaskItem', () => {
         });
     });
 
+    it.each([
+        { command: 'estimate', value: '45m', enabled: true, expected: 'custom:45' },
+        { command: 'duration', value: '1h30m', enabled: true, expected: 'custom:90' },
+        { command: 'estimate', value: 'invalid', enabled: true, expected: '15min' },
+        { command: 'duration', value: 'invalid', enabled: true, expected: '15min' },
+        { command: 'estimate', value: '45m', enabled: false, expected: '15min' },
+        { command: 'duration', value: '1h30m', enabled: false, expected: '15min' },
+    ])('handles editor /$command:$value with time estimates enabled=$enabled', async ({ command, value, enabled, expected }) => {
+        const editableTask: Task = { ...mockTask, title: 'Email', status: 'next', timeEstimate: '15min' };
+        act(() => {
+            useTaskStore.setState({
+                tasks: [editableTask],
+                _allTasks: [editableTask],
+                _tasksById: new Map([[editableTask.id, editableTask]]),
+                settings: { features: { timeEstimates: enabled } },
+            });
+        });
+        const view = render(<LanguageProvider><TaskItem task={editableTask} /></LanguageProvider>);
+        fireEvent.click(view.getAllByRole('button', { name: /edit/i })[0]);
+        const titleInput = view.getByDisplayValue('Email');
+        if (!(titleInput instanceof HTMLInputElement)) throw new Error('Expected title input');
+        const commandText = `/${command}:${value}`;
+        const typedTitle = `Email ${commandText} today`;
+        fireEvent.change(titleInput, { target: { value: typedTitle } });
+        const caret = `Email ${commandText}`.length;
+        titleInput.setSelectionRange(caret, caret);
+        fireEvent.click(titleInput);
+
+        if (enabled) {
+            expect(await view.findByRole('option', { name: commandText })).toBeInTheDocument();
+            await act(async () => {
+                fireEvent.keyDown(titleInput, { key: 'Enter' });
+            });
+        } else {
+            expect(view.queryByRole('option', { name: commandText })).not.toBeInTheDocument();
+        }
+        const expectedTitle = expected === '15min' ? typedTitle : 'Email today';
+        await waitFor(() => expect(titleInput.value).toBe(expectedTitle));
+        expect(useTaskStore.getState()._tasksById.get(editableTask.id)?.timeEstimate).toBe('15min');
+
+        await act(async () => {
+            fireEvent.click(view.getByRole('button', { name: 'Save' }));
+        });
+        await waitFor(() => {
+            expect(useTaskStore.getState()._tasksById.get(editableTask.id)).toMatchObject({
+                title: expectedTitle,
+                timeEstimate: expected,
+            });
+        });
+    });
+
     it('appends accepted slash notes instead of overwriting an existing description', async () => {
         const editableTask: Task = {
             ...mockTask,

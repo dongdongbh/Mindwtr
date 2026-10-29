@@ -27,6 +27,8 @@ import {
     buildQuickAddParseOptions,
     getPersonOptionNames,
     normalizeTimeSpentMinutes,
+    parseTimeEstimateInput,
+    minutesToTimeEstimate,
     useTaskStore,
     updateTaskFromLatest,
     areDraftAttachmentsDirty,
@@ -1572,6 +1574,14 @@ export const TaskItem = memo(function TaskItem({
             return true;
         }
 
+        if (suggestion.command === 'estimate' || suggestion.command === 'duration') {
+            if (!timeEstimatesEnabled) return false;
+            const minutes = parseTimeEstimateInput(value);
+            if (minutes === null) return false;
+            setField('timeEstimate', minutesToTimeEstimate(minutes));
+            return true;
+        }
+
         // /link and /area have no draft field mapping here; the editor wrapper
         // resolves /area against its area list, /link stays as text.
         return false;
@@ -1585,6 +1595,7 @@ export const TaskItem = memo(function TaskItem({
         setField,
         showToast,
         t,
+        timeEstimatesEnabled,
     ]);
 
     useEffect(() => {
