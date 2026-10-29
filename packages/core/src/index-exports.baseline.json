@@ -837,6 +837,7 @@
     "getArchivedProjectRow",
     "getArchivedTaskRow",
     "getAttachmentDisplayTitle",
+    "getAudioMimeType",
     "getAutoArchiveDays",
     "getBackupSourceFileDiagnostic",
     "getBaseSyncUrl",

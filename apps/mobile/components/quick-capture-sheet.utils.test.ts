@@ -19,6 +19,8 @@ describe('quick-capture utils', () => {
         expect(getCaptureMimeType('.wav')).toBe('audio/wav');
         expect(getCaptureMimeType('.mp3')).toBe('audio/mpeg');
         expect(getCaptureMimeType('.unknown')).toBe('audio/mp4');
+        // RN voice bug 3: the speech upload names .webm audio/webm; the attachment says the same.
+        expect(getCaptureMimeType('.webm')).toBe('audio/webm');
     });
 
     it('builds managed capture directory URIs below the root directory', () => {

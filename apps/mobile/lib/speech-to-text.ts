@@ -10,6 +10,7 @@ import type {
 } from '@mindwtr/core';
 import {
   dispatchSpeechCapture,
+  getAudioMimeType,
   normalizeSpeechLanguage,
   REMOTE_SPEECH_TO_TEXT_FOSS_ERROR,
   resolveSpeechToTextRuntimeSettings as resolveSpeechToTextRuntimeSettingsForBuild,
@@ -250,27 +251,8 @@ const getExtension = (uri: string) => {
   return match ? match[0] : '.m4a';
 };
 
-const getMimeType = (uri: string) => {
-  const extension = getExtension(uri);
-  switch (extension.toLowerCase()) {
-    case '.aac':
-      return 'audio/aac';
-    case '.mp3':
-      return 'audio/mpeg';
-    case '.wav':
-      return 'audio/wav';
-    case '.caf':
-      return 'audio/x-caf';
-    case '.3gp':
-    case '.3gpp':
-      return 'audio/3gpp';
-    case '.webm':
-      return 'audio/webm';
-    case '.m4a':
-    default:
-      return 'audio/mp4';
-  }
-};
+// Core's one audio mime table, shared with the capture attachment (RN voice bug 3).
+const getMimeType = (uri: string) => getAudioMimeType(getExtension(uri));
 
 type OpenAIUploadStrategy = 'blob' | 'uri';
 

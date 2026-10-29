@@ -5,6 +5,7 @@ import {
     buildQuickCaptureAudioAttachment,
     discardEmptySpeechTask,
     dispatchSpeechCapture,
+    getAudioMimeType,
     isQuickCaptureSpeechReady,
     REMOTE_SPEECH_TO_TEXT_FOSS_ERROR,
     resolveQuickCaptureAudioFormat,
@@ -204,6 +205,20 @@ describe('quick-capture audio rules', () => {
         expect(state.deleteTask).toHaveBeenCalledWith('t1');
         expect(warned).toEqual(['Failed to discard empty speech task']);
         expect(deleted).toEqual(['file:///a.wav:whisper_empty_transcript', 'file:///b.wav:whisper_empty_transcript']);
+    });
+});
+
+// RN voice bug 3: two mime tables disagreed on .webm (the capture attachment said audio/mp4, the speech upload audio/webm).
+describe('the audio mime table', () => {
+    it('names each recording extension once, for the attachment and the upload alike', () => {
+        expect(getAudioMimeType('.webm')).toBe('audio/webm');
+        expect(getAudioMimeType('.WAV')).toBe('audio/wav');
+        expect(getAudioMimeType('.m4a')).toBe('audio/mp4');
+        expect(getAudioMimeType('.aac')).toBe('audio/aac');
+        expect(getAudioMimeType('.mp3')).toBe('audio/mpeg');
+        expect(getAudioMimeType('.caf')).toBe('audio/x-caf');
+        expect(getAudioMimeType('.3gp')).toBe('audio/3gpp');
+        expect(getAudioMimeType('.ogg')).toBe('audio/mp4');
     });
 });
 

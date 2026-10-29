@@ -6,6 +6,7 @@ import {
     CaptureSessionCoordinator,
     discardEmptySpeechTask,
     dispatchSpeechCapture,
+    getAudioMimeType,
     isQuickCaptureSpeechReady,
     isSandboxMode,
     REMOTE_SPEECH_TO_TEXT_FOSS_ERROR,
@@ -76,7 +77,6 @@ export type NativeVoiceBindings = {
 
 type Active = { id: string; session: number; format: 'm4a' | 'wav'; provider: string; startedAt: number };
 
-const MIME = { m4a: 'audio/mp4', wav: 'audio/wav' } as const;
 const errorCode = (error: unknown) => (error instanceof Error ? error.message : '');
 
 /** RN's processAudioCapture ports for one recording: its bytes, an OpenAI multipart part (the polyfill's Blob), no local Whisper yet. */
@@ -251,7 +251,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const { ready } = readiness(runtime, apiKey);
             // Whisper transcribes on the device (V4): until then a Whisper recording keeps its audio and no transcript.
             const canTranscribe = runtime.provider === 'whisper' ? false : ready;
-            const mimeType = MIME[current.format];
+            const mimeType = getAudioMimeType(`.${current.format}`);
             const recovery = buildQuickCaptureAudioAttachment({ title, uri: stopped.uri, mimeType, size: stopped.size || undefined, now: at, newId: bindings.newId });
             // RN 763c5192c / 67b707e3e / a11bc850d (#788): the attachment is durable in managed storage before the task saves.
             stage = 'attachment';

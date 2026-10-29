@@ -168,6 +168,31 @@ export async function dispatchSpeechCapture(
 
 // ---- The quick-capture rules (RN's use-quick-capture-audio.ts) ----
 
+/**
+ * A recording's mime type by its extension (with the dot, any case): one table for the capture attachment and the speech upload,
+ * which disagreed on .webm (RN voice bug 3). Anything else is m4a's.
+ */
+export const getAudioMimeType = (extension: string): string => {
+    switch (extension.toLowerCase()) {
+        case '.aac':
+            return 'audio/aac';
+        case '.mp3':
+            return 'audio/mpeg';
+        case '.wav':
+            return 'audio/wav';
+        case '.caf':
+            return 'audio/x-caf';
+        case '.3gp':
+        case '.3gpp':
+            return 'audio/3gpp';
+        case '.webm':
+            return 'audio/webm';
+        case '.m4a':
+        default:
+            return 'audio/mp4';
+    }
+};
+
 export const isQuickCaptureSpeechReady = ({
     speechEnabled,
     provider,
