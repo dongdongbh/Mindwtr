@@ -72,12 +72,11 @@ describe('quick-capture speech readiness (moved from RN)', () => {
             provider: 'whisper',
             whisperModelReady: false,
         })).toBe(false);
-        expect(isQuickCaptureSpeechReady({
-            speechEnabled: true,
-            provider: 'whisper',
-            whisperModelReady: false,
-            whisperModelPath: 'file:///document/whisper-models/ggml-tiny.en.bin',
-        })).toBe(true);
+        // RN voice bug 1: a stored model path whose file is gone is not ready (the caller's whisperModelReady checked the file).
+        const storedPathOnly = {
+            speechEnabled: true, provider: 'whisper', whisperModelReady: false, whisperModelPath: 'file:///document/whisper-models/ggml-tiny.en.bin',
+        };
+        expect(isQuickCaptureSpeechReady(storedPathOnly)).toBe(false);
         expect(isQuickCaptureSpeechReady({
             speechEnabled: true,
             provider: 'gemini',

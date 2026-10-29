@@ -410,9 +410,16 @@ export function useQuickCaptureAudio({
           apiKey: guardApiKey,
           baseUrl: guardRuntime.baseUrl,
           whisperModelReady: guardRuntime.provider === 'whisper' ? Boolean(guardWhisper?.exists) : false,
-          whisperModelPath: guardRuntime.modelPath,
         });
         if (!speechConfigured) {
+          // RN voice bug 1: a stored model whose file is gone is not ready (it recorded m4a Whisper then refused, with no notice).
+          if (guardRuntime.provider === 'whisper' && guardRuntime.enabled && guardRuntime.modelPath && !guardWhisper?.exists) {
+            void logInfo('Quick capture Whisper model file missing', {
+              scope: 'capture',
+              force: true,
+              extra: { releaseCheck: 'v1.3.8/whisper-model-missing', outcome: 'not-configured' },
+            });
+          }
           showToast({
             title: t('common.notice'),
             message: t('quickAdd.speechNotConfigured'),
@@ -692,7 +699,6 @@ export function useQuickCaptureAudio({
           apiKey,
           baseUrl: speechRuntime.baseUrl,
           whisperModelReady,
-          whisperModelPath: modelPath,
         });
         let realtimeResult: SpeechToTextResult | null = null;
         let realtimeTranscriptReady = false;
@@ -953,7 +959,6 @@ export function useQuickCaptureAudio({
         apiKey,
         baseUrl: speechRuntime.baseUrl,
         whisperModelReady,
-        whisperModelPath: modelPath,
       });
       const audioUri = finalFile.uri;
       const localWhisperInput = speechReady && provider === 'whisper'

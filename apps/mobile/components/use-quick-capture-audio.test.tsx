@@ -430,6 +430,34 @@ describe('useQuickCaptureAudio', () => {
     expect(handleClose).not.toHaveBeenCalled();
   });
 
+  // RN voice bug 1: a stored Whisper model path whose file is gone was read as speech ready: the sheet recorded m4a, Whisper
+  // refused it, and the task saved as a plain audio note with no notice. Readiness now checks the model file, as the format does.
+  it('reads a Whisper model whose file is gone as speech not set up: a notice, no recording, and a log line', async () => {
+    speechMocks.ensureWhisperModelPathForConfigAsync.mockResolvedValue({
+      exists: false,
+      path: '/document/whisper-models/ggml-tiny.en.bin',
+      uri: 'file:///document/whisper-models/ggml-tiny.en.bin',
+    });
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+
+    await act(async () => {
+      await latest?.startRecording();
+      await flushPromises();
+    });
+
+    expect(toastMock.showToast).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'quickAdd.speechNotConfigured' })
+    );
+    expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
+    expect(audioMocks.AudioRecorder).not.toHaveBeenCalled();
+    expect(appLogMock.logInfo).toHaveBeenCalledWith('Quick capture Whisper model file missing', expect.objectContaining({
+      extra: { releaseCheck: 'v1.3.8/whisper-model-missing', outcome: 'not-configured' },
+    }));
+  });
+
   it('does not auto-start unconfigured audio after the preferred input resolves to text', async () => {
     vi.useFakeTimers();
     storeMocks.state.settings = unconfiguredSettings;

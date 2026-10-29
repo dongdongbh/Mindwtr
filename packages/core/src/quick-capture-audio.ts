@@ -199,7 +199,6 @@ export const isQuickCaptureSpeechReady = ({
     apiKey,
     baseUrl,
     whisperModelReady,
-    whisperModelPath,
 }: {
     speechEnabled: boolean;
     provider: string;
@@ -207,11 +206,11 @@ export const isQuickCaptureSpeechReady = ({
     // Only meaningful for provider 'openai': a self-hosted OpenAI-compatible
     // server (#930) substitutes for a key.
     baseUrl?: string;
+    /** The Whisper model file is on the device. A stored model path alone is not: its file may be gone (RN voice bug 1). */
     whisperModelReady: boolean;
-    whisperModelPath?: string;
 }) => {
     if (!speechEnabled) return false;
-    if (provider === 'whisper') return whisperModelReady || Boolean(whisperModelPath?.trim());
+    if (provider === 'whisper') return whisperModelReady;
     if (provider === 'openai' && Boolean(baseUrl?.trim())) return true;
     return Boolean(apiKey);
 };
