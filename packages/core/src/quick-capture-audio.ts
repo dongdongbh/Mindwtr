@@ -275,12 +275,14 @@ export type SpeechApplyResult = 'applied' | 'empty' | 'skipped';
 
 /**
  * A transcript's fields on the saved task, in one store command that builds them on the task as stored then: the updates, and
- * its suggested project matched by title in the task's area, or made, only while the task still has none.
+ * its suggested project matched by title in the task's area, or made, only while the task still has none. [titleAtSave] is the
+ * task's title when it saved: a title changed since (typed by the user meanwhile) stays (voice V3 review N11).
  */
 export async function applySpeechResult(
     taskId: string,
     result: SpeechToTaskResult,
     store: QuickCaptureAudioStore,
+    options: { titleAtSave?: string } = {},
 ): Promise<SpeechApplyResult> {
     const { tasks: currentTasks, settings: currentSettings } = store.getState();
     const existing = currentTasks.find((task) => task.id === taskId);
@@ -297,6 +299,7 @@ export async function applySpeechResult(
         if (!latest) return;
         const plan = buildTaskUpdatesFromSpeechResult(latest, result, state.settings);
         const rebuilt = plan.updates;
+        if (options.titleAtSave !== undefined && latest.title !== options.titleAtSave) delete rebuilt.title;
         if (plan.suggestedProjectTitle && !latest.projectId) {
             const targetAreaId = rebuilt.areaId ?? latest.areaId;
             const match = findSelectableProjectByTitleAndArea(state.projects, plan.suggestedProjectTitle, targetAreaId);

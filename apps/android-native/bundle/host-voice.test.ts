@@ -123,6 +123,20 @@ describe('native voice capture', () => {
         expect(h.lines.map((line) => `${line.kind}:${line.outcome}`)).toEqual(['capture:saved', 'transcribe:applied']);
     });
 
+    // Voice V3 review N11 (both apps): a late transcript never replaces a title the user typed after the save.
+    it('keeps a title typed after the save when the transcript arrives later', async () => {
+        const late = deferred<string>();
+        const h = harness({}, { transcript: late.promise, tags: ['#errand'] });
+        const session = await record(h);
+        const saved = await h.voice.stop({ session, save: true, text: '', options: OPTIONS }) as { taskId: string };
+        h.state.tasks = h.state.tasks.map((task) => (task.id === saved.taskId ? { ...task, title: 'Typed meanwhile' } : task));
+        late.resolve('Buy milk');
+        await h.voice.settled();
+        const task = h.state.tasks.find((entry) => entry.id === saved.taskId)!;
+        expect(task.title).toBe('Typed meanwhile');
+        expect(task.tags).toEqual(expect.arrayContaining(['#errand']));
+    });
+
     it('an empty transcript deletes the task and both files', async () => {
         const h = harness({}, { transcript: '' });
         const session = await record(h);

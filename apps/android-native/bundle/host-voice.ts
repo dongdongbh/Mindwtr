@@ -192,7 +192,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         }
     };
 
-    const transcribe = (taskId: string, recording: string, attachment: Attachment | null, cleanupSource: boolean,
+    const transcribe = (taskId: string, titleAtSave: string | undefined, recording: string, attachment: Attachment | null, cleanupSource: boolean,
         runtime: ResolvedSpeechToTextRuntimeSettings, apiKey: string, settings: AppSettings, mimeType: string) => {
         const run = (async () => {
             const transcriptionUri = attachment?.uri ?? recording;
@@ -200,7 +200,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 const ports = { ...createNativeSpeechPorts(bindings, transcriptionUri, mimeType, () => undefined),
                     ...(bindings.fetcher ? { fetcher: bindings.fetcher } : {}) };
                 const result = await dispatchSpeechCapture(speechConfigFor(runtime, apiKey, settings, now()), runtime.isFossBuild, ports);
-                const applied = await applySpeechResult(taskId, result, bindings.store);
+                const applied = await applySpeechResult(taskId, result, bindings.store, { titleAtSave });
                 if (applied === 'empty') {
                     await discardEmptySpeechTask(taskId, [{ uri: recording }, attachment ? { uri: attachment.uri } : null], 'speech_empty_transcript', {
                         store: bindings.store, deleteFile: (file) => deleteQuietly(file.uri), onWarn: () => undefined,
@@ -279,7 +279,9 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 bindings.log({ kind: 'capture', outcome: 'failed', provider: runtime.provider, errorKind: 'save-pending' });
             }
             const cleanupSource = !attachment || attachment.uri !== stopped.uri;
-            if (canTranscribe) transcribe(taskId, stopped.uri, attachment, cleanupSource, runtime, apiKey, settings, mimeType);
+            // The title as it saved: a title the user types before the transcript arrives stays (voice V3 review N11).
+            const titleAtSave = bindings.store.getState().tasks.find((task) => task.id === taskId)?.title;
+            if (canTranscribe) transcribe(taskId, titleAtSave, stopped.uri, attachment, cleanupSource, runtime, apiKey, settings, mimeType);
             else if (cleanupSource) deleteQuietly(stopped.uri);
             return { status: 'saved', taskId };
         } catch {

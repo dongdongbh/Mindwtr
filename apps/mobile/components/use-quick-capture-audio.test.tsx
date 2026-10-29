@@ -982,6 +982,38 @@ describe('useQuickCaptureAudio', () => {
     expect(fileMocks.delete).not.toHaveBeenCalledWith(managedAttachmentUri);
   });
 
+  // Voice V3 review N11 (both apps): a late transcript never replaces a title the user typed after the save.
+  it('keeps a title typed after the save when the transcript arrives later', async () => {
+    speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
+    const pendingTranscription = deferred<string>();
+    speechMocks.transcribeLocalWhisper.mockReturnValue(pendingTranscription.promise);
+    await act(async () => {
+      create(<Harness />);
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.startRecording();
+      await flushPromises();
+    });
+    await act(async () => {
+      await latest!.stopRecording({ saveTask: true });
+      await flushPromises();
+    });
+    expect(storeMocks.state.tasks).toHaveLength(1);
+    storeMocks.state.tasks[0]!.title = 'Typed meanwhile';
+
+    await act(async () => {
+      pendingTranscription.resolve('Spoken words');
+      await pendingTranscription.promise;
+      await flushPromises();
+      await flushPromises();
+    });
+
+    expect(speechMocks.transcribeLocalWhisper).toHaveBeenCalledOnce();
+    expect(storeMocks.updateTask).not.toHaveBeenCalledWith('task-1', expect.objectContaining({ title: expect.anything() }));
+    expect(storeMocks.state.tasks[0]!.title).toBe('Typed meanwhile');
+  });
+
   it('finishes deferred audio transcription once after the submitting Activity is replaced', async () => {
     const settingsWithoutAudioAttachments = {
       ...settings,

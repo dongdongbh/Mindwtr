@@ -222,7 +222,7 @@ describe('the audio mime table', () => {
 });
 
 // RN voice bug 2: the suggested project was made before the store command decided, so a project a sync gave the task
-// meanwhile left the new one orphaned.
+// meanwhile left the new one orphaned. Voice V3 review N11 (both apps): a transcript never replaces a title the user typed meanwhile. N11 (review of voice V3): a transcript never replaces a title the user typed meanwhile.
 describe('a late transcript on the task as stored', () => {
     const syncLanding = (tasks: Task[], landing: (task: Task) => Task) => {
         const { state, store } = fakeStore(tasks);
@@ -242,6 +242,17 @@ describe('a late transcript on the task as stored', () => {
         expect(state.addProject).not.toHaveBeenCalled();
         expect(state.tasks[0]?.projectId).toBe('p-synced');
         expect(state.tasks[0]?.title).toBe('Paint');
+    });
+
+    it('keeps a title the user typed after the save, and still applies the rest', async () => {
+        const saved = 'Audio note 06/29/2026, 9:00 AM';
+        const { state, store } = syncLanding([task({ title: saved })], (entry) => ({ ...entry, title: 'Call the plumber' }));
+        await applySpeechResult('t1', { transcript: 'Fix the sink', title: 'Fix the sink', tags: ['#home'] }, store, { titleAtSave: saved });
+        expect(state.tasks[0]?.title).toBe('Call the plumber');
+        expect(state.tasks[0]?.tags).toEqual(['#home']);
+        const untouched = fakeStore([task({ title: saved })]);
+        await applySpeechResult('t1', { transcript: 'Fix the sink', title: 'Fix the sink' }, untouched.store, { titleAtSave: saved });
+        expect(untouched.state.tasks[0]?.title).toBe('Fix the sink');
     });
 });
 

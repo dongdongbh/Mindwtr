@@ -2,6 +2,7 @@
 
 Changes collected since the latest stable release.
 
+- Voice capture: if you change a recording's title before its transcript arrives, the transcript keeps your title and adds only its other details. Before, it replaced the title you typed.
 - Voice capture: when a recording's transcript names a project, the project is now made only if the task still has none when the transcript arrives. Before, if a sync had filed the task in a project meanwhile, Mindwtr still made the named project and left it empty.
 - Mobile: with Whisper chosen for speech, if its model file is gone the microphone now shows the "speech not set up" notice and records nothing. Before, it recorded, Whisper could not read the recording, and the task saved as an audio note with no transcript and no message.
 - Mobile: a voice recording in a .webm file is attached as audio/webm, the type its transcription upload already used. Before, the attachment called it audio/mp4.

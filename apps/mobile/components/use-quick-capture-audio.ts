@@ -355,8 +355,9 @@ export function useQuickCaptureAudio({
   }, [isSpeechSettingsLeaseCurrent, onWarn, resolveWhisperModelAsync, settings.ai?.speechToText, visible]);
 
   // Core's rules (quick-capture-audio.ts) on this app's store.
-  const applySpeechResult = useCallback((taskId: string, result: SpeechToTextResult): Promise<SpeechApplyResult> => (
-    applySpeechResultInStore(taskId, result, useTaskStore)
+  // titleAtSave: the task's title when it saved, so a title typed meanwhile stays (voice V3 review N11).
+  const applySpeechResult = useCallback((taskId: string, result: SpeechToTextResult, titleAtSave?: string): Promise<SpeechApplyResult> => (
+    applySpeechResultInStore(taskId, result, useTaskStore, { titleAtSave })
   ), []);
 
   const discardEmptySpeechTask = useCallback((taskId: string, files: (File | null | undefined)[], reason = 'empty_transcript') => (
@@ -765,6 +766,7 @@ export function useQuickCaptureAudio({
         if (!addTaskResult.success || !addTaskResult.id) return;
         if (isSubmissionCurrent()) handleClose();
         const taskId = addTaskResult.id;
+        const titleAtSave = useTaskStore.getState().tasks.find((task) => task.id === taskId)?.title;
         const shouldCleanupSource = !attachment || attachment.uri !== finalFile.uri;
 
         if (canTranscribeSpeech) {
@@ -789,7 +791,7 @@ export function useQuickCaptureAudio({
           if (provider === 'whisper' && realtimeResult) {
             void Promise.resolve(realtimeResult)
               .then(async (result) => {
-                const applyResult = await applySpeechResult(taskId, result);
+                const applyResult = await applySpeechResult(taskId, result, titleAtSave);
                 if (applyResult === 'empty') {
                   await discardEmptySpeechTask(taskId, [
                     finalFile,
@@ -810,7 +812,7 @@ export function useQuickCaptureAudio({
             : processAudioCapture(transcriptionUri, speechConfig);
           void speechPromise
             .then(async (result) => {
-              const applyResult = await applySpeechResult(taskId, result);
+              const applyResult = await applySpeechResult(taskId, result, titleAtSave);
               if (applyResult === 'empty') {
                 await discardEmptySpeechTask(taskId, [
                   finalFile,
@@ -826,7 +828,7 @@ export function useQuickCaptureAudio({
               onWarn('Whisper offline transcription failed, using realtime result', error);
               return currentRecording.result
                 .then(async (result) => {
-                  const applyResult = await applySpeechResult(taskId, result);
+                  const applyResult = await applySpeechResult(taskId, result, titleAtSave);
                   if (applyResult === 'empty') {
                     await discardEmptySpeechTask(taskId, [
                       finalFile,
@@ -1011,6 +1013,7 @@ export function useQuickCaptureAudio({
       if (!addTaskResult.success || !addTaskResult.id) return;
       if (isSubmissionCurrent()) handleClose();
       const taskId = addTaskResult.id;
+      const titleAtSave = useTaskStore.getState().tasks.find((task) => task.id === taskId)?.title;
       const shouldCleanupSource = !attachment || attachment.uri !== finalFile.uri;
 
       if (canTranscribeSpeech) {
@@ -1036,7 +1039,7 @@ export function useQuickCaptureAudio({
           : processAudioCapture(stripFileScheme(attachment?.uri ?? audioUri), speechConfig);
         void speechPromise
           .then(async (result) => {
-            const applyResult = await applySpeechResult(taskId, result);
+            const applyResult = await applySpeechResult(taskId, result, titleAtSave);
             if (applyResult === 'empty') {
               await discardEmptySpeechTask(taskId, [
                 finalFile,
