@@ -112,3 +112,21 @@ class EntryThreads(private val post: (Long, () -> Unit) -> Unit, private val can
         worker.shutdownNow()
     }
 }
+
+/**
+ * RN's app lock hold (#1475, b7bccbbc3): while the lock covers the app, no entry is read or opened, so nothing opens under the
+ * lock; the unlock lets the router read the queue again. Each held head entry is reported once (RN's lastHeldKey).
+ */
+class EntryLockHold {
+    private var reported: String? = null
+
+    /** Whether the queue waits now ([locked]); [report] runs for [head] the first time it waits. */
+    fun holds(locked: Boolean, head: EntryQueue.Entry?, report: (EntryQueue.Entry) -> Unit): Boolean {
+        if (!locked) return false
+        if (head != null && head.id != reported) {
+            reported = head.id
+            report(head)
+        }
+        return true
+    }
+}

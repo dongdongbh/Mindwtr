@@ -15,7 +15,10 @@
 // needs a screen lock, so this check cannot reach it; (e) the relock delay (#1423), with the debug build's device lock saying yes
 // (debug.mindwtr.native.app_lock_answer): the switch turns App lock on and General draws core's relock row (shot as
 // relock-row.png); with "After 5 minutes", leaving for the home screen for 65 seconds and coming back opens the app without asking;
-// with "After 1 minute", the same leave comes back on the lock screen. Each database change happens while the app is stopped: core writes a
+// with "After 1 minute", the same leave comes back on the lock screen; (f) #1475 (RN b7bccbbc3): with "Immediately", a task link
+// sent while the app is on the home screen (what a widget row's tap sends) comes back on a steady lock screen (sampled for 4
+// seconds, the same process), the link waits in the entry queue unread by core, and the unlock opens the task in the editor
+// (shots link-held.png and link-opened.png). Each database change happens while the app is stopped: core writes a
 // copy, the copy is staged beside the database and size-checked, the old WAL and SHM go, and a rename puts it in place; the
 // untouched pull stays in android/build/app-lock-check/original-<n> for a manual recovery. It puts the setting back as it
 // found it, on failure too, reads core to prove it, goes back to the Inbox tab, and restores rotation; a restore that fails
@@ -58,6 +61,8 @@ const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tap
 const phoneLocale = (sh('getprop persist.sys.locale') || sh('getprop ro.product.locale')).trim();
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
+const entryReads = () => device.logs(pid(), TAG).split('\n').filter((line) => line.includes('native-android-entry-point')).length;
+const queued = () => { try { return runAs('cat no_backup/entries/queue'); } catch { return ''; } };
 const commands = (operation) => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`)).length;
 
@@ -102,6 +107,7 @@ const core = (mode, db = pullDatabase(), on = false, delay = null) => JSON.parse
     const out = {
         stored: useTaskStore.getState().settings.security?.mobileAppLockEnabled ?? null,
         relockMinutes: useTaskStore.getState().settings.security?.mobileAppLockRelockDelayMinutes ?? 0,
+        taskId: useTaskStore.getState().tasks.find((task) => !task.deletedAt && task.status !== 'done' && task.status !== 'archived')?.id ?? null,
         row: { label: row.label, description: row.description, value: row.value, unavailable: row.errors.unavailable },
         settingsTile: [...more.primary, ...more.utilities].find((item) => item.id === 'settings').label,
         generalRow: menu.groups.flat().find((item) => item.id === 'general').accessibilityLabel,
@@ -332,6 +338,39 @@ try {
     await away();
     await waitFor('the lock screen after 65 seconds away', lockScreen(seen), 30_000);
     check(true, '(e) with "After 1 minute", 65 seconds away comes back on the lock screen');
+
+    // (f) #1475: a task link (a widget row's tap) that arrives while the lock covers the app waits for the unlock, then opens.
+    setProp('app_lock_answer', 'yes');
+    await tap(tagged(await screen(), 'app-lock-unlock') ?? fail('no Unlock button'));
+    await waitFor('General open again', (current) => !locked(current) && Boolean(relockRow(current, 'settings.mobile.appLockRelockAfter1')), 15_000);
+    await choose('settings.mobile.appLockRelockAfter1', 'settings.mobile.appLockRelockImmediately', 0);
+    setProp('app_lock_answer', '');
+    const taskId = core('read').taskId ?? fail('no open task in the development data');
+    requireAppFront();
+    sh('input keyevent KEYCODE_HOME');
+    await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
+    await sleep(1000);
+    const linkProcess = pid();
+    const readsBefore = entryReads();
+    sh(`am start -W -a android.intent.action.VIEW -d 'mindwtr-native-dev://open?task=${taskId}' ${PKG}`);
+    await waitFor('the lock screen after the task link', lockScreen(seen), 30_000);
+    for (let sample = 0; sample < 8; sample += 1) {
+        const current = await screen();
+        if (!locked(current) || inEditor(current)) fail(`sample ${sample}: the lock screen did not stay (the app or the editor showed)`);
+        await sleep(500);
+    }
+    check(pid() === linkProcess, '(f) the task link comes back on a steady lock screen for 4 seconds, in the same process');
+    writeFileSync(resolve(work, 'link-held.png'), adbRaw('exec-out', 'screencap', '-p'));
+    const readUnderLock = entryReads() > readsBefore;
+    const heldInQueue = queued().includes(taskId);
+    console.log(`observed - under the lock: core read the entry ${readUnderLock}, the entry still queued ${heldInQueue}`);
+    check(!readUnderLock && heldInQueue, '(f) the task link waits in the entry queue, unread by core, while the lock covers the app (RN b7bccbbc3)');
+    setProp('app_lock_answer', 'yes');
+    await tap(tagged(await screen(), 'app-lock-unlock') ?? fail('no Unlock button'));
+    await waitFor('the task in the editor after the unlock', (current) => !locked(current) && inEditor(current), 30_000);
+    writeFileSync(resolve(work, 'link-opened.png'), adbRaw('exec-out', 'screencap', '-p'));
+    setProp('app_lock_answer', '');
+    check(!queued().includes(taskId), '(f) the unlock opens the task in the editor, and the entry leaves the queue');
     console.log('App lock device check passed');
 } catch (error) {
     evidenced(error);

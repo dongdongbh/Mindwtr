@@ -3470,7 +3470,11 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /if \(editor != null\) anyTime\(\{ it\.logLine\("Native Android task editor dismissed on navigation releaseCheck=v1\.3\.8\/native-editor-navigation", JSONObject\(\)\.put\("releaseCheck", "v1\.3\.8\/native-editor-navigation"\)\.put\("outcome", "closed-clean"\)\) \}, \{\}\)\s+closeEditor\(\)/);
     // Not ready (no store, a command, an owed retry) holds every entry; open work holds every entry but a context automation link.
     assert.match(entryKt, /private val ready: Boolean get\(\) = with\(shell\) \{ writable && !busy && failedAction == null \}/);
-    assert.match(entryKt, /val blocked: Boolean get\(\) = !ready \|\| workOpen/);
+    assert.match(entryKt, /val blocked: Boolean get\(\) = !ready \|\| locked \|\| workOpen/);
+    // RN b7bccbbc3 (#1475): while the app lock covers the app nothing is read or opened (EntryLockHoldTest); the unlock changes
+    // `blocked`, so MainActivity pumps again and the held entry opens.
+    assert.match(entryKt, /private val locked: Boolean get\(\) = shell\.lock\.enabled && shell\.lock\.locked/);
+    assert.match(entryKt, /fun pump\(\): Unit = with\(shell\) \{\s+if \(hold\.holds\(locked, queue\.head\(\), ::held\)\) return\s+val entry = lifecycle\.next\(!ready, workOpen\)/);
     assert.match(entryKt, /val entry = lifecycle\.next\(!ready, workOpen\) \?: return\s+if \(workOpen\) return peek\(entry\)/);
     // A link read over open work: core's entry read only (it writes nothing), off the busy path, and only an automation link opens.
     assert.match(entryKt, /private fun peek\(entry: EntryQueue\.Entry\) \{[\s\S]{0,400}runtime\.menuRead\("entryPoint", entry\.input\)[\s\S]{0,300}\?\.takeIf \{ it\.optJSONObject\("contextAutomation"\) != null \}/);

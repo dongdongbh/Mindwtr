@@ -123,6 +123,8 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
     }
     /** Which entry core reads, when a failed read tries again, and when an entry leaves (EntryLifecycle.kt, JVM-tested). */
     private val lifecycle = EntryLifecycle(queue) { SystemClock.uptimeMillis() }
+    /** RN's app lock hold (#1475): nothing is read or opened while the lock covers the app (EntryLockHold, JVM-tested). */
+    private val hold = EntryLockHold()
     /** The oldest waiting entry's id: MainActivity pumps again when it changes. */
     var head by mutableStateOf(lifecycle.head); private set
 
@@ -169,8 +171,11 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
     /** The app takes entries: its store is ready, no command runs, and no retry is owed. */
     private val ready: Boolean get() = with(shell) { writable && !busy && failedAction == null }
 
-    /** Something keeps the entry from opening now: the app is not ready, or the user's work is open ([workOpen]). */
-    val blocked: Boolean get() = !ready || workOpen
+    /** The app lock covers the app (AppLock.kt): entries wait for the unlock, then open (RN's root layout `locked`, #1475). */
+    private val locked: Boolean get() = shell.lock.enabled && shell.lock.locked
+
+    /** Something keeps the entry from opening now: the app is not ready, it is locked, or the user's work is open ([workOpen]). */
+    val blocked: Boolean get() = !ready || locked || workOpen
 
     /**
      * The user's work is open; only a context automation link runs over it (RN's runs at once). An editor with nothing in it is no
@@ -189,6 +194,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
 
     /** Reads the oldest entry once the app is free, then opens it once no action runs; MainActivity calls it whenever that may change. */
     fun pump(): Unit = with(shell) {
+        if (hold.holds(locked, queue.head(), ::held)) return
         val entry = lifecycle.next(!ready, workOpen) ?: return
         if (workOpen) return peek(entry)
         val input = JSONObject(entry.input)
@@ -221,6 +227,17 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
             }
             // A closed router's answer opens nothing and keeps the entry and its staged files for the next router.
             ui(threads.guarded { menu.whenIdle(threads.guarded { opened(entry, reply, view) }) })
+        }
+    }
+
+    /** RN's `Incoming link held until unlock` line (v1.3.8/app-lock-link-hold), once per held entry, with the entry's kind only. */
+    private fun held(entry: EntryQueue.Entry) {
+        val kind = runCatching { JSONObject(entry.input).optString("kind") }.getOrDefault("")
+        val context = JSONObject().put("releaseCheck", "v1.3.8/native-app-lock-entry-hold").put("kind", kind)
+        // Off the main thread: core's log call waits for the engine.
+        threads.background {
+            shell.coreHost()?.logLine("Native entry held until unlock releaseCheck=v1.3.8/native-app-lock-entry-hold", context)
+                ?: Log.i(CoreHost.TAG, "Native entry held until unlock $context")
         }
     }
 
