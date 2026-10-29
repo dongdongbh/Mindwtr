@@ -221,6 +221,30 @@ describe('the audio mime table', () => {
     });
 });
 
+// RN voice bug 2: the suggested project was made before the store command decided, so a project a sync gave the task
+// meanwhile left the new one orphaned.
+describe('a late transcript on the task as stored', () => {
+    const syncLanding = (tasks: Task[], landing: (task: Task) => Task) => {
+        const { state, store } = fakeStore(tasks);
+        let reads = 0;
+        // The first read is applySpeechResult's; the sync lands before the store command reads again.
+        const landed = { getState: () => {
+            reads += 1;
+            if (reads === 2) state.tasks = state.tasks.map(landing);
+            return state;
+        } } as unknown as QuickCaptureAudioStore;
+        return { state, store: landed, plain: store };
+    };
+
+    it('makes no project when a sync gave the task one before the write', async () => {
+        const { state, store } = syncLanding([task()], (entry) => ({ ...entry, projectId: 'p-synced' }));
+        await expect(applySpeechResult('t1', { transcript: 'Paint', title: 'Paint', projectTitle: 'Garage' }, store)).resolves.toBe('applied');
+        expect(state.addProject).not.toHaveBeenCalled();
+        expect(state.tasks[0]?.projectId).toBe('p-synced');
+        expect(state.tasks[0]?.title).toBe('Paint');
+    });
+});
+
 describe('speech provider dispatch', () => {
     const ports = () => ({
         readBytes: vi.fn(async () => ({ bytes: new Uint8Array([1]), mimeType: 'audio/mp4' })),

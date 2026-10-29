@@ -274,46 +274,50 @@ export type QuickCaptureAudioStore = {
 export type SpeechApplyResult = 'applied' | 'empty' | 'skipped';
 
 /**
- * A transcript's fields on the saved task: its suggested project matched by title in the task's area (or made), then one store
- * command that builds the updates again on the task as stored then (a sync save admitted first may publish newer tags).
+ * A transcript's fields on the saved task, in one store command that builds them on the task as stored then: the updates, and
+ * its suggested project matched by title in the task's area, or made, only while the task still has none.
  */
 export async function applySpeechResult(
     taskId: string,
     result: SpeechToTaskResult,
     store: QuickCaptureAudioStore,
 ): Promise<SpeechApplyResult> {
-    const { tasks: currentTasks, projects: currentProjects, addProject: addProjectNow, settings: currentSettings } = store.getState();
+    const { tasks: currentTasks, settings: currentSettings } = store.getState();
     const existing = currentTasks.find((task) => task.id === taskId);
     if (!existing) return 'skipped';
 
     const { updates, suggestedProjectTitle } = buildTaskUpdatesFromSpeechResult(existing, result, currentSettings);
-    if (suggestedProjectTitle && !existing.projectId) {
-        const targetAreaId = updates.areaId ?? existing.areaId;
-        const match = findSelectableProjectByTitleAndArea(currentProjects, suggestedProjectTitle, targetAreaId);
-        if (match) {
-            updates.projectId = match.id;
-        } else {
-            const created = await addProjectNow(
-                suggestedProjectTitle,
-                DEFAULT_PROJECT_COLOR,
-                targetAreaId ? { areaId: targetAreaId } : undefined
-            );
-            if (!created) return 'skipped';
-            updates.projectId = created.id;
-        }
-    }
-
-    if (!Object.keys(updates).length) return 'empty';
-    // Built again on the task as stored when the write is admitted: a sync save admitted first may publish newer tags.
+    if (!Object.keys(updates).length && !suggestedProjectTitle) return 'empty';
+    let outcome: SpeechApplyResult = 'applied';
+    // Built again on the task as stored when the write is admitted: a sync save admitted first may publish newer tags, or a
+    // project. The suggested project is matched or made only here, so a task a sync filed meanwhile gets none (RN voice bug 2).
     await runStoreCommand(async () => {
         const state = store.getState();
         const latest = state.tasks.find((task) => task.id === taskId);
         if (!latest) return;
-        const rebuilt = buildTaskUpdatesFromSpeechResult(latest, result, state.settings).updates;
-        if (updates.projectId && !latest.projectId) rebuilt.projectId = updates.projectId;
+        const plan = buildTaskUpdatesFromSpeechResult(latest, result, state.settings);
+        const rebuilt = plan.updates;
+        if (plan.suggestedProjectTitle && !latest.projectId) {
+            const targetAreaId = rebuilt.areaId ?? latest.areaId;
+            const match = findSelectableProjectByTitleAndArea(state.projects, plan.suggestedProjectTitle, targetAreaId);
+            if (match) {
+                rebuilt.projectId = match.id;
+            } else {
+                const created = await state.addProject(
+                    plan.suggestedProjectTitle,
+                    DEFAULT_PROJECT_COLOR,
+                    targetAreaId ? { areaId: targetAreaId } : undefined
+                );
+                if (!created) {
+                    outcome = 'skipped';
+                    return;
+                }
+                rebuilt.projectId = created.id;
+            }
+        }
         if (Object.keys(rebuilt).length) await state.updateTask(taskId, rebuilt);
     });
-    return 'applied';
+    return outcome;
 }
 
 /** An empty transcript: the task goes, then each of its recording files once ([deleteFile] keeps RN's safe-delete rules). */

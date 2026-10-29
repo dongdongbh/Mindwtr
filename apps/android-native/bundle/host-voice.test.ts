@@ -42,7 +42,9 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
             return { success: true };
         },
     };
-    const store = { getState: () => state } as unknown as QuickCaptureAudioStore;
+    // A test can land a "sync" when the store is read (onRead): a real sync lands between reads, never inside a store command.
+    const reads = { onRead: undefined as undefined | (() => void) };
+    const store = { getState: () => { reads.onRead?.(); return state; } } as unknown as QuickCaptureAudioStore;
     const transcript = setup.transcript ?? 'Buy milk';
     const voice = createNativeVoice({
         recorder: {
@@ -83,7 +85,7 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
         }), { status: 200, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch,
         ...overrides,
     });
-    return { voice, state, deleted, persisted, lines, calls, submitted };
+    return { voice, state, deleted, persisted, lines, calls, submitted, reads };
 };
 
 const record = async (h: ReturnType<typeof harness>) => {
@@ -102,12 +104,12 @@ describe('native voice capture', () => {
         const taskId = (saved as { taskId: string }).taskId;
         expect(h.submitted[0]?.fallbackTitle).toBe('Audio note 06/29/2026, 9:00 AM');
         expect(h.submitted[0]?.attachments.map((attachment) => attachment.uri)).toEqual([`${DOCS}attachments/${h.submitted[0]!.attachments[0]!.id}.m4a`]);
-        // A sync lands while the transcript's suggested project is made, after the first read of the row: the write is built
-        // again on the row as it is then.
-        const makeProject = h.state.addProject;
-        h.state.addProject = async (title: string, color: string) => {
-            h.state.tasks = h.state.tasks.map((task) => (task.id === taskId ? { ...task, tags: ['#synced', '#later'] } : task));
-            return makeProject(title, color);
+        // A sync lands after the transcript's first read of the row and before its store command: the write is built again on
+        // the row as it is then.
+        let count = 0;
+        h.reads.onRead = () => {
+            count += 1;
+            if (count === 2) h.state.tasks = h.state.tasks.map((task) => (task.id === taskId ? { ...task, tags: ['#synced', '#later'] } : task));
         };
         late.resolve('Buy milk');
         await h.voice.settled();
