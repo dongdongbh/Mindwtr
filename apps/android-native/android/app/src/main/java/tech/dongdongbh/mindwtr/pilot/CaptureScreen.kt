@@ -43,8 +43,10 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -71,11 +73,13 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
@@ -322,14 +326,18 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
             // banner; in portrait only More's panel scrolls, and the footer stays put, as in RN.
             Column(if (landscape) Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).testTag("capture-scroll")
                 else Modifier.weight(1f, fill = false)) {
-                // RN's field: Return saves (Add another keeps the keyboard up for the next capture). RN's mic is not built.
-                TitleField(draft.text, copy.getString("inputLabel"), !locked, Modifier.focusRequester(titleFocus)) { typed -> typeCapture(typed) }
+                // RN's input row: the field (Return saves; Add another keeps the keyboard up for the next capture), then the mic.
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    TitleField(draft.text, copy.getString("inputLabel"), !locked, Modifier.weight(1f).focusRequester(titleFocus)) { typed -> typeCapture(typed) }
+                    MicButton(voice.state) { voice.toggle(draft.text, draft.options) }
+                }
                 // RN's Add notes field under the title, shown with More closed too (#1406): the task's description.
                 NoteField(draft, copy.getString("notePlaceholder"), copy.getString("noteLabel"), !locked) { note ->
                     editCapture(JSONObject().put("type", "setNote").put("value", note))
                 }
                 val preview = view.items("preview")
                 if (preview.isNotEmpty()) PreviewStrip(preview, Modifier.padding(top = 8.dp))
+                RecordingRows(voice.state)
                 FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
                     itemVerticalAlignment = Alignment.CenterVertically) {
                     if (!draft.expanded) {
@@ -396,6 +404,11 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
         draft.picker?.let { picker -> view.child("picker")?.takeIf { it.getString("kind") == picker.getString("kind") }?.let { CapturePicker(model, draft, it, locked) } }
         draft.confirm?.let { LinesConfirm(model, it, locked) }
     }
+    // RN's Alert.alert from the microphone: permission denied, a recording that failed.
+    voiceAlert?.let { (title, message) ->
+        AlertDialog(onDismissRequest = ::dismissVoiceAlert, title = { Text(title) }, text = { Text(message) },
+            confirmButton = { TextButton(onClick = ::dismissVoiceAlert, modifier = Modifier.testTag("voice-alert-ok")) { Text(t("common.ok")) } })
+    }
     // The pickers open where core says, as RN's value={dueDate ?? new Date()}: the day, and the due date's clock time.
     val due = view.getJSONObject("due")
     if (pickDay) DayPickerDialog(due.getJSONObject("custom").getString("startDay"), { pickDay = false }) { day ->
@@ -404,6 +417,36 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
     if (pickTime) {
         val (hour, minute) = due.child("time")?.getString("start")?.split(":")?.mapNotNull { it.toIntOrNull() }?.takeIf { it.size == 2 }?.let { it[0] to it[1] } ?: (0 to 0)
         ClockPickerDialog(hour, minute, { pickTime = false }) { time -> editCapture(JSONObject().put("type", "setDueTime").put("time", time)) }
+    }
+}
+
+/**
+ * RN's record button (QuickCaptureSheetBody recordButton): 40 square, radius 12, a border; filterBg with the Mic, or danger with
+ * the Square while recording; faded to 0.6 and disabled while busy. Its label is RN's audioRecord or audioStop.
+ */
+@Composable
+private fun MicButton(state: VoiceUi, toggle: () -> Unit) {
+    val c = LocalTheme.current.colors
+    val shape = RoundedCornerShape(12.dp)
+    val label = t(if (state.recording) "quickAdd.audioStop" else "quickAdd.audioRecord")
+    Box(Modifier.fade(if (state.busy) 0.6f else 1f).size(40.dp).clip(shape).background(if (state.recording) c.danger else c.filterBg)
+        .rnBorder(1.dp, c.border, shape).clickable(enabled = !state.busy, role = Role.Button) { toggle() }
+        .semantics { contentDescription = label }.testTag("capture-mic"), contentAlignment = Alignment.Center) {
+        Icon(if (state.recording) Lucide.Square else Lucide.Mic, null, tint = if (state.recording) c.onTint else c.text, modifier = Modifier.size(16.dp))
+    }
+}
+
+/** RN's recording row (a red dot and "Recording...") and its processing row while the recording starts or saves. */
+@Composable
+private fun RecordingRows(state: VoiceUi) {
+    val c = LocalTheme.current.colors
+    if (state.recording) Row(Modifier.padding(top = 8.dp).testTag("capture-recording"), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(c.danger))
+        Text(t("quickAdd.audioRecording"), style = rnText(12, 600), color = c.danger, maxLines = 1)
+    }
+    if (state.busy) Row(Modifier.padding(top = 8.dp).testTag("capture-processing").semantics { liveRegion = LiveRegionMode.Polite }) {
+        Text(t("quickAdd.audioProcessing"), style = rnText(12, 600), color = c.secondaryText, maxLines = 2)
     }
 }
 

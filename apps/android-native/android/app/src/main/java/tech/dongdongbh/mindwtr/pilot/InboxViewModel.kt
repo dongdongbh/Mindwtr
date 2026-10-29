@@ -327,6 +327,31 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     private var attaches = 0
     private val main = Handler(Looper.getMainLooper())
     private val started = SystemClock.uptimeMillis()
+    // The microphone's requests wait on the permission prompt and the save; each runs on its own thread, never the main one.
+    private val voiceThreads = java.util.concurrent.Executors.newCachedThreadPool { work -> Thread(work, "mindwtr-voice-ui") }
+
+    /** The capture popup's microphone (voice pass V5): RN's recording state over the bundle's voice requests. */
+    val voice = CaptureVoice(
+        call = { name, input -> (host ?: error("No core host")).voiceRequest(name, input.toString()) },
+        io = { work -> voiceThreads.execute(work) },
+        ui = ::ui,
+        notice = ::showVoiceNotice,
+        // RN's handleClose after a voice capture saved.
+        saved = { closeCapture() },
+        later = { delayMs, run -> main.postDelayed(run, delayMs) },
+    )
+
+    /** RN's Alert.alert from the microphone (permission denied, a recording that failed): its title and message. */
+    var voiceAlert by mutableStateOf<Pair<String, String>?>(null); private set
+    fun dismissVoiceAlert() { voiceAlert = null }
+
+    private fun showVoiceNotice(notice: VoiceNotice) {
+        when (notice) {
+            is VoiceNotice.Toast -> showToast(t(notice.titleKey), t(notice.messageKey), durationMs = 4200)
+            is VoiceNotice.Alert -> voiceAlert = t(notice.titleKey) to t(notice.messageKey)
+            is VoiceNotice.Core -> showToast(notice.notice)
+        }
+    }
 
     /** The booted host, for work that takes no lock (Settings › Sync's commands); null before the boot ends. */
     internal fun coreHost(): CoreHost? = host
@@ -1490,17 +1515,22 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /** Every popup change is on disk (synced) before anything else, except reads and edits waiting for core; closing deletes it. */
     private fun keepCapture(value: CaptureDraft?, persist: Boolean = true) {
+        // The popup closing ends its voice session: a recording still running goes unsaved (RN's sheet close).
+        if (value == null && capture != null) voice.closed()
         capture = value
         saved["capturing"] = value != null
         if (value == null) captureStore.delete() else if (persist) captureStore.write(value.state())
     }
 
-    /** RN's center +: core's empty draft; RN's sticky "Add another" goes on with core's own edit. A project's "+" is [openProjectCapture]. */
-    fun openCapture() {
+    /**
+     * RN's center +: core's empty draft; RN's sticky "Add another" goes on with core's own edit. A project's "+" is
+     * [openProjectCapture]. [auto] is RN's autoRecord: the + records at once when Audio is the default capture method.
+     */
+    fun openCapture(auto: AutoRecord = AutoRecord.OFF) {
         if (capture != null) return
         perform { runtime ->
             val view = runtime.openQuickCapture()
-            ui { openedCapture(view, "") }
+            ui { openedCapture(view, "", auto) }
         }
     }
 
@@ -1521,9 +1551,10 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     /** The popup on core's [view] with [text] (an entry's draft, EntryPoints.kt, replaces an open one), then RN's sticky "Add another". */
-    internal fun openedCapture(view: JSONObject, text: String) {
+    internal fun openedCapture(view: JSONObject, text: String, auto: AutoRecord = AutoRecord.OFF) {
         captureInFlight = null
         keepCapture(CaptureDraft.opened(view).copy(text = text))
+        voice.opened(auto)
         val addAnother = view.getJSONObject("addAnother")
         if (prefs.getString(ADD_ANOTHER_KEY, null) == "true" && !addAnother.getBoolean("value")) editCapture(addAnother.getJSONObject("edit"))
     }
@@ -1542,6 +1573,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      */
     private fun resumeCapture(restored: CaptureDraft) {
         keepCapture(restored.reading())
+        // A recording does not outlive its process; the popup comes back with a fresh voice session.
+        voice.opened(AutoRecord.OFF)
         val action = restored.pending ?: return
         if (failedAction != null) return
         failedAction = action
@@ -1642,6 +1675,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** RN's Save (and Return): reads and edits still with core go first; the request is on disk before the call. */
     fun saveCapture(openAfterSave: Boolean) {
         val current = capture ?: return
+        // Review N2: a refused voice save kept its recording; the fixed draft saves with it (RN's recovery attachment).
+        if (voice.saveHeld(current.text, current.options)) return
         if (current.requests.isNotEmpty() || captureInFlight != null) {
             keepCapture(current.copy(queuedSave = if (openAfterSave) "edit" else "save"), persist = false)
             return

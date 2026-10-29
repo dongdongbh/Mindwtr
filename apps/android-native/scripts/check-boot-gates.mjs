@@ -2053,7 +2053,8 @@ assert.match(activity, /if \(open != null && writable\) Box\(Modifier\.fillMaxSi
 assert.match(inboxUi, /PullToSync\(model, Modifier\.weight\(1f\)\.fillMaxWidth\(\)\) \{\s*LazyColumn\(Modifier\.fillMaxSize\(\), contentPadding = PaddingValues\(bottom = 12\.dp\)\) \{\s*val view = shown\?\.view \?: return@LazyColumn\s*item\(key = "toolbar"\)[\s\S]*?item\(key = "header"\)[\s\S]*?items\(shown\.items, key = \{ it\.key \}\)/);
 assert.match(activity, /Screen\.Inbox -> InboxList\(model, Modifier\.fillMaxSize\(\)\)/);
 // Capture: RN's center tab button opens RN's capture popup (CaptureScreen.kt), on core's quick capture contract.
-assert.match(activity, /CaptureButton\(model\)[\s\S]*?clickable\(role = Role\.Button\) \{ model\.menu\.closeSheet\(\); model\.openCapture\(\) \}/);
+// Voice pass V5: RN's tab button records at once when Audio is the default capture method (a tap), the other way on a long press.
+assert.match(activity, /CaptureButton\(model\)[\s\S]*?combinedClickable\(role = Role\.Button,\s*onLongClick = \{ model\.menu\.closeSheet\(\); model\.openCapture\(AutoRecord\.OPPOSITE\) \}\) \{ model\.menu\.closeSheet\(\); model\.openCapture\(AutoRecord\.DEFAULT\) \}/);
 assert.match(activity, /capture\?\.let \{ CapturePopup\(model, it\) \}/);
 assert.doesNotMatch(code(activity + model), /CaptureSheet|createInboxTask|showCapture/, 'the pass-1 capture sheet is gone');
 // The tab bar: RN's order, Menu last (it opens RN's More sheet), and RN's lucide icons.
@@ -2829,7 +2830,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(menuModel, /if \(list == "inbox" && collapse != null\) GroupCollapse\.keep\(prefs, list, axis, collapse\.getJSONArray\("collapsedGroupIds"\)\)/);
     assert.match(menuUi, /Choice\(option\.getString\("label"\), option\.getBoolean\("selected"\)\) \{ sort\(option\.optJSONObject\("edit"\)\?\.getString\("sortBy"\) \?: option\.getString\("value"\)\) \}/);
     assert.match(activity, /if \(quick \|\| screen == Screen\.Inbox\) MenuDialogs\(model\)\s+if \(screen == Screen\.Focus\) FocusDialogs\(model\)/);
-    assert.match(inboxUi, /empty\.getJSONObject\("action"\)\.optJSONObject\("filterEdit"\)\?\.let\(::filterEdit\) \?: model\.openCapture\(\)/, 'the empty state runs core\'s action');
+    assert.match(inboxUi, /action\.optJSONObject\("filterEdit"\)\?\.let\(::filterEdit\)\s*\?: model\.openCapture\(if \(action\.optJSONObject\("capture"\)\?\.optBoolean\("autoRecord"\) == true\) AutoRecord\.ON else AutoRecord\.OFF\)/, 'the empty state runs core\'s action');
     // A page belongs to the list it was read for, so a tab change never draws another list's reply.
     assert.match(menuModel, /val page: MenuPage\? get\(\) = loaded\?\.takeIf \{ it\.list == list \}/);
     // Selection mode: RN's session state (the Bundle), core's bar read with the list's accepted params, a row tap as core's
@@ -10091,7 +10092,8 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 // not inside More: no heading, RN's noteInput (8 above, 44 to 96 high, radius 12, 12 by 10).
 {
     const popup = source('CaptureScreen.kt');
-    assert.match(popup, /TitleField\(draft\.text, [^\n]*\n\s+\/\/[^\n]*\n\s+NoteField\(draft, copy\.getString\("notePlaceholder"\), copy\.getString\("noteLabel"\), !locked\)/);
+    // Voice pass V5: the title sits in RN's input row with the mic beside it; the notes field still comes next.
+    assert.match(popup, /TitleField\(draft\.text, [^\n]*\n\s+MicButton\(voice\.state\) \{ voice\.toggle\(draft\.text, draft\.options\) \}\n\s+\}\n\s+\/\/[^\n]*\n\s+NoteField\(draft, copy\.getString\("notePlaceholder"\), copy\.getString\("noteLabel"\), !locked\)/);
     assert.doesNotMatch(popup, /Text\(noteLabel, style = rnText\(12, 600\)/);
     assert.match(popup, /\.padding\(top = 8\.dp\)\.fillMaxWidth\(\)\.heightIn\(min = 44\.dp, max = 96\.dp\)\.clip\(shape\)/);
 }
@@ -10319,5 +10321,23 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.deepEqual([...new Set([...voiceLine.matchAll(/\b(\w+): line\.\w+/g)].map((m) => m[1]))].sort(), ['durationMs', 'errorKind', 'outcome', 'provider'], 'a voice line holds fixed fields only');
     const voiceTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-voice.test.ts', 'apps/android-native/bundle/host-multipart.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(voiceTested.status, 0, `bundle/host-voice.test.ts: ${voiceTested.stderr.slice(-1500)}`);
+}
+// voice-v5-20261029-22: RN's microphone in the capture popup. The record button is RN's recordButton (40 square, radius 12, a
+// border; danger with the Square while recording, filterBg with the Mic; 0.6 and disabled while busy), the recording row RN's
+// (an 8 dot and 12/600 danger text), the processing row while busy. The popup's open and close are the voice session's; leaving
+// the app tells the bundle (review N5); a refused save's kept recording rides the next Save (review N2).
+{
+    const popup = source('CaptureScreen.kt');
+    const viewModel = source('InboxViewModel.kt');
+    assert.match(popup, /Box\(Modifier\.fade\(if \(state\.busy\) 0\.6f else 1f\)\.size\(40\.dp\)\.clip\(shape\)\.background\(if \(state\.recording\) c\.danger else c\.filterBg\)\s*\.rnBorder\(1\.dp, c\.border, shape\)\.clickable\(enabled = !state\.busy, role = Role\.Button\)/);
+    assert.match(popup, /Icon\(if \(state\.recording\) Lucide\.Square else Lucide\.Mic, null, tint = if \(state\.recording\) c\.onTint else c\.text, modifier = Modifier\.size\(16\.dp\)\)/);
+    assert.match(popup, /val label = t\(if \(state\.recording\) "quickAdd\.audioStop" else "quickAdd\.audioRecord"\)/);
+    assert.match(popup, /Box\(Modifier\.size\(8\.dp\)\.clip\(CircleShape\)\.background\(c\.danger\)\)\s*Text\(t\("quickAdd\.audioRecording"\), style = rnText\(12, 600\), color = c\.danger, maxLines = 1\)/);
+    assert.match(popup, /Text\(t\("quickAdd\.audioProcessing"\), style = rnText\(12, 600\), color = c\.secondaryText, maxLines = 2\)/);
+    assert.match(viewModel, /if \(value == null && capture != null\) voice\.closed\(\)/);
+    assert.match(viewModel, /keepCapture\(CaptureDraft\.opened\(view\)\.copy\(text = text\)\)\s*voice\.opened\(auto\)/);
+    assert.match(viewModel, /if \(voice\.saveHeld\(current\.text, current\.options\)\) return/);
+    assert.match(activity, /if \(event == Lifecycle\.Event\.ON_STOP && !isChangingConfigurations\) \{ VoiceCapture\.recorder\?\.leave\(\); model\.voice\.left\(\) \}/);
+    assert.match(source('EntryPoints.kt'), /openedCapture\(it, capture\.getString\("text"\), AutoRecord\.forCaptureLink\(url\)\)/);
 }
 console.log('Boot gates, second-read failure, failed-save refresh and editor read, and diagnostic acknowledgment passed');

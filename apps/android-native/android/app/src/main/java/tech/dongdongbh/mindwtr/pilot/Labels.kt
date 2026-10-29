@@ -113,6 +113,9 @@ val LABEL_KEYS = listOf(
     "settings.gmailCaptureNetworkFailed", "settings.gmailCaptureConfigFailed", "settings.gmailCaptureStorageFailed", "settings.gmailCaptureFailed",
     // RN's long-press on Done (complete with a different time) and a finished row's date (CompletedAtFlow.kt, bca5e3e7e).
     "task.completeBackdateHintMobile", "task.editCompletedAt",
+    // The capture popup's microphone (CaptureVoice.kt, RN's QuickCaptureSheetBody and use-quick-capture-audio.ts).
+    "quickAdd.audioRecord", "quickAdd.audioStop", "quickAdd.audioRecording", "quickAdd.audioProcessing", "quickAdd.speechNotConfigured",
+    "quickAdd.audioPermissionTitle", "quickAdd.audioPermissionBody", "quickAdd.audioErrorTitle", "sandbox.unavailable",
 )
 
 /** The label map: core's text for each of [LABEL_KEYS]. It has no fallback text; a key core lacks shows as the key. */

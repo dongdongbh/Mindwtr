@@ -279,7 +279,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
             lifecycle.deferred(entry)
             return
         }
-        open(reply, view)
+        open(reply, view, runCatching { JSONObject(entry.input).optString("url").ifEmpty { null } }.getOrNull())
         lifecycle.opened(entry)
         // Core copied what it took into the managed attachments folder; the staged files are done.
         stager.discard(entry.id)
@@ -287,7 +287,7 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
     }
 
     /** Core's answer: its toast, its route (with the task or project it names), then RN's capture screen over it, or the popup over the tabs. */
-    private fun open(reply: JSONObject, view: JSONObject?): Unit = with(shell) {
+    private fun open(reply: JSONObject, view: JSONObject?, url: String? = null): Unit = with(shell) {
         // RN's quiet context automation link: the broadcast's job (its notification), then the app leaves, as RN's exitApp.
         reply.optJSONObject("contextAutomation")?.let { trigger ->
             val outcome = queueTrigger(trigger.getString("action"), trigger.getString("context")) { CoreWork.enqueue(getApplication(), CoreJob.CONTEXT, it) }
@@ -310,7 +310,8 @@ class EntryRouter(private val shell: InboxViewModel, dir: File, private val stag
         // RN's capture screen replaces the screen it opens over; this popup shows over the tabs.
         closeSearch()
         menu.toTabs()
-        view?.let { openedCapture(it, capture.getString("text")) }
+        // RN's capture-quick route records at once by its link's mode, or by the default capture method ([url]: the entry's link).
+        view?.let { openedCapture(it, capture.getString("text"), AutoRecord.forCaptureLink(url)) }
     }
 
     /**

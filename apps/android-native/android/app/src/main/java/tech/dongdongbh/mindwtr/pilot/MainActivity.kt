@@ -24,6 +24,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -180,7 +181,7 @@ class MainActivity : FragmentActivity() {
                 if (isFinishing) MicrophonePermissionPrompt.answered(false)
             }
             // Leaving the app ends a recording without saving (no foreground service, as RN); a rotation keeps it.
-            if (event == Lifecycle.Event.ON_STOP && !isChangingConfigurations) VoiceCapture.recorder?.leave()
+            if (event == Lifecycle.Event.ON_STOP && !isChangingConfigurations) { VoiceCapture.recorder?.leave(); model.voice.left() }
             if (event == Lifecycle.Event.ON_DESTROY && GmailConsentPrompt.picker === pickGmail) {
                 GmailConsentPrompt.picker = null
                 GmailConsentPrompt.consent = null
@@ -496,13 +497,16 @@ internal fun Modifier.rnTabPress(selected: Boolean, onClick: () -> Unit): Modifi
 internal const val RN_TAB_ICON_IDLE = 0.64f
 
 /** RN's center capture button: a 48x38 tint tile, lifted above the tab labels. It opens the quick capture sheet. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun RowScope.CaptureButton(model: InboxViewModel) {
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(theme.captureRadius)
     val label = t("nav.addTask")
     Box(
-        Modifier.weight(1f).fillMaxHeight().clickable(role = Role.Button) { model.menu.closeSheet(); model.openCapture() }
+        // RN's tab button: a tap records at once when Audio is the default capture method, a long press the other way.
+        Modifier.weight(1f).fillMaxHeight().combinedClickable(role = Role.Button,
+            onLongClick = { model.menu.closeSheet(); model.openCapture(AutoRecord.OPPOSITE) }) { model.menu.closeSheet(); model.openCapture(AutoRecord.DEFAULT) }
             .semantics { contentDescription = label },
         contentAlignment = Alignment.Center,
     ) {

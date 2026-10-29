@@ -85,7 +85,10 @@ fun InboxList(model: InboxViewModel, modifier: Modifier) = with(model.menu) {
                     Box(Modifier.padding(horizontal = 12.dp)) {
                         // Core's action: its filter edit (Clear) with filters on, else quick capture.
                         EmptyState(empty.getString("message"), empty.getString("hint").ifEmpty { null }, empty.menuText("actionLabel")) {
-                            empty.getJSONObject("action").optJSONObject("filterEdit")?.let(::filterEdit) ?: model.openCapture()
+                            val action = empty.getJSONObject("action")
+                            // Core's capture action records at once when Audio is the default capture method (RN's screen.autoRecord).
+                            action.optJSONObject("filterEdit")?.let(::filterEdit)
+                                ?: model.openCapture(if (action.optJSONObject("capture")?.optBoolean("autoRecord") == true) AutoRecord.ON else AutoRecord.OFF)
                         }
                     }
                 }
