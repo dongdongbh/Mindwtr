@@ -813,7 +813,7 @@ assert.match(rowUi, /when \(swipe\.icon\) \{ "restore" -> Lucide\.RotateCcw; "do
 // same enabled rule for swipe and TalkBack. A selecting row has no swipe; a list with core's bulk contract keeps the row's own swipe.
 assert.match(rowUi, /val listed = actions\?\.status\s+val swipeOn = !selecting && if \(target == "done"\) completable && canComplete else if \(listed != null\) canEdit else completable && canMove/);
 assert.match(rowUi, /val canMove = writable && !busy && \(failedAction == null \|\| failedAction == statusAction\(task, target\)\)/);
-assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
+assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision, askNext = true\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
 assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete\)/);
 assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
@@ -1380,7 +1380,9 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // The donation ask's synced record (pass O2f), with the time the ask showed.
         'supportPromptShown',
         // The task editor's "..." menu: the user's action (journaled ahead; core prepares and commits it, a replay answers its first reply).
-        'runTaskEditorAction'];
+        'runTaskEditorAction',
+        // The project next-action prompt's Choose, Add or Complete project, under its receipt (a replay answers its first reply).
+        'runProjectNextAction'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -2609,7 +2611,7 @@ for (const text of [contextsUi, reviewUi, weeklyUi, dailyUi]) {
 // The status menu's Done is core's completeTask with RN's Undo toast on every list; another status on a list whose contract writes
 // its rows is that list's setTaskStatus, elsewhere updateTask.
 assert.match(rowUi, /\.clickable\(enabled = enabled, role = Role\.Button\) \{ chooseStatus\(task, status\) \}/);
-assert.match(model, /if \(status == "done" && task\.status != "done"\) \{ statusMenu = null; complete\(task\.id, task\.taskRevision\) \}\s+else if \(!menu\.rowStatus\(task, status\)\) changeStatus\(task, status\)/);
+assert.match(model, /if \(status == "done" && task\.status != "done"\) \{ statusMenu = null; complete\(task\.id, task\.taskRevision, askNext = true\) \}\s+else if \(!menu\.rowStatus\(task, status\)\) changeStatus\(task, status\)/);
 assert.match(rowUi, /failedAction == if \(status == "done"\) completeAction\(task\.id, task\.taskRevision\) else statusAction\(task, status\)\)/);
 assert.match(menuModel, /private val ROW_KINDS = mapOf\("contexts" to "contextsAction", "review" to "reviewAction", "weekly" to "reviewAction", "daily" to "reviewAction"\)/);
 // The Weekly Review's project Add task creates a task: its exact request (the request UUID core makes the task's id) is on disk first.

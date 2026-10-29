@@ -309,6 +309,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     val projectDetails = ProjectDetailsModel(this)
     /** The Focus screen's Pomodoro card (Pomodoro.kt, pass R2b): core's durable session, its transitions and its alarms. */
     val pomodoro = PomodoroModel(this)
+    /** RN's project next-action prompt after a row's Done (NextActionPrompt.kt). */
+    val nextAction = NextActionPromptModel(this)
     /** A link, share or assistant note waiting to open (EntryPoints.kt). */
     // A file share's files are staged in the cache, where core's file port reads them (HostFiles), as RN's share module copies them.
     val entries = EntryRouter(this, File(app.noBackupFilesDir, "entries"), SharedFileStager(File(app.cacheDir, "shared-entries"), ContentSharedFileSource(app)))
@@ -700,17 +702,24 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 
     /**
      * From the Inbox, Focus, Search, or a project: the same command, the same exact-retry lock. A completion this call made shows
-     * RN's toast, "{title} marked Done" with Undo for 5.2 s (RN cafdac02d, #834; efd0d8ac8, #1051).
+     * RN's toast, "{title} marked Done" with Undo for 5.2 s (RN cafdac02d, #834; efd0d8ac8, #1051). A row's Done ([askNext]: its
+     * swipe and its status menu, RN's SwipeableTaskItem) then asks for the project's next action when none is left (RN b98ced27a).
      */
-    fun complete(id: String, taskRevision: String) {
+    fun complete(id: String, taskRevision: String, askNext: Boolean = false) {
         val action = completeAction(id, taskRevision)
         perform(action) { runtime ->
             val reply = runtime.completeTask(id, taskRevision)
             acknowledged(action)
             val toast = reply.optJSONObject("toast")
             val undo = reply.optJSONObject("undo")
-            if (toast != null && undo != null) ui {
-                showToast(null, toast.getString("message"), "info", toast.getString("undoLabel"), 5200) { undoCompletion(undo.put("id", id)) }
+            if (toast != null && undo != null) {
+                ui { showToast(null, toast.getString("message"), "info", toast.getString("undoLabel"), 5200) { undoCompletion(undo.put("id", id)) } }
+                if (askNext) {
+                    // A prompt that cannot be read is no failure of the completion: it just does not show.
+                    val prompt = runCatching { runtime.menuRead("projectNextActionPrompt", JSONObject().put("taskId", id).toString()).optJSONObject("prompt") }
+                        .onFailure { Log.w(CoreHost.TAG, "Project next action prompt not read ${failureForLog(it)}") }.getOrNull()
+                    if (prompt != null) ui { nextAction.show(prompt) }
+                }
             }
         }
     }
@@ -1344,7 +1353,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
      * another status is the list's own action (Contexts, the Review screens) or updateTask.
      */
     fun chooseStatus(task: TaskRow, status: String) {
-        if (status == "done" && task.status != "done") { statusMenu = null; complete(task.id, task.taskRevision) }
+        if (status == "done" && task.status != "done") { statusMenu = null; complete(task.id, task.taskRevision, askNext = true) }
         else if (!menu.rowStatus(task, status)) changeStatus(task, status)
     }
 

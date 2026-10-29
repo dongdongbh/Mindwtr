@@ -288,6 +288,8 @@ class MainActivity : FragmentActivity() {
                 if (writable) AttachmentOverlays(model)
                 // The open project's pickers, section manager and help, over the whole screen as RN's modals.
                 if (writable && openProjectId != null && projectDetails.projectId == openProjectId) ProjectDetailsDialogs(model)
+                // RN's project next-action prompt after a row's Done (its Modal over the app).
+                if (writable) NextActionPrompt(model)
                 // RN's startup prompts (the welcome sheet, the announcement window), over everything, as RN's root modals.
                 if (writable) StartupPromptOverlays(model)
             } } } }

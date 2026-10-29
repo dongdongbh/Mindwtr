@@ -913,7 +913,7 @@ const projectAttachmentInput = (json: string, withAttachmentId = false): { proje
     return input as { projectId: string; attachmentId?: string };
 };
 type MenuCommand = 'activateProject' | 'somedayMove' | 'somedayUndo' | 'somedayTask' | 'somedaySection' | 'taskListSort' | 'archiveAction' | 'contextsAction' | 'trashAction' | 'reviewAction' | 'reviewTask' | 'calendarAction' | 'calendarCreate' | 'boardAction' | 'boardCreate'
-    | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'savedSearchDelete' | 'savedSearchSort'
+    | 'bulkAction' | 'focusGroup' | 'focusSave' | 'focusCriterion' | 'focusDelete' | 'focusReorder' | 'bulkCreate' | 'mindSweepAdd' | 'projectNextAction' | 'savedSearchDelete' | 'savedSearchSort'
     | 'generalSetting' | 'gtdSetting' | 'manageEditor' | 'manageDelete' | 'somedayRename' | 'somedayReorder' | 'somedayDelete' | 'dataSetting'
     | 'syncPreference' | 'setAISetting' | 'notificationsSetting' | 'calendarSetting' | SyncScreenCommand | AIScreenCommand | CalendarScreenCommand | AttachmentCommand | ProjectDetailCommand | TaskEditorCommand | DataCommand | StartupPromptCommand;
 /** Settings › Data's own write (DataTransfer.kt's DATA_COMMANDS): Getting Started's seed, journaled with its frozen language. */
@@ -1371,6 +1371,8 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     dataSettings: () => contract.getDataSettings(),
     // Data's Archive retention Save: what a shorter period removes now (RN's confirm card), or null to save at once.
     archiveRetentionReview: (input) => contract.getArchiveRetentionReview(input),
+    // A row's Done in a project left without a next action: RN's prompt (native-host-contract-project-next-action-prompt.ts).
+    projectNextActionPrompt: (input) => contract.getProjectNextActionPrompt(input),
     // Settings › About (native-host-contract-about.ts): the screen, and the feedback modal's state for the draft as typed.
     aboutInstallerSource: (input) => contract.getAboutInstallerSource(input),
     aboutSettings: (input) => contract.getAboutSettings(input),
@@ -1545,6 +1547,7 @@ const MENU_COMMANDS: Record<MenuCommand, (input: never) => Reply | Promise<Reply
     // Bulk organize's new project or area, Mind Sweep's Add, and a saved search's Delete.
     bulkCreate: (input) => contract.createBulkOrganizeDestination(input),
     mindSweepAdd: (input) => contract.addMindSweepItem(input),
+    projectNextAction: (input) => contract.runProjectNextAction(input),
     savedSearchDelete: (input) => contract.deleteSavedSearch(input),
     // A saved search's own sort, from its Sort modal (#1453).
     savedSearchSort: (input) => contract.setSavedSearchSort(input),

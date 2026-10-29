@@ -36,7 +36,7 @@ private const val WINDOW = 100
 /** The Menu tab's commands (host-entry.ts MENU_COMMANDS); core can refuse each before writing. */
 val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
-    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
+    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 /**
  * The creates whose exact request waits on disk until core answers: Someday's, the Weekly Review's project Add task, the
  * Calendar composer's Save, the Board's Duplicate, a saved Focus filter, Settings › Manage's editor Save (a new area or person),
@@ -1394,6 +1394,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder" -> JSONObject(action.title).put("requestId", action.id)
         // Bulk organize's create, Mind Sweep's Add and a saved search's Delete and Sort: core's whole input and the request UUID.
         "bulkCreate", "mindSweepAdd", "savedSearchDelete", "savedSearchSort" -> JSONObject(action.title).put("requestId", action.id)
+        // The project next-action prompt's Choose, Add or Complete project (NextActionPrompt.kt): core's input and the request UUID.
+        "projectNextAction" -> JSONObject(action.title).put("requestId", action.id)
         // Settings: core's whole input and the request UUID; Manage's Someday section writes are target-state and take none.
         "generalSetting", "gtdSetting", "manageEditor", "manageDelete", "dataSetting", "syncPreference", "setAISetting", "calendarSetting" -> JSONObject(action.title).put("requestId", action.id)
         // Settings › Notifications' edit, as core gave it.
@@ -1442,6 +1444,12 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             }
             // An Archive retention write that failed shows RN's line under the card (review N5).
             if (action.kind == "dataSetting") shell.ui { settings.archiveSaveFailed(true, action) }
+            // The next-action prompt's refused action wrote nothing: RN's failure toast, the prompt stays open, nothing is owed.
+            if (refused && action.kind == "projectNextAction") {
+                shell.acknowledged(action)
+                shell.ui { shell.nextAction.refused() }
+                return@perform
+            }
             // A General write core applied but could not save (SAVE_FAILED): App lock's gate follows core's value; the retry stays owed.
             if (!refused && action.kind == "generalSetting") settings.unsettled(runtime, action)
             throw failure
@@ -1466,6 +1474,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
     /** Core's answer on screen: a refusal's words, the dialog closing, and RN's toasts with core's Undo. */
     private fun finish(action: FailedAction, reply: JSONObject) {
         when (action.kind) {
+            "projectNextAction" -> shell.nextAction.done(reply)
             "somedayMove" -> {
                 val refused = reply.optJSONObject("refused")
                 if (refused != null) { shell.showToast(refused, tone = "error"); return }

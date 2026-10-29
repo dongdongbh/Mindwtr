@@ -111,7 +111,7 @@ fun TaskRowItem(
     val selecting = actions?.selecting == true
     val listed = actions?.status
     val swipeOn = !selecting && if (target == "done") completable && canComplete else if (listed != null) canEdit else completable && canMove
-    val onSwipe = if (target == "done") { { complete(task.id, task.taskRevision) } } else listed?.let { status -> { status(target) } } ?: { changeStatus(task, target) }
+    val onSwipe = if (target == "done") { { complete(task.id, task.taskRevision, askNext = true) } } else listed?.let { status -> { status(target) } } ?: { changeStatus(task, target) }
     val onDelete = actions?.delete?.takeIf { canEdit && !selecting }
     val onTap = { if (selecting) actions?.select?.invoke() else openEditor(task.id) }
     val shape = RoundedCornerShape(theme.rowRadius)

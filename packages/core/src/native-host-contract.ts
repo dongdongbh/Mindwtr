@@ -282,6 +282,7 @@ import {
 import { createReviewViewMethods } from './native-host-contract-review-views';
 import { createQuickCaptureMethods } from './native-host-contract-quick-capture';
 import { createMindSweepMethods } from './native-host-contract-mind-sweep';
+import { createProjectNextActionPromptMethods } from './native-host-contract-project-next-action-prompt';
 import { createOwnedEditorCompleteTaskDraftSaveMethods, createOwnedEditorFileEditTaskDraftSaveMethods } from './native-host-contract-owned-file-edit-save';
 import { createOwnedEditorFileAddTaskDraftSaveMethods } from './native-host-contract-owned-editor-save';
 import { createOwnedFileAddTaskDraftSaveMethods } from './native-host-contract-owned-file-save';
@@ -2012,6 +2013,8 @@ export function createNativeHostContract(options: {
 
         // The Mind Sweep screen: native-host-contract-mind-sweep.ts.
         ...createMindSweepMethods({ readiness, save, t: () => translate, revision: (now) => `${revision()}:${displayRevision(now)}` }),
+        // A row's Done in a project left without a next action: RN's prompt and its three actions (native Android).
+        ...createProjectNextActionPromptMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         // The pending-captures queue and context automation: native-host-contract-capture-ingest.ts.
         ...createCaptureIngestMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         // Reminder alarms and notification taps: native-host-contract-reminders.ts.
