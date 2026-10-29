@@ -1220,6 +1220,21 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     }
 
     /** RN's toggleAreaCollapse: [areaId] is the area's id, "no-area" without one. */
+    /** RN's Manage areas sheet on the Projects screen (#1263): core's areas in their order while open (empty until read), null while shut. */
+    var areaManager by mutableStateOf<JSONObject?>(null); private set
+    fun openAreaManager() { areaManager = JSONObject().put("areas", JSONArray()); readAreaManager() }
+    fun closeAreaManager() { areaManager = null }
+    /** Core's areas again: on open, and after every command and its stale refusal (the Projects list is read again then too). */
+    fun readAreaManager() {
+        if (areaManager == null) return
+        background(emptyList(), { runtime -> runtime.menuRead("areaOrderOptions", "{}") }) { reply, _ -> if (areaManager != null) areaManager = reply }
+    }
+    /** RN's Sort by name, Sort by color or an area's ↑ ([intent]: core's AreaOrderIntent) on the order the sheet shows. */
+    fun orderAreas(intent: JSONObject) {
+        val shown = areaManager?.menuObjects("areas")?.map { it.getString("id") } ?: return
+        menu.command("areaOrder", JSONObject().put("intent", intent).put("order", JSONArray(shown)))
+    }
+
     fun toggleArea(areaId: String) {
         val collapsed = projectsView.collapsedAreas
         projectsView = projectsView.copy(collapsedAreas = if (areaId in collapsed) collapsed - areaId else collapsed + areaId)

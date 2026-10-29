@@ -30,7 +30,9 @@
 // narrows the list to core's projects for the fixture area, and "All areas"
 // widens it again (prepare also resets the filter); (n) restored on Focus after process death (the boot reads only the tab
 // on screen), with a Focus view-options read held 15 s (debug delay_action_ms), Projects chosen meanwhile fills once the
-// read ends, without reopening the tab. Core's expected lists
+// read ends, without reopening the tab; (o) #1263: a long-press on the fixture area's second project offers RN's Move up, which
+// stores it above the first, and the Areas sheet's ↑ moves the fixture area up one in core's stored order; both orders hold
+// after a restart (the list and the reopened sheet). Core's expected lists
 // come from core's own contract run on a fresh host copy of the database. It
 // touches only the development package (it refuses any other APK), never
 // launches over another app, leaves the app on its Inbox tab, and restores
@@ -693,6 +695,63 @@ try {
     await waitFor('the trigger to say All', (current) => current.some((node) => node['content-desc']?.startsWith('Area filter: All areas')), 15_000);
     sh('input keyevent KEYCODE_BACK');
     check(core(pullDatabase('m2'), 'groups').titles.includes(names.many), '(m) "All areas" widens core\'s list again');
+
+    // (o) #1263: Move up on a project (RN's long-press) and an area's ↑ in the Areas sheet; both kept after a restart.
+    const areaProjects = () => sqlite(pullDatabase('o'), `SELECT title FROM projects WHERE areaId = '${ids.area}' AND deletedAt IS NULL AND status = 'active'
+        ORDER BY orderNum, title`).map((row) => row.title);
+    const storedAreas = () => sqlite(pullDatabase('o-areas'), 'SELECT id FROM areas WHERE deletedAt IS NULL ORDER BY orderNum, name').map((row) => row.id);
+    const before = areaProjects();
+    check(before.length === 2 && before.includes(names.added), `(o) ${names.area} holds two active projects: ${before.join(', ')}`);
+    const [upper, lower] = before;
+    nodes = await reveal(lower, 80);
+    const [x1, y1, x2, y2] = box(textNode(nodes, lower) ?? fail(`${lower} is not on the list`));
+    requireAppFront();
+    sh(`input swipe ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)} ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)} 900`);
+    nodes = await waitFor('RN\'s Move up alert', (current) => Boolean(withDescription(current, 'Move up')) && hasText(current, lower), 10_000);
+    check(!withDescription(nodes, 'Move down'), '(o) the lower project offers Move up only, as RN does at the area\'s end');
+    await tap(withDescription(nodes, 'Move up'));
+    await waitFor(`${lower} stored above ${upper}`, () => areaProjects()[0] === lower, 30_000);
+    nodes = await reveal(upper, 80);
+    check(isDeepStrictEqual(shownOrder(nodes, [upper, lower]), [lower, upper]), `(o) the list shows ${lower} above ${upper}`);
+    const areasBefore = storedAreas();
+    // The fixture area moves up one; at the top, the area under it moves up instead (the next run's area then rises again).
+    const mover = areasBefore.indexOf(ids.area) > 0 ? ids.area : areasBefore[1];
+    const at = areasBefore.indexOf(mover);
+    const expectedAreas = [...areasBefore];
+    [expectedAreas[at - 1], expectedAreas[at]] = [expectedAreas[at], expectedAreas[at - 1]];
+    nodes = await toTop();
+    await tap(tagged(nodes, 'projects-manage-areas') ?? fail('no Areas button'));
+    const sheetRow = async (id) => {
+        let current = await waitFor('the Areas sheet', (screenNodes) => Boolean(tagged(screenNodes, 'project-area-manager')), 15_000);
+        for (let step = 0; step < 40 && !tagged(current, `project-area-move-up-${id}`); step += 1) {
+            const [l, t, r, b] = box(tagged(current, 'project-area-manager'));
+            requireAppFront();
+            sh(`input swipe ${Math.round((l + r) / 2)} ${Math.round(t + (b - t) * 0.7)} ${Math.round((l + r) / 2)} ${Math.round(t + (b - t) * 0.45)} 600`);
+            await sleep(500);
+            current = await screen();
+        }
+        return current;
+    };
+    nodes = await sheetRow(mover);
+    await tap(tagged(nodes, `project-area-move-up-${mover}`) ?? fail(`no ↑ for area ${mover}`));
+    await waitFor('the area order stored', () => isDeepStrictEqual(storedAreas(), expectedAreas), 30_000);
+    check(true, `(o) the Areas sheet's ↑ stored area ${mover} one place up`);
+    sh('input keyevent KEYCODE_BACK');
+    await waitFor('the Areas sheet to close', (current) => !tagged(current, 'project-area-manager'), 10_000);
+    // A restart keeps both orders: the list and the reopened sheet show what core stored.
+    await stopApp();
+    launch();
+    await showTab('Projects');
+    nodes = await reveal(upper, 80);
+    check(isDeepStrictEqual(shownOrder(nodes, [upper, lower]), [lower, upper]) && areaProjects()[0] === lower, `(o) after a restart ${lower} is still above ${upper}`);
+    nodes = await toTop();
+    await tap(tagged(nodes, 'projects-manage-areas') ?? fail('no Areas button'));
+    nodes = await sheetRow(mover);
+    const rowTop = (id) => box(tagged(nodes, `project-area-row-${id}`) ?? fail(`area ${id} is not in the sheet`))[1];
+    check(rowTop(mover) < rowTop(expectedAreas[at]) && isDeepStrictEqual(storedAreas(), expectedAreas),
+        '(o) after a restart the reopened sheet shows the moved area above its old neighbour, as stored');
+    sh('input keyevent KEYCODE_BACK');
+    await waitFor('the Areas sheet to close', (current) => !tagged(current, 'project-area-manager'), 10_000);
 
     // (n) Startup review 1: the boot leaves Projects for later when Focus shows. Chosen while a user action runs, Projects must
     // still fill when that action ends (its read waits for idle; it is never dropped).

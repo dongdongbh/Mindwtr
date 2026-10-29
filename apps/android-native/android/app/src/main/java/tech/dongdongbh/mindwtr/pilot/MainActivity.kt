@@ -290,6 +290,8 @@ class MainActivity : FragmentActivity() {
                 if (writable && openProjectId != null && projectDetails.projectId == openProjectId) ProjectDetailsDialogs(model)
                 // RN's project next-action prompt after a row's Done (its Modal over the app).
                 if (writable) NextActionPrompt(model)
+                // The Projects screen's Manage areas sheet (#1263), over the whole screen as RN's modal.
+                if (writable) areaManager?.let { AreaOrderSheet(model, it) }
                 // RN's startup prompts (the welcome sheet, the announcement window), over everything, as RN's root modals.
                 if (writable) StartupPromptOverlays(model)
             } } } }

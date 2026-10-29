@@ -440,3 +440,54 @@ describe('iOS-read shapes stay exact (review B1, B2)', () => {
         expect(android.value.sections.map((row) => (row as { sequential: unknown }).sequential)).toEqual([false, false]);
     });
 });
+
+// RN's long-press Move up / Move down on the Projects screen (#1263, 2678f9a44): core's planProjectMove swaps the project with its
+// shown neighbour inside one area; a starred project never passes an unstarred one. The edit carries the order the area showed.
+describe('runProjectEdit move (#1263)', () => {
+    const ordered = (id: string, order: number, extra: Partial<Project> = {}) => project(id, { title: id, order, ...extra });
+    const fixture = () => ({ projects: [ordered('p1', 0, { areaId: 'a' }), ordered('p2', 1, { areaId: 'a' }), ordered('p3', 2, { areaId: 'a' }),
+        ordered('star', 3, { areaId: 'a', isFocused: true }), ordered('q1', 0), ordered('q2', 1)] });
+    const group = (host: Awaited<ReturnType<typeof open>>['host'], areaId: string | null) => {
+        const view = host.getProjects();
+        if (!view.ok) throw new Error(view.error.message);
+        return view.value.active.find((entry) => entry.areaId === areaId)!.projects.map((row) => row.id);
+    };
+    const move = (n: number, projectId: string, direction: 'up' | 'down', order: string[]) =>
+        ({ requestId: uuid(n), projectId, kind: 'move', direction, order }) as never;
+
+    it('swaps a project with its shown neighbour in its area once, and a replay writes nothing', async () => {
+        const { host, saves } = await open(fixture());
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p2', 'p3']);
+        expect(await host.runProjectEdit(move(90, 'p3', 'up', ['star', 'p1', 'p2', 'p3']))).toMatchObject({ ok: true, value: { kind: 'move', outcome: 'saved' } });
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p3', 'p2']);
+        expect(group(host, null)).toEqual(['q1', 'q2']);
+        const count = saves();
+        expect(await host.runProjectEdit(move(90, 'p3', 'up', ['star', 'p1', 'p2', 'p3']))).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(saves()).toBe(count);
+        expect(await host.runProjectEdit(move(91, 'q1', 'down', ['q1', 'q2']))).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(group(host, null)).toEqual(['q2', 'q1']);
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p3', 'p2']);
+    });
+
+    it('refuses a move at an area\'s edge and past a starred project, as RN offers none', async () => {
+        const { host, saves } = await open(fixture());
+        const count = saves();
+        const shown = ['star', 'p1', 'p2', 'p3'];
+        for (const [n, id, direction] of [[92, 'p3', 'down'], [93, 'p1', 'up'], [94, 'star', 'down']] as const) {
+            expect(await host.runProjectEdit(move(n, id, direction, shown))).toMatchObject({ ok: true, value: { outcome: 'blocked' } });
+        }
+        expect(group(host, 'a')).toEqual(shown);
+        expect(saves()).toBe(count);
+    });
+
+    it('refuses an order that changed since it was shown, and writes nothing', async () => {
+        const { host, saves } = await open(fixture());
+        const count = saves();
+        expect(await host.runProjectEdit(move(95, 'p2', 'up', ['star', 'p2', 'p1', 'p3']))).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await host.runProjectEdit(move(96, 'p2', 'up', ['p1', 'p2']))).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(group(host, 'a')).toEqual(['star', 'p1', 'p2', 'p3']);
+        expect(saves()).toBe(count);
+        expect(await host.runProjectEdit({ requestId: uuid(97), projectId: 'p2', kind: 'move', direction: 'left', order: [] } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+});

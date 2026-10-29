@@ -629,6 +629,12 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
 
     fun setScope(scope: String) = edit(projectId, "scope") { put("scope", scope) }
 
+    /** RN's long-press Move up / Move down on the Projects list (#1263): [order] is the project's area group as the list shows it. */
+    fun move(projectId: String, direction: String, order: List<String>) =
+        edit(projectId, "move", refused = { shell.showToast(t("common.notice"), t("projects.moveProjectFailed"), "error") }) {
+            put("direction", direction).put("order", JSONArray(order))
+        }
+
     /** An area of the picker (null: No area). */
     fun setArea(area: JSONObject?) {
         areaPicker = null

@@ -1,5 +1,15 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -115,6 +125,15 @@ data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>) {
     }
 }
 
+/**
+ * Whether RN offers Move up and Move down for [projects]' row [index] (#1263): only past a shown neighbour with the same star, as
+ * core's planProjectMove allows (core decides; a refused move writes nothing).
+ */
+internal fun projectMoves(projects: List<ProjectRow>, index: Int): Pair<Boolean, Boolean> {
+    val row = projects[index]
+    return (projects.getOrNull(index - 1)?.isFocused == row.isFocused) to (projects.getOrNull(index + 1)?.isFocused == row.isFocused)
+}
+
 sealed interface DetailItem
 /** [collapsible]: RN's Completed pile heading, which folds ([collapsed]) the done tasks under it. */
 data class DetailSection(val id: String, val title: String, val count: Int, val muted: Boolean, val collapsible: Boolean = false,
@@ -206,6 +225,18 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
     val c = LocalTheme.current.colors
     LazyColumn(modifier, contentPadding = PaddingValues(12.dp)) {
         item(key = "add") { AddProjectField(model) }
+        // RN's list controls row: Manage areas' button (the Tag filter beside it is not on native yet).
+        item(key = "controls") {
+            val manage = t("areas.manage")
+            val shape = RoundedCornerShape(8.dp)
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.End) {
+                Box(Modifier.heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape)
+                    .clickable(enabled = writable && !busy, role = Role.Button) { openAreaManager() }
+                    .semantics { contentDescription = manage }.testTag("projects-manage-areas").padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(manage, style = rnText(12, 600), color = c.text)
+                }
+            }
+        }
         if (projects != null && PROJECT_BUCKETS.all { (bucket, _) -> projects?.buckets?.get(bucket).isNullOrEmpty() }) item(key = "empty") {
             Text(t("projects.empty"), style = rnText(16, 400), color = c.secondaryText, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(48.dp))
@@ -243,7 +274,10 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
                 val areaKey = group.areaId ?: "no-area"
                 val folded = areaKey in projectsView.collapsedAreas
                 item(key = "area:$bucket:${group.areaId}") { AreaHeader(model, group, areaKey, folded) }
-                if (!folded) for (row in group.projects) item(key = "project:${row.id}") { ProjectRowItem(model, row) }
+                if (!folded) for ((index, row) in group.projects.withIndex()) item(key = "project:${row.id}") {
+                    val (up, down) = projectMoves(group.projects, index)
+                    ProjectRowItem(model, row, group.projects.map { it.id }, up, down)
+                }
             }
         }
     }
@@ -339,18 +373,31 @@ private fun AreaChip(label: String, selected: Boolean, enabled: Boolean, onClick
  * project's status in RN's status color; then core's active task count and RN's star. The
  * star asks core for the other state, dimmed and disabled when core says five are starred.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow) = with(model) {
+private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<String>, canMoveUp: Boolean, canMoveDown: Boolean) = with(model) {
     val theme = LocalTheme.current
     val c = theme.colors
     val count = "${row.activeTaskCount} ${t("common.tasks")}"
     val view = LocalView.current
+    // RN's long-press Move up / Move down (#1263), also as accessibility actions; none while the project cannot move.
+    val moves = listOfNotNull("up".takeIf { canMoveUp }?.let { it to t("projects.moveUp") }, "down".takeIf { canMoveDown }?.let { it to t("projects.moveDown") })
+    val canAct = writable && !busy && failedAction == null
+    var moveMenu by remember { mutableStateOf(false) }
+    val move = { direction: String -> moveMenu = false; projectDetails.move(row.id, direction, order) }
+    if (moveMenu) ThemedAlert(row.title, null, moves.map { (direction, label) -> AlertButton(label, "default") { move(direction) } } +
+        AlertButton(t("common.cancel"), "cancel") { moveMenu = false }) { moveMenu = false }
     Row(
         Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp)).background(c.cardBg)
             .heightIn(min = 52.dp).padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f).clickable(enabled = writable && !busy && failedAction == null, role = Role.Button) { openProject(row.id) }) {
+        Column(Modifier.weight(1f)
+            .combinedClickable(enabled = canAct, role = Role.Button, onLongClick = if (moves.isEmpty()) null else ({
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); moveMenu = true
+            })) { openProject(row.id) }
+            .semantics { customActions = moves.map { (direction, label) -> CustomAccessibilityAction(label) { if (canAct) move(direction); canAct } } }
+            .testTag("project-row-open-${row.id}")) {
             Text(row.title, style = rnText(16, 500), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(bottom = 4.dp))
             if (row.nextActionTitle != null) {

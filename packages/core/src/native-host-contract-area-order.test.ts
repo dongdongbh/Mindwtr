@@ -219,3 +219,56 @@ describe('prepared native Area order', () => {
         expect(saves()).toBe(0);
     });
 });
+
+// Android's Manage areas sheet (#1263, RN 56921ca38): one journaled Menu command runs the prepared order above. The request is the
+// order the sheet showed and RN's intent, so a replay that already landed writes nothing and a changed order is refused.
+describe('runAreaOrder (#1263)', () => {
+    const run = (methods: Awaited<ReturnType<typeof open>>['methods'], intent: NativeAreaOrderRequest['intent'], order: string[]) =>
+        methods.runAreaOrder({ requestId: '320bd84a-0fd1-497b-823d-3435ae8fd921', intent, order });
+    const shown = () => useTaskStore.getState()._allAreas.filter((row) => !row.deletedAt)
+        .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name)).map((row) => row.id);
+
+    it('stores RN\'s Move up once, and a replay of the same request writes nothing', async () => {
+        const { methods, saves, data } = await open();
+        expect(shown()).toEqual(['b', 'c', 'a']);
+        expect(await run(methods, { kind: 'moveUp', areaId: 'a' }, ['b', 'c', 'a']))
+            .toEqual({ ok: true, value: { outcome: 'saved', orderedIds: ['b', 'a', 'c'] } });
+        expect(shown()).toEqual(['b', 'a', 'c']);
+        expect(data().areas.find((row) => row.id === 't')).toEqual(baseAreas[1]);
+        const count = saves();
+        expect(await run(methods, { kind: 'moveUp', areaId: 'a' }, ['b', 'c', 'a']))
+            .toEqual({ ok: true, value: { outcome: 'unchanged', orderedIds: ['b', 'a', 'c'] } });
+        expect(saves()).toBe(count);
+    });
+
+    it('sorts by name and by color as RN does, each a target state', async () => {
+        const { methods } = await open();
+        expect(await run(methods, { kind: 'sortName' }, ['b', 'c', 'a'])).toMatchObject({ ok: true, value: { outcome: 'unchanged' } });
+        expect(await run(methods, { kind: 'sortColor' }, ['b', 'c', 'a'])).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(shown()).toEqual(['b', 'a', 'c']);
+        expect(await run(methods, { kind: 'sortName' }, ['b', 'a', 'c'])).toMatchObject({ ok: true, value: { outcome: 'saved' } });
+        expect(shown()).toEqual(['b', 'c', 'a']);
+    });
+
+    it('refuses the top area\'s Move up and an order that changed since it was shown, writing nothing', async () => {
+        const { methods, saves } = await open();
+        const count = saves();
+        expect(await run(methods, { kind: 'moveUp', areaId: 'b' }, ['b', 'c', 'a'])).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await run(methods, { kind: 'moveUp', areaId: 'c' }, ['c', 'b', 'a'])).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(await run(methods, { kind: 'moveUp', areaId: 'a' }, ['b', 'a'])).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(shown()).toEqual(['b', 'c', 'a']);
+        expect(saves()).toBe(count);
+        expect(await methods.runAreaOrder({ requestId: 'nope', intent: { kind: 'sortName' }, order: [] } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+    it('owes a failed save, and the retry finishes it without moving twice', async () => {
+        let failing = false;
+        const { methods, data } = await open({}, () => failing);
+        failing = true;
+        expect(await run(methods, { kind: 'moveUp', areaId: 'a' }, ['b', 'c', 'a'])).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
+        failing = false;
+        expect(await run(methods, { kind: 'moveUp', areaId: 'a' }, ['b', 'c', 'a'])).toMatchObject({ ok: true, value: { orderedIds: ['b', 'a', 'c'] } });
+        expect(data().areas.filter((row) => !row.deletedAt).sort((x, y) => x.order - y.order).map((row) => row.id)).toEqual(['b', 'a', 'c']);
+    });
+});

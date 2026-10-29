@@ -1371,6 +1371,8 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         'completeReminderTask', 'snoozeReminder',
         // Project details: the user's edit (journaled ahead; core reads, prepares and commits it, a replay of an applied edit unchanged).
         'runProjectEdit',
+        // The Projects screen's Manage areas order (#1263): RN's intent on the order shown, prepared and committed inside (a target state).
+        'runAreaOrder',
         // Settings › Notifications' controls (pass R2): each the state it asks for, under its receipt.
         'setNotificationsSetting',
         // Settings › Calendar (pass C3): an edit the view gave (a receipt of its own), and a new subscription (never journaled).
@@ -2164,7 +2166,7 @@ assert.equal([activity, owner, editorUi, focusUi, projectsUi].join('\n').match(/
 assert.doesNotMatch(code(projectsUi) + code(model), /\.(sort\w*|sorted\w*|filter(?!Bg\b)\w*|groupBy|reversed|asReversed|shuffled|distinct\w*|partition|minBy|maxBy)\b/);
 assert.match(projectsUi, /val PROJECT_BUCKETS = listOf\("active" to "projects\.activeSection", "deferred" to "projects\.deferredSection", "archived" to "projects\.closed"\)/);
 for (const walk of [/List\(groups\.length\(\)\) \{ index ->/, /List\(rows\.length\(\)\) \{ row ->/, /List\(items\.length\(\)\) \{ index ->/,
-    /for \(\(bucket, heading\) in PROJECT_BUCKETS\) \{/, /for \(group in groups\) \{/, /for \(row in group\.projects\) item/,
+    /for \(\(bucket, heading\) in PROJECT_BUCKETS\) \{/, /for \(group in groups\) \{/, /for \(\(index, row\) in group\.projects\.withIndex\(\)\) item/,
     /for \(entry in detail\?\.items\.orEmpty\(\)\) when \(entry\)/]) assert.match(projectsUi, walk);
 assert.match(projectsUi, /group\.areaName \?: t\("projects\.noArea"\)/);
 // The project status line is core's text (Completed or Cancelled for a closed project).

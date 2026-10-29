@@ -13,7 +13,8 @@ import { ensureDeviceId } from './store-helpers';
 import { getProjectAccentColor } from './task-accent-color';
 import { isNativeJsonWithinBytes } from './native-host-contract-task-view';
 import { getProjectFlowMode } from './task-utils';
-import type { ProjectFlowMode } from './types';
+import { planProjectMove } from './project-grouping';
+import type { Project, ProjectFlowMode } from './types';
 
 /**
  * One Project details edit as the user made it: the field and its new value (a target state), under the request UUID the
@@ -37,6 +38,8 @@ export type NativeProjectEdit = { requestId: string; projectId: string } & (
     | { kind: 'sectionMove'; sectionId: string; direction: 'up' | 'down'; order: string[] }
     // RN's section manager Parallel/Sequential button, shown while the project is Per section (#1429).
     | { kind: 'sectionFlow'; sectionId: string; sequential: boolean }
+    // RN's Projects screen long-press Move up / Move down (#1263): [order] is the project's area group as the list showed it.
+    | { kind: 'move'; direction: 'up' | 'down'; order: string[] }
     // The header's actions sheet (RN's "..."): Complete, Cancel or Reactivate, Duplicate, Delete and that Delete's Undo.
     | { kind: 'lifecycle'; action: 'complete' | 'cancel' | 'reactivate' }
     | { kind: 'duplicate' }
@@ -86,6 +89,8 @@ const valid = (input: unknown): input is NativeProjectEdit => {
             && (edit.value === null || text(edit.value, 100)) && (edit.opened === null || (edit.field === 'reviewAt' && text(edit.opened, 100)));
         case 'sectionRename': return keys(edit, ['sectionId', 'title']) && id(edit.sectionId) && text(edit.title);
         case 'sectionDelete': return keys(edit, ['sectionId']) && id(edit.sectionId);
+        case 'move': return keys(edit, ['direction', 'order']) && (edit.direction === 'up' || edit.direction === 'down')
+            && Array.isArray(edit.order) && edit.order.length <= 100_000 && edit.order.every(id);
         case 'sectionMove': return keys(edit, ['sectionId', 'direction', 'order']) && id(edit.sectionId)
             && (edit.direction === 'up' || edit.direction === 'down') && Array.isArray(edit.order)
             && edit.order.length <= 1_000 && edit.order.every(id);
@@ -281,6 +286,25 @@ export function createProjectEditMethods(deps: {
                 return { ok: true, value: isRename
                     ? { command: 'ProjectSectionRename', request: { ...base, sectionId: edit.sectionId, title: edit.title, expected: read.value.token } }
                     : { command: 'ProjectSectionDelete', request: { ...base, sectionId: edit.sectionId, expected: read.value.token } } };
+            }
+            case 'move': {
+                // The Projects list as Kotlin reads it (getProjects): the area group that holds the project.
+                const read = await call('getProjects', undefined) as NativeHostResult<Record<'active' | 'deferred' | 'archived', Array<{ areaId: string | null; projects: Json[] }>>>;
+                if (!read.ok) return read;
+                const group = [...read.value.active, ...read.value.deferred, ...read.value.archived]
+                    .find((entry) => entry.projects.some((row) => row.id === edit.projectId));
+                if (!group) return { ok: true, value: { conflict: 'The Project is no longer in the list' } };
+                const shown = group.projects.map((row) => row.id as string);
+                if (same(shown, moved(edit.order, edit.projectId, edit.direction))) return { ok: true, value: { outcome: 'unchanged' } };
+                if (!same(shown, edit.order)) return { ok: true, value: { conflict: 'The Projects changed since they were shown' } };
+                const state = useTaskStore.getState();
+                const projects = shown.map((projectId) => state._projectsById.get(projectId)).filter((row): row is Project => Boolean(row));
+                const planned = planProjectMove({ areaId: group.areaId ?? undefined, projects }, state._allProjects, edit.projectId, edit.direction);
+                if (!planned) return { ok: true, value: { outcome: 'blocked' } };
+                return { ok: true, value: { run: async () => {
+                    await useTaskStore.getState().reorderProjects(planned.orderedIds, planned.areaId);
+                    return { ok: true, value: {} };
+                } } };
             }
             case 'sectionMove': {
                 const read = await options('getProjectSectionOrderOptions');
