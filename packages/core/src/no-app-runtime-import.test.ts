@@ -14,6 +14,19 @@ const forbidden = (specifier: string, file: string): boolean => {
     return false;
 };
 
+/** The app-runtime imports in [code] (a core module named [file]), comments stripped. */
+const offendersIn = (code: string, file: string): string[] => {
+    // Strings first, so a '/*' or '//' inside one opens no comment; comments then go, strings stay.
+    const stripped = code.replace(/('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\/\/[^\n]*|\/\*[\s\S]*?\*\//g,
+        (match, literal: string | undefined) => literal ?? '');
+    const specifiers = [
+        ...stripped.matchAll(/\b(?:import|export)\b[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]/g),
+        ...stripped.matchAll(/\bimport\s*['"]([^'"]+)['"]/g),
+        ...stripped.matchAll(/\b(?:import|require)\s*\(\s*(?:['"]([^'"]+)['"]|`([^`$]+)`)\s*\)/g),
+    ].map((match) => (match[1] ?? match[2])!);
+    return specifiers.filter((specifier) => forbidden(specifier, file)).map((specifier) => `${file}: ${specifier}`);
+};
+
 describe('core source', () => {
     it('never imports Expo, React Native or whisper.rn, and React only in its two shared hooks', () => {
         const offenders: string[] = [];
@@ -22,19 +35,20 @@ describe('core source', () => {
                 const path = join(dir, entry.name);
                 if (entry.isDirectory()) { walk(path); continue; }
                 if (!/\.tsx?$/.test(entry.name) || /\.(test|spec)\.tsx?$/.test(entry.name) || entry.name.endsWith('.d.ts')) continue;
-                const file = relative(import.meta.dirname, path);
-                const code = readFileSync(path, 'utf8').replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '');
-                const specifiers = [
-                    ...code.matchAll(/\b(?:import|export)\b[^'"`;]*?\bfrom\s*['"]([^'"]+)['"]/g),
-                    ...code.matchAll(/\bimport\s*['"]([^'"]+)['"]/g),
-                    ...code.matchAll(/\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g),
-                ].map((match) => match[1]!);
-                for (const specifier of specifiers) {
-                    if (forbidden(specifier, file)) offenders.push(`${file}: ${specifier}`);
-                }
+                offenders.push(...offendersIn(readFileSync(path, 'utf8'), relative(import.meta.dirname, path)));
             }
         };
         walk(import.meta.dirname);
         expect(offenders).toEqual([]);
+    });
+
+    // Voice V1 review: the guard missed a template-literal import() and any code after a '/*' (or '//') inside a string.
+    it('catches a template-literal import and an import after a string that holds a comment opener', () => {
+        expect(offendersIn('const w = await import(`whisper.rn`);', 'a.ts')).toEqual(['a.ts: whisper.rn']);
+        expect(offendersIn("const glob = 'src/*.ts';\nimport { File } from 'expo-file-system';\nconst end = '*/';", 'b.ts'))
+            .toEqual(['b.ts: expo-file-system']);
+        expect(offendersIn("const url = 'https://example.com'; import 'react-native';", 'c.ts')).toEqual(['c.ts: react-native']);
+        // A comment still hides what it holds, and an allowed module stays allowed.
+        expect(offendersIn("/* import 'expo-audio'; */\n// import 'whisper.rn';\nimport { x } from './y';", 'd.ts')).toEqual([]);
     });
 });
