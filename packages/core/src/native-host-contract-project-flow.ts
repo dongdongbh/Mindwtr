@@ -100,8 +100,9 @@ export function createProjectFlowMethods(deps: {
     revision: () => string;
 }) {
     return {
-        getProjectFlowOptions(input: { projectId: string }): NativeHostResult<{ revision: string;
-            project: { id: string } & NativeProjectFlowToken; canChange: boolean; flowMode: ProjectFlowMode }> {
+        /** iOS reads exactly revision, project and canChange; Android's Menu read passes [flowMode] for RN's Flow Mode (#1429). */
+        getProjectFlowOptions(input: { projectId: string; flowMode?: true }): NativeHostResult<{ revision: string;
+            project: { id: string } & NativeProjectFlowToken; canChange: boolean; flowMode?: ProjectFlowMode }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!input || typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 500)
@@ -110,7 +111,7 @@ export function createProjectFlowMethods(deps: {
             if (!project || project.deletedAt || project.purgedAt)
                 return fail('STALE_REVISION', 'Project is unavailable; refresh before changing flow');
             const value = { revision: deps.revision(), project: { id: project.id, ...token(project) },
-                canChange: project.status !== 'archived', flowMode: getProjectFlowMode(project) };
+                canChange: project.status !== 'archived', ...(input.flowMode === true ? { flowMode: getProjectFlowMode(project) } : {}) };
             return isNativeJsonWithinBytes(value) ? { ok: true, value }
                 : fail('INVALID_INPUT', 'Project flow options exceed the bounded native response');
         },

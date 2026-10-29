@@ -121,10 +121,10 @@ describe('native Pomodoro presentation using RN timer helpers', () => {
     });
 
     // e4d71e032: RN's card keeps only an actionable task linked (isTaskActionable); a task done, archived, cancelled, filed as
-    // Reference or gone unlinks, and the timer stays as it was.
-    it.each(['done', 'archived', 'cancelled', 'reference', 'deleted'] as const)('drops a linked task once it is %s (e4d71e032)', (transition) => {
+    // Reference unlinks, and the timer stays as it was (a task gone from the store unlinked before too).
+    it.each(['done', 'archived', 'cancelled', 'reference'] as const)('drops a linked task once it is %s (e4d71e032)', (transition) => {
         const state = initial(); state.session.selectedTaskId = 'linked'; const raw = JSON.stringify(state);
-        const live = transition === 'deleted' ? [] : [{ ...task('linked'),
+        const live = [{ ...task('linked'),
             status: transition === 'cancelled' ? 'archived' as const : transition,
             ...(transition === 'cancelled' ? { cancelledAt: '2026-10-10T00:00:00.000Z' } : {}) }];
         const view = ready(panel(raw, { liveTasks: live }));

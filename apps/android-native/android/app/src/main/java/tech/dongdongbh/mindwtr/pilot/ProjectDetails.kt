@@ -94,7 +94,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -624,9 +623,9 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         edit(projectId, "flowMode") { for (name in fields.keys()) put(name, fields.get(name)) }
     }
 
-    /** RN's section manager flow button: the other of what the row shows, as a target state; the manager reads again after. */
+    /** RN's section manager flow button: the other of what the row shows, as a target state; the manager reads again once idle. */
     fun setSectionFlow(sectionId: String, shownSequential: Boolean) =
-        edit(projectId, "sectionFlow", answer = { readOrder() }) { put("sectionId", sectionId).put("sequential", !shownSequential) }
+        edit(projectId, "sectionFlow") { put("sectionId", sectionId).put("sequential", !shownSequential) }
 
     fun setScope(scope: String) = edit(projectId, "scope") { put("scope", scope) }
 

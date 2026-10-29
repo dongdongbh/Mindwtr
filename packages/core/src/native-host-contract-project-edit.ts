@@ -200,7 +200,7 @@ export function createProjectEditMethods(deps: {
                 return { ok: true, value: { command: 'ProjectFlow', request: { ...base, action, expected: token(read.value) } } };
             }
             case 'flowMode': {
-                const read = await options('getProjectFlowOptions');
+                const read = await options('getProjectFlowOptions', { ...project, flowMode: true });
                 if (!read.ok) return read;
                 if (read.value.canChange === false) return { ok: true, value: { outcome: 'blocked' } };
                 if (read.value.flowMode === edit.mode) return { ok: true, value: { outcome: 'unchanged' } };
@@ -212,11 +212,12 @@ export function createProjectEditMethods(deps: {
             }
             case 'sectionFlow': {
                 const state = useTaskStore.getState();
-                const current = state._allSections.find((row) => row.id === edit.sectionId);
-                if (!current || current.deletedAt || current.projectId !== edit.projectId) return { ok: true, value: { conflict: 'The Section is no longer there' } };
                 const parent = state._projectsById.get(edit.projectId);
                 if (!parent || parent.deletedAt || parent.purgedAt) return { ok: true, value: { conflict: 'The Project is no longer there' } };
+                // An archived project's sections are its history (archived with it): RN's manager offers no flow there.
                 if (parent.status === 'archived' || getProjectFlowMode(parent) !== 'perSection') return { ok: true, value: { outcome: 'blocked' } };
+                const current = state._allSections.find((row) => row.id === edit.sectionId);
+                if (!current || current.deletedAt || current.projectId !== edit.projectId) return { ok: true, value: { conflict: 'The Section is no longer there' } };
                 if ((current.isSequential === true) === edit.sequential) return { ok: true, value: { outcome: 'unchanged' } };
                 return { ok: true, value: { run: async () => {
                     const result = await useTaskStore.getState().updateSection(edit.sectionId, { isSequential: edit.sequential });

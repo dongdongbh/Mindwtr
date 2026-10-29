@@ -1416,12 +1416,13 @@ const MENU_READS: Record<string, (input: never) => Reply> = {
     // Project details (ProjectDetails.kt): the values its panel and pickers show (a project's options; none writes), and core's
     // blocks for the notes as typed.
     projectStatusOptions: (input) => contract.getProjectStatusOptions(input),
-    projectFlowOptions: (input) => contract.getProjectFlowOptions(input),
+    // Android's Flow Mode and section flow (#1429) ride on flags only these Menu reads pass: iOS's own reads keep their exact keys.
+    projectFlowOptions: (input: { projectId: string }) => contract.getProjectFlowOptions({ ...input, flowMode: true }),
     projectNotesOptions: (input) => contract.getProjectNotesEditOptions(input),
     projectAreaOptions: (input) => contract.getProjectAreaOptions(input),
     projectTagsOptions: (input) => contract.getProjectTagsEditOptions(input),
     projectDateOptions: (input) => contract.getProjectDateOptions(input),
-    projectSectionOrderOptions: (input) => contract.getProjectSectionOrderOptions(input),
+    projectSectionOrderOptions: (input: { projectId: string }) => contract.getProjectSectionOrderOptions({ ...input, sectionFlow: true }),
     projectNotesPreview: (input) => contract.getProjectNotesPreview(input),
     // The header's Convert to section… (ProjectDetails.kt): its row, destinations and preview (a read; the write is projectEdit).
     projectToSectionOptions: (input) => contract.getProjectToSectionOptions(input),

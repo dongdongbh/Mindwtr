@@ -101,10 +101,11 @@ export function createProjectSectionOrderMethods(deps: {
     revision: () => string;
 }) {
     return {
-        getProjectSectionOrderOptions(input: { projectId: string }): NativeHostResult<{
+        /** iOS reads each row's four keys exactly; Android's Menu read passes [sectionFlow] for each row's flow (#1429). */
+        getProjectSectionOrderOptions(input: { projectId: string; sectionFlow?: true }): NativeHostResult<{
             revision: string; project: { id: string; title: string; status: Project['status'] };
             canReorder: boolean; sections: Array<{ id: string; title: string;
-                canMoveUp: boolean; canMoveDown: boolean; sequential: boolean | null }>; token: Section[] }> {
+                canMoveUp: boolean; canMoveDown: boolean; sequential?: boolean | null }>; token: Section[] }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             if (!input || typeof input.projectId !== 'string' || !input.projectId || input.projectId.length > 500)
@@ -125,7 +126,7 @@ export function createProjectSectionOrderMethods(deps: {
                 sections: shown.map((row, index) => ({ id: row.id, title: row.title,
                     canMoveUp: canReorder && index > 0,
                     canMoveDown: canReorder && index < shown.length - 1,
-                    sequential: perSection ? row.isSequential === true : null })),
+                    ...(input.sectionFlow === true ? { sequential: perSection ? row.isSequential === true : null } : {}) })),
                 token: shown };
             const frozen = detach<typeof value>(JSON.parse(JSON.stringify(value)));
             return frozen && isNativeJsonWithinBytes(frozen) ? { ok: true, value: frozen }

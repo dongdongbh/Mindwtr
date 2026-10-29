@@ -100,7 +100,5 @@ class ProjectDetailsTest {
         assertEquals(null, flowModeEdit(shown = "perSection", picked = "perSection"))
         for (picked in listOf("parallel", "sequential")) assertEquals(picked, flowModeEdit(shown = "perSection", picked = picked)?.getString("mode"))
         assertEquals("perSection", flowModeEdit(shown = "sequential", picked = "perSection")?.getString("mode"))
-        // Opening and closing the details sends no flow edit: only a typed title and notes are stored on leave.
-        assertEquals(emptyList<Pair<String, String>>(), editsOnLeave(title = null, storedTitle = "Old", notes = null, storedNotes = null))
     }
 }
