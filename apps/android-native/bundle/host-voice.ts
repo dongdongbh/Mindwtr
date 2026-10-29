@@ -125,6 +125,19 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
     let active: Active | null = null;
     let starting: { session: number } | null = null;
     let stopping = false;
+    /**
+     * Review N2: a save refused for its draft (an unreadable date command) keeps its recording, as RN's recovery attachment: the
+     * managed copy waits for the popup's next Save, and goes with the session when the popup closes.
+     */
+    let held: { session: number; attachment: Attachment; recording: string; title: string; provider: string } | null = null;
+    const heldFor = (session: number) => held !== null && held.session === session;
+    const dropHeld = (keep: (session: number) => boolean) => {
+        const kept = held;
+        if (!kept || keep(kept.session)) return;
+        held = null;
+        deleteQuietly(kept.attachment.uri);
+        if (kept.recording !== kept.attachment.uri) deleteQuietly(kept.recording);
+    };
     /** Transcriptions still running after their task saved (RN's detached speech promise). */
     const transcriptions = new Set<Promise<void>>();
 
@@ -263,7 +276,14 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             const saved = await bindings.submit({
                 text: input.text ?? '', options: input.options!, captureId, fallbackTitle: title, attachments: attachment ? [attachment] : [],
             });
-            if (saved.ok && saved.value.kind === 'refused') return { status: 'refused', notice: saved.value.notice };
+            if (saved.ok && saved.value.kind === 'refused') {
+                // Review N2: the recording stays for the fixed draft's Save (a managed copy, made now if save audio is off).
+                const kept = attachment ?? await bindings.persistAttachment(recovery);
+                dropHeld(() => false);
+                held = { session: input.session, attachment: kept, recording: stopped.uri, title, provider: runtime.provider };
+                adopted = true;
+                return { status: 'refused', notice: saved.value.notice };
+            }
             // Review B1: a task with this capture ID in the store points to these files, saved or not (core's addTask landed it and
             // the store retries its save), so they stay, as RN keeps them once addTask succeeded.
             const landed = bindings.store.getState().tasks.find((task) => task.id === captureId.toLowerCase());
@@ -294,22 +314,76 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         }
     };
 
+    /** The popup's Save while a refused save holds its recording: the draft saves with it (RN's recovery attachment). */
+    const save = async (input: { session: number; text: string; options?: QuickCaptureOptions }): Promise<
+        | { status: 'saved'; taskId: string }
+        | { status: 'idle' | 'busy' | 'failed' }
+        | { status: 'refused'; notice: unknown }
+    > => {
+        const kept = held;
+        if (!kept || kept.session !== input.session) return { status: 'idle' };
+        if (!input.options) throw new Error('A voice save needs the popup draft options');
+        if (stopping || !coordinator.tryBeginSubmission(input.session)) return { status: 'busy' };
+        stopping = true;
+        try {
+            const captureId = bindings.newId();
+            const saved = await bindings.submit({
+                text: input.text, options: input.options, captureId, fallbackTitle: kept.title, attachments: [kept.attachment],
+            });
+            if (saved.ok && saved.value.kind === 'refused') return { status: 'refused', notice: saved.value.notice };
+            // As a stop's save (review B1): a task with this capture ID in the store has the recording, saved or not.
+            const landed = bindings.store.getState().tasks.find((task) => task.id === captureId.toLowerCase());
+            const taskId = saved.ok && saved.value.kind === 'saved' && saved.value.taskId ? saved.value.taskId : landed?.id;
+            if (!taskId) {
+                bindings.log({ kind: 'capture', outcome: 'failed', provider: kept.provider, errorKind: 'save' });
+                return { status: 'failed' };
+            }
+            held = null;
+            bindings.log(saved.ok
+                ? { kind: 'capture', outcome: 'saved', provider: kept.provider }
+                : { kind: 'capture', outcome: 'failed', provider: kept.provider, errorKind: 'save-pending' });
+            if (kept.recording !== kept.attachment.uri) deleteQuietly(kept.recording);
+            return { status: 'saved', taskId };
+        } catch {
+            bindings.log({ kind: 'capture', outcome: 'failed', provider: kept.provider, errorKind: 'save' });
+            return { status: 'failed' };
+        } finally {
+            coordinator.finishSubmission(input.session);
+            stopping = false;
+        }
+    };
+
+    /**
+     * Review N5: the app left the front. Kotlin's recorder already ended the recording; this forgets it, and a start still
+     * waiting for the microphone records nothing (it cancels what it gets), so the next start or stop behaves as RN's.
+     */
+    const leave = async (): Promise<{ status: 'left' }> => {
+        starting = null;
+        await cancelRecording(() => true);
+        return { status: 'left' };
+    };
+
     return {
-        /** The popup opened: a new session; an older session's recording ends without saving. */
-        async open(): Promise<{ session: number }> {
+        /** The popup opened: a new session; an older session's recording, or a refused save's kept one, goes without saving. */
+        async open(): Promise<{ session: number; defaultAudio: boolean }> {
             const session = coordinator.beginSession();
             await cancelRecording((owner) => owner !== session);
-            return { session };
+            dropHeld((owner) => owner === session);
+            // RN's center + records at once when Settings › GTD's default capture method is Audio.
+            return { session, defaultAudio: bindings.settings().gtd?.defaultCaptureMethod === 'audio' };
         },
-        /** The popup closed: its session ends, and its recording with it, unsaved (RN's sheet close). */
+        /** The popup closed: its session ends, and its recording with it, unsaved (RN's sheet close), and a kept one too. */
         async close(session: number): Promise<{ status: 'closed' }> {
             coordinator.invalidateSession(session);
             await cancelRecording((owner) => owner === session);
+            dropHeld((owner) => owner !== session);
             return { status: 'closed' };
         },
         start,
         stop,
-        state: () => ({ recording: active !== null, busy: starting !== null || stopping, format: active?.format ?? null }),
+        save,
+        leave,
+        state: () => ({ recording: active !== null, busy: starting !== null || stopping, format: active?.format ?? null, held: held !== null }),
         /** Tests and the boot: every transcription still running has ended. */
         settled: () => Promise.all([...transcriptions]).then(() => undefined),
         async request(name: string, input: Record<string, unknown>): Promise<unknown> {
@@ -318,8 +392,12 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 case 'open': return this.open();
                 case 'close': return this.close(session);
                 case 'start': return start(session);
-                case 'stop': return stop({ session, save: input.save === true, text: typeof input.text === 'string' ? input.text : '',
-                    options: input.options as QuickCaptureOptions | undefined });
+                // A stop's and a save's answer say whether a refused save's recording is still kept (the popup's next Save sends it).
+                case 'stop': return { ...await stop({ session, save: input.save === true, text: typeof input.text === 'string' ? input.text : '',
+                    options: input.options as QuickCaptureOptions | undefined }), held: heldFor(session) };
+                case 'save': return { ...await save({ session, text: typeof input.text === 'string' ? input.text : '',
+                    options: input.options as QuickCaptureOptions | undefined }), held: heldFor(session) };
+                case 'leave': return leave();
                 case 'state': return this.state();
                 default: throw new Error(`Unknown voice request ${name}`);
             }
