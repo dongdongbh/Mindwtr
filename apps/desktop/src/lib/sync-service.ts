@@ -2081,6 +2081,18 @@ export class SyncService {
                 token: config.token,
                 fetcher: (await getTauriFetch()) ?? fetch,
             });
+            if (!isTauriRuntimeEnv() && typeof window !== 'undefined' && window.location.protocol === 'http:') {
+                const cloudUrl = new URL(normalizedUrl);
+                if (cloudUrl.protocol === 'http:'
+                    && cloudUrl.hostname === window.location.hostname
+                    && cloudUrl.port !== window.location.port) {
+                    void syncServiceDependencies.logInfo('Browser same-host HTTP cloud connection test succeeded', {
+                        scope: 'sync',
+                        force: true,
+                        extra: { releaseCheck: 'v1.3.8/docker-lan-cloud-test' },
+                    });
+                }
+            }
         } catch (error) {
             logSyncWarning('Self-hosted connection test failed', error);
             throw error;

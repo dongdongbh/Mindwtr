@@ -39,6 +39,8 @@ Then open:
 
 From a phone or another computer, replace `localhost` with the Docker host's LAN IP. In Mindwtr, use the cloud port (`http://HOST_IP:8787`) as the Self-Hosted URL, not the PWA port (`:5173`).
 
+From v1.3.8, the Docker web app permits HTTP connections to the same hostname or IPv4 address on another port. Use the same address for the PWA and Cloud URLs, and set `MINDWTR_CLOUD_CORS_ORIGIN` to the PWA origin. Another LAN HTTP host is still blocked by the browser policy, even with Allow insecure connections enabled; use HTTPS for a separate cloud host.
+
 To build from source instead, clone the repository and run `docker compose -f docker/compose.yaml up --build -d` from its root.
 
 This HTTP compose file is best for local testing. Mindwtr desktop and mobile clients accept HTTP for localhost, private IPs, and local hostnames. Public URLs should use HTTPS.
