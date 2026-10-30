@@ -27,6 +27,7 @@ export type TaskListBulkBarProps = {
   hasSelection: boolean;
   onExitSelectionMode: () => void;
   onOpenOrganize?: () => void;
+  onReorder?: () => void;
   onMoveToSection?: () => void;
   onToggleRangeSelectMode: () => void;
   onOpenTagModal: () => void;
@@ -47,6 +48,7 @@ export function TaskListBulkBar({
   hasSelection,
   onExitSelectionMode,
   onOpenOrganize,
+  onReorder,
   onMoveToSection,
   onToggleRangeSelectMode,
   onOpenTagModal,
@@ -117,6 +119,18 @@ export function TaskListBulkBar({
         ))}
       </ScrollView>
       <View style={styles.bulkActions}>
+        {onReorder ? (
+          <TouchableOpacity
+            onPress={onReorder}
+            disabled={bulkActionLoading}
+            style={[styles.bulkActionButton, { backgroundColor: themeColors.filterBg, opacity: bulkActionLoading ? 0.5 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={t('projects.reorderTasks')}
+            testID="task-list-reorder-shortcut"
+          >
+            <Text style={[styles.bulkActionText, { color: themeColors.text }]}>{t('projects.reorderTasks')}</Text>
+          </TouchableOpacity>
+        ) : null}
         {onMoveToSection && bar.moveToSection ? (
           <TouchableOpacity
             onPress={onMoveToSection}

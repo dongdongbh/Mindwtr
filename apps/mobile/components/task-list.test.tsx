@@ -1046,6 +1046,30 @@ describe('TaskList', () => {
     }));
   });
 
+  it('omits the Reorder shortcut when a project has no visible reorder targets', async () => {
+    taskListSelectionState.current = {
+      ...taskListSelectionState.current,
+      selectionMode: true,
+    };
+    const onBulkBarPropsChange = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <TaskList
+          bulkBarPlacement="external"
+          onBulkBarPropsChange={onBulkBarPropsChange}
+          project={{ id: project.id, enableReorder: true }}
+          showHeader={false}
+          statusFilter="all"
+          taskSource={[]}
+          title={project.title}
+        />,
+      );
+    });
+    expect(onBulkBarPropsChange.mock.calls.at(-1)?.[0].onReorder).toBeUndefined();
+    act(() => tree.unmount());
+  });
+
   it('keeps read-only project rows inspectable while removing every mutation surface', async () => {
     const archivedTask = makeTask('archived-task', 'Historical task', { status: 'archived' });
     taskListSelectionState.current = {

@@ -33,6 +33,7 @@ import {
   type Project,
   type ProjectSequenceTaskCue,
   type Task,
+  type TaskSortBy,
 } from '@mindwtr/core';
 
 import InboxScreen from '../../app/(drawer)/(tabs)/inbox';
@@ -497,8 +498,10 @@ const observeBar = (root: ReactTestInstance) => {
   if (!bar) return null;
   return {
     count: textOf(hostOf(bar, 'Text')[0]),
-    // Every control in screen order: [accessibility label, text, disabled]; the first is the exit X.
-    buttons: hostOf(bar, 'TouchableOpacity').map((node) => [node.props.accessibilityLabel ?? null, textOf(node), node.props.disabled === true]),
+    // Frozen bulk-action controls shared with native. Reorder exits this mode;
+    // its new project-only shortcut is exercised separately below.
+    buttons: hostOf(bar, 'TouchableOpacity').filter((node) => node.props.testID !== 'task-list-reorder-shortcut')
+      .map((node) => [node.props.accessibilityLabel ?? null, textOf(node), node.props.disabled === true]),
   };
 };
 
@@ -826,8 +829,9 @@ const noCue = () => undefined;
 const ignore = () => undefined;
 
 /** The project workspace's list as ProjectDetailModal mounts it, with the bulk bar it pins above its toolbar. */
-function ProjectHarness() {
+function ProjectHarness({ sortBy = 'default' }: { sortBy?: TaskSortBy } = {}) {
   const [barProps, setBarProps] = React.useState<TaskListBulkBarProps | null>(null);
+  const [reorderMode, setReorderMode] = React.useState(false);
   const launch = useTaskStore((state) => state._allProjects.find((entry) => entry.id === 'p-launch')!);
   const allTasks = useTaskStore((state) => state._allTasks);
   const projectTasks = React.useMemo(() => allTasks.filter((entry) => entry.projectId === 'p-launch' && !entry.deletedAt), [allTasks]);
@@ -839,11 +843,11 @@ function ProjectHarness() {
         project={launch}
         tasks={projectTasks}
         showCompletedTasks={false}
-        sortBy="default"
+        sortBy={sortBy}
         getTaskSequenceCue={noCue}
         sequenceCueLabels={NO_CUES}
-        reorderMode={false}
-        onReorderModeChange={ignore}
+        reorderMode={reorderMode}
+        onReorderModeChange={setReorderMode}
         listHeaderComponent={null}
         listRef={listRef}
         onListScroll={ignore}
@@ -939,6 +943,42 @@ describe('React Native task list selection mode parity fixture', () => {
     resetForTests();
     if (originalTz === undefined) delete process.env.TZ;
     else process.env.TZ = originalTz;
+  });
+
+  it('leaves project selection for the existing reorder mode and returns with the selection cleared', async () => {
+    await seedStore();
+    let renderer!: ReactTestRenderer;
+    await act(async () => { renderer = create(<ProjectHarness />); });
+    const row = taskRows(renderer.root)[0];
+    await act(async () => { row.actions.toggleSelect(row.task); });
+    expect(taskRows(renderer.root).some((entry) => entry.isMultiSelected)).toBe(true);
+    const before = useTaskStore.getState()._allTasks;
+
+    await press(hostOf(barOf(renderer.root)!, 'TouchableOpacity')
+      .find((node) => node.props.testID === 'task-list-reorder-shortcut'), 'Reorder');
+
+    expect(barOf(renderer.root)).toBeNull();
+    expect(hostOf(renderer.root, 'DraggableFlatList')).toHaveLength(1);
+    await press(hostOf(renderer.root, 'TouchableOpacity')
+      .find((node) => node.props.testID === 'project-task-reorder-toggle'), 'Done reordering');
+    expect(taskRows(renderer.root).every((entry) => !entry.selectionMode && !entry.isMultiSelected)).toBe(true);
+    expect(barOf(renderer.root)).toBeNull();
+    expect(useTaskStore.getState()._allTasks).toBe(before);
+    await act(async () => { renderer.unmount(); });
+  });
+
+  it('keeps the shortcut out of custom-sorted projects and unrelated lists', async () => {
+    for (const screen of [<ProjectHarness sortBy="title" />, <InboxScreen />]) {
+      await seedStore();
+      let renderer!: ReactTestRenderer;
+      await act(async () => { renderer = create(screen); });
+      const row = taskRows(renderer.root)[0];
+      await act(async () => { row.actions.toggleSelect(row.task); });
+      expect(barOf(renderer.root)).not.toBeNull();
+      expect(hostOf(barOf(renderer.root)!, 'TouchableOpacity')
+        .some((node) => node.props.testID === 'task-list-reorder-shortcut')).toBe(false);
+      await act(async () => { renderer.unmount(); });
+    }
   });
 
   it('replays every scenario exactly as frozen', async () => {
