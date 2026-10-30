@@ -968,7 +968,7 @@ describe('React Native task list selection mode parity fixture', () => {
   });
 
   it('keeps the shortcut out of custom-sorted projects and unrelated lists', async () => {
-    for (const screen of [<ProjectHarness sortBy="title" />, <InboxScreen />]) {
+    for (const screen of [<ProjectHarness key="project" sortBy="title" />, <InboxScreen key="inbox" />]) {
       await seedStore();
       let renderer!: ReactTestRenderer;
       await act(async () => { renderer = create(screen); });
