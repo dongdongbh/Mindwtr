@@ -7,6 +7,7 @@ import {
     buildReviewSteps,
     buildReviewSuggestionUpdates,
     createAIProvider,
+    flushPendingSave,
     getExternalCalendarDaySummaries,
     getReviewCalendarRange,
     getReviewStepRail,
@@ -18,6 +19,7 @@ import {
     getWeeklyReviewSettings,
     getWeeklyReviewStale,
     isActionableReviewSuggestion,
+    isTaskFinished,
     planReviewProjectTask,
     resolveReviewStepSession,
     restoreReviewSession,
@@ -51,7 +53,7 @@ import { useQuickCapture } from '../../contexts/quick-capture-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
-import { logError } from '../../lib/app-log';
+import { logError, logInfo } from '../../lib/app-log';
 import { fetchExternalCalendarEvents } from '../../lib/external-calendar';
 import { maybeRequestStoreReviewAfterPositiveMoment } from '../../lib/store-review-prompt';
 
@@ -124,6 +126,19 @@ export function useReviewModalController({
 
     useEffect(() => () => { pendingNavigationRef.current = null; }, []);
     const [expandedProject, setExpandedProject] = useState<string | null>(null);
+    const [projectCompletionPrompt, setProjectCompletionPrompt] = useState<{ id: string; title: string } | null>(null);
+    const [projectCompletionError, setProjectCompletionError] = useState<string | null>(null);
+    const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
+    const completingProjectRef = useRef(false);
+    const [keepProjectsStep, setKeepProjectsStep] = useState(false);
+
+    useEffect(() => {
+        if (!visible) {
+            setProjectCompletionPrompt(null);
+            setProjectCompletionError(null);
+            setKeepProjectsStep(false);
+        }
+    }, [visible]);
     const [aiSuggestions, setAiSuggestions] = useState<TitledReviewSuggestion[]>([]);
     const [aiSelectedIds, setAiSelectedIds] = useState<Set<string>>(new Set());
     const [aiLoading, setAiLoading] = useState(false);
@@ -257,6 +272,52 @@ export function useReviewModalController({
             });
         }
     }, [addTask, areas, closeProjectTaskPrompt, people, projects, projectTaskPrompt, projectTaskTitle, settings, tasks]);
+
+    const closeProjectCompletionPrompt = useCallback(() => {
+        if (!completingProjectRef.current) setProjectCompletionPrompt(null);
+    }, []);
+
+    const completeProject = useCallback(async (projectId: string, confirmed = false) => {
+        if (!visible || completingProjectRef.current) return;
+        const state = useTaskStore.getState();
+        const project = state._allProjects.find((item) => item.id === projectId && !item.deletedAt && item.status === 'active');
+        if (!project) {
+            setProjectCompletionPrompt(null);
+            return;
+        }
+        setProjectCompletionError(null);
+        const sectionIds = new Set(state._allSections.filter((section) => section.projectId === projectId).map((section) => section.id));
+        const hasUnfinishedTasks = state._allTasks.some((task) => (
+            (task.projectId === projectId || (!task.projectId && task.sectionId && sectionIds.has(task.sectionId)))
+            && !task.deletedAt && !isTaskFinished(task) && task.status !== 'reference'
+        ));
+        if (hasUnfinishedTasks && !confirmed) {
+            setProjectCompletionPrompt({ id: project.id, title: project.title });
+            return;
+        }
+        completingProjectRef.current = true;
+        setCompletingProjectId(projectId);
+        // Keep the current review step stable while the store publishes the archive.
+        setKeepProjectsStep(true);
+        try {
+            const result = await state.updateProject(projectId, { status: 'archived' });
+            if (result && !result.success) throw new Error(result.error || 'Failed to complete project');
+            await flushPendingSave();
+            setProjectCompletionPrompt(null);
+            void logInfo('Weekly review project completed', {
+                scope: 'review',
+                force: true,
+                extra: { releaseCheck: 'v1.3.8/weekly-review-complete-project', outcome: 'completed' },
+            });
+        } catch (error) {
+            setProjectCompletionPrompt(null);
+            setProjectCompletionError(t('projects.archiveFailed'));
+            void logError(error, { scope: 'review', extra: { message: 'Failed to complete project during weekly review' } });
+        } finally {
+            completingProjectRef.current = false;
+            setCompletingProjectId(null);
+        }
+    }, [t, visible]);
 
     const toggleExternalDayExpanded = useCallback((dayKey: string) => {
         setExpandedExternalDays((prev) => {
@@ -421,8 +482,12 @@ export function useReviewModalController({
         externalCalendarLoading,
     }), [externalCalendarError, externalCalendarLoading, externalCalendarReviewItems.length, includeContextStep, weeklyBuckets]);
     const steps = useMemo<ReviewStepDefinition[]>(
-        () => titleWeeklyReviewSteps(stepFlags, labels).map((step) => ({ ...step, Icon: STEP_ICONS[step.id] })),
-        [labels, stepFlags],
+        () => titleWeeklyReviewSteps(stepFlags, labels).map((step) => ({
+            ...step,
+            hasWork: step.hasWork || (step.id === 'projects' && keepProjectsStep),
+            Icon: STEP_ICONS[step.id],
+        })),
+        [keepProjectsStep, labels, stepFlags],
     );
     const {
         displayedStep,
@@ -512,6 +577,11 @@ export function useReviewModalController({
         canGoBack: previousStepId !== null,
         closeEditModal,
         closeProjectTaskPrompt,
+        closeProjectCompletionPrompt,
+        completeProject,
+        completingProjectId,
+        projectCompletionPrompt,
+        projectCompletionError,
         completion,
         contextReviewGroups,
         currentStep: displayedStep,

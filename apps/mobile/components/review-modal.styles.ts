@@ -394,6 +394,9 @@ export const styles = StyleSheet.create({
         justifyContent: 'center',
         paddingHorizontal: 20,
     },
+    promptOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
     promptCard: {
         width: '100%',
         borderRadius: 12,

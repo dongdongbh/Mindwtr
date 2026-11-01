@@ -1,12 +1,13 @@
 import React from 'react';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildReviewSteps, getWeeklyReviewBuckets, type Project, type Task } from '@mindwtr/core';
+import { buildReviewSteps, getWeeklyReviewBuckets, type Project, type Section, type Task } from '@mindwtr/core';
 
 import { Modal, Platform, ScrollView } from 'react-native';
 import { CompactText } from './compact-text';
 import { ReviewModal } from './review-modal';
 import { styles } from './review-modal.styles';
+import { logInfo } from '../lib/app-log';
 import { fetchExternalCalendarEvents } from '../lib/external-calendar';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { useTaskEditPreview } from './task-edit/use-task-edit-preview';
@@ -25,7 +26,7 @@ const NOW = new Date(2026, 2, 4, 10, 0, 0);
 // (and outside the look-back window) for any test machine behind UTC.
 const at = (day: number, hour = 9) => new Date(2026, 2, day, hour, 0, 0).toISOString();
 
-const defaultTasks = [
+const defaultTasks: Task[] = [
     {
         id: 'inbox-1',
         title: 'Inbox task',
@@ -68,11 +69,14 @@ const defaultTasks = [
     },
 ];
 
-const defaultProjects = [
+const defaultProjects: Project[] = [
     {
         id: 'project-1',
         title: 'Project One',
         status: 'active',
+        color: '#3b82f6',
+        order: 0,
+        tagIds: [],
         createdAt: at(2),
         updatedAt: at(2),
     },
@@ -108,7 +112,13 @@ const defaultSettings = {
     gtd: { weeklyReview: { includeContextStep: false } },
 };
 
+let hiddenTasks: Task[] = [];
+
 const storeState = {
+    get _allTasks() { return [...this.tasks, ...hiddenTasks]; },
+    get _allProjects() { return this.projects; },
+    _allSections: [] as Section[],
+    updateProject: vi.fn(),
     tasks: defaultTasks.map((task) => ({ ...task })),
     projects: defaultProjects.map((project) => ({ ...project })),
     areas: [],
@@ -215,6 +225,7 @@ vi.mock('../lib/ai-config', () => ({
 
 vi.mock('../lib/app-log', () => ({
     logError: vi.fn(),
+    logInfo: vi.fn(),
 }));
 
 vi.mock('../lib/external-calendar', () => ({
@@ -338,6 +349,12 @@ describe('ReviewModal', () => {
         vi.useFakeTimers();
         vi.setSystemTime(NOW);
         vi.clearAllMocks();
+        hiddenTasks = [];
+        storeState._allSections = [];
+        storeState.updateProject.mockReset().mockImplementation(async (id: string, updates: Partial<Project>) => {
+            storeState.projects = storeState.projects.map((project) => project.id === id ? { ...project, ...updates } : project);
+            return { success: true };
+        });
         storeState.tasks = defaultTasks.map((task) => ({ ...task }));
         storeState.projects = defaultProjects.map((project) => ({ ...project }));
         storeState.settings = { ...defaultSettings };
@@ -349,6 +366,109 @@ describe('ReviewModal', () => {
     afterEach(() => {
         Platform.OS = 'web';
         vi.useRealTimers();
+    });
+
+    const openProjectCompletion = async () => {
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({ step: 'projects', startedAt: NOW.toISOString() }));
+        let tree!: ReturnType<typeof create>;
+        await act(async () => { tree = create(<ReviewModal visible onClose={vi.fn()} />); });
+        const card = tree.root.findAll((node) => typeof node.props.onPress === 'function' && node.props.accessibilityState?.expanded === false)[0];
+        act(() => card.props.onPress());
+        return tree;
+    };
+
+    it('completes an empty project and retains Projects until the review closes', async () => {
+        storeState.tasks = [];
+        const tree = await openProjectCompletion();
+        await act(async () => { await tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress(); });
+        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' });
+        expect(currentStepOf(tree)).toBe('projects');
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        expect(logInfo).toHaveBeenCalledWith('Weekly review project completed', {
+            scope: 'review', force: true,
+            extra: { releaseCheck: 'v1.3.8/weekly-review-complete-project', outcome: 'completed' },
+        });
+        await act(async () => tree.update(<ReviewModal visible={false} onClose={vi.fn()} />));
+        await act(async () => tree.update(<ReviewModal visible onClose={vi.fn()} />));
+        expect(currentStepOf(tree)).toBe('completed');
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['direct', 'section'] as const)('confirms unfinished %s tasks inside the sheet and cancel writes nothing', async (association) => {
+        Platform.OS = association === 'direct' ? 'android' : 'ios';
+        storeState.tasks = [];
+        hiddenTasks = [{ ...defaultTasks[2], projectId: association === 'direct' ? 'project-1' : undefined, sectionId: association === 'section' ? 'section-1' : undefined }];
+        storeState._allSections = [{ id: 'section-1', projectId: 'project-1', title: 'Section', order: 0, createdAt: at(2), updatedAt: at(2) }];
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        expect(tree.root.findAllByType(Modal)[0].props.allowSwipeDismissal).toBe(false);
+        expect(tree.root.findByProps({ accessibilityViewIsModal: true }).props.onAccessibilityEscape).toBeTypeOf('function');
+        expect(tree.root.findAllByType(Modal).some((modal) => modal.props.presentationStyle === 'pageSheet' && modal.findAllByProps({ testID: 'review-confirm-complete-project' }).length > 0)).toBe(true);
+        expect(storeState.updateProject).not.toHaveBeenCalled();
+        act(() => tree.root.findByProps({ accessibilityLabel: 'common.cancel' }).props.onPress());
+        expect(tree.root.findAllByType(Modal)[0].props.allowSwipeDismissal).toBe(true);
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        expect(storeState.updateProject).not.toHaveBeenCalled();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        await act(async () => tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.onPress());
+        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' });
+        expect(currentStepOf(tree)).toBe('projects');
+        await act(async () => tree.unmount());
+    });
+
+    it('bounds long confirmation titles while keeping the full accessible name', async () => {
+        const title = 'A very long project title\n'.repeat(100);
+        storeState.projects = [{ ...defaultProjects[0], title }];
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        const heading = tree.root.findByProps({ accessibilityLabel: title });
+        expect(heading.props.numberOfLines).toBe(2);
+        expect(heading.props.children).toBe(title);
+        expect(tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.disabled).toBe(false);
+        await act(async () => tree.unmount());
+    });
+
+    it('does not confirm deleted, finished or reference tasks', async () => {
+        storeState.tasks = [];
+        hiddenTasks = [
+            { ...defaultTasks[2], id: 'deleted', deletedAt: at(3) },
+            { ...defaultTasks[2], id: 'done', status: 'done' },
+            { ...defaultTasks[2], id: 'archived', status: 'archived' },
+            { ...defaultTasks[2], id: 'reference', status: 'reference' },
+        ];
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        expect(storeState.updateProject).toHaveBeenCalledOnce();
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['archived', 'deleted'] as const)('does not complete a project made %s while confirmation was open', async (change) => {
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        storeState.projects = [{ ...defaultProjects[0], ...(change === 'deleted' ? { deletedAt: at(3) } : { status: 'archived' as const }) }];
+        await act(async () => tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.onPress());
+        expect(storeState.updateProject).not.toHaveBeenCalled();
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['result', 'throw'] as const)('shows a translated failure for a rejected %s and prevents duplicate writes', async (failure) => {
+        let rejectWrite!: () => void;
+        storeState.updateProject.mockImplementation(() => new Promise((resolve, reject) => {
+            rejectWrite = () => failure === 'throw' ? reject(new Error('Disk full')) : resolve({ success: false, error: 'Disk full' });
+        }));
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        const confirm = tree.root.findByProps({ testID: 'review-confirm-complete-project' });
+        act(() => { confirm.props.onPress(); confirm.props.onPress(); });
+        expect(storeState.updateProject).toHaveBeenCalledOnce();
+        expect(tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.disabled).toBe(true);
+        await act(async () => rejectWrite());
+        expect(tree.root.findByProps({ accessibilityRole: 'alert' }).props.children).toBe('projects.archiveFailed');
+        expect(storeState.projects[0].status).toBe('active');
+        expect(logInfo).not.toHaveBeenCalled();
+        await act(async () => tree.unmount());
     });
 
     it.each([
@@ -790,16 +910,17 @@ describe('ReviewModal', () => {
     });
 
     it('parses the project-step prompt and Save & edit opens the created task in the editor', async () => {
-        storeState.addTask.mockImplementation(async (title: string, props: Record<string, unknown>) => {
+        storeState.addTask.mockImplementation(async (title: string, props: Partial<Task>) => {
             storeState.tasks.push({
                 id: 'new-task-1',
                 title,
+                status: 'inbox',
                 contexts: [],
                 tags: [],
                 createdAt: '2026-03-15T00:00:00.000Z',
                 updatedAt: '2026-03-15T00:00:00.000Z',
                 ...props,
-            } as (typeof storeState.tasks)[number]);
+            });
             return { success: true, id: 'new-task-1' };
         });
         let tree!: ReturnType<typeof create>;

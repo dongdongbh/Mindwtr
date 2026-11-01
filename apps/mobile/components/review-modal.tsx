@@ -74,6 +74,11 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         canGoBack,
         closeEditModal,
         closeProjectTaskPrompt,
+        closeProjectCompletionPrompt,
+        completeProject,
+        completingProjectId,
+        projectCompletionPrompt,
+        projectCompletionError,
         completion,
         contextReviewGroups,
         currentStep,
@@ -441,6 +446,20 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                             <FolderOpen size={14} color={tc.tint} strokeWidth={2} />
                             <Text style={[styles.reviewOpenProjectText, { color: tc.tint }]} numberOfLines={1}>
                                 {formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title })}
+                            </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.reviewOpenProjectButton, { opacity: completingProjectId ? 0.5 : 1 }]}
+                            accessibilityRole="button"
+                            accessibilityLabel={t('projects.complete')}
+                            accessibilityState={{ disabled: completingProjectId !== null }}
+                            disabled={completingProjectId !== null}
+                            testID={`review-complete-project-${entry.project.id}`}
+                            onPress={() => { void completeProject(entry.project.id); }}
+                        >
+                            <CheckCircle2 size={14} color={tc.tint} strokeWidth={2} />
+                            <Text style={[styles.reviewOpenProjectText, { color: tc.tint }]}>
+                                {t('projects.complete')}
                             </Text>
                         </TouchableOpacity>
                     </View>
@@ -855,9 +874,14 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
     };
 
     return (
-        <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal onRequestClose={handleClose} onDismiss={handleReviewDismiss}>
+        <Modal visible={modalVisible} animationType="slide" presentationStyle="pageSheet" allowSwipeDismissal={!projectCompletionPrompt} onRequestClose={projectCompletionPrompt ? closeProjectCompletionPrompt : handleClose} onDismiss={handleReviewDismiss}>
             <GestureHandlerRootView style={{ flex: 1 }}>
-                <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['top', 'bottom']}>
+                <SafeAreaView
+                    style={[styles.container, { backgroundColor: tc.bg }]}
+                    edges={['top', 'bottom']}
+                    accessibilityElementsHidden={Boolean(projectCompletionPrompt)}
+                    importantForAccessibility={projectCompletionPrompt ? 'no-hide-descendants' : 'auto'}
+                >
                     <SandboxWorkspaceCue />
                     <View style={[styles.header, { borderBottomColor: tc.border }]}>
                         <TouchableOpacity
@@ -889,6 +913,11 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                     {renderStepRail()}
 
                     <View style={styles.content}>
+                        {projectCompletionError && (
+                            <Text accessibilityRole="alert" style={[styles.hint, { color: tc.danger }]}>
+                                {projectCompletionError}
+                            </Text>
+                        )}
                         {renderStepContent()}
                     </View>
 
@@ -942,6 +971,39 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                         </View>
                     )}
                 </SafeAreaView>
+
+                {projectCompletionPrompt && (
+                    <View style={[styles.promptBackdrop, styles.promptOverlay]} accessibilityViewIsModal onAccessibilityEscape={closeProjectCompletionPrompt}>
+                        <View style={[styles.promptCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
+                            <Text style={[styles.promptTitle, { color: tc.text }]} numberOfLines={2} accessibilityLabel={projectCompletionPrompt.title}>
+                                {projectCompletionPrompt.title}
+                            </Text>
+                            <Text style={[styles.promptProject, { color: tc.secondaryText }]}>{t('projects.completeConfirm')}</Text>
+                            <View style={styles.promptActions}>
+                                <TouchableOpacity
+                                    style={[styles.promptButton, { borderColor: tc.border }]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('common.cancel')}
+                                    onPress={closeProjectCompletionPrompt}
+                                    disabled={completingProjectId !== null}
+                                >
+                                    <Text style={[styles.promptButtonText, { color: tc.text }]}>{t('common.cancel')}</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.promptButtonPrimary, { backgroundColor: filledButton.backgroundColor, opacity: completingProjectId ? 0.5 : 1 }]}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={t('projects.complete')}
+                                    accessibilityState={{ disabled: completingProjectId !== null }}
+                                    testID="review-confirm-complete-project"
+                                    onPress={() => { void completeProject(projectCompletionPrompt.id, true); }}
+                                    disabled={completingProjectId !== null}
+                                >
+                                    <Text style={[styles.promptButtonPrimaryText, { color: onFilled }]}>{t('projects.complete')}</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                )}
 
                 <TaskEditModal
                     visible={showEditModal}
