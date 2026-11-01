@@ -1247,8 +1247,11 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         areaManagerDraft = areaManagerDraft.copy(expanded = null)
         menu.command("areaColor", JSONObject().put("areaId", areaId).put("color", color ?: JSONObject.NULL))
     }
-    /** RN's Delete, offered only while no project uses the area: Settings' manageDelete with core's target (the revision the sheet showed). */
-    fun deleteArea(area: JSONObject) = menu.command("manageDelete", JSONObject().put("target", area.getJSONObject("delete")))
+    /**
+     * RN's Delete, offered only while no project uses the area: Settings' manageDelete with core's target (the revision the sheet showed)
+     * and ifUnused, so core refuses it if a sync moved a project into the area since (review 2a).
+     */
+    fun deleteArea(area: JSONObject) = menu.command("manageDelete", JSONObject().put("target", area.getJSONObject("delete")).put("ifUnused", true))
     /** RN's Save: Settings' manageEditor create (its exact request kept on disk first, as Settings' Save does), then the sheet closes. */
     fun addArea() {
         val draft = areaManagerDraft

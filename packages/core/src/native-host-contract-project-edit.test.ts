@@ -530,3 +530,27 @@ describe('runProjectEdit move (#1263)', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 });
+
+// The Projects screen's Manage areas sheet offers Delete only while no live project uses the area (RN ProjectAreaModals.tsx). Core
+// holds that rule too (review 2a): a sync can move a project into the area after the sheet read, and Settings' delete would detach it.
+describe('Manage areas sheet Delete (#1263 review 2a)', () => {
+    it('refuses a sheet Delete once a live project uses the area, and deletes it while none does', async () => {
+        const { host, data, saves } = await open();
+        const read = host.getProjectAreaManager();
+        if (!read.ok) throw new Error(read.error.message);
+        const row = read.value.areas[0];
+        expect(row).toMatchObject({ id: 'a', inUse: false });
+        await useTaskStore.getState().updateProject('p', { areaId: 'a' });
+        await flushPendingSave();
+        const count = saves();
+        expect(await host.deleteManageItem({ requestId: uuid(200), target: row.delete, ifUnused: true }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+        expect(data().areas.find((item) => item.id === 'a')?.deletedAt).toBeUndefined();
+        expect(data().projects.find((item) => item.id === 'p')?.areaId).toBe('a');
+        await useTaskStore.getState().updateProject('p', { areaId: undefined });
+        expect(await host.deleteManageItem({ requestId: uuid(201), target: row.delete, ifUnused: true })).toEqual({ ok: true, value: { changed: true } });
+        await flushPendingSave();
+        expect(data().areas.find((item) => item.id === 'a')?.deletedAt).toBeDefined();
+    });
+});

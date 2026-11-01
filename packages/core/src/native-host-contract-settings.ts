@@ -70,6 +70,7 @@
  * import cycle between the two files is safe.
  */
 import { AREA_PRESET_COLORS, DEFAULT_AREA_COLOR } from './color-constants';
+import { countLiveProjectsByArea } from './area-project-usage';
 import { createBackupFileName, serializeBackupData } from './backup-transfer';
 import { bytesToBase64 } from './base64-bytes';
 import { serializeMindwtrCsv } from './mindwtr-csv-export';
@@ -1050,15 +1051,21 @@ export function createSettingsMethods(deps: SettingsDeps) {
          * `delete`). Target state: one already gone answers `changed: false`. Compare-and-set on
          * the row's revision: one changed since the view showed it is not deleted (STALE_REVISION).
          */
-        async deleteManageItem(input: { requestId: string; target: NativeManageDeleteTarget }): Promise<NativeHostResult<{ changed: boolean }>> {
+        /**
+         * [input].ifUnused (the Projects screen's Manage areas sheet, #1263): RN deletes an area only while no live project uses it,
+         * so a project synced into the area after the sheet read refuses the delete instead of being detached as Settings' is.
+         */
+        async deleteManageItem(input: { requestId: string; target: NativeManageDeleteTarget; ifUnused?: true }): Promise<NativeHostResult<{ changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const target = isObjectRecord(input) ? readWriteTarget(input.target) : null;
             if (!target || (target.type !== 'area' && target.type !== 'person' && target.type !== 'context' && target.type !== 'tag')
-                || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)) {
+                || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
+                || (input.ifUnused !== undefined && (input.ifUnused !== true || target.type !== 'area'))) {
                 return fail('INVALID_INPUT', 'A request UUID and an area, person, context or tag, with the revision its row showed, are required');
             }
-            return receipts.run<{ changed: boolean }>(input.requestId, JSON.stringify(['manageDelete', target]), async () => {
+            const ifUnused = input.ifUnused === true;
+            return receipts.run<{ changed: boolean }>(input.requestId, JSON.stringify(ifUnused ? ['manageDelete', target, 'ifUnused'] : ['manageDelete', target]), async () => {
                 const state = useTaskStore.getState();
                 const present = target.type === 'area'
                     ? state.areas.some((area) => area.id === target.id)
@@ -1068,6 +1075,8 @@ export function createSettingsMethods(deps: SettingsDeps) {
                 if (!present) return { ok: true, value: { changed: false } };
                 const refused = refuseStaleTarget(target);
                 if (refused) return refused;
+                if (ifUnused && target.type === 'area' && countLiveProjectsByArea(state._allProjects).has(target.id))
+                    return fail('STALE_REVISION', 'A project uses this area now; refresh before deleting it');
                 const written = await runStoreWrite(() => {
                     switch (target.type) {
                         case 'area': return state.deleteArea(target.id);
