@@ -498,11 +498,35 @@ export function connect({ serial, pkg, uiFile, adb = process.env.ADB ?? DEFAULT_
         }
         return inView(nodes) ?? fail(`no ${description} on screen`);
     };
-    /** Scrolls the list to its first item (the Inbox's Process button is a list item). */
+    /**
+     * Flings the list toward its top: a fast 300 px stroke. Its finger travel stays under a pull down to sync's threshold
+     * (Material 3 counts half the drag against 80 dp), so a fling that meets the top of Focus, the Inbox or a list starts no sync.
+     */
+    const flingUp = async (nodes) => {
+        const list = mainList(nodes);
+        if (!list) return nodes;
+        const [x1, y1, x2, y2] = box(list);
+        const from = Math.round(y1 + (y2 - y1) * 0.3);
+        const stroke = async (x) => {
+            requireAppFront();
+            sh(`input swipe ${x} ${from} ${x} ${from + 300} 40`);
+            await sleep(700);
+            return screen();
+        };
+        const moved = await stroke(Math.round((x1 + x2) / 2));
+        if (signature(moved) !== signature(nodes)) return moved;
+        // A stroke the system or a settling list ignored is tried once more further right, as swipe does.
+        await sleep(600);
+        return stroke(Math.round(x1 + (x2 - x1) * 0.8));
+    };
+    /**
+     * Scrolls the list to its first item (the Inbox's Process button is a list item) by flings, never a long drag: a long
+     * drag at the top is RN's pull down to sync (5bb0ea8f) and would start a sync.
+     */
     const toTop = async () => {
         let nodes = await screen();
         for (let step = 0; step < 60; step += 1) {
-            const next = await swipe(nodes, 'up');
+            const next = await flingUp(nodes);
             if (signature(next) === signature(nodes)) return next;
             nodes = next;
         }

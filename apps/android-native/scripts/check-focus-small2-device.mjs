@@ -132,8 +132,9 @@ try {
 
     // (a) Pull down to sync: one drag down from the list's top, one run.
     const pulls = () => lines('Native Android pull to sync');
-    const before = pulls().length;
     let nodes = await device.toTop();
+    // Counted after the scroll to the top, so only this drag's run is counted.
+    const before = pulls().length;
     const list = mainList(nodes) ?? fail('no Focus list');
     const [x1, y1, x2, y2] = box(list);
     const x = Math.round((x1 + x2) / 2);
@@ -141,7 +142,7 @@ try {
     sh(`input swipe ${x} ${y1 + 60} ${x} ${Math.min(y2 - 40, y1 + 900)} 700`);
     await sleep(300);
     shoot('pull-bar');
-    await waitFor('the pull to sync run', () => pulls().length === before + 1, 120_000);
+    await waitFor('the pull to sync run', () => pulls().length > before, 120_000);
     await sleep(3_000);
     const ran = pulls().slice(before);
     check(ran.length === 1, `(a) one pull down runs one pull down to sync: ${ran.map((line) => line.slice(line.indexOf('{'))).join(' ')}`);

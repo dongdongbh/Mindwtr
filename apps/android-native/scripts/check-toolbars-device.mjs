@@ -381,7 +381,7 @@ try {
     check(rewritten.length > 0 && JSON.stringify(rewritten) === JSON.stringify(replaced), `(e) only the ${replaced.length} task(s) whose place changed were written`);
     await tapExpecting(button(await screen(), en['common.done']) ?? fail('no Done'), (current) => !withDescription(current, seen.reorder[0].positionLabel), 'Done');
     // (e) Back leaves Reorder first: Focus stays open.
-    nodes = await tapExpecting(withDescription(await device.toTop(), en['projects.reorderTasks']) ?? fail('no Reorder'),
+    nodes = await tapExpecting(withDescription(await device.toTop(), `${en['projects.reorderTasks']}, ${en['focus.reorderScreenHint']}`) ?? fail('no Reorder'),
         (current) => Boolean(withDescription(current, seen.reorder[0].positionLabel)), 'the reorder screen again');
     nodes = await back((current) => !withDescription(current, seen.reorder[0].positionLabel));
     check(tabSelected(nodes, en['tab.next']), '(e) Back ended Reorder, and Focus stayed open');

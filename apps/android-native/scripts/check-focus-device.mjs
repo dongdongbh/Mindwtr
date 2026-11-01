@@ -187,7 +187,11 @@ const scanForRow = async (title) => {
     let triedMore;
     for (let step = 0; step < budget; step += 1) {
         if (inList(nodes, title)) return nodes;
-        passedSection = headers(nodes).sort((a, b) => b.top - a.top)[0]?.title ?? passedSection;
+        // A title under a More pill is not passed: the rows More brings sit above it (a leftover Upcoming row once made
+        // a Next action read as Upcoming, run 2026-11-01).
+        const pill = nodes.find((node) => node['content-desc']?.startsWith('More '));
+        passedSection = headers(nodes).filter((header) => !pill || header.top < box(pill)[1])
+            .sort((a, b) => b.top - a.top)[0]?.title ?? passedSection;
         // The dump can report the More pill's labelled node as not clickable (its click sits on a same-bounds node,
         // run 32), so it is found by its label and tapped at its center; a pill that stays put after the tap is
         // treated as disabled (a retry is owed) and the scroll goes on.
