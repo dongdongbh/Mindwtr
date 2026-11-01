@@ -157,6 +157,17 @@ export type NativeFocusReorderRow = {
  * the next Focus read. Group options, saving, removing an advanced criterion,
  * deleting a saved filter and reordering are commands.
  */
+/** getFocus's revision ends in this part when the read sends the device's group folds (#1444). */
+export const FOCUS_FOLDS_REVISION_PART = ':folds:';
+/**
+ * A getFocus revision without its folds part. The folds change no filter list and no Pomodoro choice, so those reads compare
+ * only this base (a fold once made them refuse every read with STALE_REVISION).
+ */
+export const focusRevisionWithoutFolds = (revision: string): string => {
+    const at = revision.indexOf(FOCUS_FOLDS_REVISION_PART);
+    return at < 0 ? revision : revision.slice(0, at);
+};
+
 export type NativeFocusControls = {
     /** Send back as `controls` with every Focus read and command. */
     state: FocusControlState;
@@ -789,7 +800,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
                 return fail('INVALID_INPUT', 'The Focus controls, a list, a valid window, the Focus revision and a picker query only for tokens or projects are required');
             }
             const { model, revision } = deps.focusModel(input.controls === undefined ? null : state, new Date());
-            if (revision !== input.revision) return fail('STALE_REVISION', 'Focus changed; read it again');
+            if (revision !== focusRevisionWithoutFolds(input.revision)) return fail('STALE_REVISION', 'Focus changed; read it again');
             const all = focusLists(model, deps.t())[input.list as ListName];
             const query = input.query;
             const items = query === undefined ? all : all.filter((item) => matchesPickerQuery(

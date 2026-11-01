@@ -2695,6 +2695,15 @@ describe('native host contract', () => {
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(host.getFocusSectionWindow({ key: 'next', offset: 0, limit: 1, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE,
             collapsedGroupIds: ['focus:schedule:later-today', 'context:@home', 'project:elsewhere'] })).toMatchObject({ ok: true, value: { rows: [{ id: 'phone' }] } });
+        // The folds change no filter list and no Pomodoro choice: the filter sheet's lists and the Pomodoro picker take the
+        // folded read's revision (a fold once broke the filter search, its More and the picker with STALE_REVISION).
+        // Another base revision still refuses.
+        expect(host.getFocusControlsList({ list: 'tokens', offset: 0, limit: 2, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE }))
+            .toMatchObject({ ok: true });
+        expect(host.getPomodoroTaskWindow({ offset: 0, limit: 2, revision: folded.revision, controls: DEFAULT_FOCUS_CONTROL_STATE }))
+            .toMatchObject({ ok: true });
+        expect(host.getFocusControlsList({ list: 'tokens', offset: 0, limit: 2, revision: `old-${folded.revision}`, controls: DEFAULT_FOCUS_CONTROL_STATE }))
+            .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(host.getFocus({ limit: 20, controls: DEFAULT_FOCUS_CONTROL_STATE, collapsedGroupIds: [7] as never })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 

@@ -362,6 +362,8 @@ import { createBulkActionMethods } from './native-host-contract-bulk-actions';
 import {
     buildNativeFocusControls,
     createFocusControlMethods,
+    FOCUS_FOLDS_REVISION_PART,
+    focusRevisionWithoutFolds,
     readNativeFocusControlEdit,
     readNativeFocusControls,
     type NativeFocusControls,
@@ -1434,7 +1436,7 @@ export function createNativeHostContract(options: {
             : folds.size === 0 ? section : foldFocusSection(section, folds)))
     );
     /** The folds belong to the view: a page asked under other folds is another revision. */
-    const foldsRevision = (folds: ReadonlySet<string> | null) => (!folds?.size ? '' : `:folds:${paramsKey([...folds].sort())}`);
+    const foldsRevision = (folds: ReadonlySet<string> | null) => (!folds?.size ? '' : `${FOCUS_FOLDS_REVISION_PART}${paramsKey([...folds].sort())}`);
 
     const focusRows = (section: CachedFocusSection, offset: number, limit: number, now: Date): NativeTaskRow[] => {
         const formatDate = createDateFormatter(dateFormatting());
@@ -2917,7 +2919,7 @@ export function createNativeHostContract(options: {
             const now = new Date(), read = readFocusControls(input, now);
             if (!read) return fail('INVALID_INPUT', 'The Focus controls are not valid');
             const { model, revision: currentRevision } = focusModel(read.controls, now);
-            if (input.revision !== currentRevision) return fail('STALE_REVISION', 'Focus changed; restart paging');
+            if (focusRevisionWithoutFolds(input.revision) !== currentRevision) return fail('STALE_REVISION', 'Focus changed; restart paging');
             const tasks = getPomodoroTaskChoices(model.lists);
             const value = { version: NATIVE_HOST_CONTRACT_VERSION, revision: currentRevision, total: tasks.length,
                 rows: tasks.slice(input.offset, input.offset + input.limit).map(({ id, title }) => ({ id, title })) } as const;
