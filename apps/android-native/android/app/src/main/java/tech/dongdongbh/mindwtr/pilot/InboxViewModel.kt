@@ -169,6 +169,17 @@ private const val SUGGESTIONS = 4
 private const val SYNC_FALLBACK_MS = 3_000L
 /** RN's Archive retention interval (use-root-layout-archive-retention.ts). */
 private const val ARCHIVE_RETENTION_MS = 15 * 60 * 1000L
+/**
+ * One Archive retention run once core is quiet ([awaitQuiet]): nothing once the app left the front ([active] false), else core's run
+ * ([send]) told whether an editor is open, read only now (review BLOCK 1): openEditor and openProject take [busy] before their read
+ * sets the editor or the project, so a tap made while core was busy counts as open. The outcome, or null when nothing was sent.
+ */
+internal fun archiveRetentionRun(awaitQuiet: () -> Unit, active: () -> Boolean, editor: () -> Boolean, project: () -> Boolean, busy: () -> Boolean,
+    send: (Boolean) -> String): String? {
+    awaitQuiet()
+    return if (active()) send(editor() || project() || busy()) else null
+}
+
 /** The start screen waits at most this long for the first screen (InboxViewModel.holdSplash), then lets a slow start show. */
 private const val SPLASH_CAP_MS = 10_000L
 /** Core windows the View tab's checklist by NATIVE_HOST_MAX_WINDOW. */
@@ -393,11 +404,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         val askedAt = SystemClock.uptimeMillis()
         Thread({
             try {
-                runtime.awaitQuiet(askedAt) { !active }
-                if (!active) return@Thread
-                if (runtime.archiveRetention(editor != null || openProjectId != null).optString("outcome") == "purged") {
-                    ui { menu.whenIdle { if (writable) refreshAll() } }
-                }
+                val outcome = archiveRetentionRun({ runtime.awaitQuiet(askedAt) { !active } }, { active }, { editor != null }, { openProjectId != null },
+                    { busy }) { runtime.archiveRetention(it).optString("outcome") }
+                if (outcome == "purged") ui { menu.whenIdle { if (writable) refreshAll() } }
             } catch (failure: Throwable) {
                 Log.w(CoreHost.TAG, "Native Android archive retention failed ${failureForLog(failure)}")
             } finally {
@@ -500,12 +509,13 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     // first, then answers the prompt to open (the activity has no second writer: review O2e P3-A).
                     ProcessCoreHost.aboutStartup(runtime)
                     prompts.start(runtime)
-                    runArchiveRetention()
                     if (screen != Screen.Inbox) ProcessCoreHost.startDeferredSync()
                     main.postDelayed({ ProcessCoreHost.startDeferredSync("boot-timeout") }, SYNC_FALLBACK_MS)
                     restored?.let { resumeEditor(it, savedDraft.optJSONObject("pending")) }
                     // Control edits core had not answered before the process died are sent again, in order.
                     pumpEdits()
+                    // After the restored editor is back (review N4), so the run sees it open.
+                    runArchiveRetention()
                     if (reopenProcessing != null) resumeProcessing(reopenProcessing) else processingStore.delete()
                     if (reopenCapture != null) resumeCapture(reopenCapture) else captureStore.delete()
                     // An owed create left on disk goes first; then the open sheet and screen are read.

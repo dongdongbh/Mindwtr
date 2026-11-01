@@ -1440,6 +1440,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
                 shell.ui { landless(action) }
                 return@perform
             }
+            // An Archive retention write that failed shows RN's line under the card (review N5).
+            if (action.kind == "dataSetting") shell.ui { settings.archiveSaveFailed(true, action) }
             // A General write core applied but could not save (SAVE_FAILED): App lock's gate follows core's value; the retry stays owed.
             if (!refused && action.kind == "generalSetting") settings.unsettled(runtime, action)
             throw failure
@@ -1449,6 +1451,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         shell.acknowledged(action)
         shell.ui {
             if (action.kind in CREATES) store.delete()
+            if (action.kind == "dataSetting") settings.archiveSaveFailed(false, action)
             finish(action, reply)
         }
     }

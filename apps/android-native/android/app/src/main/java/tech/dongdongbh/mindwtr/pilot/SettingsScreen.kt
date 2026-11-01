@@ -404,17 +404,19 @@ private fun ArchiveRetentionCard(model: InboxViewModel, card: JSONObject) = with
             Text(card.getString("current"), style = rnText(16, 500, 21), color = c.text, modifier = Modifier.padding(top = 12.dp))
             val label = card.getString("daysLabel")
             Text(label, style = rnText(13, 400, 18), color = c.secondaryText, modifier = Modifier.padding(top = 12.dp))
-            BasicTextField(draft, { draft = it }, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = rnText(14, 400).copy(color = c.text),
+            BasicTextField(draft, { draft = it; settings.archiveSaveFailed(false) }, singleLine = true, cursorBrush = SolidColor(c.tint), textStyle = rnText(14, 400).copy(color = c.text),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier.padding(top = 6.dp).fillMaxWidth().clip(shape).rnBorder(1.dp, c.border, shape).padding(10.dp)
                     .semantics { contentDescription = label }.testTag("archive-retention-days"))
             if (draft.isNotEmpty() && typed == null) Text(card.getString("invalid"), style = rnText(14, 400), color = c.text,
                 modifier = Modifier.padding(top = 6.dp).semantics { liveRegion = LiveRegionMode.Polite })
+            if (settings.local.optBoolean("archiveSaveFailed")) Text(card.getString("saveFailed"), style = rnText(14, 400), color = c.text,
+                modifier = Modifier.padding(top = 6.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag("archive-retention-save-failed"))
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Text(card.getString("save"), style = rnText(16, 400, 21), color = c.tint, modifier = Modifier.fade(if (canSave) 1f else 0.45f)
                     .clickable(enabled = canSave, role = Role.Button) { focus.clearFocus(); typed?.let(settings::archiveRetention) }.testTag("archive-retention-save"))
                 Text(never.getString("label"), style = rnText(16, 400, 21), color = c.tint, modifier = Modifier.fade(if (canNever) 1f else 0.45f)
-                    .clickable(enabled = canNever, role = Role.Button) { settings.data(never.getJSONObject("edit")) }.testTag("archive-retention-never"))
+                    .clickable(enabled = canNever, role = Role.Button) { settings.archiveData(never.getJSONObject("edit")) }.testTag("archive-retention-never"))
             }
         }
     }
@@ -445,7 +447,7 @@ private fun ArchiveRetentionReview(model: InboxViewModel, review: JSONObject) = 
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.End)) {
                 Text(review.getString("cancel"), style = rnText(14, 400), color = c.tint, modifier = Modifier.clickable(role = Role.Button) { close() }.testTag("archive-retention-cancel"))
                 Text(review.getString("confirm"), style = rnText(14, 400), color = c.tint, modifier = Modifier.clickable(role = Role.Button) {
-                    close(); settings.data(review.getJSONObject("edit"))
+                    close(); settings.archiveData(review.getJSONObject("edit"))
                 }.testTag("archive-retention-apply"))
             }
         }

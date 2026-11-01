@@ -34,6 +34,8 @@ import java.util.UUID
  * and the device choices RN keeps under its keys. Every row, label, option, confirmation and write is core's.
  */
 
+/** Core's Data edit for Archive retention's days. */
+private const val ARCHIVE_EDIT = "archiveRetentionDays"
 /** Settings' commands (host-entry.ts MENU_COMMANDS). */
 val SETTINGS_KINDS = setOf("generalSetting", "gtdSetting", "manageEditor", "manageDelete", "somedayRename", "somedayReorder", "somedayDelete", "dataSetting", "syncPreference",
     "setAISetting", "notificationsSetting", "calendarSetting")
@@ -425,15 +427,31 @@ class SettingsModel(private val menu: MenuModel, private val saved: SavedStateHa
     /** Data's Debug logging switch and Archive retention's Save and Never: core's edit, with a new request UUID. */
     fun data(edit: JSONObject) = menu.command("dataSetting", JSONObject().put("edit", edit))
 
+    /** Archive retention's Save, Apply and Never: core's edit, with RN's save-failed line cleared first. */
+    fun archiveData(edit: JSONObject) {
+        archiveSaveFailed(false)
+        data(edit)
+    }
+
     /**
      * Archive retention's Save of [days] (RN's save): core's review first when it removes sooner (the confirm card, kept in [local]
-     * so a rotation keeps it open), else core's edit at once.
+     * so a rotation keeps it open), else core's edit at once. A review read that failed shows its failure (review N6).
      */
     fun archiveRetention(days: Int) {
-        shell.background(emptyList(), { runtime -> runtime.menuRead("archiveRetentionReview", JSONObject().put("days", days).toString()) }) { reply, _ ->
+        archiveSaveFailed(false)
+        shell.background(listOf(Part.MenuDialog), { runtime -> runtime.menuRead("archiveRetentionReview", JSONObject().put("days", days).toString()) }) { reply, _ ->
             val review = reply.optJSONObject("review")
-            if (review == null) data(reply.getJSONObject("edit")) else editLocal { put("archiveReview", review) }
+            if (review == null) archiveData(reply.getJSONObject("edit")) else editLocal { put("archiveReview", review) }
         }
+    }
+
+    /**
+     * RN's "Could not save archive retention." under the card (review N5): an Archive retention Save, Apply or Never that failed
+     * ([action], MenuModel's send) shows it; the next one, its retry saving, or typing in the days field clears it.
+     */
+    fun archiveSaveFailed(failed: Boolean, action: FailedAction? = null) {
+        if (action != null && JSONObject(action.title).optJSONObject("edit")?.optString("type") != ARCHIVE_EDIT) return
+        if (failed != local.optBoolean("archiveSaveFailed")) editLocal { if (failed) put("archiveSaveFailed", true) else remove("archiveSaveFailed") }
     }
 
     /** Data's made log file, waiting for the Data screen to open the share sheet from its activity (a rotation keeps it). */

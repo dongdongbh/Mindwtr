@@ -147,3 +147,24 @@ describe('native host contract: Settings › Data Archive retention card', () =>
         expect(on.getArchiveRetentionReview({ days: 1.5 })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 });
+
+// iOS reads getDataSettings by named fields only (apps/ios-native/App/CoreModel.swift readDataSettings, no key-count check), so the
+// archiveRetention key is safe there (review BLOCK 2, waived). These are the fields its guard requires: a rename fails here first.
+describe('native host contract: the getDataSettings fields iOS reads', () => {
+    it('keeps the version, revision, title, every backup label and the diagnostics card iOS checks', async () => {
+        const view = value((await openHost({})).getDataSettings()) as unknown as Record<string, any>;
+        expect(view.version).toEqual(expect.any(Number));
+        for (const name of ['revision', 'title']) expect(view[name]).toMatch(/./);
+        for (const name of ['title', 'exportLabel', 'description', 'failed', 'csvLabel', 'csvDescription', 'csvFailed', 'tasknotesLabel',
+            'tasknotesDescription', 'tasknotesFailed', 'mergeLabel', 'mergeDescription', 'mergeFailed', 'restoreFileLabel', 'restoreFileDescription',
+            'csvImportLabel', 'csvImportDescription', 'todoistImportLabel', 'todoistImportDescription', 'ticktickImportLabel', 'ticktickImportDescription',
+            'dgtImportLabel', 'dgtImportDescription', 'omnifocusImportLabel', 'omnifocusImportDescription', 'snapshotsLabel', 'restoreLabel']) {
+            expect([name, view.backup[name]]).toEqual([name, expect.stringMatching(/./)]);
+        }
+        const labels = view.diagnostics;
+        expect(labels.title).toMatch(/./);
+        expect(labels.debugLogging.value).toEqual(expect.any(Boolean));
+        for (const name of ['toastTitle', 'logMissing', 'shareUnavailable', 'logCleared', 'logClearFailed']) expect([name, labels[name]]).toEqual([name, expect.any(String)]);
+        for (const name of ['shareLog', 'clearLog']) expect([name, labels[name] === null || typeof labels[name] === 'object']).toEqual([name, true]);
+    });
+});
