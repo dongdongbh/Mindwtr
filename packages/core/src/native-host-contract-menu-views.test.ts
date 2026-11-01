@@ -231,6 +231,12 @@ describe('native host contract: More sheet and list views', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await host.moveTaskToDestination({ ...input, requestId: 'nope' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(host.getTaskDestinationPicker({ id: 'no-such-task' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        // RN's TaskEditDestinationPicker says No matches only when neither a project nor an area matches: an area-only match shows none.
+        const lonely = (await useTaskStore.getState().addArea('Zebra garden'))!;
+        const areaOnly = value(host.getTaskDestinationPicker({ id: task.id, query: 'zebra' }));
+        expect(areaOnly.projectGroups.flatMap((group) => group.rows)).toEqual([]);
+        expect(areaOnly.areas.rows.map((row) => row.destination)).toEqual([{ kind: 'area', id: lonely.id }]);
+        expect(areaOnly.noMatches).toBeNull();
     });
     it('returns what core\'s models return when called directly', async () => {
         freezeClock();

@@ -1199,7 +1199,8 @@ export function createMenuViewMethods(deps: MenuViewDeps) {
                 ],
                 areas: { title: areasLabel, rows: areas.map((area) => ({ title: area.name, accessibilityLabel: `${areasLabel}: ${area.name}`,
                     selected: task.areaId === area.id, destination: { kind: 'area' as const, id: area.id } })) },
-                noMatches: choices.filteredProjects.length === 0 ? t('common.noMatches') : null,
+                // RN: only when neither a project nor an area matches.
+                noMatches: choices.filteredProjects.length === 0 && areas.length === 0 ? t('common.noMatches') : null,
             } };
         },
 
