@@ -129,14 +129,13 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
      * Review N2: a save refused for its draft (an unreadable date command) keeps its recording, as RN's recovery attachment: the
      * managed copy waits for the popup's next Save, and goes with the session when the popup closes.
      */
-    let held: { session: number; attachment: Attachment; recording: string; title: string; provider: string } | null = null;
+    let held: { session: number; attachments: Attachment[]; recordings: string[]; title: string; provider: string } | null = null;
     const heldFor = (session: number) => held !== null && held.session === session;
     const dropHeld = (keep: (session: number) => boolean) => {
         const kept = held;
         if (!kept || keep(kept.session)) return;
         held = null;
-        deleteQuietly(kept.attachment.uri);
-        if (kept.recording !== kept.attachment.uri) deleteQuietly(kept.recording);
+        [...kept.attachments.map((attachment) => attachment.uri), ...kept.recordings].forEach(deleteQuietly);
     };
     /** Transcriptions still running after their task saved (RN's detached speech promise). */
     const transcriptions = new Set<Promise<void>>();
@@ -273,14 +272,17 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             if (!coordinator.isCurrent(input.session)) return { status: 'stale' };
             stage = 'save';
             const captureId = bindings.newId();
+            // RN's initialAttachments: a refused save's kept recordings ride this save too (review N2).
+            const prior = held !== null && held.session === input.session ? held : null;
             const saved = await bindings.submit({
-                text: input.text ?? '', options: input.options!, captureId, fallbackTitle: title, attachments: attachment ? [attachment] : [],
+                text: input.text ?? '', options: input.options!, captureId, fallbackTitle: title,
+                attachments: [...(prior?.attachments ?? []), ...(attachment ? [attachment] : [])],
             });
             if (saved.ok && saved.value.kind === 'refused') {
                 // Review N2: the recording stays for the fixed draft's Save (a managed copy, made now if save audio is off).
                 const kept = attachment ?? await bindings.persistAttachment(recovery);
-                dropHeld(() => false);
-                held = { session: input.session, attachment: kept, recording: stopped.uri, title, provider: runtime.provider };
+                held = { session: input.session, attachments: [...(prior?.attachments ?? []), kept],
+                    recordings: [...(prior?.recordings ?? []), ...(stopped.uri !== kept.uri ? [stopped.uri] : [])], title, provider: runtime.provider };
                 adopted = true;
                 return { status: 'refused', notice: saved.value.notice };
             }
@@ -293,6 +295,10 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
                 return { status: 'failed' };
             }
             adopted = true;
+            if (prior && held === prior) {
+                held = null;
+                prior.recordings.forEach(deleteQuietly);
+            }
             if (saved.ok) {
                 bindings.log({ kind: 'capture', outcome: 'saved', provider: runtime.provider, durationMs: durationBucket(at.getTime() - current.startedAt) });
             } else {
@@ -328,7 +334,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
         try {
             const captureId = bindings.newId();
             const saved = await bindings.submit({
-                text: input.text, options: input.options, captureId, fallbackTitle: kept.title, attachments: [kept.attachment],
+                text: input.text, options: input.options, captureId, fallbackTitle: kept.title, attachments: kept.attachments,
             });
             if (saved.ok && saved.value.kind === 'refused') return { status: 'refused', notice: saved.value.notice };
             // As a stop's save (review B1): a task with this capture ID in the store has the recording, saved or not.
@@ -342,7 +348,7 @@ export function createNativeVoice(bindings: NativeVoiceBindings) {
             bindings.log(saved.ok
                 ? { kind: 'capture', outcome: 'saved', provider: kept.provider }
                 : { kind: 'capture', outcome: 'failed', provider: kept.provider, errorKind: 'save-pending' });
-            if (kept.recording !== kept.attachment.uri) deleteQuietly(kept.recording);
+            kept.recordings.forEach(deleteQuietly);
             return { status: 'saved', taskId };
         } catch {
             bindings.log({ kind: 'capture', outcome: 'failed', provider: kept.provider, errorKind: 'save' });

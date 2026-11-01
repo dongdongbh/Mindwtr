@@ -348,6 +348,30 @@ describe('native voice capture', () => {
         expect(closed.voice.state()).toMatchObject({ held: false });
     });
 
+    // Review N2, RN's initialAttachments: a kept recording rides the next recording's save too, as RN's stopRecording sends
+    // [...initialAttachments, audio]; a second refused save keeps both.
+    it('a kept recording rides the next recording\'s save with it', async () => {
+        const setup: { save?: 'refused' } = { save: 'refused' };
+        const h = harness({}, setup);
+        const session = await record(h);
+        await h.voice.stop({ session, save: true, text: 'x /due:someday', options: OPTIONS });
+        expect(await h.voice.start(session)).toEqual({ status: 'recording', format: 'm4a' });
+        await h.voice.stop({ session, save: true, text: 'y /due:someday', options: OPTIONS });
+        expect(h.submitted.at(-1)!.attachments).toHaveLength(2);
+        expect(h.deleted).toEqual([]);
+        setup.save = undefined;
+        expect(await h.voice.start(session)).toMatchObject({ status: 'recording' });
+        expect(await h.voice.stop({ session, save: true, text: 'Call mom', options: OPTIONS })).toMatchObject({ status: 'saved' });
+        const attachments = h.submitted.at(-1)!.attachments.map((attachment) => attachment.uri);
+        expect(new Set(attachments).size).toBe(3);
+        expect(attachments.every((uri) => uri.startsWith(`${DOCS}attachments/`))).toBe(true);
+        expect(h.voice.state()).toMatchObject({ held: false });
+        await h.voice.settled();
+        // Each original recording goes once its managed copy is the task's; the copies stay.
+        expect(h.deleted.filter((uri) => uri.startsWith(`${DOCS}attachments/`))).toEqual([]);
+        expect(new Set(h.deleted.filter((uri) => uri.startsWith(`${DOCS}voice-captures/`))).size).toBe(3);
+    });
+
     it('opens a session that says whether Audio is the default capture method', async () => {
         expect(await harness({}, { settings: { ...gemini(), gtd: { defaultCaptureMethod: 'audio' } } as AppSettings }).voice.open()).toMatchObject({ defaultAudio: true });
         expect(await harness().voice.open()).toMatchObject({ defaultAudio: false });
