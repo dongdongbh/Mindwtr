@@ -302,3 +302,21 @@ describe('runAreaColor (#1263)', () => {
         expect(saves()).toBe(count);
     });
 });
+
+// Review 5c: runAreaColor's prepare and commit are two steps; a sync landing between them prepares again on the area as it is now.
+describe('runAreaColor retry (#1263 review 5c)', () => {
+    it('prepares again when a sync changes the area between prepare and commit, keeping the synced name', async () => {
+        const { methods, data } = await open({ areas: [area()], projects: [project('p1')] });
+        const commit = methods.commitPreparedAreaColor.bind(methods);
+        let calls = 0;
+        vi.spyOn(methods, 'commitPreparedAreaColor').mockImplementation(async (input) => {
+            calls += 1;
+            if (calls === 1) await useTaskStore.getState().updateArea('area-work', { name: 'Synced' });
+            return commit(input);
+        });
+        expect(await methods.runAreaColor({ requestId: id, areaId: 'area-work', color: '#ef4444' }))
+            .toEqual({ ok: true, value: { outcome: 'saved', id: 'area-work', color: '#ef4444' } });
+        expect(calls).toBe(2);
+        expect(data().areas[0]).toMatchObject({ name: 'Synced', color: '#ef4444' });
+    });
+});
