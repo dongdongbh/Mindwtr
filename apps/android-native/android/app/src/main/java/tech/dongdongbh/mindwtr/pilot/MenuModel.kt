@@ -1413,7 +1413,7 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             runtime.menuCommand(action.kind, input(action))
         } catch (failure: Exception) {
             val refused = UPDATE_REFUSALS.any { failure.message?.startsWith(it) == true }
-                || (action.kind in LANDLESS && failure.message?.startsWith("ACTION_FAILED") == true)
+                || ((action.kind in LANDLESS || action.kind == "projectNextAction") && failure.message?.startsWith("ACTION_FAILED") == true)
             if (refused && action.kind in CREATES) shell.ui { store.delete() }
             // A refused composer Save wrote nothing: the composer's next Save gets a fresh request UUID.
             if (refused && action.kind == "calendarCreate") shell.ui { calendar.refused(action) }
@@ -1444,12 +1444,20 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             }
             // An Archive retention write that failed shows RN's line under the card (review N5).
             if (action.kind == "dataSetting") shell.ui { settings.archiveSaveFailed(true, action) }
-            // The next-action prompt's refused action wrote nothing: RN's failure toast, the prompt stays open, nothing is owed.
+            // The next-action prompt's refused action wrote nothing (its ACTION_FAILED too: core's write did not land and kept no
+            // receipt, native-request-receipts.ts): RN's failure toast, the prompt stays open, nothing is owed. A stale one reads
+            // core's prompt again for the same task, so the next tap sends the new revisions (review N1).
             if (refused && action.kind == "projectNextAction") {
                 shell.acknowledged(action)
-                shell.ui { shell.nextAction.refused() }
+                val fresh = if (failure.message?.startsWith("STALE_REVISION") != true) null else runCatching {
+                    runtime.menuRead("projectNextActionPrompt", JSONObject().put("taskId", JSONObject(action.title).getString("taskId")).toString())
+                        .optJSONObject("prompt")
+                }.onFailure { Log.w(CoreHost.TAG, "Project next action prompt not read again ${failureForLog(it)}") }
+                shell.ui { shell.nextAction.refused(stale = fresh?.isSuccess == true, fresh = fresh?.getOrNull()) }
                 return@perform
             }
+            // A failure that leaves the retry owed (SAVE_FAILED: it landed): the prompt closes so the failure banner shows (review N2).
+            if (action.kind == "projectNextAction") shell.ui { shell.nextAction.owed() }
             // A General write core applied but could not save (SAVE_FAILED): App lock's gate follows core's value; the retry stays owed.
             if (!refused && action.kind == "generalSetting") settings.unsettled(runtime, action)
             throw failure

@@ -2612,6 +2612,14 @@ for (const text of [contextsUi, reviewUi, weeklyUi, dailyUi]) {
 // its rows is that list's setTaskStatus, elsewhere updateTask.
 assert.match(rowUi, /\.clickable\(enabled = enabled, role = Role\.Button\) \{ chooseStatus\(task, status\) \}/);
 assert.match(model, /if \(status == "done" && task\.status != "done"\) \{ statusMenu = null; complete\(task\.id, task\.taskRevision, askNext = true\) \}\s+else if \(!menu\.rowStatus\(task, status\)\) changeStatus\(task, status\)/);
+// Only a row's Done (its swipe and its status menu, RN's SwipeableTaskItem) asks for the project's next action: Search's Done, the
+// Calendar's, Pomodoro's and the failure banner's retry complete without the prompt (next-action review N5).
+assert.deepEqual(readdirSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot')).filter((name) => name.endsWith('.kt'))
+    .flatMap((name) => (source(name).match(/askNext = true/g) ?? []).map(() => name)).sort(), ['InboxViewModel.kt', 'TaskRowView.kt']);
+assert.match(searchUi, /\{ complete\(task\.id, task\.taskRevision\) \}/);
+assert.match(source('CalendarModel.kt'), /"done" -> complete\(taskId, revision\)\n/);
+assert.match(source('Pomodoro.kt'), /shell\.complete\(id, taskRevision\)\n/);
+assert.match(model, /"complete" -> complete\(action\.id, action\.patch\["taskRevision"\]\.orEmpty\(\)\)\n/);
 assert.match(rowUi, /failedAction == if \(status == "done"\) completeAction\(task\.id, task\.taskRevision\) else statusAction\(task, status\)\)/);
 assert.match(menuModel, /private val ROW_KINDS = mapOf\("contexts" to "contextsAction", "review" to "reviewAction", "weekly" to "reviewAction", "daily" to "reviewAction"\)/);
 // The Weekly Review's project Add task creates a task: its exact request (the request UUID core makes the task's id) is on disk first.
@@ -3240,7 +3248,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     // C3: Settings › Calendar's writes too (core's ACTION_FAILED: the device refused, or no calendar push yet): its toast shows core's words.
     assert.match(menuModel, /private val LANDLESS = setOf\("mindSweepAdd", "bulkCreate", "calendarSetting"\)/);
     assert.match(menuModel, /if \(action\.kind == "calendarSetting"\) \{ shell\.acknowledged\(action\); return@perform \}/);
-    assert.match(menuModel, /\|\| \(action\.kind in LANDLESS && failure\.message\?\.startsWith\("ACTION_FAILED"\) == true\)/);
+    // The next-action prompt's ACTION_FAILED did not land either (no receipt kept): its refusal path, not an owed retry (review N2).
+    assert.match(menuModel, /\|\| \(\(action\.kind in LANDLESS \|\| action\.kind == "projectNextAction"\) && failure\.message\?\.startsWith\("ACTION_FAILED"\) == true\)/);
     assert.match(menuModel, /if \(refused && action\.kind in LANDLESS\) \{\s+shell\.acknowledged\(action\)\s+shell\.ui \{ landless\(action\) \}\s+return@perform/);
     // Navigation: the Inbox's Mind Sweep (its pill and its empty-Inbox button) and the Weekly Review's open it; the More sheet's saved
     // searches open their screen; Mind Sweep goes back to the screen it opened over.
@@ -3846,6 +3855,8 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(model, /"open" -> \{\s+keepCapture\(null\)\s+openSavedTask\(reply\.getString\("taskId"\), reply\.menuText\("projectId"\)\)/);
     assert.match(modalKt, /shell\.openSavedTask\(reply\.getString\("taskId"\), reply\.menuText\("projectId"\)\)/);
     assert.doesNotMatch(code(model + modalKt), /openEditor\(id, "task"\)/, 'Save & edit never opens the editor over the screen it was on');
+    // The project next-action prompt's Save & edit is RN's ProjectNextActionEditor: over the screen the row was on, once idle.
+    assert.match(model, /openEditor = \{ taskId -> menu\.whenIdle \{ openEditor\(taskId, "task"\) \} \}/);
     // An owed failure (the screen's own save's, or any other command's) shows the app's failure banner with its exact retry, as
     // every screen's does: without it every control stayed disabled with no Try again.
     assert.match(captureModalUi, /if \(model\.failedAction != null\) FailureBanner\(model\.error\.orEmpty\(\)\) \{ OwedRetry\(model\) \}/);

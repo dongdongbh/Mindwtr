@@ -310,7 +310,11 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** The Focus screen's Pomodoro card (Pomodoro.kt, pass R2b): core's durable session, its transitions and its alarms. */
     val pomodoro = PomodoroModel(this)
     /** RN's project next-action prompt after a row's Done (NextActionPrompt.kt). */
-    val nextAction = NextActionPromptModel(this)
+    val nextAction: NextActionPromptModel = NextActionPromptModel(command = { menu.command("projectNextAction", it) },
+        toast = { title, message -> showToast(title, message, "error", durationMs = 4200) },
+        // RN's ProjectNextActionEditor opens over the screen the row was on (unlike the capture screen's Save & edit). The command
+        // still holds busy when its reply lands, so the editor opens once it settled (perform would turn it away).
+        openEditor = { taskId -> menu.whenIdle { openEditor(taskId, "task") } })
     /** A link, share or assistant note waiting to open (EntryPoints.kt). */
     // A file share's files are staged in the cache, where core's file port reads them (HostFiles), as RN's share module copies them.
     val entries = EntryRouter(this, File(app.noBackupFilesDir, "entries"), SharedFileStager(File(app.cacheDir, "shared-entries"), ContentSharedFileSource(app)))

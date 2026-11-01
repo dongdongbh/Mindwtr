@@ -19,7 +19,8 @@ import type { TaskStatus } from './types';
 type Translate = (key: string) => string;
 
 export type NativeProjectNextActionPrompt = {
-    taskId: string; projectId: string; projectRevision: string; scope: 'project' | 'section';
+    /** The project, and the completed task's section, an Add lands in (RN's prompt.projectId and prompt.sectionId). */
+    taskId: string; projectId: string; sectionId: string | null; projectRevision: string; scope: 'project' | 'section';
     title: string; description: string;
     /** RN's "Choose an existing task" list: every candidate, as RN's ScrollView shows them. */
     choose: { label: string; items: { id: string; title: string; status: TaskStatus; statusLabel: string; taskRevision: string }[] };
@@ -33,7 +34,7 @@ export type NativeProjectNextActionPrompt = {
 
 export type NativeProjectNextActionRequest = { requestId: string; taskId: string } & (
     { action: 'choose'; candidateId: string; candidateRevision: string }
-    | { action: 'add'; text: string; openAfterSave: boolean }
+    | { action: 'add'; text: string; openAfterSave: boolean; projectId: string; sectionId: string | null }
     | { action: 'completeProject'; projectId: string; projectRevision: string });
 
 export type NativeProjectNextActionResult = { action: 'choose' | 'completeProject'; id: string }
@@ -65,7 +66,8 @@ export function createProjectNextActionPromptMethods(deps: {
         if (value.action === 'choose') return id(value.candidateId) && id(value.candidateRevision) ? value as NativeProjectNextActionRequest : null;
         if (value.action === 'add') {
             return typeof value.text === 'string' && Boolean(value.text.trim()) && value.text.length <= TEXT_LIMIT
-                && typeof value.openAfterSave === 'boolean' ? value as NativeProjectNextActionRequest : null;
+                && typeof value.openAfterSave === 'boolean' && id(value.projectId) && (value.sectionId === null || id(value.sectionId))
+                ? value as NativeProjectNextActionRequest : null;
         }
         return value.action === 'completeProject' && id(value.projectId) && id(value.projectRevision) ? value as NativeProjectNextActionRequest : null;
     };
@@ -94,7 +96,7 @@ export function createProjectNextActionPromptMethods(deps: {
             const sectionTitle = data.scope === 'section' && task.sectionId
                 ? sections.find((section) => section.id === task.sectionId)?.title : undefined;
             return { ok: true, value: { prompt: {
-                taskId: task.id, projectId: data.project.id, projectRevision: revisionOf(data.project), scope: data.scope,
+                taskId: task.id, projectId: data.project.id, sectionId: task.sectionId ?? null, projectRevision: revisionOf(data.project), scope: data.scope,
                 title: t('projects.nextActionPromptTitle'),
                 description: data.scope === 'section' && sectionTitle
                     ? formatI18nTemplate(t('projects.nextActionPromptSectionDesc'), { section: sectionTitle, project: data.project.title })
@@ -134,15 +136,15 @@ export function createProjectNextActionPromptMethods(deps: {
                     const written = await runStoreWrite(() => useTaskStore.getState().updateProject(project.id, { status: 'archived' }));
                     return settleWrite(written, { action: 'completeProject' as const, id: project.id });
                 }
-                const completed = state._tasksById.get(request.taskId);
-                const project = completed?.projectId ? state._projectsById.get(completed.projectId) : undefined;
-                if (!completed || !project || project.deletedAt || project.status === 'archived') {
+                // The prompt's project and section, as RN's: a sync that moved the completed task since never moves the new one.
+                const project = state._projectsById.get(request.projectId);
+                if (!project || project.deletedAt || project.status === 'archived') {
                     return fail('INVALID_INPUT', 'The project no longer takes a next action');
                 }
                 // The capture sheet's quick-add grammar, so "/waiting" and friends work here too (#859, f34284f8c).
                 const { title, props } = parseProjectNextActionInput(request.text.trim(), {
                     projectId: project.id,
-                    sectionId: completed.sectionId,
+                    sectionId: request.sectionId ?? undefined,
                     projects: state.projects,
                     areas: state.areas,
                     parseOptions: buildQuickAddParseOptions(state.settings, state),

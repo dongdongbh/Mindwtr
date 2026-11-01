@@ -67,7 +67,7 @@ describe('native host contract: project next-action prompt', () => {
         const host = await openHost({ tasks: [task('last', 'next'), task('waits', 'waiting'), task('later', 'someday')], projects: [project()] });
         const prompt = await complete(host, 'last');
         expect(prompt).toEqual({
-            taskId: 'last', projectId: 'project', projectRevision: expect.any(String), scope: 'project',
+            taskId: 'last', projectId: 'project', sectionId: null, projectRevision: expect.any(String), scope: 'project',
             title: t('projects.nextActionPromptTitle'),
             description: 'Choose or add the next action for Launch.',
             choose: { label: t('projects.nextActionPromptChooseExisting'), items: expect.arrayContaining([
@@ -115,9 +115,9 @@ describe('native host contract: project next-action prompt', () => {
     it('Add parses the capture sheet\'s quick-add grammar into the project as Next unless a status is typed (321443606, #859)', async () => {
         const host = await openHost({ tasks: [task('last', 'next')], projects: [project()] });
         await complete(host, 'last');
-        const plain = value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: ' Draft brief @phone ', openAfterSave: false }));
+        const plain = value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: ' Draft brief @phone ', openAfterSave: false, projectId: 'project', sectionId: null }));
         expect(stored(plain.id)).toMatchObject({ status: 'next', projectId: 'project', contexts: ['@phone'] });
-        const waiting = value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: 'Hear back /waiting', openAfterSave: false }));
+        const waiting = value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: 'Hear back /waiting', openAfterSave: false, projectId: 'project', sectionId: null }));
         expect(stored(waiting.id)).toMatchObject({ status: 'waiting', projectId: 'project' });
     });
 
@@ -126,7 +126,7 @@ describe('native host contract: project next-action prompt', () => {
             settings: { deviceId: 'device-a', gtd: {}, features: { priorities: false, timeEstimates: false } } });
         await complete(host, 'last');
         const added = value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add',
-            text: 'Call vendor /priority:high /estimate:45m', openAfterSave: false }));
+            text: 'Call vendor /priority:high /estimate:45m', openAfterSave: false, projectId: 'project', sectionId: null }));
         expect(stored(added.id)).not.toHaveProperty('priority');
         expect(stored(added.id)).not.toHaveProperty('timeEstimate');
     });
@@ -134,7 +134,7 @@ describe('native host contract: project next-action prompt', () => {
     it('Save & edit answers openAfterSave with the new task, and its replay finds the same task (9dea771b5)', async () => {
         const host = await openHost({ tasks: [task('last', 'next')], projects: [project()] });
         await complete(host, 'last');
-        const request = { requestId: generateUUID(), taskId: 'last', action: 'add' as const, text: 'Write plan', openAfterSave: true };
+        const request = { requestId: generateUUID(), taskId: 'last', action: 'add' as const, text: 'Write plan', openAfterSave: true, projectId: 'project', sectionId: null };
         const added = value(await host.runProjectNextAction(request));
         expect(added).toEqual({ action: 'add', id: expect.any(String), openAfterSave: true });
         expect(value(await host.runProjectNextAction(request))).toEqual(added);
@@ -152,7 +152,7 @@ describe('native host contract: project next-action prompt', () => {
         expect(prompt.description).toBe('Choose or add the next action for Section one in Launch.');
         expect(prompt.completeProject).toBeNull();
         expect(prompt.choose.items.map((item) => item.id)).toEqual(['s1b']);
-        const added = value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 's1', action: 'add', text: 'Next in one', openAfterSave: false }));
+        const added = value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 's1', action: 'add', text: 'Next in one', openAfterSave: false, projectId: 'project', sectionId: 'one' }));
         expect(stored(added.id)?.sectionId).toBe('one');
     });
 
@@ -170,13 +170,59 @@ describe('native host contract: project next-action prompt', () => {
         expect((await complete(host, 'last'))?.description).toBe('Choose or add the next action for Cost $& {{section}}.');
     });
 
+    // Correction pass (review N3, N5).
+    const add = (host: Host, prompt: { taskId: string; projectId: string; sectionId: string | null }, text: string, requestId = generateUUID()) =>
+        host.runProjectNextAction({ requestId, taskId: prompt.taskId, action: 'add', text, openAfterSave: false,
+            projectId: prompt.projectId, sectionId: prompt.sectionId });
+
+    it('Add lands in the prompt\'s project and section, not where the completed task moved since (RN\'s prompt.projectId, N3)', async () => {
+        const host = await openHost({
+            tasks: [task('last', 'next', { sectionId: 'one' }), task('s2', 'next', { sectionId: 'two' })],
+            projects: [project({ isSequential: true, sequentialScope: 'section' } as Partial<Project>), project({ id: 'other', title: 'Other' })],
+            sections: [section('one'), section('two'), section('elsewhere', { projectId: 'other' })],
+        });
+        const prompt = (await complete(host, 'last'))!;
+        expect(prompt).toMatchObject({ projectId: 'project', sectionId: 'one' });
+        // A sync moves the completed task to another project before the user taps Add.
+        await useTaskStore.getState().updateTask('last', { projectId: 'other', sectionId: 'elsewhere' });
+        const added = value(await add(host, prompt, 'Next in one'));
+        expect(stored(added.id)).toMatchObject({ projectId: 'project', sectionId: 'one' });
+    });
+
+    it('Add names its task by the request UUID, so a replay after process death finds it (N5)', async () => {
+        const host = await openHost({ tasks: [task('last', 'next')], projects: [project()] });
+        const prompt = (await complete(host, 'last'))!;
+        const requestId = generateUUID().toUpperCase();
+        const added = value(await add(host, prompt, 'Write plan', requestId));
+        expect(added.id).toBe(requestId.toLowerCase());
+        expect(stored(requestId.toLowerCase())?.title).toBe('Write plan');
+    });
+
+    it('Add is refused once the prompt\'s project is archived, and writes nothing (N5)', async () => {
+        const host = await openHost({ tasks: [task('last', 'next')], projects: [project()] });
+        const prompt = (await complete(host, 'last'))!;
+        await useTaskStore.getState().updateProject('project', { status: 'archived' });
+        const before = useTaskStore.getState()._allTasks.length;
+        expect(await add(host, prompt, 'Too late')).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(useTaskStore.getState()._allTasks).toHaveLength(before);
+    });
+
+    it('Complete project refuses a project changed since the prompt showed it, and archives nothing (N5)', async () => {
+        const host = await openHost({ tasks: [task('last', 'next')], projects: [project()] });
+        const prompt = (await complete(host, 'last'))!;
+        await useTaskStore.getState().updateProject('project', { title: 'Launch v2' });
+        expect(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'completeProject',
+            projectId: prompt.projectId, projectRevision: prompt.projectRevision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(useTaskStore.getState()._projectsById.get('project')?.status).toBe('active');
+    });
+
     it('refuses a malformed action, and logs each saved action with no title', async () => {
         const host = await openHost({ tasks: [task('last', 'next')], projects: [project()] });
         await complete(host, 'last');
-        expect(await host.runProjectNextAction({ requestId: 'nope', taskId: 'last', action: 'add', text: 'x', openAfterSave: false })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        expect(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: '   ', openAfterSave: false } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.runProjectNextAction({ requestId: 'nope', taskId: 'last', action: 'add', text: 'x', openAfterSave: false, projectId: 'project', sectionId: null })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: '   ', openAfterSave: false, projectId: 'project', sectionId: null } as never)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         setLogger((payload) => lines.push(payload));
-        value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: 'Secret words', openAfterSave: false }));
+        value(await host.runProjectNextAction({ requestId: generateUUID(), taskId: 'last', action: 'add', text: 'Secret words', openAfterSave: false, projectId: 'project', sectionId: null }));
         const line = lines.find((entry) => entry.context?.releaseCheck === 'v1.3.8/native-project-next-action');
         expect(line?.context).toMatchObject({ outcome: 'add' });
         expect(JSON.stringify(lines)).not.toContain('Secret words');
