@@ -38,6 +38,14 @@ val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayProjectMove", "
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
     "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 /**
+ * Core's line for the status menu's Move to project or area… or a parked project's Move to section… refused as stale (it wrote
+ * nothing), shown as RN's failure toast; null for any other refusal or command (status menu review BLOCK 1).
+ */
+internal fun staleMoveLine(kind: String, message: String?): String? =
+    message?.takeIf { kind in setOf("taskDestinationMove", "somedayProjectMove") && it.startsWith("STALE_REVISION") }
+        ?.substringAfter(": ", "")?.ifEmpty { null }
+
+/**
  * The creates whose exact request waits on disk until core answers: Someday's, the Weekly Review's project Add task, the
  * Calendar composer's Save, the Board's Duplicate, a saved Focus filter, Settings › Manage's editor Save (a new area or person),
  * Bulk organize's new project or area, and a Mind Sweep capture.
@@ -1467,6 +1475,12 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
                 shell.ui { landless(action) }
                 return@perform
             }
+            // A stale Move to project or area… or project Move to section… wrote nothing: RN's failure toast (4.2 s) with core's line,
+            // the project's move dialog (its revision is old) closes, and perform reads the lists again for the next tap.
+            staleMoveLine(action.kind, failure.message)?.let { line -> shell.ui {
+                if (action.kind == "somedayProjectMove") dialog?.takeIf { it.optString("kind") == "move" && it.optString("projectId") == action.title }?.let { keepDialog(null) }
+                shell.showToast(t("common.error"), line, "error", durationMs = 4200)
+            } }
             // An Archive retention write that failed shows RN's line under the card (review N5).
             if (action.kind == "dataSetting") shell.ui { settings.archiveSaveFailed(true, action) }
             // The next-action prompt's refused action wrote nothing (its ACTION_FAILED too: core's write did not land and kept no

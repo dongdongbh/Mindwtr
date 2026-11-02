@@ -818,6 +818,10 @@ assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape 
 assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
 // RN's status menu (43479990e): the Destination group's Move to project or area… opens core's picker; its rows keep their words.
 assert.match(rowUi, /StatusMenuAction\(t\("task\.moveToProjectOrArea"\), idle\) \{ openDestination\(task\) \}/);
+// Status menu review: a stale move shows core's line as RN's failure toast and closes the project's move dialog; the picker
+// with its search sits above the keyboard.
+assert.match(source('MenuModel.kt'), /staleMoveLine\(action\.kind, failure\.message\)\?\.let \{ line -> shell\.ui \{/);
+assert.match(source('TaskEditor.kt'), /detectTapGestures \{ dismiss\(\) \} \}\.imePadding\(\)\.padding\(20\.dp\)/);
 assert.match(rowUi, /Text\(label, style = rnText\(14, 500\), color = c\.text, textAlign = TextAlign\.Center\)/);
 assert.doesNotMatch(rowUi, /split\(' '\)\.joinToString/, 'no capitalized words in the status menu rows');
 // RN's long press on a parked project in its Someday section opens Move to section… for it (#1319, 8fd2cab96).

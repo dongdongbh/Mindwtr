@@ -1490,7 +1490,8 @@ internal fun PickerDialog(title: String, dismiss: () -> Unit, search: (@Composab
     val theme = LocalTheme.current
     val c = theme.colors
     BackHandler(onBack = dismiss)
-    Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.padding(20.dp),
+    // RN pads the picker by the keyboard (useAndroidKeyboardInset): the search's keyboard never covers the rows or Cancel.
+    Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.imePadding().padding(20.dp),
         contentAlignment = Alignment.Center) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
