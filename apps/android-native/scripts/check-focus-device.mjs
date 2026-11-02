@@ -378,7 +378,10 @@ try {
     }
 
     // (c) Complete from Focus: the row leaves, core's Today total drops by one, and done is stored once.
-    const todayTotal = sectionTotal(nodes, TODAY);
+    // Today's title sits at the top of Today; a long Today (the development data grows each run) puts it above the row's
+    // screen, so read core's total at the top, then come back to the row.
+    const todayTotal = sectionTotal(nodes, TODAY) ?? sectionTotal(await device.toTop(), TODAY) ?? fail('no Today total on Focus');
+    if (!rowNode(await screen(), first)) nodes = await device.reveal(first, 80);
     const savedBefore = completes(processId, 'saved');
     // Core's Today total drops by one; a section core counts as empty is hidden, as in RN.
     const todayAfter = (current) => sectionTotal(current, TODAY) ?? (headers(current).length > 0 ? 0 : undefined);
