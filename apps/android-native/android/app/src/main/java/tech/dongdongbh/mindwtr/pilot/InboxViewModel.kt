@@ -1256,7 +1256,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     fun addArea() {
         val draft = areaManagerDraft
         val name = draft.name.trim()
-        if (name.isEmpty() || draft.check?.optBoolean("saveDisabled") == true) return
+        if (!draft.canSave) return
         val sheet = areaManager ?: return
         val color = draft.color ?: sheet.optJSONArray("colors")?.optString(0) ?: return
         menu.settings.createArea(sheet.getJSONObject("newArea"), name, color)
@@ -2445,4 +2445,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
 }
 
 /** The Manage areas sheet's draft (#1263): RN's open swatch row, the new area's name and swatch (null: core's first), core's name check. */
-data class AreaManagerDraft(val expanded: String? = null, val name: String = "", val color: String? = null, val check: JSONObject? = null)
+data class AreaManagerDraft(val expanded: String? = null, val name: String = "", val color: String? = null, val check: JSONObject? = null) {
+    /** RN's Save: a name core's check let through; it waits for the check, as RN's does (review 6). */
+    val canSave get() = name.isNotBlank() && check?.optBoolean("saveDisabled") == false
+}

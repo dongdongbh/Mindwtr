@@ -147,7 +147,7 @@ fun AreaOrderSheet(model: InboxViewModel, sheet: JSONObject) = with(model) {
             Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
                 Text(t("common.cancel"), style = rnText(14, 700), color = c.secondaryText, modifier = Modifier.clip(RoundedCornerShape(10.dp))
                     .clickable(role = Role.Button, onClick = ::closeAreaManager).testTag("project-area-cancel").padding(horizontal = 10.dp, vertical = 8.dp))
-                val save = enabled && draft.name.isNotBlank() && draft.check?.optBoolean("saveDisabled") != true
+                val save = enabled && draft.canSave
                 Text(t("common.save"), style = rnText(14, 700), color = c.tint, modifier = Modifier.fade(if (save) 1f else 0.5f).clip(RoundedCornerShape(10.dp))
                     .clickable(enabled = save, role = Role.Button, onClick = ::addArea).testTag("project-area-save").padding(horizontal = 10.dp, vertical = 8.dp))
             }
