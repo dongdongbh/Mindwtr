@@ -19,7 +19,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Worker } from 'node:worker_threads';
-import { check, connect, evidenced, fail, Stopped, tab, tagged, withDescription } from './device.mjs';
+import { box, check, connect, evidenced, fail, Stopped, tab, tagged, withDescription } from './device.mjs';
 import { cleanupOnExit } from './check-net-device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
@@ -257,7 +257,10 @@ try {
     nodes = await openPopup();
     await tap(mic(nodes) ?? fail('no mic'));
     const deny = await waitFor('the system permission prompt', (current) => current.find((node) => /permission_deny(_and_dont_ask_again)?_button$/.test(node['resource-id'] ?? '')), 20_000);
-    await tap(deny.find((node) => /permission_deny(_and_dont_ask_again)?_button$/.test(node['resource-id'] ?? '')));
+    // The system's own dialog is in front, so the app-front guard of tap() does not apply: tap it only while it is the one in front.
+    if (!front().includes('permissioncontroller')) throw new Stopped(`the permission prompt is not in front: ${front().trim()}`);
+    const [dx1, dy1, dx2, dy2] = box(deny.find((node) => /permission_deny(_and_dont_ask_again)?_button$/.test(node['resource-id'] ?? '')));
+    sh(`input tap ${Math.round((dx1 + dx2) / 2)} ${Math.round((dy1 + dy2) / 2)}`);
     nodes = await waitFor('RN\'s permission alert', (current) => Boolean(tagged(current, 'voice-alert-ok')), 20_000);
     check(nodes.some((node) => node.text === en['quickAdd.audioPermissionTitle']), `(5) a refused permission shows RN's alert: ${en['quickAdd.audioPermissionTitle']}`);
     await tapExpecting(tagged(nodes, 'voice-alert-ok'), (current) => !tagged(current, 'voice-alert-ok'), 'the alert closed');
