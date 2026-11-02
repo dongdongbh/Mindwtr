@@ -1,14 +1,15 @@
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react';
-import type { ComponentProps, RefObject } from 'react';
+import type { ComponentProps, ReactNode, RefObject } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DndContext } from '@dnd-kit/core';
+import { DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
-import type { Project, Section, Task } from '@mindwtr/core';
+import { flushPendingSave, getStorageAdapter, setStorageAdapter, useTaskStore, type Project, type Section, type Task } from '@mindwtr/core';
 
 import { useUiStore } from '../../../store/ui-store';
 import { LanguageProvider } from '../../../contexts/language-context';
 import type { TaskListScope } from '../../../contexts/keybinding-context';
 import { ProjectWorkspace } from './ProjectWorkspace';
+import { projectsViewCollisionDetection, projectsViewKeyboardCoordinates } from './projects-view-dnd';
 
 vi.mock('../../TaskItem', () => ({
     TaskItem: ({ task }: { task: Task }) => (
@@ -68,6 +69,7 @@ const translations: Record<string, string> = {
     'projects.moveSectionRight': 'Move section right',
     'projects.noActiveTasks': 'No active tasks',
     'projects.noSection': 'No Section',
+    'projects.reorderSections': 'Reorder sections',
     'projects.sectionEmpty': 'No tasks',
     'projects.sectionNotes': 'Section notes',
     'projects.sectionsLabel': 'Tasks',
@@ -160,13 +162,21 @@ type RenderOptions = {
     layout?: 'list' | 'columns';
 };
 
+function WorkspaceDndContext({ children, onDragEnd }: { children: ReactNode; onDragEnd: (event: DragEndEvent) => void }) {
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: projectsViewKeyboardCoordinates }),
+    );
+    return <DndContext sensors={sensors} collisionDetection={projectsViewCollisionDetection} onDragEnd={onDragEnd}>{children}</DndContext>;
+}
+
 const renderWorkspace = ({ store = {}, props = {}, layout }: RenderOptions = {}) => {
     storeHolder.current = makeStore(store);
     if (layout) useUiStore.setState({ projectLayouts: { [project.id]: layout } });
     const taskDragEndRef: RefObject<((event: DragEndEvent) => void) | null> = { current: null };
     const utils = render(
         <LanguageProvider>
-            <DndContext>
+            <WorkspaceDndContext onDragEnd={(event) => taskDragEndRef.current?.(event)}>
             <ProjectWorkspace
                 highlightTaskId={null}
                 isAreaCreating={false}
@@ -183,15 +193,20 @@ const renderWorkspace = ({ store = {}, props = {}, layout }: RenderOptions = {})
                 taskDragEndRef={taskDragEndRef}
                 {...props}
             />
-            </DndContext>
+            </WorkspaceDndContext>
         </LanguageProvider>
     );
     return { ...utils, taskDragEndRef, store: storeHolder.current as ReturnType<typeof makeStore> };
 };
 
 const dragEnd = (activeId: string, overId: string): DragEndEvent => ({
-    active: { id: activeId },
-    over: { id: overId },
+    active: { id: activeId, data: { current: { type: 'task', sortable: true } } },
+    over: { id: overId, data: { current: {} } },
+} as unknown as DragEndEvent);
+
+const sectionDragEnd = (sectionId: string, overSectionId: string, projectId = project.id): DragEndEvent => ({
+    active: { id: `project-section:${sectionId}`, data: { current: { type: 'project-section', projectId, sectionId } } },
+    over: { id: `project-section:${overSectionId}`, data: { current: { type: 'project-section', projectId, sectionId: overSectionId } } },
 } as unknown as DragEndEvent);
 
 const columnTitles = (container: HTMLElement) =>
@@ -377,6 +392,122 @@ describe('ProjectWorkspace sections-as-columns (#1019)', () => {
         fireEvent.click(getByRole('menuitem', { name: 'Move section left: Shipping' }));
 
         expect(store.reorderSections).toHaveBeenCalledWith(project.id, [shipping.id, planning.id]);
+    });
+
+    it.each(['list', 'columns'] as const)('drags section headers in %s without moving their tasks', (layout) => {
+        const { getByRole, taskDragEndRef, store } = renderWorkspace({ layout });
+        expect(getByRole('button', { name: 'Reorder sections: Shipping' })).toBeInTheDocument();
+
+        taskDragEndRef.current?.(sectionDragEnd(shipping.id, planning.id));
+
+        expect(store.reorderSections).toHaveBeenCalledWith(project.id, [shipping.id, planning.id]);
+        expect(store.reorderProjectTasks).not.toHaveBeenCalled();
+        expect(store.updateTask).not.toHaveBeenCalled();
+    });
+
+    it('reorders a header using the real keyboard drag sensor', async () => {
+        const measure = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+            const top = this.querySelector('button[aria-label="Reorder sections: Shipping"]') ? 100 : 0;
+            return { top, bottom: top + 30, left: 0, right: 300, width: 300, height: 30, x: 0, y: top, toJSON: () => ({}) };
+        });
+        try {
+            const { getByRole, store } = renderWorkspace({ store: { allTasks: tasks.slice(0, 3) } });
+            const handle = getByRole('button', { name: 'Reorder sections: Shipping' });
+            handle.focus();
+            fireEvent.keyDown(handle, { code: 'Space' });
+            await waitFor(() => expect(handle).toHaveAttribute('aria-pressed', 'true'));
+            fireEvent.keyDown(document, { code: 'ArrowUp' });
+            fireEvent.keyDown(document, { code: 'Space' });
+            await waitFor(() => expect(store.reorderSections).toHaveBeenCalledWith(project.id, [shipping.id, planning.id]));
+        } finally {
+            measure.mockRestore();
+        }
+    });
+
+    it('reorders sections while tasks use a non-manual sort', () => {
+        const { taskDragEndRef, store } = renderWorkspace({ store: { projects: [{ ...project, taskSortBy: 'title' }] } });
+        taskDragEndRef.current?.(sectionDragEnd(shipping.id, planning.id));
+        expect(store.reorderSections).toHaveBeenCalledWith(project.id, [shipping.id, planning.id]);
+    });
+
+    it('rejects cross-project and non-section drops', () => {
+        const { taskDragEndRef, store } = renderWorkspace();
+        taskDragEndRef.current?.(sectionDragEnd(shipping.id, planning.id, 'other-project'));
+        const onTask = sectionDragEnd(shipping.id, planning.id);
+        onTask.over = dragEnd('task-1', 'task-2').over;
+        taskDragEndRef.current?.(onTask);
+        taskDragEndRef.current?.(sectionDragEnd(shipping.id, shipping.id));
+        expect(store.reorderSections).not.toHaveBeenCalled();
+        expect(store.updateTask).not.toHaveBeenCalled();
+    });
+
+    it.each(['archived', 'creating', 'task editor'] as const)('disables section dragging while %s', (condition) => {
+        if (condition === 'task editor') useUiStore.setState({ editingTaskId: 'task-1' });
+        const { queryByRole, taskDragEndRef, store } = renderWorkspace({
+            store: condition === 'archived' ? { projects: [{ ...project, status: 'archived' }] } : {},
+            props: { isCreatingProject: condition === 'creating' },
+        });
+        expect(queryByRole('button', { name: 'Reorder sections: Shipping' })).toBeNull();
+        taskDragEndRef.current?.(sectionDragEnd(shipping.id, planning.id));
+        expect(store.reorderSections).not.toHaveBeenCalled();
+    });
+
+    it('disables section dragging while a section title draft is open', () => {
+        const { getByRole, queryByRole, taskDragEndRef, store } = renderWorkspace();
+        fireEvent.click(getByRole('button', { name: 'More options: Planning' }));
+        fireEvent.click(getByRole('menuitem', { name: 'Edit' }));
+        expect(queryByRole('button', { name: 'Reorder sections: Shipping' })).toBeNull();
+        taskDragEndRef.current?.(sectionDragEnd(shipping.id, planning.id));
+        expect(store.reorderSections).not.toHaveBeenCalled();
+    });
+
+    it('persists a header drag through the existing section reorder command using fresh section order', async () => {
+        const initialState = useTaskStore.getState();
+        const previousAdapter = getStorageAdapter();
+        const newest = section('section-c', 'Newest section', 2);
+        const saved: Parameters<ReturnType<typeof getStorageAdapter>['saveData']>[0][] = [];
+        setStorageAdapter({
+            getData: async () => ({ tasks: [], projects: [], sections: [], areas: [], settings: {} }),
+            saveData: async (data) => { saved.push(data); },
+        });
+        try {
+            const { taskDragEndRef } = renderWorkspace({ store: { reorderSections: initialState.reorderSections } });
+            // A section arrives after the render, before the drop. Its position must survive.
+            useTaskStore.setState({
+                projects: [project], _allProjects: [project], sections: [planning, shipping, newest],
+                _allSections: [planning, shipping, newest], _allTasks: tasks, tasks,
+                _sectionsById: new Map([planning, shipping, newest].map((row) => [row.id, row])),
+                _projectsById: new Map([[project.id, project]]),
+                _tasksById: new Map(tasks.map((row) => [row.id, row])),
+                settings: { deviceId: 'sections-test' },
+            });
+            await act(async () => {
+                taskDragEndRef.current?.(sectionDragEnd(shipping.id, planning.id));
+                await flushPendingSave();
+            });
+            expect(saved.length).toBeGreaterThan(0);
+            const persisted = saved[saved.length - 1];
+            expect([...(persisted.sections ?? [])].sort((a, b) => a.order - b.order).map((row) => row.id))
+                .toEqual([shipping.id, planning.id, newest.id]);
+            expect(persisted.tasks).toEqual(tasks);
+        } finally {
+            await flushPendingSave();
+            setStorageAdapter(previousAdapter);
+            useTaskStore.setState(initialState, true);
+        }
+    });
+
+    it('opens quick add directly inside the chosen section', () => {
+        const onQuickAdd = vi.fn();
+        window.addEventListener('mindwtr:quick-add', onQuickAdd);
+        try {
+            const { getAllByRole } = renderWorkspace();
+            fireEvent.click(getAllByRole('button', { name: 'Add task' })[0]);
+            expect(onQuickAdd.mock.calls[0][0].detail.initialProps)
+                .toEqual({ projectId: project.id, status: 'next', sectionId: planning.id });
+        } finally {
+            window.removeEventListener('mindwtr:quick-add', onQuickAdd);
+        }
     });
 
     it('dismisses a section overflow with Escape and restores focus to its trigger', () => {

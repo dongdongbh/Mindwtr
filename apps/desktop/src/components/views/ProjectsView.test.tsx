@@ -1,8 +1,8 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { KeyboardSensor, type DragEndEvent } from '@dnd-kit/core';
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
+import { projectsViewKeyboardCoordinates } from './projects/projects-view-dnd';
 import { AREA_FILTER_NONE, flushPendingSave, getStorageAdapter, setStorageAdapter, useTaskStore, type Area, type Project, type Task } from '@mindwtr/core';
 import { registerUndoableAction, showUndoToast } from '../../lib/undo-registry';
 
@@ -10,6 +10,7 @@ import { ProjectsView } from './ProjectsView';
 
 const initialTaskState = useTaskStore.getState();
 const dndCallbacks = vi.hoisted(() => ({ current: null as null | { onDragEnd?: (event: DragEndEvent) => void } }));
+const workspaceDragEnd = vi.hoisted(() => vi.fn());
 vi.mock('@mindwtr/core', async () => {
     const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
     return { ...actual, flushPendingSave: vi.fn(actual.flushPendingSave) };
@@ -128,13 +129,17 @@ vi.mock('./projects/ProjectWorkspace', () => ({
         onRequestQuickArea,
         onManageAreas,
         onConvertProjectToSection,
+        taskDragEndRef,
     }: {
         projectsSidebarCollapsed?: boolean;
         onToggleProjectsSidebar?: () => void;
         onRequestQuickArea?: (projectId: string) => void;
         onManageAreas?: () => void;
         onConvertProjectToSection?: (projectId: string) => void;
-    }) => (
+        taskDragEndRef: RefObject<((event: DragEndEvent) => void) | null>;
+    }) => {
+        taskDragEndRef.current = workspaceDragEnd;
+        return (
         <div data-testid="project-workspace">
             Workspace
             {onManageAreas && <button type="button" onClick={onManageAreas}>Manage areas</button>}
@@ -148,7 +153,8 @@ vi.mock('./projects/ProjectWorkspace', () => ({
                 </button>
             )}
         </div>
-    ),
+        );
+    },
 }));
 
 vi.mock('./projects/ProjectToSectionDialog', () => ({
@@ -259,6 +265,7 @@ describe('ProjectsView', () => {
         requestConfirmation.mockReset();
         dndSensorCalls.length = 0;
         dndCallbacks.current = null;
+        workspaceDragEnd.mockReset();
         vi.mocked(flushPendingSave).mockReset().mockResolvedValue(undefined);
         vi.mocked(registerUndoableAction).mockReset();
         vi.mocked(showUndoToast).mockReset();
@@ -312,6 +319,22 @@ describe('ProjectsView', () => {
     const dropTask = (sortable = true, section = 'active', projectId = 'project-2') => {
         act(() => dndCallbacks.current?.onDragEnd?.(taskDropEvent(sortable, projectId, { type: 'project', section })));
     };
+
+    it('delegates section header drops to the workspace without moving a task or project', () => {
+        const updateTask = vi.fn();
+        const updateProject = vi.fn();
+        projectsViewStoreOverrides.current = { updateTask, updateProject };
+        render(<ProjectsView />);
+        const event = taskDropEvent(true, 'project-section:s2', { type: 'project-section', projectId: 'project-1', sectionId: 's2' });
+        event.active.id = 'project-section:s1';
+        event.active.data.current = { type: 'project-section', projectId: 'project-1', sectionId: 's1' };
+
+        act(() => dndCallbacks.current?.onDragEnd?.(event));
+
+        expect(workspaceDragEnd).toHaveBeenCalledWith(event);
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(updateProject).not.toHaveBeenCalled();
+    });
 
     const setupTaskMove = (overrides: Record<string, unknown> = {}) => {
         const now = '2026-10-06T12:00:00.000Z';
@@ -449,7 +472,7 @@ describe('ProjectsView', () => {
 
         const keyboardSensor = dndSensorCalls.find(({ sensor }) => sensor === KeyboardSensor);
         expect(keyboardSensor?.options).toMatchObject({
-            coordinateGetter: sortableKeyboardCoordinates,
+            coordinateGetter: projectsViewKeyboardCoordinates,
         });
     });
 

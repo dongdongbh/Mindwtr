@@ -29,7 +29,7 @@ import { Attachment,
     splitCompletedTasks, tFallback, undoProjectDelete, updateProjectFromDraft, useTaskStore, } from '@mindwtr/core';
 import { useDndMonitor } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
-import { SortableContext, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { SortableContext, verticalListSortingStrategy, horizontalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
 import { Search, FileText, CheckCircle2, ChevronDown, ChevronRight, Folder, PanelLeftOpen, Plus, X } from 'lucide-react';
 
 import { PromptModal } from '../../PromptModal';
@@ -59,7 +59,7 @@ import { ProjectNotesSection } from './ProjectNotesSection';
 import { ProjectSectionActionsMenu } from './ProjectSectionActionsMenu';
 import { ProjectTaskToolbarMenu } from './ProjectTaskToolbarMenu';
 import { DraggableProjectTaskRow, SortableProjectTaskRow } from './SortableRows';
-import { SectionDropZone, getSectionContainerId, getSectionIdFromContainer, NO_SECTION_CONTAINER } from './section-dnd';
+import { SectionDropZone, SortableSectionHeader, getSectionHeaderId, getSectionContainerId, getSectionIdFromContainer, NO_SECTION_CONTAINER } from './section-dnd';
 import {
     DEFAULT_AREA_COLOR,
     getProjectColor,
@@ -687,21 +687,32 @@ export function ProjectWorkspace({
     const columnsScrollRef = useRef<HTMLDivElement | null>(null);
     const handleColumnsPointerDown = useMiddleMousePan(columnsScrollRef);
 
-    const handleMoveSection = useCallback((sectionId: string, offset: -1 | 1) => {
+    const canDragSections = !isArchivedProject && projectSections.length > 1 && !showSectionPrompt
+        && !editingTaskId && !isCreatingProject && !Object.values(sectionNotesOpen).some(Boolean);
+
+    const handleReorderSection = useCallback((sectionId: string, overSectionId: string) => {
         const current = getMutableSelectedProject();
         if (!current) return;
-        const currentIndex = projectSections.findIndex((section) => section.id === sectionId);
-        const nextIndex = currentIndex + offset;
-        if (currentIndex < 0 || nextIndex < 0 || nextIndex >= projectSections.length) return;
-        const nextSections = [...projectSections];
-        const [moved] = nextSections.splice(currentIndex, 1);
-        if (!moved) return;
-        nextSections.splice(nextIndex, 0, moved);
+        const state = useTaskStore.getState();
+        const storedProject = state._allProjects.find((project) => project.id === current.id);
+        const currentSections = storedProject
+            ? getProjectSectionsForView(storedProject, state.sections, state._allSections)
+            : projectSections;
+        const currentIndex = currentSections.findIndex((section) => section.id === sectionId);
+        const nextIndex = currentSections.findIndex((section) => section.id === overSectionId);
+        if (currentIndex < 0 || nextIndex < 0 || currentIndex === nextIndex) return;
+        const nextSections = arrayMove(currentSections, currentIndex, nextIndex);
         void Promise.resolve(reorderSections(current.id, nextSections.map((section) => section.id))).catch((error) => {
             reportError('Failed to reorder sections', error);
             showToast(resolveText('projects.sectionReorderFailed', 'Failed to reorder sections.'), 'error');
         });
     }, [getMutableSelectedProject, projectSections, reorderSections, resolveText, showToast]);
+
+    const handleMoveSection = (sectionId: string, offset: -1 | 1) => {
+        const currentIndex = projectSections.findIndex((section) => section.id === sectionId);
+        const destination = projectSections[currentIndex + offset];
+        if (currentIndex >= 0 && destination) handleReorderSection(sectionId, destination.id);
+    };
 
     const sectionTaskGroups = useMemo(() => {
         if (!selectedProjectId || projectSections.length === 0) {
@@ -737,7 +748,7 @@ export function ProjectWorkspace({
     // even when empty — it's the drop target that clears a task's section.
     const [taskDragActive, setTaskDragActive] = useState(false);
     useDndMonitor(useMemo(() => ({
-        onDragStart: () => setTaskDragActive(true),
+        onDragStart: (event) => setTaskDragActive(event.active.data.current?.type === 'task'),
         onDragEnd: () => setTaskDragActive(false),
         onDragCancel: () => setTaskDragActive(false),
     }), []));
@@ -1017,6 +1028,15 @@ export function ProjectWorkspace({
     const handleTaskDragEnd = useCallback((event: DragEndEvent) => {
         const current = getMutableSelectedProject();
         if (!current || !selectedProject || isArchivedProject) return;
+        const data = event.active.data.current;
+        if (data?.type === 'project-section') {
+            const overData = event.over?.data.current;
+            if (!canDragSections || data.projectId !== current.id || overData?.type !== 'project-section'
+                || overData.projectId !== current.id || typeof data.sectionId !== 'string'
+                || typeof overData.sectionId !== 'string') return;
+            handleReorderSection(data.sectionId, overData.sectionId);
+            return;
+        }
         // In non-default sort modes the list is not a drop target; tasks can only
         // be dragged out to the sidebar (handled by the Projects view).
         if (!canReorderProjectTasks) return;
@@ -1081,7 +1101,7 @@ export function ProjectWorkspace({
                 reorderProjectTasks(current.id, nextDestinationItems, getSectionIdFromContainer(destinationContainer), activeId),
             );
         })().catch(failTaskMove);
-    }, [canReorderProjectTasks, getMutableSelectedProject, isArchivedProject, reorderProjectTasks, selectedProject, showToast, taskIdToContainer, taskIdsByContainer, updateTask]);
+    }, [canDragSections, canReorderProjectTasks, getMutableSelectedProject, handleReorderSection, isArchivedProject, reorderProjectTasks, selectedProject, showToast, t, taskIdToContainer, taskIdsByContainer, updateTask]);
 
     useEffect(() => {
         taskDragEndRef.current = handleTaskDragEnd;
@@ -1260,6 +1280,12 @@ export function ProjectWorkspace({
             : null;
 
         return (
+            <SortableSectionHeader
+                projectId={group.section.projectId}
+                sectionId={group.section.id}
+                label={`${resolveText('projects.reorderSections', 'Reorder sections')}: ${group.section.title}`}
+                disabled={!canDragSections}
+            >
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
                     type="button"
@@ -1341,6 +1367,7 @@ export function ProjectWorkspace({
                     </div>
                 )}
             </div>
+            </SortableSectionHeader>
         );
     };
 
@@ -2004,7 +2031,12 @@ export function ProjectWorkspace({
                                         </div>
                                     )}
                                 </div>
-                                {tasksContent}
+                                <SortableContext
+                                    items={projectSections.map((section) => getSectionHeaderId(section.id))}
+                                    strategy={columnsLayout ? horizontalListSortingStrategy : verticalListSortingStrategy}
+                                >
+                                    {tasksContent}
+                                </SortableContext>
                             </section>
 
                             {projectReferenceTasks.length > 0 && (

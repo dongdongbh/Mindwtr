@@ -19,7 +19,6 @@ import {
     type DragEndEvent,
     type DragStartEvent,
 } from '@dnd-kit/core';
-import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import {
     AREA_FILTER_ALL,
     AREA_FILTER_NONE,
@@ -47,6 +46,7 @@ import { ProjectToSectionDialog } from './projects/ProjectToSectionDialog';
 import { computeProjectAreaDragResult } from './projects/project-area-dnd';
 import {
     projectsViewCollisionDetection,
+    projectsViewKeyboardCoordinates,
     resolveTaskSidebarDropTarget,
     type ProjectsDragData,
     type TaskSidebarDropTarget,
@@ -537,7 +537,7 @@ export function ProjectsView() {
             activationConstraint: { distance: 5 },
         }),
         useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
+            coordinateGetter: projectsViewKeyboardCoordinates,
         }),
     );
     const [activeDrag, setActiveDrag] = useState<ProjectsViewActiveDrag | null>(null);
@@ -680,6 +680,10 @@ export function ProjectsView() {
         const data = event.active.data.current as ProjectsDragData | undefined;
         if (data?.type === 'project') {
             handleProjectDragEnd(data.section, event);
+            return;
+        }
+        if (data?.type === 'project-section') {
+            taskDragEndRef.current?.(event);
             return;
         }
         if (data?.type === 'task') {

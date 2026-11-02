@@ -1,4 +1,5 @@
-import { closestCenter, pointerWithin, type CollisionDetection } from '@dnd-kit/core';
+import { closestCenter, pointerWithin, type CollisionDetection, type KeyboardCoordinateGetter } from '@dnd-kit/core';
+import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { projectAreaCollisionDetection } from './project-area-dnd';
 import type { ProjectAreaSection } from './project-area-collapse';
 
@@ -6,13 +7,15 @@ import type { ProjectAreaSection } from './project-area-collapse';
 // is so collision detection and drag-end dispatch can branch per drag type.
 export type ProjectsTaskDragData = { type: 'task'; sortable: boolean };
 export type ProjectsProjectDragData = { type: 'project'; section: ProjectAreaSection };
-export type ProjectsDragData = ProjectsTaskDragData | ProjectsProjectDragData;
+export type ProjectsSectionDragData = { type: 'project-section'; projectId: string; sectionId: string };
+export type ProjectsDragData = ProjectsTaskDragData | ProjectsProjectDragData | ProjectsSectionDragData;
 
 type DroppableData = {
     type?: string;
     zone?: string;
     section?: ProjectAreaSection;
     areaId?: string;
+    projectId?: string;
 };
 
 const dataOf = (container: { data: { current?: unknown } }): DroppableData =>
@@ -21,8 +24,34 @@ const dataOf = (container: { data: { current?: unknown } }): DroppableData =>
 const isSidebarTaskTarget = (data: DroppableData) =>
     (data.type === 'project' || data.zone === 'projectArea') && data.section !== 'archived';
 
+export const projectsViewKeyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
+    const activeData = args.context.active?.data.current as ProjectsDragData | undefined;
+    if (activeData?.type !== 'project-section') return sortableKeyboardCoordinates(event, args);
+
+    // Task rows between headers must not intercept keyboard section movement.
+    const droppableRects = new Map([...args.context.droppableRects].filter(([id]) => {
+        const container = args.context.droppableContainers.get(id);
+        const data = container ? dataOf(container) : undefined;
+        return data?.type === 'project-section' && data.projectId === activeData.projectId;
+    }));
+    return sortableKeyboardCoordinates(event, {
+        ...args,
+        context: { ...args.context, droppableRects },
+    });
+};
+
 export const projectsViewCollisionDetection: CollisionDetection = (args) => {
     const activeData = args.active.data.current as ProjectsDragData | undefined;
+
+    if (activeData?.type === 'project-section') {
+        return closestCenter({
+            ...args,
+            droppableContainers: args.droppableContainers.filter((container) => {
+                const data = dataOf(container);
+                return data.type === 'project-section' && data.projectId === activeData.projectId;
+            }),
+        });
+    }
 
     if (activeData?.type === 'project') {
         // Project drags stay inside their own sidebar section, matching the old
