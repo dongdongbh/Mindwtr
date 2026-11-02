@@ -166,16 +166,16 @@ describe('the push writes', () => {
         const details = { title: 'T', startDate: new Date('2026-10-30T00:00:00Z'), endDate: new Date('2026-10-31T00:00:00Z'), allDay: true,
             notes: 'N', location: '', url: 'https://example.com', timeZone: 'UTC', endTimeZone: 'UTC' };
         expect(await host.calendars.createEvent!('7', { ...details, calendarId: '7' })).toBe('9');
-        await host.calendars.updateEvent!('9', { ...details, allDay: false, timeZone: undefined, endTimeZone: undefined });
-        await host.calendars.deleteEvent!('9');
+        await host.calendars.updateEvent!('9', { ...details, allDay: false, timeZone: undefined, endTimeZone: undefined }, { taskId: 't1', calendarId: '7' });
+        await host.calendars.deleteEvent!('9', { taskId: 't1', calendarId: '7' });
         await host.calendars.deleteCalendar!('7');
         expect(await host.calendars.getSources!()).toEqual([]);
         expect(host.calendars.updateCalendar).toBeUndefined();
         const sent = { title: 'T', startMs: 1_793_318_400_000, endMs: 1_793_404_800_000, notes: 'N', location: '' };
         expect(calls).toEqual([
             { op: 'createEvent', calendarId: '7', details: { ...sent, allDay: true, timeZone: 'UTC', endTimeZone: 'UTC' } },
-            { op: 'updateEvent', eventId: '9', details: { ...sent, allDay: false } },
-            { op: 'deleteEvent', eventId: '9' },
+            { op: 'updateEvent', eventId: '9', calendarId: '7', details: { ...sent, allDay: false } },
+            { op: 'deleteEvent', eventId: '9', calendarId: '7' },
             { op: 'deleteCalendar', calendarId: '7' },
         ]);
     });

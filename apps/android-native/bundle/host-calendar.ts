@@ -90,8 +90,10 @@ export const createNativeCalendar = (keyValue: KeyValue, call: () => CalendarCal
             // No updateCalendar: Android keeps a calendar's color only from its creation, so core recolors by making a new one (#726).
             deleteCalendar: (calendarId) => call()({ op: 'deleteCalendar', calendarId }),
             createEvent: (calendarId, details) => call()({ op: 'createEvent', calendarId, details: eventDetails(details) }) as Promise<string>,
-            updateEvent: (eventId, details) => call()({ op: 'updateEvent', eventId, details: eventDetails(details) }),
-            deleteEvent: (eventId) => call()({ op: 'deleteEvent', eventId }),
+            // The row's calendar goes along: the provider hands a deleted event's _id to the next event, so an event in another
+            // calendar is missing to CalendarPushWrites.kt, never written (it may be the user's own).
+            updateEvent: (eventId, details, context) => call()({ op: 'updateEvent', eventId, ...(context ? { calendarId: context.calendarId } : {}), details: eventDetails(details) }),
+            deleteEvent: (eventId, context) => call()({ op: 'deleteEvent', eventId, ...(context ? { calendarId: context.calendarId } : {}) }),
         },
         ...(sync ? {
             syncEntries: {

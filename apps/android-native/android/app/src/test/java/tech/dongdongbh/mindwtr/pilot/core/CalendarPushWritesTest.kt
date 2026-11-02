@@ -23,7 +23,8 @@ class CalendarPushWritesTest {
             (next++).also { calendars[it] = values; accounts[it] = accountName to accountType }
         override fun deleteCalendar(id: Long): Int = if (refuseCalendarDelete || calendars.remove(id) == null) 0 else 1
         override fun insertEvent(values: Map<String, Any>): Long = (next++).also { events[it] = values.toMutableMap() }
-        override fun eventIsLive(id: Long) = id in events && id !in deleted
+        override fun eventIsLive(id: Long, calendarId: Long?) = id in events && id !in deleted
+            && (calendarId == null || events[id]!![CalendarContract.Events.CALENDAR_ID] == calendarId)
         override fun updateEvent(id: Long, values: Map<String, Any>): Int = events[id]?.let { it.putAll(values); 1 } ?: 0
         override fun deleteEvent(id: Long): Int = if (events.remove(id) != null) 1 else 0
         override fun deleteReminders(eventId: Long) { reminders.remove(eventId) }
@@ -85,25 +86,43 @@ class CalendarPushWritesTest {
         val calendar = writes.createCalendar(seed())
         val gone = writes.createEvent(calendar, event())
         rows.events.remove(gone.toLong())
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(gone, event()) }.message)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(gone, null, event()) }.message)
         // A row marked deleted, waiting for its sync adapter, is gone too (expo's findEventById selection).
         val marked = writes.createEvent(calendar, event())
         rows.deleted += marked.toLong()
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(marked, event()) }.message)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(marked, null, event()) }.message)
     }
 
     @Test fun anUpdateWritesTheEventAndDropsItsRemindersAsExpoDoes() {
         val id = writes.createEvent(writes.createCalendar(seed()), event())
         rows.reminders[id.toLong()] = 1
-        writes.updateEvent(id, event().put("title", "Changed"))
+        writes.updateEvent(id, null, event().put("title", "Changed"))
         assertEquals("Changed", rows.events[id.toLong()]!![CalendarContract.Events.TITLE])
         assertTrue(id.toLong() !in rows.reminders)
     }
 
     @Test fun aDeleteOfAnEventAlreadyGoneAnswersMissingSoCoreForgetsItsRow_rnBug2() {
         val id = writes.createEvent(writes.createCalendar(seed()), event())
-        writes.deleteEvent(id)
-        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(id) }.message)
+        writes.deleteEvent(id, null)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(id, null) }.message)
+    }
+
+    /**
+     * The provider hands a deleted event's _id to the next event (S23, review N9), so a pushed-event row can name the user's
+     * own event in another calendar. Core passes the row's calendar: an event elsewhere is missing, and it is never changed.
+     */
+    @Test fun anEventIdTheProviderGaveToAnEventInAnotherCalendarIsMissingAndUntouched() {
+        val mindwtr = writes.createCalendar(seed())
+        val users = writes.createCalendar(seed().put("name", "users-own"))
+        val theirs = writes.createEvent(users, event().put("title", "Dentist"))
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.updateEvent(theirs, mindwtr, event()) }.message)
+        assertEquals(CalendarPushWrites.MISSING_EVENT, assertThrows(IllegalStateException::class.java) { writes.deleteEvent(theirs, mindwtr) }.message)
+        assertEquals("Dentist", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
+        // In its own calendar (or with no calendar given, as before) the event is written.
+        writes.updateEvent(theirs, users, event().put("title", "Changed"))
+        assertEquals("Changed", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
+        writes.deleteEvent(theirs, null)
+        assertTrue(theirs.toLong() !in rows.events)
     }
 
     @Test fun aCalendarDeleteThatRemovesNoRowRefusesSoCoreKeepsTheSavedId_0c2782b76() {

@@ -65,13 +65,17 @@ function phone(calendars: Calendar[], events: Record<string, { calendarId: strin
             }
             case 'updateEvent': {
                 const event = state.events.get(request.eventId as string);
-                if (!event) throw new Error('Calendar event not found');
+                // CalendarPushWrites.kt: an event in another calendar than the row's is missing too.
+                if (!event || (request.calendarId && event.calendarId !== request.calendarId)) throw new Error('Calendar event not found');
                 event.title = (request.details as { title: string }).title;
                 return null;
             }
-            case 'deleteEvent':
-                if (!state.events.delete(request.eventId as string)) throw new Error('Calendar event not found');
+            case 'deleteEvent': {
+                const event = state.events.get(request.eventId as string);
+                if (!event || (request.calendarId && event.calendarId !== request.calendarId)) throw new Error('Calendar event not found');
+                state.events.delete(request.eventId as string);
                 return null;
+            }
             default: throw new Error(`Unsupported calendar call ${op}`);
         }
     };
@@ -198,6 +202,20 @@ describe('missing events (RN bugs 1 and 2, fixed in CalendarPushWrites.kt)', () 
         await app.host.startPush();
         const made = device.state.calendars.find((entry) => entry.title === 'Mindwtr')!.id;
         expect(await app.rows()).toEqual([['t1', '501', made]]);
+    });
+});
+
+describe('an event ID the provider reused (review N9: the S23 hands a deleted _id to the next event)', () => {
+    it('never writes or deletes the user\'s event that took a pushed event\'s ID: core makes its own event and forgets the row', async () => {
+        const device = phone([calendar('1'), calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}` })],
+            { 70: { calendarId: '1', title: 'Dentist' }, 71: { calendarId: '1', title: 'Gym' } });
+        const app = await upgrade({ tasks: [task('t1'), task('t2', { status: 'done', completedAt: at })], kv: { [KEY.enabled]: '1', [KEY.calendarId]: '7' },
+            device, rows: [{ taskId: 't1', eventId: '70', calendarId: '7' }, { taskId: 't2', eventId: '71', calendarId: '7' }] });
+        await app.host.startPush();
+        expect(device.state.events.get('70')).toEqual({ calendarId: '1', title: 'Dentist' });
+        expect(device.state.events.get('71')).toEqual({ calendarId: '1', title: 'Gym' });
+        expect(await app.rows()).toEqual([['t1', '500', '7']]);
+        expect(device.state.events.get('500')).toEqual({ calendarId: '7', title: 'PRIVATE t1' });
     });
 });
 

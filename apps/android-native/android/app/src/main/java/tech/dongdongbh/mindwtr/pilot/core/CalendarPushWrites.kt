@@ -19,8 +19,8 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
         fun insertCalendar(accountName: String, accountType: String, values: Map<String, Any>): Long?
         fun deleteCalendar(id: Long): Int
         fun insertEvent(values: Map<String, Any>): Long?
-        /** Whether the event exists and is not marked deleted (expo's findEventById selection). */
-        fun eventIsLive(id: Long): Boolean
+        /** Whether the event exists, is not marked deleted (expo's findEventById selection) and, when given, is in [calendarId]. */
+        fun eventIsLive(id: Long, calendarId: Long?): Boolean
         fun updateEvent(id: Long, values: Map<String, Any>): Int
         fun deleteEvent(id: Long): Int
         fun deleteReminders(eventId: Long)
@@ -66,19 +66,23 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
         return (rows.insertEvent(values) ?: error("Event could not be saved")).toString()
     }
 
-    /** expo's updateEventAsync, which also drops the event's reminders; an event that is gone is [MISSING_EVENT]. */
-    fun updateEvent(eventId: String, details: JSONObject) {
+    /**
+     * expo's updateEventAsync, which also drops the event's reminders; an event that is gone is [MISSING_EVENT]. So is one in
+     * another calendar than [calendarId] (the row's): the provider hands a deleted event's _id to the next event, which can be
+     * the user's own, and it is never written.
+     */
+    fun updateEvent(eventId: String, calendarId: String?, details: JSONObject) {
         val id = eventId.toLong()
         val values = eventValues(details)
-        check(rows.eventIsLive(id) && rows.updateEvent(id, values) > 0) { MISSING_EVENT }
+        check(rows.eventIsLive(id, calendarId?.toLong()) && rows.updateEvent(id, values) > 0) { MISSING_EVENT }
         rows.deleteReminders(id)
     }
 
-    /** expo's deleteEventAsync; an event that is already gone is [MISSING_EVENT]. */
-    fun deleteEvent(eventId: String) {
+    /** expo's deleteEventAsync; an event that is already gone, or one in another calendar than [calendarId], is [MISSING_EVENT]. */
+    fun deleteEvent(eventId: String, calendarId: String?) {
         val id = eventId.toLong()
         // A row only marked deleted (its sync adapter has not removed it yet) is gone already: deleting it again counts a row.
-        check(rows.eventIsLive(id) && rows.deleteEvent(id) > 0) { MISSING_EVENT }
+        check(rows.eventIsLive(id, calendarId?.toLong()) && rows.deleteEvent(id) > 0) { MISSING_EVENT }
     }
 
     /** The event columns RN writes: no alarms and no recurrence rule; `url` has no Android column, as in expo. */
