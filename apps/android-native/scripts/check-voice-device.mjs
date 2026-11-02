@@ -261,9 +261,12 @@ try {
     if (!front().includes('permissioncontroller')) throw new Stopped(`the permission prompt is not in front: ${front().trim()}`);
     const [dx1, dy1, dx2, dy2] = box(deny.find((node) => /permission_deny(_and_dont_ask_again)?_button$/.test(node['resource-id'] ?? '')));
     sh(`input tap ${Math.round((dx1 + dx2) / 2)} ${Math.round((dy1 + dy2) / 2)}`);
-    nodes = await waitFor('RN\'s permission alert', (current) => Boolean(tagged(current, 'voice-alert-ok')), 20_000);
+    // The alert is a dialog window, which carries no test tags: it is found by RN's title and its OK button by text.
+    const alertShown = (current) => current.some((node) => node.text === en['quickAdd.audioPermissionTitle']);
+    const alertOk = (current) => current.find((node) => node.text === en['common.ok']);
+    nodes = await waitFor('RN\'s permission alert', (current) => alertShown(current) && Boolean(alertOk(current)), 20_000);
     check(nodes.some((node) => node.text === en['quickAdd.audioPermissionTitle']), `(5) a refused permission shows RN's alert: ${en['quickAdd.audioPermissionTitle']}`);
-    await tapExpecting(tagged(nodes, 'voice-alert-ok'), (current) => !tagged(current, 'voice-alert-ok'), 'the alert closed');
+    await tapExpecting(alertOk(nodes), (current) => !alertShown(current), 'the alert closed');
     check(!recording(await screen()) && recordings().length === 0, '(5) nothing records');
     sh(`pm grant ${PKG} ${MIC}`);
 
