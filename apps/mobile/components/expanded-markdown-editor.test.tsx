@@ -79,6 +79,48 @@ const withPlatform = (os: typeof Platform.OS, run: () => void) => {
 };
 
 describe('ExpandedMarkdownEditor', () => {
+  it.each(['()', '[]', '``'])('deletes an empty %s pair after stale native echoes', (pair) => {
+    withPlatform('android', () => {
+      for (const prefix of ['', 'note ']) {
+        const onChange = vi.fn();
+        let tree!: renderer.ReactTestRenderer;
+        act(() => {
+          tree = renderer.create(
+            <ExpandedMarkdownEditor
+              isOpen onClose={vi.fn()} value={prefix} onChange={onChange}
+              title="Description" placeholder="Description" t={(key) => key} initialMode="edit"
+              selection={{ start: prefix.length, end: prefix.length }}
+              onSelectionChange={vi.fn()} canUndo={false} onUndo={() => undefined}
+            />
+          );
+        });
+        const input = () => tree.root.findByType(TextInput);
+        const rawInsertion = prefix + pair[0];
+        act(() => { input().props.onChangeText(rawInsertion); });
+        expect(input().props.value).toBe(prefix + pair);
+        act(() => { input().props.onChangeText(rawInsertion); });
+        act(() => { input().props.onChangeText(rawInsertion); });
+        expect(input().props.value).toBe(prefix + pair);
+
+        const preventDefault = vi.fn();
+        act(() => {
+          input().props.onKeyPress({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(rawInsertion);
+        });
+        expect(input().props.value).toBe(rawInsertion);
+        expect(onChange).toHaveBeenLastCalledWith(rawInsertion);
+        act(() => {
+          input().props.onKeyPress({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(prefix);
+        });
+        expect(input().props.value).toBe(prefix);
+        expect(onChange).toHaveBeenLastCalledWith(prefix);
+        expect(preventDefault).not.toHaveBeenCalled();
+        act(() => { tree.unmount(); });
+      }
+    });
+  });
+
   it('enables native spell checking in edit mode', () => {
     let tree: renderer.ReactTestRenderer;
 

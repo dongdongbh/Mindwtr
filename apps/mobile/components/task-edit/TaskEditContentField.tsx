@@ -843,6 +843,11 @@ export function TaskEditContentField({
                                                     }
                                                 }}
                                                 onChangeText={(text) => handleChecklistTitleChange(index, checklistItemKey, text)}
+                                                onKeyPress={(event) => {
+                                                    if (event.nativeEvent.key === 'Backspace') {
+                                                        delete ignoredNativePairChangeRefs.current[checklistItemKey];
+                                                    }
+                                                }}
                                                 onSelectionChange={(event) => handleChecklistSelectionChange(
                                                     checklistItemKey,
                                                     event.nativeEvent.selection,

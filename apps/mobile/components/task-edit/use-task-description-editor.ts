@@ -269,6 +269,9 @@ export function useTaskDescriptionEditor({
     // preventDefault cannot cancel it), so pairing here too processes one keystroke
     // twice — IME-specific echo orders then double the pair (#565).
     const handleDescriptionKeyPress = React.useCallback((event: NativeSyntheticEvent<TextInputKeyPressEventData>) => {
+        if (event.nativeEvent.key === 'Backspace') {
+            ignoredNativePairChangeRef.current = null;
+        }
         const next = applyMarkdownKeyboardShortcut(
             descriptionDraftRef.current,
             descriptionSelectionRef.current,

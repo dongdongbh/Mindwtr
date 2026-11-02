@@ -839,6 +839,46 @@ describe('TaskEditContentField', () => {
     expect(getState().checklist[0].title).toBe('(');
   });
 
+  it.each(['()', '[]', '``'])('deletes an empty checklist %s pair after stale native echoes', (pair) => {
+    withPlatform('android', () => {
+      for (const prefix of ['', 'note ']) {
+        const { getState, applyChecklistUpdate } = createChecklistState([
+          { id: 'check-1', title: prefix, isCompleted: false },
+        ]);
+        let tree!: ReturnType<typeof create>;
+        const render = () => (
+          <TaskEditContentField {...baseProps} fieldId="checklist"
+            checklist={getState().checklist} applyChecklistUpdate={applyChecklistUpdate} />
+        );
+        act(() => { tree = create(render()); });
+        const input = () => tree.root.findByProps({ accessibilityLabel: 'taskEdit.checklist 1' });
+        const rawInsertion = prefix + pair[0];
+        act(() => { input().props.onChangeText(rawInsertion); });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(prefix + pair);
+        act(() => { input().props.onChangeText(rawInsertion); });
+        act(() => { input().props.onChangeText(rawInsertion); });
+        expect(getState().checklist[0].title).toBe(prefix + pair);
+
+        const preventDefault = vi.fn();
+        act(() => {
+          input().props.onKeyPress?.({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(rawInsertion);
+        });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(rawInsertion);
+        act(() => {
+          input().props.onKeyPress?.({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(prefix);
+        });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(prefix);
+        expect(preventDefault).not.toHaveBeenCalled();
+        act(() => { tree.unmount(); });
+      }
+    });
+  });
+
   it('keeps Android checklist cursor inside a collapsed pair and ignores duplicate native insertion', () => {
     const { getState, applyChecklistUpdate } = createChecklistState([
       { id: 'check-1', title: '', isCompleted: false },
