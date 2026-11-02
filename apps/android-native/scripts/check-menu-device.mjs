@@ -298,14 +298,15 @@ try {
     const rowLabel = `${target.label}: ${target.name}`;
     nodes = await tapExpecting(tagged(nodes, 'destination-search'), () => /mInputShown=true/.test(sh('dumpsys input_method')), 'the keyboard for the picker\'s search');
     sh(`input text '${target.name.replace(/ /g, '%s')}'`);
-    nodes = await waitFor(`the picker's row "${rowLabel}"`, (current) => Boolean(withDescription(current, rowLabel)) && Boolean(withDescription(current, en['common.cancel'])), 10_000);
+    nodes = await waitFor(`the picker's row "${rowLabel}"`, (current) => Boolean(withDescription(current, rowLabel)) && hasText(current, en['common.cancel']), 10_000);
     await sleep(600); // the card moves with the keyboard's animation
     nodes = await device.settle(await screen());
     const keyboard = sh('dumpsys window windows').split(/\n  Window #/).find((part) => part.includes('InputMethod')) ?? fail('no keyboard window');
     const keyboardTop = Number(/ frame=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? /mFrame=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? NaN)
         + Number(/mGivenContentInsets=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? NaN);
     writeFileSync(resolve(work, 'destination-search-keyboard.png'), adbRaw('exec-out', 'screencap', '-p'));
-    const bottoms = [withDescription(nodes, rowLabel), withDescription(nodes, en['common.cancel'])].map((node) => node ? box(node)[3] : NaN);
+    // Cancel is a text button (no description).
+    const bottoms = [withDescription(nodes, rowLabel), nodes.find((node) => node.text === en['common.cancel'])].map((node) => node ? box(node)[3] : NaN);
     check(Number.isFinite(keyboardTop) && bottoms.every((bottom) => bottom <= keyboardTop),
         `(c2) with the keyboard up (top ${keyboardTop}), the found row and Cancel sit above it (bottoms ${bottoms.join(', ')})`);
     const destinationsBefore = commands('taskDestinationMove');
@@ -317,7 +318,7 @@ try {
         `(c2) the ${target.kind} "${target.name}" is stored on the task in one write`);
     nodes = await openStatusMenu();
     nodes = await tapExpecting(withDescription(nodes, en['task.moveToProjectOrArea']), (current) => Boolean(tagged(current, 'destination-search')), 'core\'s destination picker');
-    await tap(withDescription(nodes, en['common.none']) ?? fail('no None row'));
+    await tap(nodes.find((node) => node.text === en['common.none']) ?? fail('no None row'));
     await waitFor('the move back', () => commands('taskDestinationMove') === destinationsBefore + 2, 10_000);
     seen = core();
     check(seen.stored[titles.someday][0].areaId === null && seen.stored[titles.someday][0].projectId === null, '(c2) None puts the task back with no area and no project, one write more');
