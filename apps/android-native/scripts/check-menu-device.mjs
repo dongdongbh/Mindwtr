@@ -10,8 +10,8 @@
 // Someday capture into it and the toast's Undo moves it back (one write each), and a failed commit of a heading's Add task
 // keeps its exact retry (the capture UUID on disk) and Try again stores it once; (c2) the Someday row's status menu draws RN's
 // Destination group (Move to project or area…, Move to section…, as written) and Copy task link / Copy task ID (43479990e; shot as
-// status-menu.png), Copy task ID shows RN's copied toast, and Move to project or area… opens core's picker, whose first area moves
-// the task there in one write (skipped when the development data has no area); (d) Reference opens on core's list;
+// status-menu.png), Copy task ID shows RN's copied toast, and Move to project or area… opens core's picker, whose search finds an area
+// (a project when there is none) above the keyboard, moves the task there in one write, and None moves it back; (d) Reference opens on core's list;
 // (e) History's Done and Archived tabs show core's rows; (f) Archived's Restore (move to Inbox) stores once; (g) rotation
 // and process death keep History on its Archived tab. It touches only the development package (it refuses any other APK),
 // never launches over another app, restores rotation and clears its debug properties on exit.
@@ -98,7 +98,7 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
     const live = store._allTasks.filter((task) => !task.deletedAt);
     const stored = Object.fromEntries(Object.values(JSON.parse(process.env.CHECK_TITLES)).map((title) => [title,
         live.filter((task) => task.title === title).map((task) => ({ id: task.id, status: task.status, section: task.viewSectionIds?.someday ?? null,
-            areaId: task.areaId ?? null }))]));
+            areaId: task.areaId ?? null, projectId: task.projectId ?? null }))]));
     console.log(JSON.stringify({
         tiles: [...more.primary, ...more.utilities].map((item) => ({ id: item.id, label: item.label })),
         waiting: { rows: waiting.rows.map((row) => row.title), stats: waiting.stats },
@@ -108,6 +108,7 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
         reference: { rows: reference.items.map(titleOf).filter(Boolean), empty: reference.empty.message },
         sections: sections.map((section) => section.id),
         areas: store.areas.filter((area) => !area.deletedAt).map((area) => ({ id: area.id, name: area.name })),
+        projects: store.projects.filter((project) => !project.deletedAt && project.status === 'active').map((project) => ({ id: project.id, title: project.title })),
         stored,
     }));
     process.exit(0);
@@ -287,17 +288,39 @@ try {
     nodes = await tapExpecting(withDescription(nodes, en['task.moveToProjectOrArea']), (current) => Boolean(tagged(current, 'destination-search')), 'core\'s destination picker');
     writeFileSync(resolve(work, 'destination-picker.png'), adbRaw('exec-out', 'screencap', '-p'));
     check(hasText(nodes, en['task.destination']) && hasText(nodes, en['common.none']) && hasText(nodes, en['nav.projects']), '(c2) the picker shows Destination, None and Projects');
-    const area = seen.areas.map((entry) => ({ ...entry, node: withDescription(nodes, `${en['taskEdit.areaLabel']}: ${entry.name}`) })).find((entry) => entry.node);
-    if (!area) {
-        console.log('skip - (c2) no area on the picker\'s first screen of the development data');
-        sh('input keyevent KEYCODE_BACK');
-    } else {
-        const destinationsBefore = commands('taskDestinationMove');
-        await tap(area.node);
-        await waitFor('the move', () => commands('taskDestinationMove') === destinationsBefore + 1, 10_000);
-        seen = core();
-        check(seen.stored[titles.someday][0].areaId === area.id, `(c2) the area "${area.name}" is stored on the task in one write`);
-    }
+    // A real move (status menu review note 3): the picker's search narrows to an area of the development data (a project when it has
+    // none), with the keyboard up the found row and Cancel sit above it (review note 2), its tap stores the task there in one write,
+    // and None puts the task back (no area, no project), one write more.
+    const plain = (name) => /^[A-Za-z0-9 ]{2,40}$/.test(name);
+    const target = seen.areas.filter((entry) => plain(entry.name)).map((entry) => ({ kind: 'area', id: entry.id, name: entry.name, label: en['taskEdit.areaLabel'] }))
+        .concat(seen.projects.filter((entry) => plain(entry.title)).map((entry) => ({ kind: 'project', id: entry.id, name: entry.title, label: en['nav.projects'] })))[0]
+        ?? fail('(c2) the development data has no area and no active project with a plain name to move the task to');
+    const rowLabel = `${target.label}: ${target.name}`;
+    nodes = await tapExpecting(tagged(nodes, 'destination-search'), () => /mInputShown=true/.test(sh('dumpsys input_method')), 'the keyboard for the picker\'s search');
+    sh(`input text '${target.name.replace(/ /g, '%s')}'`);
+    nodes = await waitFor(`the picker's row "${rowLabel}"`, (current) => Boolean(withDescription(current, rowLabel)) && Boolean(withDescription(current, en['common.cancel'])), 10_000);
+    await sleep(600); // the card moves with the keyboard's animation
+    nodes = await device.settle(await screen());
+    const keyboard = sh('dumpsys window windows').split(/\n  Window #/).find((part) => part.includes('InputMethod')) ?? fail('no keyboard window');
+    const keyboardTop = Number(/ frame=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? /mFrame=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? NaN)
+        + Number(/mGivenContentInsets=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? NaN);
+    writeFileSync(resolve(work, 'destination-search-keyboard.png'), adbRaw('exec-out', 'screencap', '-p'));
+    const bottoms = [withDescription(nodes, rowLabel), withDescription(nodes, en['common.cancel'])].map((node) => node ? box(node)[3] : NaN);
+    check(Number.isFinite(keyboardTop) && bottoms.every((bottom) => bottom <= keyboardTop),
+        `(c2) with the keyboard up (top ${keyboardTop}), the found row and Cancel sit above it (bottoms ${bottoms.join(', ')})`);
+    const destinationsBefore = commands('taskDestinationMove');
+    await tap(withDescription(nodes, rowLabel));
+    await waitFor('the move', () => commands('taskDestinationMove') === destinationsBefore + 1, 10_000);
+    seen = core();
+    const placed = seen.stored[titles.someday][0];
+    check(target.kind === 'area' ? placed.areaId === target.id && placed.projectId === null : placed.projectId === target.id && placed.areaId === null,
+        `(c2) the ${target.kind} "${target.name}" is stored on the task in one write`);
+    nodes = await openStatusMenu();
+    nodes = await tapExpecting(withDescription(nodes, en['task.moveToProjectOrArea']), (current) => Boolean(tagged(current, 'destination-search')), 'core\'s destination picker');
+    await tap(withDescription(nodes, en['common.none']) ?? fail('no None row'));
+    await waitFor('the move back', () => commands('taskDestinationMove') === destinationsBefore + 2, 10_000);
+    seen = core();
+    check(seen.stored[titles.someday][0].areaId === null && seen.stored[titles.someday][0].projectId === null, '(c2) None puts the task back with no area and no project, one write more');
 
     setProp('fail_commit', '1');
     const addLabel = en['viewSections.addTask'].replace('{section}', SECTION);
