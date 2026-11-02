@@ -1,7 +1,8 @@
 // node --test apps/android-native/scripts/run-device-batch.test.mjs (no phone needed)
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { checkArgs, defaultChecks, parseArgs, setenvArgs, unreachable, verdict, withAdbPort } from './run-device-batch.mjs';
+import { buildSteps, checkArgs, defaultChecks, harnessChecks, parseArgs, setenvArgs, unreachable, verdict, withAdbPort } from './run-device-batch.mjs';
 import { DEFAULT_ADB } from './device.mjs';
 
 test('parses options and check names', () => {
@@ -58,4 +59,25 @@ test('a phone that is not "device" stops the batch with one line naming the port
         'VERDICT FAIL 0/1: not run, RFCW10JBP0Y not reachable on adb port 5037 (unauthorized)');
     assert.equal(unreachable({ status: null, error: new Error('spawnSync adb ENOENT') }, '5038', 2),
         'VERDICT FAIL 0/2: not run, RFCW10JBP0Y not reachable on adb port 5038 (spawnSync adb ENOENT)');
+});
+
+// The real scripts: a check needs the upgrade harness only when it reads its built APKs (apks/manifest.json), itself or through
+// the check it runs (check-data-deadlines-device runs check-data-device). Shots, locks and the startup fixture in the harness
+// folder do not count.
+const readCheck = (check) => readFileSync(new URL(`./${check}.mjs`, import.meta.url), 'utf8');
+const stepNames = (checks) => buildSteps('/w/t', harnessChecks(checks, readCheck)).map(([name]) => name);
+
+test('a run of only non-harness checks skips the harness step', () => {
+    const checks = ['check-about-device', 'check-intl-device', 'check-startup-device', 'check-onboarding-device',
+        'check-widget-list-device', 'check-someday-projects-device'];
+    assert.deepEqual(harnessChecks(checks, readCheck), []);
+    assert.deepEqual(stepNames(checks), ['bundle', 'gradle']);
+});
+
+test('a run with a harness check keeps the harness step', () => {
+    for (const check of ['check-upgrade-device', 'capture-parity-screens', 'check-data-device', 'check-data-deadlines-device',
+        'check-data-deadlines2-device', 'check-data-large-import-device', 'check-data-no-undo-device']) {
+        assert.deepEqual(harnessChecks(['check-about-device', check], readCheck), [check], check);
+        assert.deepEqual(stepNames(['check-about-device', check]), ['bundle', 'gradle', 'harness'], check);
+    }
 });

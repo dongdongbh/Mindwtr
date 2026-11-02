@@ -12,7 +12,8 @@
 //
 // Each RN build comes from a `git archive` of its pinned commit in a throwaway
 // folder under $MINDWTR_HARNESS_DIR (default /home/dd/.mindwtr-harness). Only
-// upgradetest-rn-identity.patch changes it (upgradetest-rn-identity-155.patch, the same change, for RN_FIX_COMMIT's app.config.ts). apps/mobile/scripts/android_build.sh,
+// upgradetest-rn-identity.patch changes it (upgradetest-rn-identity-155.patch, the same change, for RN_FIX_COMMIT's app.config.ts;
+// upgradetest-rn-identity-parity.patch, the same again, for --parity-rn's revision: it fits app.config.ts from RN_FIX_COMMIT on). apps/mobile/scripts/android_build.sh,
 // the release build script, prepares it (`--prep-only`), Gradle builds it with
 // the wanted versionCode, and then the folder is deleted. Dependencies are a link
 // farm into this checkout's node_modules, with @mindwtr/core pointing at the
@@ -49,6 +50,9 @@ const apks = resolve(home, 'apks');
 const patch = resolve(import.meta.dirname, 'upgradetest-rn-identity.patch');
 // The same identity change, for RN_FIX_COMMIT's app.config.ts (the Gmail lines moved the first patch's context).
 const patchFix = resolve(import.meta.dirname, 'upgradetest-rn-identity-155.patch');
+// And for --parity-rn's revision: the 155 patch stopped applying once bad6459d0 added BENCHMARK_SCHEME below its anchor line.
+// This one anchors above that line, so it applies both before and after it. (The 155 patch stays: its hash names the cached RN 155 APK.)
+const patchParity = resolve(import.meta.dirname, 'upgradetest-rn-identity-parity.patch');
 const env = { ...process.env, ANDROID_HOME: sdk, ANDROID_SDK_ROOT: sdk, TMPDIR: resolve(home, 'tmp') };
 
 const run = (command, args, options = {}) => execFileSync(command, args, { stdio: 'inherit', env, ...options });
@@ -77,7 +81,7 @@ const patchId = sha256(patch).slice(0, 12);
 // over it), the RN side of capture-parity-screens' pairs, so they compare with today's RN rather than RN 154's older source.
 const parityArg = process.argv.find((arg) => arg === '--parity-rn' || arg.startsWith('--parity-rn='));
 const parityCommit = parityArg ? out('git', ['-C', repo, 'rev-parse', `${parityArg.split('=')[1] ?? 'HEAD'}^{commit}`]) : null;
-const patchFor = (commit) => (commit === RN_FIX_COMMIT || commit === parityCommit ? patchFix : patch);
+const patchFor = (commit) => (commit === RN_FIX_COMMIT ? patchFix : commit === parityCommit ? patchParity : patch);
 const rnApk = (commit, code) => resolve(apks, `rn-${commit.slice(0, 12)}-${sha256(patchFor(commit)).slice(0, 12)}-${code}.apk`);
 
 const checkRnIdentity = (mobile) => {

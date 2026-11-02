@@ -3,8 +3,10 @@
 //   node apps/android-native/scripts/run-device-batch.mjs [--tree <worktree>] [--harness <dir>] [--log <dir>] [--no-build]
 //       [--detach [--unit <name>]] [check names...]
 //
-// It builds the bundle, the four Gradle variants and the upgrade harness, and stops before any check when one of them fails
-// (`STOP: <step> failed`). Each check then starts from the home screen with rotation on, runs for at most an hour and adds
+// It builds the bundle and the four Gradle variants, and stops before any check when one of them fails (`STOP: <step> failed`).
+// It builds the upgrade harness only when a check reads its APKs (harnessChecks; else `harness=skipped (no check needs it)`); a
+// harness that fails to build marks only those checks `EXIT=1 not run, harness failed`, and the others still run. Each check
+// then starts from the home screen with rotation on, runs for at most an hour and adds
 // `## <check> HH:MM` and `EXIT=<code> rotation=<r>` to <log>/summary.txt (its output goes to <log>/<check>.log). The last line
 // of summary.txt is `VERDICT PASS <n>/<n>` or `VERDICT FAIL <passed>/<n>: <failed checks>`; the exit code is 0 only on PASS.
 // With no names it runs every check-*-device.mjs and capture-parity-screens.mjs in the tree (check-projects-device with
@@ -12,7 +14,7 @@
 // background jobs die when the worker pauses) and prints the unit and the log folder. phone-queue.mjs shows who holds the
 // phone and who waits.
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync } from 'node:fs';
+import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -96,6 +98,24 @@ export function checkArgs(check) {
     return [];
 }
 
+// The checks that need the upgrade harness's built APKs: their script, or a check script it runs, reads apks/manifest.json.
+// [read] gives a check's source. Shots, locks and fixtures kept in the harness folder do not count.
+export function harnessChecks(checks, read) {
+    const reads = (check) => read(check).includes('apks/manifest.json');
+    return checks.filter((check) => reads(check)
+        || [...read(check).matchAll(/'((?:check-[\w-]+-device|capture-parity-screens))\.mjs'/g)].some(([, other]) => other !== check && reads(other)));
+}
+
+// The build before the checks; the upgrade harness only when [needHarness] names a check.
+export function buildSteps(tree, needHarness) {
+    return [
+        ['bundle', process.execPath, [`${scriptsDir}/build-bundle.mjs`]],
+        ['gradle', './gradlew', [':app:assembleDebug', ':app:assembleUpgradetest', ':app:assemblePlayBenchmark', ':app:assemblePlayBenchmarkSeed', '--offline', '-q'],
+            { cwd: join(tree, 'apps/android-native/android') }],
+        ...(needHarness.length ? [['harness', process.execPath, [`${scriptsDir}/build-upgrade-harness.mjs`]]] : []),
+    ];
+}
+
 const hhmm = () => new Date().toTimeString().slice(0, 5);
 const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
 
@@ -171,14 +191,11 @@ function main() {
         say(stop);
         process.exit(1);
     }
+    const needHarness = harnessChecks(checks, (check) => readFileSync(join(opts.tree, scriptsDir, `${check}.mjs`), 'utf8'));
+    let harnessFailed = false;
     if (opts.build) {
-        const steps = [
-            ['bundle', process.execPath, [`${scriptsDir}/build-bundle.mjs`]],
-            ['gradle', './gradlew', [':app:assembleDebug', ':app:assembleUpgradetest', ':app:assemblePlayBenchmark', ':app:assemblePlayBenchmarkSeed', '--offline', '-q'],
-                { cwd: join(opts.tree, 'apps/android-native/android') }],
-            ['harness', process.execPath, [`${scriptsDir}/build-upgrade-harness.mjs`]],
-        ];
-        for (const [name, cmd, args, extra] of steps) {
+        if (!needHarness.length) say('harness=skipped (no check needs it)');
+        for (const [name, cmd, args, extra] of buildSteps(opts.tree, needHarness)) {
             const code = run(cmd, args, `${name}.log`, extra);
             say(`${name}=${code}`);
             if (name === 'gradle' && code === 0) {
@@ -186,7 +203,11 @@ function main() {
                 const sha = spawnSync('sha256sum', [apk], { encoding: 'utf8' }).stdout.slice(0, 12);
                 say(`apk sha ${sha}`);
             }
-            if (code !== 0) {
+            // A harness that cannot be built fails only the checks that need it; the others still run.
+            if (code !== 0 && name === 'harness' && needHarness.length < checks.length) {
+                say(`harness failed (${opts.log}/harness.log): not run: ${needHarness.join(' ')}`);
+                harnessFailed = true;
+            } else if (code !== 0) {
                 say(`STOP: ${name} failed (${opts.log}/${name}.log)`);
                 say(`VERDICT FAIL 0/${checks.length}: not run, ${name} failed`);
                 process.exit(1);
@@ -196,6 +217,12 @@ function main() {
 
     const results = [];
     for (const check of checks) {
+        if (harnessFailed && needHarness.includes(check)) {
+            say(`## ${check} ${hhmm()}`);
+            say('EXIT=1 not run, harness failed');
+            results.push({ check, exit: 1 });
+            continue;
+        }
         if (!adb('dumpsys', 'activity', 'activities').split('\n').find((l) => l.includes('topResumedActivity'))?.includes('launcher')) {
             adb('input', 'keyevent', 'KEYCODE_HOME');
         }
