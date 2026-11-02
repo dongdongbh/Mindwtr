@@ -7,7 +7,7 @@
 // Through the app's own screens:
 //   (1) Settings › Advanced › AI › Speech: speech on, OpenAI, the stub's base URL (a self-hosted server needs no key, #930);
 //   (2) the capture popup's mic: RN's record button (Record audio), its recording row; a stop shows the processing row, the
-//       popup closes, and the task saves first as "Audio note …" with the recording attached (audio/mp4 in managed storage);
+//       popup closes, and the task saves first as "Audio Note …" with the recording attached (audio/mp4 in managed storage);
 //       the stub's transcript then becomes its title, from a multipart upload of an .m4a;
 //   (3) the popup closed while recording: no task, no recording left in files/voice-captures;
 //   (4) the app left while recording (Home), then back: the mic is idle and records again (review N5);
@@ -105,7 +105,7 @@ const sqlite = (sql) => {
     return out ? JSON.parse(out) : [];
 };
 /** This run's live tasks: their titles and attachments. */
-const runTasks = () => sqlite(`SELECT id, title, attachments FROM tasks WHERE deletedAt IS NULL AND (title = '${SPOKEN}' OR title LIKE 'Audio note %') AND createdAt >= '${started}'`);
+const runTasks = () => sqlite(`SELECT id, title, attachments FROM tasks WHERE deletedAt IS NULL AND (title = '${SPOKEN}' OR title LIKE '${en['quickAdd.audioNoteTitle']} %') AND createdAt >= '${started}'`);
 const recordings = () => sh(`run-as ${PKG} sh -c 'ls files/voice-captures 2>/dev/null; ls files/voice-captures/quick-capture-audio 2>/dev/null' || true`)
     .split(/\s+/).filter((name) => /\.(m4a|wav|tmp)$/.test(name));
 
@@ -212,7 +212,10 @@ try {
     await sleep(3000);
     await tap(mic(await screen()));
     await waitFor('the popup closed after the save', (current) => !popup(current), 30_000);
-    const saved = await waitFor('the voice task', () => runTasks().find((task) => task.title === SPOKEN || task.title.startsWith('Audio note ')), 30_000);
+    // waitFor answers the screen's nodes, so the task is kept here. The first title is quickAdd.audioNoteTitle ("Audio Note").
+    let saved = null;
+    await waitFor('the voice task', () => (saved = runTasks().find((task) => task.title === SPOKEN
+        || task.title.startsWith(`${en['quickAdd.audioNoteTitle']} `))), 30_000);
     const attachments = JSON.parse(saved.attachments ?? '[]');
     check(attachments.length === 1 && attachments[0].mimeType === 'audio/mp4' && attachments[0].uri.includes('/files/attachments/')
         && attachments[0].title.startsWith(`${en['quickAdd.audioNoteTitle']} `), `(2) saved with the recording in managed storage: ${attachments[0]?.title} ${attachments[0]?.mimeType}`);
