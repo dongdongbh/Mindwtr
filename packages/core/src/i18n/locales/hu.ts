@@ -2,6 +2,7 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Hungarian.
 export const huOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Kezdés előtt",
     "taskEdit.advanceReminderLabel": "Előzetes emlékeztető",
     "taskEdit.advanceReminderMinutes": "{count} perccel előtte",
     "taskEdit.advanceReminderHour": "1 órával előtte",

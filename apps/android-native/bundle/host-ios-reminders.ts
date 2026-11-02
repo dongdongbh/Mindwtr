@@ -156,6 +156,7 @@ export function createIosReminderMethods(deps: Dependencies) {
     // Saved repeating alarms whose signature carries a time zone, from the last prepare; its acknowledgment logs the count.
     let zoned = 0;
     let advanceScheduled = false;
+    let startAdvanceScheduled = 0;
     let revision = 0, unsubscribe: (() => void) | null = null, resolvedLanguage: string | null = null;
     const changed = () => { revision += 1; };
     const current = (token: string) => {
@@ -189,6 +190,7 @@ export function createIosReminderMethods(deps: Dependencies) {
         begin(token: string) {
             if (owner || typeof token !== 'string' || !/^[0-9a-f-]{36}$/.test(token)) throw unavailable();
             advanceScheduled = false;
+            startAdvanceScheduled = 0;
             const check = deps.capture(); check(); owner = { token, current: check }; return null;
         },
         current(token: string) { current(token); return null; },
@@ -219,6 +221,9 @@ export function createIosReminderMethods(deps: Dependencies) {
             readOwnedIosReminderMaps(result.value.alarms, result.value.state);
             if (result.value.writeAhead !== null) readOwnedIosReminderMaps(result.value.writeAhead, storedState);
             advanceScheduled = result.value.schedule.some((alarm) => record(alarm.details.data) && alarm.details.data.kind === 'task-due-advance');
+            // A successful full batch proves every queued start prealert was accepted.
+            startAdvanceScheduled = result.value.schedule.some((alarm) => record(alarm.details.data) && alarm.details.data.kind === 'task-start-advance')
+                ? result.value.schedule.length : 0;
             return { storedAlarms, storedState, plan: result.value };
         },
         async acknowledge(token: string, mode: string, scheduled: number, cancelled: number, collapsed = 0, rearmed = 0) {
@@ -230,9 +235,12 @@ export function createIosReminderMethods(deps: Dependencies) {
             const admitted = zoned; zoned = 0;
             try { await deps.acknowledged(mode, scheduled, cancelled, collapsed, rearmed, admitted); } catch { /* Confirmed persistence survives logging failure. */ }
             const advanceConfirmed = advanceScheduled && scheduled > 0; advanceScheduled = false;
+            const startAdvanceConfirmed = startAdvanceScheduled > 0 && scheduled >= startAdvanceScheduled; startAdvanceScheduled = 0;
             try {
                 if (advanceConfirmed) logInfo('Advance reminder scheduled', { scope: 'notifications', force: true,
                     context: { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'scheduled' } });
+                if (startAdvanceConfirmed) logInfo('Start advance reminder scheduled', { scope: 'notifications', force: true,
+                    context: { releaseCheck: 'v1.3.8/start-advance-reminder', outcome: 'scheduled' } });
             } catch { /* Confirmed scheduling survives logging failure. */ }
             return null;
         },

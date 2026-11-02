@@ -635,17 +635,21 @@ export function readNativePreparedInboxWrite(input: unknown): NativePreparedInbo
                 return id;
             } });
         if (recomputed.reason !== undefined) return null;
-        const hasAdvance = (task: Task) => Object.prototype.hasOwnProperty.call(task, 'dueReminderLeadMinutes');
-        const legacyReference = witness.decisionKind === 'reference' && witness.committed === 'reference'
-            && witness.source.status !== 'reference' && !hasAdvance(witness.source)
-            && witness.lists.tasks.every((task) => !hasAdvance(task))
-            && prepared.effect.tasks.every((row) => !hasAdvance(row.after) && (!row.before || !hasAdvance(row.before)))
-            && recomputed.effect.tasks.some((row) => row.after.id === witness.source.id
-                && row.after.status === 'reference' && row.after.dueReminderLeadMinutes === 0);
-        // Old v1 journals predate this field; compare their exact effect without the new transition-only Off value.
+        const legacyReferenceFields = (['dueReminderLeadMinutes', 'startReminderLeadMinutes'] as const).filter((field) => {
+            const hasAdvance = (task: Task) => Object.prototype.hasOwnProperty.call(task, field);
+            return witness.decisionKind === 'reference' && witness.committed === 'reference'
+                && witness.source.status !== 'reference' && !hasAdvance(witness.source)
+                && witness.lists.tasks.every((task) => !hasAdvance(task))
+                && prepared.effect.tasks.every((row) => !hasAdvance(row.after) && (!row.before || !hasAdvance(row.before)))
+                && recomputed.effect.tasks.some((row) => row.after.id === witness.source.id
+                    && row.after.status === 'reference' && row.after[field] === 0);
+        });
+        // Old v1 journals retain their exact effect bytes before each field's transition-only Off value existed.
+        const legacyReference = legacyReferenceFields.length > 0;
         const effect = legacyReference ? { ...recomputed.effect, tasks: recomputed.effect.tasks.map((row) => {
             if (row.after.id !== witness.source.id) return row;
-            const { dueReminderLeadMinutes: _advance, ...after } = row.after;
+            const after = { ...row.after };
+            for (const field of legacyReferenceFields) delete after[field];
             return { ...row, after };
         }) } : recomputed.effect;
         if (idIndex !== witness.ids.length

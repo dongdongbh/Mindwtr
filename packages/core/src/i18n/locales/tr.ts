@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const trOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Başlamadan önce",
     "attachments.webUploadRequiresCloud": "Tarayıcıdan yükleme, kendi sunucunuzda bulut eşitlemesi gerektirir.",
     "attachments.webUploadEncrypted": "Tarayıcıdan yükleme için eşitleme şifrelemesi kapalı olmalıdır.",
     "attachments.webUploadOffline": "Çevrimdışıyken dosya yüklenemez.",

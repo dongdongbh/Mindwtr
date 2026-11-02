@@ -274,6 +274,7 @@ export interface Task {
     reminderPolicy?: TaskReminderPolicy; // Absent legacy tasks retain their explicit send/skip behavior.
     suppressMindwtrReminders?: boolean; // Legacy choice/compatibility snapshot; reminderPolicy takes precedence.
     dueReminderLeadMinutes?: number; // Minutes before an explicit due time; 0 = explicitly off, absent = never set. Maximum 10080.
+    startReminderLeadMinutes?: number; // 5/15/30/60 minutes before an explicit start time; 0 = explicitly off, absent = never set.
     repeatReminderMinutes?: number; // Repeat the due-time reminder every N minutes (presets 5|10|15|30|60). Absent/0 = off. Due-time only.
     reviewAt?: string; // Tickler/review date (ISO string). If set, task is due for review at/after this time.
     completedAt?: string; // ISO timestamp when task was last completed/archived.

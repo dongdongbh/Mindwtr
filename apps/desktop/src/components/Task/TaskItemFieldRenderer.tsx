@@ -941,6 +941,21 @@ export function TaskItemFieldRenderer({
                             hasValue: Boolean(editStartTime),
                             warning: dateIssueLabel,
                         })}
+                        {reminders.startAdvance && (
+                            <label className="mt-2 block text-xs text-muted-foreground">
+                                <span>{reminders.startAdvance.label}</span>
+                                <select
+                                    aria-label={reminders.startAdvance.label}
+                                    disabled={!reminders.startAdvance.enabled}
+                                    value={draft.startReminderLeadMinutes ?? 0}
+                                    onChange={(event) => setField('startReminderLeadMinutes', Number(event.target.value))}
+                                    className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-sm text-foreground disabled:opacity-50"
+                                >
+                                    {reminders.startAdvance.options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                                {reminders.startAdvance.hint && <span className="mt-1 block leading-snug">{reminders.startAdvance.hint}</span>}
+                            </label>
+                        )}
                         {editDueDate && (
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                 <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5" aria-label={t('taskEdit.startModeLabel')}>

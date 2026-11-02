@@ -13,7 +13,9 @@ import { TASK_RECURRENCE_FIELD_KEYS } from '@mindwtr/core';
 import {
   normalizeNullableTaskTimeSpentMinutes,
   normalizeNullableTaskDueReminderLeadMinutes,
+  normalizeNullableTaskStartReminderLeadMinutes,
   normalizeOptionalTaskDueReminderLeadMinutes,
+  normalizeOptionalTaskStartReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   TASK_RECURRENCE_INPUT_FIELD_KEYS,
 } from './input-validation.js';
@@ -71,6 +73,21 @@ describe('dueReminderLeadMinutes boundary validation', () => {
   test('rejects fractional, negative, and excessive offsets', () => {
     for (const minutes of [-1, 1.5, 10081, NaN, Infinity]) {
       expect(() => normalizeOptionalTaskDueReminderLeadMinutes(minutes)).toThrow('Invalid task dueReminderLeadMinutes');
+    }
+  });
+});
+
+describe('startReminderLeadMinutes boundary validation', () => {
+  test('accepts absent, explicit Off, and bounded integer offsets', () => {
+    expect(normalizeOptionalTaskStartReminderLeadMinutes(undefined)).toBeUndefined();
+    for (const minutes of [0, 5, 15, 30, 60]) {
+      expect(normalizeOptionalTaskStartReminderLeadMinutes(minutes)).toBe(minutes);
+    }
+    expect(normalizeNullableTaskStartReminderLeadMinutes(null)).toBe(null);
+  });
+  test('rejects fractional, negative, and excessive offsets', () => {
+    for (const minutes of [-1, 1, 1.5, 61, NaN, Infinity]) {
+      expect(() => normalizeOptionalTaskStartReminderLeadMinutes(minutes)).toThrow('Invalid task startReminderLeadMinutes');
     }
   });
 });

@@ -1,6 +1,6 @@
 import { isAfter } from 'date-fns';
-import { normalizeDueReminderLeadMinutes } from './due-reminder-lead';
-export { normalizeDueReminderLeadMinutes } from './due-reminder-lead';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './due-reminder-lead';
+export { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './due-reminder-lead';
 import { hasTimeComponent, safeParseDate } from './date';
 import { isTaskActionable } from './task-status';
 import { stripMarkdown } from './markdown';
@@ -14,7 +14,7 @@ export type ScheduleOptions = {
     taskReminderDefault?: NotificationSettings['taskReminderDefault'];
 };
 
-export type TaskReminderIntentKind = 'start' | 'due' | 'review' | 'due-repeat' | 'due-advance';
+export type TaskReminderIntentKind = 'start' | 'due' | 'review' | 'due-repeat' | 'due-advance' | 'start-advance';
 
 export type TaskReminderIntent = {
     key: string;
@@ -29,6 +29,7 @@ export type TaskReminderPlan = {
     next: TaskReminderIntent | null;
     repeats: TaskReminderIntent[];
     advance: TaskReminderIntent | null;
+    startAdvance: TaskReminderIntent | null;
 };
 
 export type ProjectReviewReminderIntent = {
@@ -65,6 +66,17 @@ function getDueAdvanceReminderIntent(task: Task, now: Date, options: ScheduleOpt
     if (!isAfter(scheduledAt, now)) return null;
     const key = `task:${task.id}:a${lead}:${scheduledAt.getTime()}`;
     return { key, dedupeKey: key, taskId: task.id, kind: 'due-advance', scheduledAt };
+}
+
+function getStartAdvanceReminderIntent(task: Task, now: Date, options: ScheduleOptions): TaskReminderIntent | null {
+    const lead = normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes);
+    if (!lead || isInactiveTask(task) || !shouldSendTaskReminders(task, options) || options.includeStartTime === false) return null;
+    const start = parseExplicitReminderDate(task.startTime);
+    if (!start) return null;
+    const scheduledAt = new Date(start.getTime() - lead * 60_000);
+    if (!isAfter(scheduledAt, now)) return null;
+    const key = `task:${task.id}:sa${lead}:${scheduledAt.getTime()}`;
+    return { key, dedupeKey: key, taskId: task.id, kind: 'start-advance', scheduledAt };
 }
 
 function parseExplicitReminderDate(value: string | undefined | null): Date | null {
@@ -172,7 +184,7 @@ const REMINDER_NOTIFICATION_TAG_PREFIX = 'mindwtr-reminder:';
  * (`task:<id>`, `task:<id>:r<n>`, `project:<id>`, `digest:<kind>`).
  */
 export function getReminderNotificationTag(key: string): string {
-    const base = key.startsWith('task:') ? key.replace(/:(?:r\d+|a\d+:-?\d+)$/, '') : key;
+    const base = key.startsWith('task:') ? key.replace(/:(?:r\d+|s?a\d+:-?\d+)$/, '') : key;
     return `${REMINDER_NOTIFICATION_TAG_PREFIX}${base}`;
 }
 
@@ -195,10 +207,22 @@ export function getTaskReminderPlan(
             repeatIndex: index + 1,
         }),
     );
+    const next = getNextTaskReminderIntent(task, now, options);
+    const advance = getDueAdvanceReminderIntent(task, now, options);
+    const startAdvance = getStartAdvanceReminderIntent(task, now, options);
+    if (!advance && !startAdvance) return { next, repeats, advance, startAdvance };
+    // One alert per task and instant, including a prealert coinciding with another scheduled reminder.
+    const seen = new Set<number>();
+    const unique = (intent: TaskReminderIntent | null): TaskReminderIntent | null => {
+        if (!intent || seen.has(intent.scheduledAt.getTime())) return null;
+        seen.add(intent.scheduledAt.getTime());
+        return intent;
+    };
     return {
-        next: getNextTaskReminderIntent(task, now, options),
-        repeats,
-        advance: getDueAdvanceReminderIntent(task, now, options),
+        next: unique(next),
+        repeats: repeats.filter((intent) => unique(intent) !== null),
+        advance: unique(advance),
+        startAdvance: unique(startAdvance),
     };
 }
 
@@ -355,7 +379,9 @@ export function buildReminderNotificationBody(
     kind: TaskReminderIntentKind,
     translations: Record<string, string>
 ): string {
-    const reminderLabel = kind === 'due-advance'
+    const reminderLabel = kind === 'start-advance'
+        ? (translations['taskEdit.startAdvanceReminderLabel'] ?? 'Before start')
+        : kind === 'due-advance'
         ? (translations['taskEdit.advanceReminderLabel'] ?? 'Advance reminder')
         : kind === 'start'
         ? (translations['settings.startDateNotifications'] ?? 'Start date reminder')
@@ -561,8 +587,8 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
                 });
             }
 
-            const advance = plan.advance;
-            if (advance && advance.scheduledAt.getTime() <= windowToMs) {
+            for (const advance of [plan.advance, plan.startAdvance]) {
+                if (!advance || advance.scheduledAt.getTime() > windowToMs) continue;
                 oneShot.push({
                     key: advance.key,
                     title: task.title,
@@ -570,7 +596,7 @@ export function buildReminderSchedule(input: ReminderScheduleInput): ReminderSch
                     fireAt: advance.scheduledAt,
                     hasSnoozeAction: true,
                     hasCompleteAction: true,
-                    data: { kind: 'task-due-advance', taskId: task.id },
+                    data: { kind: advance.kind === 'start-advance' ? 'task-start-advance' : 'task-due-advance', taskId: task.id },
                 });
             }
 
@@ -670,6 +696,6 @@ export function resolveDueReminders(
     const { requests } = buildReminderSchedule({ ...input, now: window.from, deliveryWindowTo: window.to });
     return requests.filter((request) => (
         !request.repeatInterval
-        && (!request.data.taskId || request.key === `task:${request.data.taskId}` || request.data.kind === 'task-due-advance')
+        && (!request.data.taskId || request.key === `task:${request.data.taskId}` || request.data.kind === 'task-due-advance' || request.data.kind === 'task-start-advance')
     ));
 }

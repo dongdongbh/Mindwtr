@@ -75,7 +75,8 @@ const readRequest = (value: unknown): NativeAppleReminderImportRequest => {
 };
 const readTarget = (value: unknown, id: string): NativeAppleReminderImportTarget => {
     if (!exact(value, ['id', 'row']) || value.id !== id) invalid();
-    const legacyLayout = Array.isArray(value.row) && value.row.length === SCHEMA5_TASK_COLUMNS.length
+    const legacyLayout = Array.isArray(value.row) && (value.row.length === SCHEMA5_TASK_COLUMNS.length
+        || (value.row.length === SCHEMA5_TASK_COLUMNS.length + 1 && TASK_SQLITE_COLUMNS[SCHEMA5_TASK_COLUMNS.length] === 'dueReminderLeadMinutes'))
         && SCHEMA5_TASK_COLUMNS.every((name, index) => TASK_SQLITE_COLUMNS[index] === name);
     if (value.row !== null && (!Array.isArray(value.row) || (value.row.length !== TASK_SQLITE_COLUMNS.length && !legacyLayout)
         || value.row[0] !== id || !value.row.every((cell) => cell === null || typeof cell === 'string'

@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const koOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "시작 전",
     'settings.importDiagnostics.unknownColumns': "알 수 없는 열 {{count}}개를 무시했습니다.",
     'settings.importDiagnostics.csvLocation': "{{row}}행, {{column}}열",
     'settings.importDiagnostics.csvArchiveLocation': "CSV 항목 {{entry}}, {{row}}행, {{column}}열",

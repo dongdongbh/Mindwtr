@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const frOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Avant le début",
     "settings.gmailCapture": "Gmail",
     "settings.gmailCaptureDesc": "Connectez Google et capturez les e-mails portant le libellé de votre choix.",
     "settings.gmailCaptureDisclosure": "Google accorde un accès en lecture seule à toute votre boîte mail, même si Mindwtr importe uniquement les e-mails portant le libellé sélectionné. Mindwtr ne modifie jamais les e-mails ni les libellés. Les informations de l’expéditeur et le texte importés deviennent des données de tâches ordinaires et peuvent être inclus dans la synchronisation, les sauvegardes, les exports ou les fonctions d’IA facultatives que vous avez configurés. Utilisez uniquement un compte de test prévu à cet effet.",

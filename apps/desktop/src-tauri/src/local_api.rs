@@ -3465,6 +3465,7 @@ fn create_next_recurring_task_for_local_api(
             "timeEstimate",
             "repeatReminderMinutes",
             "dueReminderLeadMinutes",
+            "startReminderLeadMinutes",
             "reminderPolicy",
         ],
     );
@@ -3927,6 +3928,9 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
     let had_advance_reminder = task
         .get("dueReminderLeadMinutes")
         .is_some_and(|value| !value.is_null());
+    let had_start_advance_reminder = task
+        .get("startReminderLeadMinutes")
+        .is_some_and(|value| !value.is_null());
     for key in [
         "startTime",
         "dueDate",
@@ -3938,6 +3942,7 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
         "suppressMindwtrReminders",
         "repeatReminderMinutes",
         "dueReminderLeadMinutes",
+        "startReminderLeadMinutes",
         "showFutureRecurrence",
         "focusOrder",
         "boardOrder",
@@ -3946,6 +3951,9 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
     }
     if had_advance_reminder {
         task.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
+    if had_start_advance_reminder {
+        task.insert("startReminderLeadMinutes".to_string(), json!(0));
     }
     task.insert("isFocusedToday".to_string(), Value::Bool(false));
     task.insert("pushCount".to_string(), Value::Number(0.into()));
@@ -4553,6 +4561,13 @@ fn normalize_task_triage_patch(
             || sanitized
                 .get("dueReminderLeadMinutes")
                 .is_some_and(|value| !value.is_null());
+        let clear_start_advance = previous_status != "reference"
+            || task
+                .get("startReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null())
+            || sanitized
+                .get("startReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null());
         for field in [
             "startTime",
             "dueDate",
@@ -4564,6 +4579,7 @@ fn normalize_task_triage_patch(
             "suppressMindwtrReminders",
             "repeatReminderMinutes",
             "dueReminderLeadMinutes",
+            "startReminderLeadMinutes",
             "showFutureRecurrence",
             "focusOrder",
             "boardOrder",
@@ -4572,6 +4588,9 @@ fn normalize_task_triage_patch(
         }
         if clear_advance {
             sanitized.insert("dueReminderLeadMinutes".to_string(), json!(0));
+        }
+        if clear_start_advance {
+            sanitized.insert("startReminderLeadMinutes".to_string(), json!(0));
         }
         sanitized.insert("isFocusedToday".to_string(), Value::Bool(false));
         sanitized.insert("pushCount".to_string(), Value::Number(0.into()));
@@ -4589,6 +4608,12 @@ fn normalize_task_triage_patch(
 fn normalize_task_reminder_patch(patch: &mut Map<String, Value>, default_skip: bool) {
     if patch.get("dueReminderLeadMinutes").is_some_and(Value::is_null) {
         patch.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
+    if patch
+        .get("startReminderLeadMinutes")
+        .is_some_and(Value::is_null)
+    {
+        patch.insert("startReminderLeadMinutes".to_string(), json!(0));
     }
     if let Some(policy) = patch.get("reminderPolicy").and_then(Value::as_str) {
         let skip = policy == "skip" || (policy == "inherit" && default_skip);
@@ -4692,6 +4717,12 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
             }
             "dueReminderLeadMinutes" => {
                 value.is_null() || value.as_i64().is_some_and(|minutes| (0..=10080).contains(&minutes))
+            }
+            "startReminderLeadMinutes" => {
+                value.is_null()
+                    || value
+                        .as_i64()
+                        .is_some_and(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60))
             }
             "repeatReminderMinutes" => {
                 value.is_null()
@@ -5459,6 +5490,43 @@ mod tests {
         }
         for minutes in [json!(-1), json!(1.5), json!(10081), json!("15"), json!(true)] {
             let mut patch = json!({"dueReminderLeadMinutes": minutes}).as_object().unwrap().clone();
+            assert!(super::sanitize_task_patch_map(&mut patch).is_err());
+        }
+    }
+
+    #[test]
+    fn start_advance_reminder_patch_validation_and_clear() {
+        for minutes in [
+            json!(0),
+            json!(5),
+            json!(15),
+            json!(30),
+            json!(60),
+            Value::Null,
+        ] {
+            let mut patch = json!({"startReminderLeadMinutes": minutes})
+                .as_object()
+                .unwrap()
+                .clone();
+            super::sanitize_task_patch_map(&mut patch).unwrap();
+            super::normalize_task_reminder_patch(&mut patch, false);
+            assert_eq!(
+                patch["startReminderLeadMinutes"],
+                if minutes.is_null() { json!(0) } else { minutes }
+            );
+        }
+        for minutes in [
+            json!(-1),
+            json!(1),
+            json!(1.5),
+            json!(61),
+            json!("15"),
+            json!(true),
+        ] {
+            let mut patch = json!({"startReminderLeadMinutes": minutes})
+                .as_object()
+                .unwrap()
+                .clone();
             assert!(super::sanitize_task_patch_map(&mut patch).is_err());
         }
     }

@@ -23,12 +23,14 @@ import {
   normalizeNullableTaskRelativeStartOffset,
   normalizeNullableTaskRepeatReminderMinutes,
   normalizeNullableTaskDueReminderLeadMinutes,
+  normalizeNullableTaskStartReminderLeadMinutes,
   normalizeNullableTaskTimeSpentMinutes,
   normalizeNullableTaskTokens,
   normalizeOptionalTaskRecurrence,
   normalizeOptionalTaskRelativeStartOffset,
   normalizeOptionalTaskRepeatReminderMinutes,
   normalizeOptionalTaskDueReminderLeadMinutes,
+  normalizeOptionalTaskStartReminderLeadMinutes,
   normalizeOptionalTaskTimeSpentMinutes,
   normalizeOptionalTaskTokens,
 } from './input-validation.js';
@@ -407,6 +409,7 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
         timeSpentMinutes: normalizeOptionalTaskTimeSpentMinutes(input.timeSpentMinutes),
         repeatReminderMinutes: normalizeOptionalTaskRepeatReminderMinutes(input.repeatReminderMinutes),
         dueReminderLeadMinutes: normalizeOptionalTaskDueReminderLeadMinutes(input.dueReminderLeadMinutes),
+        startReminderLeadMinutes: normalizeOptionalTaskStartReminderLeadMinutes(input.startReminderLeadMinutes),
         attachments: buildLinkAttachments(input.attachments),
       });
       const body = hasQuickAdd ? { input: input.quickAdd, props } : { title: input.title, props };
@@ -447,6 +450,8 @@ export const createCloudService = (options: CloudServiceOptions): MindwtrService
           patch.timeSpentMinutes = normalizeNullableTaskTimeSpentMinutes(value as number | null);
         } else if (name === 'dueReminderLeadMinutes') {
           patch.dueReminderLeadMinutes = normalizeNullableTaskDueReminderLeadMinutes(value as number | null) ?? 0;
+        } else if (name === 'startReminderLeadMinutes') {
+          patch.startReminderLeadMinutes = normalizeNullableTaskStartReminderLeadMinutes(value as number | null) ?? 0;
         } else if (name === 'repeatReminderMinutes') {
           patch.repeatReminderMinutes = normalizeNullableTaskRepeatReminderMinutes(value as number | null);
         } else {

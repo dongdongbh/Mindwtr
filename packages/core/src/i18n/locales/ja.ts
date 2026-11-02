@@ -10,6 +10,7 @@
 //   パーサのコマンドトークン (/due:, @context, #tag, +Project…) は英語のまま。
 // - 数値プレースホルダは詰める ({{count}}件)、英単語は前後に半角スペースを入れる (Dropbox に接続)。
 export const jaOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "開始前",
     "taskEdit.advanceReminderLabel": "事前リマインダー",
     "taskEdit.advanceReminderMinutes": "{count} 分前",
     "taskEdit.advanceReminderHour": "1 時間前",

@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const arOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "قبل البدء",
     "settings.desktopAppLockDesc": "اطلب Windows Hello أو Touch ID (أو كلمة مرور Mac) عند فتح Mindwtr وبعد ابتعادك. هذا يخفي نافذة التطبيق فقط؛ يظل بإمكان أداة macOS وواجهة API المحلية وخادم MCP قراءة بياناتك.",
     "settings.desktopAppLockUnavailable": "أعدّ Windows Hello أو كلمة مرور تسجيل الدخول على Mac لاستخدام قفل التطبيق.",
     "appLock.lockNow": "قفل Mindwtr",

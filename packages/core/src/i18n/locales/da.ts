@@ -1,5 +1,6 @@
 // Danish translation. Keep at full key parity with en.ts.
 export const daOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Før start",
     "taskEdit.advanceReminderLabel": "Forhåndspåmindelse",
     "taskEdit.advanceReminderMinutes": "{count} min før",
     "taskEdit.advanceReminderHour": "1 time før",

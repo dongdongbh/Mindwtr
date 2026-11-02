@@ -1,5 +1,6 @@
 // Ukrainian app strings. Keep placeholders and slash-command syntax in sync with en.ts.
 export const ukOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "До початку",
     "taskEdit.advanceReminderLabel": "Завчасне нагадування",
     "taskEdit.advanceReminderMinutes": "За {count} хв",
     "taskEdit.advanceReminderHour": "За 1 годину",

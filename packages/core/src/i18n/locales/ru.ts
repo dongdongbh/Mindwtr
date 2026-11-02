@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const ruOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "До начала",
     "attachments.webUploadRequiresCloud": "Для загрузки из браузера нужна синхронизация с собственным облачным сервером.",
     "attachments.webUploadEncrypted": "Для загрузки из браузера нужно отключить шифрование синхронизации.",
     "attachments.webUploadOffline": "В автономном режиме нельзя загружать файлы.",

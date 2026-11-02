@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { normalizeTaskForLoad, normalizeCancellationTimestamp, isTaskFinished, normalizeTaskStatus, type TaskLoadTemporalContext } from './task-status';
 import { normalizeRecurrenceForLoad } from './recurrence';
-import { normalizeDueReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { normalizeTimeSpentMinutes } from './time-spent';
 import { normalizeRelativeStartOffset } from './task-relative-start';
 import { preserveShallowIdentity, sameShallowRecord } from './shallow-identity';
@@ -171,16 +171,33 @@ const corpus = (): Array<[string, Task]> => [
     ['bad minutes', base({ repeatReminderMinutes: 'x', dueReminderLeadMinutes: Number.NaN, timeSpentMinutes: -3 })],
 ];
 const same = (task: Task, now: string, temporalContext?: TaskLoadTemporalContext) => {
-    const expected = frozenNormalizeTaskForLoad(task, now, temporalContext);
+    let expected = frozenNormalizeTaskForLoad(task, now, temporalContext);
+    const lead = normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes);
+    const leadChanged = !Object.hasOwn(task, 'startReminderLeadMinutes') || !Object.is(task.startReminderLeadMinutes, lead);
+    if (leadChanged && expected === task) {
+        // Force the frozen oracle to return its candidate, since adding a schema field also requires a new object.
+        expected = frozenNormalizeTaskForLoad({ ...task, revBy: ` ${task.revBy ?? ''} ` }, now, temporalContext);
+    }
     const actual = normalizeTaskForLoad(task, now, temporalContext);
-    expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
-    expect(Object.keys(actual)).toEqual(Object.keys(expected));
-    expect(actual).toEqual(expected);
-    expect(actual === task).toBe(expected === task);
+    const { startReminderLeadMinutes: actualLead, ...actualLegacy } = actual;
+    const { startReminderLeadMinutes: _expectedLead, ...expectedLegacy } = expected;
+    expect(actualLead).toBe(lead);
+    expect(JSON.stringify(actualLegacy)).toBe(JSON.stringify(expectedLegacy));
+    expect(Object.keys(actualLegacy)).toEqual(Object.keys(expectedLegacy));
+    expect(actualLegacy).toEqual(expectedLegacy);
+    expect(actual === task).toBe(expected === task && !leadChanged);
 };
 
 describe('normalizeTaskForLoad in one pass', () => {
     afterEach(() => { vi.resetModules(); vi.doUnmock('./task-status'); });
+
+    it.each([[undefined, undefined], [null, undefined], [0, 0], [5, 5], [15, 15], [30, 30], [60, 60], [13, undefined], [61, undefined]])(
+        'normalizes the added start field %s to %s and preserves second-load identity', (raw, expected) => {
+            const normalized = normalizeTaskForLoad(base({ startReminderLeadMinutes: raw }), NOW);
+            expect(normalized.startReminderLeadMinutes).toBe(expected);
+            expect(normalizeTaskForLoad(normalized, NOW)).toBe(normalized);
+        },
+    );
 
     it.each(corpus())('gives what the two-pass form gave: %s', (_name, task) => {
         same(task, NOW);

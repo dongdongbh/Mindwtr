@@ -121,6 +121,29 @@ describe('native host contract: reminders', () => {
         expect(done.cancel).toContainEqual({ key: moved.key, id: moved.id, reason: 'withdrawn' });
     });
 
+    it.each(['android', 'ios'] as const)('gives start advance alerts durable identities, replaces starts and supports Done/Snooze (%s)', async (platform) => {
+        freezeClock();
+        await seed({}, [task({ id: 'advance', startTime: '2026-09-28T12:00:00Z', startReminderLeadMinutes: 60 })]);
+        const host = await openHost(platform);
+        const first = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true }));
+        const advance = first.schedule.find((alarm) => (alarm.details.data as Record<string, unknown>)?.kind === 'task-start-advance')!;
+        expect(advance.fireAtMs).toBe(Date.parse('2026-09-28T11:00:00Z'));
+        expect(first.schedule).toHaveLength(2);
+        const again = value(await host.planReminderAlarms({ storedAlarms: first.alarms, storedState: first.state, permissionGranted: true }));
+        expect(again.schedule).toEqual([]);
+        await useTaskStore.getState().updateTask('advance', { startTime: '2026-09-28T13:00:00Z' });
+        const changed = value(await host.planReminderAlarms({ storedAlarms: first.alarms, storedState: first.state, permissionGranted: true }));
+        const moved = changed.schedule.find((alarm) => (alarm.details.data as Record<string, unknown>)?.kind === 'task-start-advance')!;
+        expect(changed.cancel).toContainEqual({ key: advance.key, id: advance.id, reason: 'withdrawn' });
+        expect(moved.id).not.toBe(advance.id);
+        const snoozed = value(await host.snoozeReminder({ requestId: generateUUID(), requestedAt: Date.parse(NOW), details: moved.details }));
+        expect(snoozed.details.data).toEqual(moved.details.data);
+        expect(value(await host.planReminderSnooze({ storedState: changed.state, alarm: snoozed, permissionGranted: true })).schedule).toEqual([snoozed]);
+        expect(value(await host.completeReminderTask({ requestId: generateUUID(), taskId: 'advance' })).changed).toBe(true);
+        const done = value(await host.planReminderAlarms({ storedAlarms: changed.alarms, storedState: changed.state, permissionGranted: true }));
+        expect(done.cancel).toContainEqual({ key: moved.key, id: moved.id, reason: 'withdrawn' });
+    });
+
     it.each(['android', 'ios'] as const)('withdraws inherited pending alarms and delivered reminders on default Skip (%s)', async (platform) => {
         freezeClock();
         await seed({ taskReminderDefault: 'send' }, [
@@ -757,10 +780,11 @@ describe('native host contract: reminders', () => {
         const host = await openHost(platform);
         const fired = value(await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true })).schedule[0];
         const snoozes = [];
-        for (const kind of [undefined, 'task-start', 'task-due', 'task-due-advance', 'task-reminder', 'task-review']) {
+        for (const kind of [undefined, 'task-start', 'task-due', 'task-due-advance', 'task-start-advance', 'task-reminder', 'task-review']) {
             const data = { ...(fired.details.data as Record<string, string>) };
             if (kind) data.kind = kind;
             else delete data.kind; // Older stored Snooze requests have no kind.
+            if (kind === 'task-start-advance') data.alarmKey = 'task:snoozed:sa15:1790593200000';
             const alarm = value(await host.snoozeReminder({ requestId: generateUUID(), requestedAt: Date.now(), details: { ...fired.details, data } }));
             const made = value(await host.planReminderSnooze({ storedState: null, alarm, permissionGranted: true }));
             expect(made.schedule).toEqual([alarm]);

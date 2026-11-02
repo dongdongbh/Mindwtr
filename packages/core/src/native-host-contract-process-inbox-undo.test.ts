@@ -77,9 +77,14 @@ describe('Process Inbox public Undo', () => {
                 const restored = useTaskStore.getState()._tasksById.get(ID)!;
                 const restoredFields = buildProcessInboxUndoRestoreUpdates(restored);
                 const originalFields = buildProcessInboxUndoRestoreUpdates(original);
-                expect({ ...restoredFields, dueReminderLeadMinutes: restoredFields.dueReminderLeadMinutes || undefined })
-                    .toEqual({ ...originalFields, dueReminderLeadMinutes: originalFields.dueReminderLeadMinutes || undefined });
-                if (kind === 'reference') expect(restored.dueReminderLeadMinutes).toBe(0);
+                expect({ ...restoredFields, dueReminderLeadMinutes: restoredFields.dueReminderLeadMinutes || undefined,
+                    startReminderLeadMinutes: restoredFields.startReminderLeadMinutes || undefined })
+                    .toEqual({ ...originalFields, dueReminderLeadMinutes: originalFields.dueReminderLeadMinutes || undefined,
+                        startReminderLeadMinutes: originalFields.startReminderLeadMinutes || undefined });
+                if (kind === 'reference') {
+                    expect(restored.dueReminderLeadMinutes).toBe(0);
+                    expect(restored.startReminderLeadMinutes).toBe(0);
+                }
                 expect(restored.deletedAt).toBeUndefined();
                 expect(restored.rev).toBeGreaterThan(original.rev!);
                 expect(await sqlite.sql('SELECT * FROM tasks WHERE id=?', [sentinel.id])).toEqual(originalRows);

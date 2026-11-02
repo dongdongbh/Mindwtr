@@ -19,7 +19,7 @@ import { tFallback } from './i18n';
 import { buildRRuleString, editRRuleString, getProjectedRecurringTaskCalendarDate, isMonthlyWeekdaySet, MONTHLY_WEEKDAYS, parseRRuleString, RECURRENCE_INTERVAL_MAX, type RRuleEditOverrides } from './recurrence';
 import { getLocalizedWeekdayButtons, getLocalizedWeekdayLabels, WEEKDAY_ORDER } from './recurrence-constants';
 import { resolveFeatureFlags } from './resolve-feature-flags';
-import { normalizeDueReminderLeadMinutes, REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, REPEAT_REMINDER_INTERVAL_OPTIONS } from './schedule-utils';
 import type { TaskDraft } from './task-draft';
 import { computeRelativeStartTime } from './task-relative-start';
 import { getTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
@@ -269,6 +269,13 @@ export function getTaskEditorRelativeStart(
 export const DUE_REMINDER_LEAD_OPTIONS = [5, 15, 30, 60, 1440, 2880, 10080] as const;
 
 export type TaskEditorReminders = {
+    startAdvance: {
+        enabled: boolean;
+        label: string;
+        valueLabel: string;
+        hint: string | null;
+        options: Array<{ value: number; label: string; selected: boolean }>;
+    } | null;
     showAdvance: boolean;
     advanceLabel: string;
     advanceValueLabel: string;
@@ -291,7 +298,7 @@ export type TaskEditorReminders = {
 };
 
 export function getTaskEditorReminders(
-    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'> & Partial<Pick<TaskDraft, 'reminderPolicy' | 'dueReminderLeadMinutes'>>,
+    draft: Pick<TaskDraft, 'startTime' | 'dueDate' | 'repeatReminderMinutes' | 'suppressMindwtrReminders'> & Partial<Pick<TaskDraft, 'reminderPolicy' | 'dueReminderLeadMinutes' | 'startReminderLeadMinutes'>>,
     t: Translate,
     settings: Pick<NotificationSettings, 'taskReminderDefault' | 'notificationsEnabled'> = {},
 ): TaskEditorReminders {
@@ -320,7 +327,16 @@ export function getTaskEditorReminders(
         return tFallback(t, 'taskEdit.advanceReminderMinutes', '{count} min before').replace('{count}', String(minutes));
     };
     const showAdvance = hasTimeComponent(draft.dueDate) && !!safeParseDate(draft.dueDate) && shouldSendTaskReminders(draft, settings);
+    const startCurrent = normalizeStartReminderLeadMinutes(draft.startReminderLeadMinutes) ?? 0;
     return {
+        startAdvance: hasTimeComponent(draft.startTime) && !!safeParseDate(draft.startTime) ? {
+            enabled: shouldSendTaskReminders(draft, settings),
+            label: tFallback(t, 'taskEdit.startAdvanceReminderLabel', 'Before start'),
+            valueLabel: advanceLabel(startCurrent),
+            hint: shouldSendTaskReminders(draft, settings) ? null
+                : tFallback(t, 'taskEdit.advanceReminderSkipped', 'Enable start/due reminders for this task to use an advance reminder.'),
+            options: [0, 5, 15, 30, 60].map((value) => ({ value, label: advanceLabel(value), selected: value === startCurrent })),
+        } : null,
         showAdvance,
         advanceLabel: tFallback(t, 'taskEdit.advanceReminderLabel', 'Advance reminder'),
         advanceValueLabel: advanceLabel(advanceCurrent),

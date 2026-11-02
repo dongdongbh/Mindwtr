@@ -105,6 +105,10 @@ export const createNativeReminders = (bindings: NativeReminderBindings) => {
             && item.details && typeof item.details === 'object' && 'data' in item.details
             && item.details.data && typeof item.details.data === 'object' && 'kind' in item.details.data
             && item.details.data.kind === 'task-due-advance')) log('Advance reminder scheduled', { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'scheduled' });
+        if (refused === 0 && plan.schedule.some((item) => item && typeof item === 'object' && 'details' in item
+            && item.details && typeof item.details === 'object' && 'data' in item.details
+            && item.details.data && typeof item.details.data === 'object' && 'kind' in item.details.data
+            && item.details.data.kind === 'task-start-advance')) log('Start advance reminder scheduled', { releaseCheck: 'v1.3.8/start-advance-reminder', outcome: 'scheduled' }, true);
         // A refused Snooze is made again only by a rebuild (core remakes a made Snooze then), so after a refusal the next plan is one.
         rebuilt = refused === 0;
         if (topUpTimer) clearTimeout(topUpTimer);

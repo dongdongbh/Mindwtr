@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const hiOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "शुरू होने से पहले",
     "attachments.webUploadRequiresCloud": "ब्राउज़र से अपलोड करने के लिए स्व-होस्टेड क्लाउड सिंक आवश्यक है।",
     "attachments.webUploadEncrypted": "ब्राउज़र से अपलोड करने के लिए सिंक एन्क्रिप्शन बंद होना चाहिए।",
     "attachments.webUploadOffline": "ऑफ़लाइन रहते हुए फ़ाइलें अपलोड नहीं की जा सकतीं।",

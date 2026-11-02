@@ -6,7 +6,7 @@ import { normalizeOptionalContainerId, resolveTaskContainerAssignment } from './
 import { resolveDefaultNewTaskAreaId } from './area-utils';
 import { normalizeCancellationTimestamp, normalizeTaskLifecycleFields } from './task-status';
 import { normalizeRecurrenceForLoad } from './recurrence';
-import { normalizeDueReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { resolveTaskFocusCreation } from './focus-star';
 import { isTaskFutureFocusCandidate, isTaskFutureFocusCandidateBeforeBoundary, type FocusDateLookup } from './task-utils';
 
@@ -62,7 +62,7 @@ export function buildNewTask({
     const resolvedSectionId = containerResolution.sectionId;
     const resolvedAreaId = containerResolution.areaId;
     const referenceClears = resolvedStatus === 'reference'
-        ? getReferenceTaskFieldClears(initialTaskProps.dueReminderLeadMinutes)
+        ? getReferenceTaskFieldClears(initialTaskProps.dueReminderLeadMinutes, initialTaskProps.startReminderLeadMinutes)
         : {};
     const explicitOrder = getTaskOrder(initialTaskProps);
     const resolvedOrder = !hasTaskOrder && resolvedProjectId
@@ -83,6 +83,7 @@ export function buildNewTask({
         recurrence: normalizeRecurrenceForLoad(initialTaskProps.recurrence),
         repeatReminderMinutes: normalizeRepeatReminderMinutes(initialTaskProps.repeatReminderMinutes),
         dueReminderLeadMinutes: normalizeDueReminderLeadMinutes(initialTaskProps.dueReminderLeadMinutes),
+        startReminderLeadMinutes: normalizeStartReminderLeadMinutes(initialTaskProps.startReminderLeadMinutes),
         rev: 1,
         revBy: deviceId,
         createdAt: now,

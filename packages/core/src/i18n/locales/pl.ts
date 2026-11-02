@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const plOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Przed rozpoczęciem",
     "attachments.webUploadRequiresCloud": "Przesyłanie w przeglądarce wymaga synchronizacji z własnym serwerem w chmurze.",
     "attachments.webUploadEncrypted": "Przesyłanie w przeglądarce wymaga wyłączenia szyfrowania synchronizacji.",
     "attachments.webUploadOffline": "Nie można przesyłać plików offline.",

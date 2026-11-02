@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const en: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Before start",
     "taskEdit.advanceReminderLabel": "Advance reminder",
     "taskEdit.advanceReminderMinutes": "{count} min before",
     "taskEdit.advanceReminderHour": "1 hour before",

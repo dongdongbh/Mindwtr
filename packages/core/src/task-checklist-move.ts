@@ -6,7 +6,7 @@ import { generateDeterministicUUID } from './uuid';
 const DETAIL_FIELDS = [
     'description', 'attachments', 'checklist', 'startTime', 'dueDate', 'reviewAt', 'recurrence', 'relativeStartOffset',
     'contexts', 'tags', 'projectId', 'sectionId', 'priority', 'energyLevel', 'timeEstimate', 'assignedTo',
-    'location', 'timeSpentMinutes', 'repeatReminderMinutes', 'dueReminderLeadMinutes',
+    'location', 'timeSpentMinutes', 'repeatReminderMinutes', 'dueReminderLeadMinutes', 'startReminderLeadMinutes',
 ] as const satisfies readonly (keyof Task)[];
 
 const isEmpty = (value: unknown): boolean => value === undefined || value === null || value === 0

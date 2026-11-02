@@ -440,7 +440,7 @@ describe('TaskEditScheduleField', () => {
         act(() => { useTaskStore.setState({ settings: previousSettings }); timedTree.unmount(); });
     });
 
-    it.each(['repeat', 'advance'] as const)('collapses %s reminder options until the compact row is pressed', (kind) => {
+    it.each(['repeat', 'advance', 'start advance'] as const)('collapses %s reminder options until the compact row is pressed', (kind) => {
         const setDraftField = vi.fn();
 
         let tree!: renderer.ReactTestRenderer;
@@ -449,8 +449,8 @@ describe('TaskEditScheduleField', () => {
                 <TaskEditScheduleField {...({
                     customWeekdays: [],
                     dailyInterval: 1,
-                    draft: makeDraft({ dueDate: '2026-04-28T09:20:00' }),
-                    fieldId: 'dueDate',
+                    draft: makeDraft(kind === 'start advance' ? { startTime: '2026-04-28T09:20:00' } : { dueDate: '2026-04-28T09:20:00' }),
+                    fieldId: kind === 'start advance' ? 'startTime' : 'dueDate',
                     formatDate: (value?: string) => value ?? '',
                     formatDueDate: (value?: string) => value ?? '',
                     getSafePickerDateValue: () => new Date('2026-04-28T09:20:00'),
@@ -477,7 +477,7 @@ describe('TaskEditScheduleField', () => {
             );
         });
 
-        const label = kind === 'repeat' ? 'Repeat reminder' : 'Advance reminder';
+        const label = kind === 'repeat' ? 'Repeat reminder' : kind === 'start advance' ? 'Before start' : 'Advance reminder';
         const optionLabel = kind === 'repeat' ? '5 min' : '5 min before';
         const collapsedRow = tree.root.findByProps({ accessibilityLabel: `${label}: Off` });
         expect(collapsedRow.props.accessibilityRole).toBe('button');
@@ -492,7 +492,7 @@ describe('TaskEditScheduleField', () => {
             fiveMinuteOption.props.onPress();
         });
 
-        expect(setDraftField).toHaveBeenCalledWith(kind === 'repeat' ? 'repeatReminderMinutes' : 'dueReminderLeadMinutes', 5);
+        expect(setDraftField).toHaveBeenCalledWith(kind === 'repeat' ? 'repeatReminderMinutes' : kind === 'start advance' ? 'startReminderLeadMinutes' : 'dueReminderLeadMinutes', 5);
         if (kind === 'advance') {
             act(() => { tree.root.findByProps({ accessibilityLabel: `${label}: Off` }).props.onPress(); });
             act(() => { tree.root.findByProps({ accessibilityRole: 'radio', accessibilityLabel: 'Off' }).props.onPress(); });
@@ -503,6 +503,12 @@ describe('TaskEditScheduleField', () => {
             const inactive = tree.root.findByProps({ accessibilityLabel: `${label}: 30 min before` });
             expect(inactive.props.disabled).toBe(true);
             expect(setDraftField).not.toHaveBeenCalled();
+        }
+        if (kind === 'start advance') {
+            const props = tree.root.findByType(TaskEditScheduleField).props as ComponentProps<typeof TaskEditScheduleField>;
+            act(() => { tree.update(<TaskEditScheduleField {...props} draft={makeDraft({ startTime: '2026-04-28', startReminderLeadMinutes: 30 })} />); });
+            expect(tree.root.findAllByProps({ accessibilityLabel: 'Before start: 30 min before' })).toHaveLength(0);
+            expect(setDraftField).toHaveBeenCalledTimes(1);
         }
         act(() => { tree.unmount(); });
     });

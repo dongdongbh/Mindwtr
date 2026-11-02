@@ -1,4 +1,4 @@
-import { normalizeDueReminderLeadMinutes } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes } from './schedule-utils';
 import { normalizeTaskReminderPolicy, shouldSendTaskReminders } from './task-reminder-policy';
 import type { ProjectTaskSummary } from './project-row-meta';
 import { buildNextRecurringTask, canonicalRecurringFollowUp, createNextRecurringTask, normalizeRecurrenceForLoad, type RecurrenceProjection } from './recurrence';
@@ -90,7 +90,7 @@ export const matchesDuplicateSource = (source: Task, copy: Task, asNextAction = 
     return JSON.stringify(links) === JSON.stringify((copy.attachments ?? []).map((item) => ({ ...item, id: '' })));
 };
 
-export const getReferenceTaskFieldClears = (dueReminderLeadMinutes?: number): Partial<Task> => ({
+export const getReferenceTaskFieldClears = (dueReminderLeadMinutes?: number, startReminderLeadMinutes?: number): Partial<Task> => ({
     status: 'reference',
     startTime: undefined,
     dueDate: undefined,
@@ -102,6 +102,7 @@ export const getReferenceTaskFieldClears = (dueReminderLeadMinutes?: number): Pa
     suppressMindwtrReminders: undefined,
     repeatReminderMinutes: undefined,
     dueReminderLeadMinutes: dueReminderLeadMinutes === undefined ? undefined : 0,
+    startReminderLeadMinutes: startReminderLeadMinutes === undefined ? undefined : 0,
     showFutureRecurrence: undefined,
     isFocusedToday: false,
     focusOrder: undefined,
@@ -217,8 +218,9 @@ export function applyTaskUpdates(
     if (incomingStatus === 'reference') {
         finalUpdates = {
             ...finalUpdates,
-            ...getReferenceTaskFieldClears(finalUpdates.dueReminderLeadMinutes ?? oldTask.dueReminderLeadMinutes),
-            ...(statusChanged ? { dueReminderLeadMinutes: 0 } : {}),
+            ...getReferenceTaskFieldClears(finalUpdates.dueReminderLeadMinutes ?? oldTask.dueReminderLeadMinutes,
+                finalUpdates.startReminderLeadMinutes ?? oldTask.startReminderLeadMinutes),
+            ...(statusChanged ? { dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 } : {}),
         };
     }
 
@@ -312,6 +314,11 @@ export const normalizeTaskUpdate = (
         adjustedUpdates = { ...adjustedUpdates, dueReminderLeadMinutes: updates.dueReminderLeadMinutes === undefined
             && task.dueReminderLeadMinutes === undefined ? undefined
             : updates.dueReminderLeadMinutes == null ? 0 : normalizeDueReminderLeadMinutes(updates.dueReminderLeadMinutes) };
+    }
+    if (hasOwnField(updates, 'startReminderLeadMinutes')) {
+        adjustedUpdates = { ...adjustedUpdates, startReminderLeadMinutes: updates.startReminderLeadMinutes === undefined
+            && task.startReminderLeadMinutes === undefined ? undefined
+            : updates.startReminderLeadMinutes == null ? 0 : normalizeStartReminderLeadMinutes(updates.startReminderLeadMinutes) };
     }
     if (hasOwnField(updates, 'reminderPolicy')) {
         const policy = normalizeTaskReminderPolicy(updates.reminderPolicy);

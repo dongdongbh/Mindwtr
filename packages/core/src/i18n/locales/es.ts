@@ -2,6 +2,7 @@
 // translation contributions easier. Every English key is translated here (mode: overrides,
 // floor: all), so new English UI copy cannot silently fall back in Spanish.
 export const esOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Antes del inicio",
     "taskEdit.advanceReminderLabel": "Recordatorio anticipado",
     "taskEdit.advanceReminderMinutes": "{count} min antes",
     "taskEdit.advanceReminderHour": "1 hora antes",

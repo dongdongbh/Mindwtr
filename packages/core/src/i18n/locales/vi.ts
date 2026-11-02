@@ -1,4 +1,5 @@
 export const viOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Trước khi bắt đầu",
     "attachments.webUploadRequiresCloud": "Tải lên từ trình duyệt cần đồng bộ với máy chủ đám mây tự lưu trữ.",
     "attachments.webUploadEncrypted": "Tải lên từ trình duyệt cần tắt mã hóa đồng bộ.",
     "attachments.webUploadOffline": "Không thể tải tệp lên khi ngoại tuyến.",

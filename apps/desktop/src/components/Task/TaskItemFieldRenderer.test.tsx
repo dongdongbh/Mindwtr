@@ -1977,6 +1977,23 @@ describe('TaskItemFieldRenderer reminder policy', () => {
         expect(getByRole('combobox', { name: 'Start/due reminders' })).not.toBeNull();
     });
 
+    it('offers start presets only for an explicit start time and writes Off explicitly', () => {
+        const setField = vi.fn();
+        const { getByRole, queryByRole, rerender } = render(
+            <TaskItemFieldRenderer fieldId="startTime" {...createProps({ draft: { startTime: '2026-04-19T09:30', startReminderLeadMinutes: 15 }, setField })} />
+        );
+        const control = getByRole('combobox', { name: 'Before start' });
+        expect(control).toHaveValue('15');
+        expect(Array.from(control.querySelectorAll('option'), (option) => option.value)).toEqual(['0', '5', '15', '30', '60']);
+        fireEvent.change(control, { target: { value: '30' } });
+        fireEvent.change(control, { target: { value: '0' } });
+        expect(setField).toHaveBeenNthCalledWith(1, 'startReminderLeadMinutes', 30);
+        expect(setField).toHaveBeenNthCalledWith(2, 'startReminderLeadMinutes', 0);
+        rerender(<TaskItemFieldRenderer fieldId="startTime" {...createProps({ draft: { startTime: '2026-04-19', startReminderLeadMinutes: 15 }, setField })} />);
+        expect(queryByRole('combobox', { name: 'Before start' })).toBeNull();
+        expect(setField).toHaveBeenCalledTimes(2);
+    });
+
     it('selects advance presets, preserves the choice while inactive, and turns it Off explicitly', () => {
         const { getByRole, getByText } = render(
             <DraftFieldHarness fieldId="dueDate" initialDraft={{ dueDate: '2026-04-19T11:45', dueReminderLeadMinutes: 90 }} />

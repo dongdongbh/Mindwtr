@@ -1222,12 +1222,16 @@ export function* mergeAppDataWithStatsPass(local: AppData, incoming: AppData, op
             ? winner
             : { ...winner, perSectionFlow: other.perSectionFlow }
     );
-    // Older clients omit this field; zero is the explicit Off value and must win normally.
-    const keepDueReminderLeadFromPeer = (winner: Task, other: Task): Task => (
-        winner.dueReminderLeadMinutes !== undefined || other.dueReminderLeadMinutes === undefined || winner.purgedAt
-            ? winner
-            : { ...winner, dueReminderLeadMinutes: other.dueReminderLeadMinutes }
-    );
+    // Older clients omit these fields; zero is the explicit Off value and must win normally.
+    const keepReminderLeadsFromPeer = (winner: Task, other: Task): Task => {
+        let preserved = winner;
+        for (const field of ['dueReminderLeadMinutes', 'startReminderLeadMinutes'] as const) {
+            if (preserved[field] === undefined && other[field] !== undefined && !preserved.purgedAt) {
+                preserved = { ...preserved, [field]: other[field] };
+            }
+        }
+        return preserved;
+    };
     const withMergedAttachments = <T extends Task | Project>(winner: T, attachments: Attachment[] | undefined): T => {
         // In the common no-attachment case there is no patch to apply. Keep
         // the normalized winner instead of copying its full optional schema.
@@ -1258,7 +1262,7 @@ export function* mergeAppDataWithStatsPass(local: AppData, incoming: AppData, op
                 preserveTaskCancellationFromStrippedPeer(
                     localTask,
                     incomingTask,
-                    withMergedAttachments(keepDueReminderLeadFromPeer(winnerWithForwardCompatibleViewSections, winner === localTask ? incomingTask : localTask), attachments),
+                    withMergedAttachments(keepReminderLeadsFromPeer(winnerWithForwardCompatibleViewSections, winner === localTask ? incomingTask : localTask), attachments),
                 ),
             );
         },

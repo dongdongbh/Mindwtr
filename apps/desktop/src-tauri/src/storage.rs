@@ -41,7 +41,7 @@ const STORAGE_RETRY_BASE_DELAY_MS: u64 = 120;
 // indexes that duplicated camelCase ones. Increment this
 // whenever SQLITE_SCHEMA or an ensure_* migration changes; otherwise the warm schema-state fast
 // path can incorrectly skip the migration on an existing database.
-const STORAGE_SCHEMA_VERSION: i64 = 15;
+const STORAGE_SCHEMA_VERSION: i64 = 16;
 const STORAGE_SCHEMA_STATE_TABLE: &str = "storage_schema_state";
 // Version 4 adds assignedTo to the desktop-native FTS schema and forces one
 // content rebuild after the corrected triggers are installed.
@@ -114,7 +114,8 @@ CREATE TABLE IF NOT EXISTS tasks (
   deletedAt TEXT,
   purgedAt TEXT,
   reminderPolicy TEXT,
-  dueReminderLeadMinutes INTEGER
+  dueReminderLeadMinutes INTEGER,
+  startReminderLeadMinutes INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -546,6 +547,7 @@ fn initialize_sqlite_schema(conn: &mut Connection) -> Result<i64, String> {
         ensure_column(&transaction, "tasks", "reminderPolicy", "TEXT")?;
         ensure_column(&transaction, "tasks", "repeatReminderMinutes", "INTEGER")?;
         ensure_column(&transaction, "tasks", "dueReminderLeadMinutes", "INTEGER")?;
+        ensure_column(&transaction, "tasks", "startReminderLeadMinutes", "INTEGER")?;
         ensure_column(&transaction, "tasks", "timeSpentMinutes", "INTEGER")?;
         ensure_column(&transaction, "tasks", "cancelledAt", "TEXT")?;
         ensure_column(&transaction, "tasks", "archivedAt", "TEXT")?;
@@ -1835,7 +1837,7 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
     let execute_insert =
         |sql: &str, values: &[&dyn ToSql]| conn.prepare_cached(sql)?.execute(values);
     execute_insert(
-        "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy, dueReminderLeadMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48)",
+        "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy, dueReminderLeadMinutes, startReminderLeadMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49)",
         params![
             task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
             task.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -1899,6 +1901,7 @@ fn replace_task_row(conn: &Connection, task: &Value) -> Result<(), String> {
             task.get("archivedAt").and_then(|v| v.as_str()),
             task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
             task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
+            task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -2095,6 +2098,14 @@ fn row_to_task_value(row: &rusqlite::Row<'_>) -> Result<Value, rusqlite::Error> 
     if let Ok(Some(minutes)) = row.get::<_, Option<i64>>("dueReminderLeadMinutes") {
         if (0..=10080).contains(&minutes) {
             map.insert("dueReminderLeadMinutes".to_string(), Value::Number(minutes.into()));
+        }
+    }
+    if let Ok(Some(minutes)) = row.get::<_, Option<i64>>("startReminderLeadMinutes") {
+        if matches!(minutes, 0 | 5 | 15 | 30 | 60) {
+            map.insert(
+                "startReminderLeadMinutes".to_string(),
+                Value::Number(minutes.into()),
+            );
         }
     }
     if let Ok(val) = row.get::<_, Option<i64>>("repeatReminderMinutes") {
@@ -3585,7 +3596,7 @@ fn replace_prepared_data_in_transaction(
         let attachments_json = json_str(task.get("attachments"));
         let view_section_ids_json = json_str(task.get("viewSectionIds"));
         execute_insert(
-            "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy, dueReminderLeadMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48)",
+            "INSERT OR REPLACE INTO tasks (id, title, status, priority, energyLevel, assignedTo, taskMode, startTime, relativeStartOffset, dueDate, recurrence, showFutureRecurrence, pushCount, tags, contexts, checklist, description, textDirection, attachments, location, projectId, sectionId, viewSectionIds, areaId, orderNum, boardOrder, focusOrder, isFocusedToday, timeEstimate, suppressMindwtrReminders, repeatReminderMinutes, reviewAt, completedAt, cancelledAt, statusBeforeProjectArchive, completedAtBeforeProjectArchive, isFocusedTodayBeforeProjectArchive, projectArchivedAt, rev, revBy, createdAt, updatedAt, deletedAt, purgedAt, timeSpentMinutes, archivedAt, reminderPolicy, dueReminderLeadMinutes, startReminderLeadMinutes) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49)",
             params![
                 task.get("id").and_then(|v| v.as_str()).unwrap_or_default(),
                 task.get("title").and_then(|v| v.as_str()).unwrap_or_default(),
@@ -3649,6 +3660,7 @@ fn replace_prepared_data_in_transaction(
             task.get("archivedAt").and_then(|v| v.as_str()),
             task.get("reminderPolicy").and_then(Value::as_str).filter(|policy| matches!(*policy, "inherit" | "send" | "skip")),
             task.get("dueReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| (0..=10080).contains(minutes)),
+            task.get("startReminderLeadMinutes").and_then(Value::as_i64).filter(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60)),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -6580,7 +6592,7 @@ mod tests {
     fn due_advance_migrates_and_round_trips_explicit_off() {
         use serde_json::json;
         let mut conn = Connection::open_in_memory().unwrap();
-        let legacy_schema = SQLITE_SCHEMA.replace("  reminderPolicy TEXT,\n  dueReminderLeadMinutes INTEGER\n);", "  reminderPolicy TEXT\n);");
+        let legacy_schema = SQLITE_SCHEMA.replace("  reminderPolicy TEXT,\n  dueReminderLeadMinutes INTEGER,\n  startReminderLeadMinutes INTEGER\n);", "  reminderPolicy TEXT\n);");
         assert_ne!(legacy_schema, SQLITE_SCHEMA);
         conn.execute_batch(&legacy_schema).unwrap();
         let generation = sqlite_schema_generation(&conn).unwrap();
@@ -6599,10 +6611,51 @@ mod tests {
     }
 
     #[test]
+    fn start_advance_migrates_and_round_trips_explicit_off() {
+        use serde_json::json;
+        let mut conn = Connection::open_in_memory().unwrap();
+        let legacy_schema = SQLITE_SCHEMA.replace(
+            "  dueReminderLeadMinutes INTEGER,\n  startReminderLeadMinutes INTEGER\n);",
+            "  dueReminderLeadMinutes INTEGER\n);",
+        );
+        assert_ne!(legacy_schema, SQLITE_SCHEMA);
+        conn.execute_batch(&legacy_schema).unwrap();
+        let generation = sqlite_schema_generation(&conn).unwrap();
+        conn.execute("INSERT INTO storage_schema_state (id, storage_version, schema_generation) VALUES (1, 15, ?1)", [generation]).unwrap();
+        initialize_sqlite_schema(&mut conn).unwrap();
+        for minutes in [5, 15, 30, 60, 0] {
+            let task = json!({"id":"advance", "title":"Advance", "status":"next", "tags":[], "contexts":[],
+                "createdAt":"2026-01-01", "updatedAt":"2026-01-01", "startReminderLeadMinutes":minutes});
+            replace_task_row(&conn, &task).unwrap();
+            let read = conn
+                .query_row(
+                    "SELECT * FROM tasks WHERE id='advance'",
+                    [],
+                    row_to_task_value,
+                )
+                .unwrap();
+            assert_eq!(read["startReminderLeadMinutes"], minutes);
+        }
+        conn.execute(
+            "UPDATE tasks SET startReminderLeadMinutes=61 WHERE id='advance'",
+            [],
+        )
+        .unwrap();
+        let invalid = conn
+            .query_row(
+                "SELECT * FROM tasks WHERE id='advance'",
+                [],
+                row_to_task_value,
+            )
+            .unwrap();
+        assert!(invalid.get("startReminderLeadMinutes").is_none());
+    }
+
+    #[test]
     fn reminder_policy_migration_keeps_legacy_absence_and_round_trips_new_values() {
         let mut conn = Connection::open_in_memory().unwrap();
         let legacy_schema = SQLITE_SCHEMA.replace(
-            "  purgedAt TEXT,\n  reminderPolicy TEXT,\n  dueReminderLeadMinutes INTEGER\n);",
+            "  purgedAt TEXT,\n  reminderPolicy TEXT,\n  dueReminderLeadMinutes INTEGER,\n  startReminderLeadMinutes INTEGER\n);",
             "  purgedAt TEXT\n);",
         );
         assert_ne!(legacy_schema, SQLITE_SCHEMA);

@@ -450,6 +450,7 @@ describe('recurrence', () => {
             dueDate: '2025-01-10T09:00:00.000Z',
             repeatReminderMinutes: 30,
             dueReminderLeadMinutes: 1440,
+            startReminderLeadMinutes: 15,
             recurrence: { rule: 'weekly', strategy: 'strict' },
             createdAt: '2025-01-01T00:00:00.000Z',
             updatedAt: '2025-01-01T00:00:00.000Z',
@@ -461,6 +462,7 @@ describe('recurrence', () => {
         expect(next?.relativeStartOffset).toEqual({ amount: -1, unit: 'day' });
         expect(next?.repeatReminderMinutes).toBe(30);
         expect(next?.dueReminderLeadMinutes).toBe(1440);
+        expect(next?.startReminderLeadMinutes).toBe(15);
         expect(next?.startTime).toBe('2025-01-16T09:00:00.000Z');
         expect(next?.dueDate).toBe('2025-01-17T09:00:00.000Z');
         expect(next?.checklist).toHaveLength(1);

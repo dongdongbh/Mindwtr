@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const itOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Prima dell’inizio",
     "attachments.webUploadRequiresCloud": "I caricamenti dal browser richiedono la sincronizzazione con un cloud autogestito.",
     "attachments.webUploadEncrypted": "I caricamenti dal browser richiedono la disattivazione della crittografia di sincronizzazione.",
     "attachments.webUploadOffline": "Non è possibile caricare file offline.",

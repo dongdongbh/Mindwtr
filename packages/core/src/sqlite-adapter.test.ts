@@ -819,6 +819,21 @@ describeSqlite('SqliteAdapter', () => {
         expect((await adapter.getData()).tasks[0].dueReminderLeadMinutes).toBe(0);
     });
 
+    it('migrates start advance reminder absence and round-trips explicit Off without resurrecting the old value', async () => {
+        db.exec(SQLITE_BASE_SCHEMA.replace('  startReminderLeadMinutes INTEGER,\n', ''));
+        runSql(db, "INSERT INTO tasks (id,title,status,createdAt,updatedAt) VALUES ('legacy','Legacy','next','2026-01-01','2026-01-01')");
+        const loaded = await adapter.getData();
+        expect(loaded.tasks[0].startReminderLeadMinutes).toBeUndefined();
+        expect(allSql(db, 'SELECT startReminderLeadMinutes FROM tasks')).toEqual([{ startReminderLeadMinutes: null }]);
+        await adapter.saveTask({ ...loaded.tasks[0], startReminderLeadMinutes: 30, rev: 1 });
+        expect((await adapter.getData()).tasks[0].startReminderLeadMinutes).toBe(30);
+        await adapter.saveTask({ ...loaded.tasks[0], startReminderLeadMinutes: 0, rev: 2 });
+        const cleared = await adapter.getData();
+        expect(cleared.tasks[0].startReminderLeadMinutes).toBe(0);
+        await adapter.saveData(cleared);
+        expect((await adapter.getData()).tasks[0].startReminderLeadMinutes).toBe(0);
+    });
+
     it('declares repeat reminder minutes in the base task schema', () => {
         db.exec(SQLITE_BASE_SCHEMA);
 

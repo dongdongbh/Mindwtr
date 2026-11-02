@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const deOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Vor dem Start",
     "settings.gmailCapture": "Gmail",
     "settings.gmailCaptureDesc": "Verbinde Google und erfasse E-Mails mit einem Label deiner Wahl.",
     "settings.gmailCaptureDisclosure": "Google gewährt schreibgeschützten Zugriff auf dein gesamtes Postfach, obwohl Mindwtr nur E-Mails mit dem ausgewählten Label importiert. Mindwtr ändert niemals E-Mails oder Labels. Importierte Absenderinformationen und E-Mail-Texte werden zu gewöhnlichen Aufgabendaten und können in deine konfigurierte Synchronisierung, Backups, Exporte oder optionale KI-Funktionen einfließen. Verwende nur ein eigens dafür vorgesehenes Testkonto.",

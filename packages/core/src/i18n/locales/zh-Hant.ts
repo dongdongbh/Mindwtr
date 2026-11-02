@@ -1,5 +1,6 @@
 // Split from i18n-translations.ts to make community translation contributions easier.
 export const zhHant: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "開始前提醒",
     "taskEdit.advanceReminderLabel": "提前提醒",
     "taskEdit.advanceReminderMinutes": "提前 {count} 分鐘",
     "taskEdit.advanceReminderHour": "提前 1 小時",

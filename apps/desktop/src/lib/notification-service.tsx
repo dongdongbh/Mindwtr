@@ -26,7 +26,7 @@ import { logInfo, logWarn } from './app-log';
 import { isAppLocked } from './app-lock';
 
 const notifiedAtByTask = new Map<string, string>();
-const advanceObservedByTask = new Map<string, string>();
+const advanceObservedByTask = new Set<string>();
 const repeatNotifiedByTask = new Map<string, string>();
 const notifiedAtByProject = new Map<string, string>();
 const digestSentOnByKind = new Map<'morning' | 'evening', string>();
@@ -443,12 +443,12 @@ function checkDueAndNotify() {
         const taskId = request.data.taskId;
         const projectId = request.data.projectId;
         if (taskId) {
-            if (request.data.kind === 'task-due-advance') {
+            if (request.data.kind === 'task-due-advance' || request.data.kind === 'task-start-advance') {
                 // Admit only reminders observed while future: editing a deadline never catches up a past prealert.
-                if (request.fireAt.getTime() > now.getTime() || advanceObservedByTask.get(taskId) !== request.key) continue;
+                if (request.fireAt.getTime() > now.getTime() || !advanceObservedByTask.has(request.key)) continue;
                 void sendNotification(request.title, request.message, getReminderNotificationTag(request.key)).then((sent) => {
                     if (sent) void logInfo('Advance reminder delivered', { scope: 'notifications', force: true,
-                        extra: { releaseCheck: 'v1.3.8/due-advance-reminder', outcome: 'delivered' } });
+                        extra: { releaseCheck: request.data.kind === 'task-start-advance' ? 'v1.3.8/start-advance-reminder' : 'v1.3.8/due-advance-reminder', outcome: 'delivered' } });
                 });
                 continue;
             }
@@ -468,8 +468,10 @@ function checkDueAndNotify() {
 
     advanceObservedByTask.clear();
     for (const task of gates.taskRemindersEnabled ? tasks : []) {
-        const advance = getTaskReminderPlan(task, now, { includeDueDate, taskReminderDefault: settings.taskReminderDefault }).advance;
-        if (advance) advanceObservedByTask.set(task.id, advance.key);
+        const plan = getTaskReminderPlan(task, now, { includeStartTime: settings.startDateNotificationsEnabled !== false, includeDueDate, taskReminderDefault: settings.taskReminderDefault });
+        for (const advance of [plan.advance, plan.startAdvance]) {
+            if (advance) advanceObservedByTask.add(advance.key);
+        }
     }
 
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
