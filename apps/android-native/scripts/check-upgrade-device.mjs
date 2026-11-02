@@ -1709,19 +1709,34 @@ const scenarioCalendarPush = async () => {
         const pink = (current) => current.find((node) => node['content-desc'] === `${en['settings.calendarMobile.mindwtrCalendarColor']} ${PINK}`);
         if (!pink(nodes)) await tap(tagged(nodes, 'calendar-push') ?? fail('no push card'));
         await tap(await scrollTo(pink, 'the pink color'));
-        const recolored = () => mindwtrCalendars().filter((row) => !earlier.has(row._id) && row._id !== calendarId);
-        await until('the Mindwtr calendar made again in the new color', () => recolored().length === 1 && liveEvents(recolored()[0]._id).length === 2
-            && !mindwtrCalendars().some((row) => row._id === calendarId), 60_000);
-        const newId = recolored()[0]._id;
-        made.push(newId);
-        const color = calendarRows(CALENDARS, ['_id', 'calendar_color', 'account_type'], `_id=${newId}`)[0];
-        console.log(`info - the recolored Mindwtr calendar's account type: ${color?.account_type}`);
-        check(Number(color?.calendar_color) === ((0xFF000000 | parseInt(PINK.slice(1), 16)) | 0) && liveEvents(calendarId).length === 0
-            && mindwtrCalendars().filter((row) => !earlier.has(row._id)).length === 1,
-            '(12) N9: a color change in the native card leaves one Mindwtr calendar, in the new color, with the two live events');
+        // The new calendar and its events can take the deleted ones' _ids (the S23's provider hands out max(_id)+1), so the
+        // new calendar is told by its color and its marked name (RN v1.3.2 named its calendar plain "mindwtr").
+        const PINK_INT = ((0xFF000000 | parseInt(PINK.slice(1), 16)) | 0).toString();
+        const oldEvents = new Set(liveEvents(calendarId));
+        const ownRows = () => calendarRows(CALENDARS, ['_id', 'name', 'calendar_displayName', 'calendar_color', 'account_type'])
+            .filter((row) => !earlier.has(row._id) && (row.calendar_displayName === 'Mindwtr' || /^mindwtr(:|$)/.test(row.name ?? '')));
+        const recolored = () => {
+            const list = ownRows();
+            return list.length === 1 && list[0].calendar_color === PINK_INT && /^mindwtr:[0-9a-f-]{36}$/.test(list[0].name ?? '') ? list[0] : null;
+        };
+        await until('the Mindwtr calendar made again in the new color', () => {
+            const calendar = recolored();
+            return Boolean(calendar) && liveEvents(calendar._id).length === 2;
+        }, 60_000).catch((error) => {
+            // What the provider shows then (IDs, internal names and colors of this run's calendars; no titles of tasks).
+            console.log(`note - calendars after the color change: ${JSON.stringify(ownRows().map((row) => ({ ...row,
+                events: liveEvents(row._id).length, old: liveEvents(row._id).filter((id) => oldEvents.has(id)).length })))} want color ${PINK_INT}`);
+            throw error;
+        });
+        const newCalendar = recolored();
+        const newId = newCalendar._id;
+        if (!made.includes(newId)) made.push(newId);
+        console.log(`info - the recolored Mindwtr calendar's account type: ${newCalendar.account_type}; calendar ID ${newId === calendarId ? 'reused' : 'new'}; event IDs reused: ${liveEvents(newId).filter((id) => oldEvents.has(id)).length}`);
+        check(ownRows().length === 1, '(12) N9: a color change in the native card leaves one Mindwtr calendar, made with the marker name, in the new color, with the two live tasks\' events');
         const deleteRow = (current) => current.find((node) => node['content-desc'] === en['settings.calendarMobile.deleteMindwtrCalendar']);
         await tap(await scrollTo(deleteRow, 'Delete Mindwtr calendar'));
-        const confirm = (current) => tagged(current, 'calendar-delete-confirm');
+        // The dialog is its own window, where Compose's test tags are not resource IDs: its button is found by its text.
+        const confirm = (current) => tagged(current, 'calendar-delete-confirm') ?? current.find((node) => node.text === en['common.delete']);
         await tap(await waitFor('the Delete question', (current) => Boolean(confirm(current)), 15_000).then(confirm));
         await until('the Mindwtr calendar deleted', () => !mindwtrCalendars().some((row) => !earlier.has(row._id)), 60_000);
         await stopApp();
