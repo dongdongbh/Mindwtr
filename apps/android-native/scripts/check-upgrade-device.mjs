@@ -1614,6 +1614,7 @@ const scenarioCalendarPush = async () => {
     const earlier = new Set(mindwtrCalendars().map((row) => row._id));
     if (earlier.size) console.log(`note - Mindwtr calendars from before this run (left alone): ${earlier.size}`);
     let made = [];
+    let userCalendar = null;
     try {
         const zone = phoneZone || 'UTC';
         const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -1687,6 +1688,39 @@ const scenarioCalendarPush = async () => {
         check(context.releaseCheck === 'v1.3.8/native-calendar-push' && context.outcome === 'pushed' && context.adopted === 'existing'
             && context.rowsBefore === '3' && context.rowsAfter === '2', `(12) the diagnostics line: ${JSON.stringify(context)}`);
 
+        // The provider hands a deleted event's _id to the next event (S23). A user's event that takes a pushed event's ID is
+        // never written or deleted: core makes the task's own event again. The user's side is a calendar this run makes
+        // (MtuUser<run>, LOCAL), so no real calendar is touched.
+        const account = calendarRows(CALENDARS, ['_id', 'account_name'], `_id=${calendarId}`)[0]?.account_name ?? '';
+        const asAdapter = (uri, name, type) => `'${uri}?caller_is_syncadapter=true&account_name=${encodeURIComponent(name)}&account_type=${type}'`;
+        calendarCommand(`insert --uri ${asAdapter(CALENDARS, `mtu${run}`, 'LOCAL')} --bind name:s:mtu-user --bind calendar_displayName:s:MtuUser${run}`
+            + ` --bind account_name:s:mtu${run} --bind account_type:s:LOCAL --bind calendar_access_level:i:700 --bind ownerAccount:s:mtu${run}`
+            + ' --bind visible:i:1 --bind sync_events:i:1');
+        userCalendar = calendarRows(CALENDARS, ['_id', 'calendar_displayName'], `calendar_displayName='MtuUser${run}'`)[0]?._id ?? fail('(12) no test user calendar');
+        // The task's event goes for good (as its sync adapter, so its _id is free), and the user's event comes next.
+        calendarCommand(`delete --uri ${asAdapter(`${EVENTS}/${remade}`, account, 'LOCAL')}`);
+        const userTitle = `12user${run}`;
+        calendarCommand(`insert --uri ${EVENTS} --bind calendar_id:i:${userCalendar} --bind title:s:${userTitle} --bind dtstart:l:1793750400000`
+            + ' --bind dtend:l:1793754000000 --bind eventTimezone:s:UTC');
+        const userEvent = () => calendarRows(EVENTS, ['_id', 'calendar_id', 'title', 'dtstart', 'deleted'], `title='${userTitle}'`)[0];
+        const taken = userEvent();
+        if (taken?._id !== remade) {
+            console.log(`note - (12) reuse: the provider gave the user's event a new _id (${taken?._id} vs ${remade}); the reuse case is not reproduced`);
+        } else {
+            console.log('INJECTED (12): the user\'s event in another calendar took the deleted pushed event\'s _id');
+            sh('logcat -c');
+            device.launch(NATIVE_ACTIVITY);
+            await until('the native push after the reuse', () => Boolean(startedLine()), 90_000);
+            await sleep(3000);
+            await stopApp();
+            const user = userEvent();
+            check(user?._id === remade && user.calendar_id === userCalendar && user.title === userTitle && user.dtstart === '1793750400000' && user.deleted === '0',
+                '(12) reuse: the user\'s event that took a pushed event\'s ID is untouched');
+            const rowNow = pushRows('12-reuse').get(items.find((item) => item.role === 'deleted').id);
+            check(rowNow?.calendar_id === calendarId && rowNow.calendar_event_id !== remade && liveEvents(calendarId).includes(rowNow.calendar_event_id),
+                '(12) reuse: the task got its own event again in the Mindwtr calendar');
+        }
+
         // The native Settings push card (review N9): a color change makes a new Mindwtr calendar in that color with the live
         // tasks' events (Android keeps a calendar's color only from its creation), then Delete Mindwtr calendar removes it.
         device.launch(NATIVE_ACTIVITY);
@@ -1750,6 +1784,11 @@ const scenarioCalendarPush = async () => {
             try { calendarCommand(`delete --uri ${CALENDARS}/${id}`); } catch (error) { console.log(`note - calendar ${id} delete: ${error.message}`); }
         };
         made.forEach(remove);
+        if (userCalendar) {
+            remove(userCalendar);
+            console.log(`cleanup - the test user calendar: ${calendarRows(CALENDARS, ['_id'], `_id=${userCalendar}`).length ? 'LEFT' : 'deleted'}`);
+            if (calendarRows(CALENDARS, ['_id'], `_id=${userCalendar}`).length) fail('(12) cleanup left the test user calendar');
+        }
         const others = mindwtrCalendars().filter((row) => !earlier.has(row._id) && !made.includes(row._id)).map((row) => row._id);
         others.forEach(remove);
         made = [...new Set([...made, ...others])];
