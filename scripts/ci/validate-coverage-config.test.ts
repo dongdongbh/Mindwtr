@@ -129,7 +129,9 @@ describe("Vitest harness timeout", () => {
     expect(config.test?.testTimeout).toBe(30_000);
   });
 
-  test("core keeps Vitest's default", () => {
-    expect((coreConfig as ConfigObject).test?.testTimeout).toBeUndefined();
+  // Core's SQLite-host contract tests boot a real database per test and
+  // passed 5 s under shared-host and CI load (seen at 6.3 s on a runner).
+  test("core waits 20 s before calling a test hung", () => {
+    expect((coreConfig as ConfigObject).test?.testTimeout).toBe(20_000);
   });
 });
