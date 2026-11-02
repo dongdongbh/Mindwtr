@@ -1535,7 +1535,7 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         expect(mockUpdateEventAsync).not.toHaveBeenCalled();
         expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
         expect(mockUpsertCalendarSyncEntry).toHaveBeenCalledWith(expect.objectContaining({ taskId: task.id, calendarEventId: 'evt-1' }));
-        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({
+        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({ force: true,
             extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome: 'recreated' },
         }));
     });
@@ -1556,7 +1556,7 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         expect(mockDeleteEventAsync).toHaveBeenCalledWith('evt-gone');
         expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
         expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarId: 'cal-1', calendarEventId: 'evt-1' }));
-        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({
+        expect(mockLogInfo).toHaveBeenCalledWith('Calendar push found a missing event', expect.objectContaining({ force: true,
             extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome: 'cleared' },
         }));
     });

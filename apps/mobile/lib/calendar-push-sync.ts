@@ -37,6 +37,7 @@ const isEventGone = (eventId: string): Promise<boolean> => Calendar.getEventAsyn
 const missingEvent = (outcome: 'recreated' | 'cleared'): Error => {
     void logInfo('Calendar push found a missing event', {
         scope: 'calendar-push',
+        force: true,
         extra: { releaseCheck: 'v1.3.8/calendar-push-missing-event', outcome },
     });
     return new Error('Calendar event not found');
