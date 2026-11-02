@@ -4,6 +4,8 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
     test: {
         setupFiles: ['./vitest.setup.ts'],
+        // SQLite-host contract tests boot a real database per test; 5 s timed out under shared-host and CI load.
+        testTimeout: 20000,
         // Vitest 4 narrowed discovery defaults; retain the Vitest 3 boundary.
         exclude: [
             ...configDefaults.exclude,
