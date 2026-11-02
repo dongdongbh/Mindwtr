@@ -1582,11 +1582,17 @@ const scenarioPomodoroRnFix = async () => {
 const RN_PUSH_TITLE = 'Push tasks to calendar'; // v1.3.2's settings.calendarMobile.pushTasksToCalendar
 const PUSH_KEYS = { enabled: 'mindwtr:calendar-push-sync:enabled', calendarId: 'mindwtr:calendar-push-sync:calendar-id' };
 /**
- * A calendar provider query as the app's uid (run-as: the app holds the calendar permissions, the shell may not). Rows as
- * objects of the projected columns; a value is read up to the next `, <column>=`.
+ * A calendar provider query as the shell (run-as cannot reach a provider: ACCESS_CONTENT_PROVIDERS_EXTERNALLY). Rows as
+ * objects of the projected columns; a value is read up to the next `, <column>=`. A refused query throws: read as "no rows",
+ * it would let the cleanup miss the calendar this run made.
  */
+const calendarCommand = (command) => {
+    const text = sh(`content ${command} 2>&1`);
+    if (/Error while accessing provider|Exception/.test(text)) fail(`calendar provider refused \`content ${command.split(' ')[0]}\`: ${text.split('\n')[1] ?? text}`);
+    return text;
+};
 const calendarRows = (uri, columns, where) => {
-    const text = runAs(`content query --uri ${uri} --projection ${columns.join(':')}${where ? ` --where "${where}"` : ''}`);
+    const text = calendarCommand(`query --uri ${uri} --projection ${columns.join(':')}${where ? ` --where "${where}"` : ''}`);
     if (/No result found/.test(text)) return [];
     const names = columns.join('|');
     return text.split('\n').filter((line) => line.startsWith('Row:')).map((line) => Object.fromEntries(
@@ -1653,7 +1659,7 @@ const scenarioCalendarPush = async () => {
         const pendingLocal = resolve(work, '12-pending.json');
         writeFileSync(pendingLocal, JSON.stringify({ version: 1, pending: [{ id: done.id, at: Date.now() - 60_000 }] }));
         pushPrivate(pendingLocal, 'files/mindwtr-widget-checkoff-pending.json');
-        runAs(`content delete --uri ${EVENTS}/${event('deleted')}`);
+        calendarCommand(`delete --uri ${EVENTS}/${event('deleted')}`);
         check(!liveEvents(calendarId).includes(event('deleted')), '(12) INJECTED: one pushed event deleted from the calendar provider');
         sh('logcat -c');
         install(APKS.native153, true);
@@ -1682,7 +1688,7 @@ const scenarioCalendarPush = async () => {
         // Every Mindwtr calendar this run made goes, and its events with it (the provider deletes a calendar's events).
         made = [...new Set([...made, ...mindwtrCalendars().filter((row) => !earlier.has(row._id)).map((row) => row._id)])];
         for (const id of made) {
-            try { runAs(`content delete --uri ${CALENDARS}/${id}`); } catch (error) { console.log(`note - calendar ${id} delete: ${error.message}`); }
+            try { calendarCommand(`delete --uri ${CALENDARS}/${id}`); } catch (error) { console.log(`note - calendar ${id} delete: ${error.message}`); }
         }
         const left = made.filter((id) => mindwtrCalendars().some((row) => row._id === id) || liveEvents(id).length > 0);
         console.log(`cleanup - deleted ${made.length} Mindwtr calendar(s) this run made; left: ${left.length}`);
