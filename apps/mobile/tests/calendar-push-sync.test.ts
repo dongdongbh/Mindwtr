@@ -280,9 +280,9 @@ beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     mockPlatform.OS = 'ios';
-
-    mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr' }]);
-
+    // Default: the stored calendar still exists
+    mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', name: 'mindwtr' }]);
+    // Mirror the storage adapter's persistent task/platform mapping contract.
     setCalendarSyncEntries([]);
     mockGetCalendarSyncEntry.mockImplementation(async (taskId, platform) => (
         calendarSyncEntries.get(calendarSyncEntryKey(taskId, platform)) ?? null
@@ -1514,7 +1514,7 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
     // expo-calendar 15's Android codes (CalendarModule.kt): getEventByIdAsync on a deleted row, deleteEventAsync on zero rows.
     const notFound = (id: string) => Object.assign(new Error(`Event with id ${id} could not be found`), { code: 'E_EVENT_NOT_FOUND' });
     const notDeleted = (id: string) => Object.assign(new Error(`Event with id ${id} could not be deleted`), { code: 'E_EVENT_NOT_DELETED' });
-    const androidCalendars = () => mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', accessLevel: 'owner', allowsModifications: true }]);
+    const androidCalendars = () => mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Mindwtr', name: 'mindwtr', accessLevel: 'owner', allowsModifications: true }]);
     // A full push tries a done task's delete twice (its own pass, then the stale pass), so each refusal stays for the whole run.
     afterEach(() => {
         mockDeleteEventAsync.mockImplementation(async () => {});

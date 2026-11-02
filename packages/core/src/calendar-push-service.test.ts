@@ -175,7 +175,7 @@ describe('calendar push behind the host ports', () => {
         const phone = device({
             calendars: [
                 PRIMARY,
-                { id: 'saved', title: 'Anything', ownerAccount: 'alex@gmail.com', accessLevel: 'owner', source: google },
+                { id: 'saved', title: 'Anything', name: 'mindwtr', ownerAccount: 'alex@gmail.com', accessLevel: 'owner', source: google },
                 { id: 'app-made', title: 'Mindwtr', name: 'mindwtr', accessLevel: 'owner', source: google },
                 { id: 'users-own', title: 'Mindwtr', name: 'alex@gmail.com', accessLevel: 'owner', source: google },
             ],
@@ -200,7 +200,7 @@ describe('calendar push behind the host ports', () => {
     ])('keeps an unrelated selected target during owned-calendar deletion: $os/$availability', async ({ os, availability }) => {
         const phone = device({
             os,
-            calendars: [PRIMARY, { ...PRIMARY, id: 'saved', title: 'Mindwtr' },
+            calendars: [PRIMARY, { ...PRIMARY, id: 'saved', title: 'Mindwtr', name: 'mindwtr' },
                 ...(availability === 'read-only' ? [{ id: 'selected', title: 'Personal', allowsModifications: false }] : [])],
             storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'selected' },
             entries: [
@@ -676,6 +676,38 @@ describe('calendar push behind the host ports', () => {
             },
         );
         expect(writes).toBeGreaterThan(3);
+    });
+
+    // Calendar push review N3 (an RN bug too): Android's calendar provider can give a deleted calendar's _id to a new calendar.
+    // The saved ID is then the user's calendar: push never writes into it, and a Delete or a recolor never deletes it.
+    it('on Android a saved ID now held by a calendar without Mindwtr\'s internal name is not its own', async () => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', color: '#0B8043', accessLevel: 'owner', allowsModifications: true, source: google };
+        const setup = () => device({
+            calendars: [PRIMARY, reused],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_COLOR_KEY]: '#3B82F6' },
+            entries: [{ taskId: 't1', calendarEventId: 'e1', calendarId: 'saved', platform: 'android', lastSyncedAt: '' }],
+        });
+        const pushing = setup();
+        const warned: unknown[] = [];
+        pushing.host.log.warn = (message, context) => { warned.push([message, context.extra]); };
+        expect(await createCalendarPushService(pushing.host).ensureMindwtrCalendar()).toBe('created-1');
+        expect(warned).toEqual([['Saved Mindwtr calendar ID now names another calendar',
+            { releaseCheck: 'v1.3.8/calendar-push-reused-id', outcome: 'skipped' }]]);
+        expect(pushing.storage.get(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe('created-1');
+        const deleting = setup();
+        await createCalendarPushService(deleting.host).deleteMindwtrCalendar();
+        expect(deleting.writes.filter((write) => write[0] === 'deleteCalendar')).toEqual([]);
+        expect(deleting.calendars.map((calendar) => calendar.id)).toEqual(['primary', 'saved']);
+        expect(deleting.storage.has(CALENDAR_PUSH_CALENDAR_ID_KEY)).toBe(false);
+        const recoloring = setup();
+        expect(await createCalendarPushService(recoloring.host).updateMindwtrCalendarColor('#059669')).toBe(false);
+        expect(recoloring.writes).toEqual([]);
+        expect(recoloring.calendars.find((calendar) => calendar.id === 'saved')).toEqual(reused);
+        // RN's own names keep it: v1.3.2's plain "mindwtr", and the marked name a creation writes now.
+        for (const name of ['mindwtr', 'mindwtr:11111111-1111-4111-8111-111111111111']) {
+            const phone = device({ calendars: [PRIMARY, { ...reused, name }], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' } });
+            expect(await createCalendarPushService(phone.host).ensureMindwtrCalendar()).toBe('saved');
+        }
     });
 
     it('recolors only the calendar it saved', async () => {
