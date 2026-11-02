@@ -969,8 +969,23 @@
             });
         };
     }
+    // The device calendar (HostCalendars.kt). A read is refused and cancelled as a file call is. A calendar push write is
+    // refused before it starts while an operation drains, but once started it is never cancelled: Kotlin ends each provider
+    // write on its own, and a write that landed must reach core, or core saves no row and the event is never updated or
+    // removed (an untracked event keeps alerting). RN's calls are never cancelled.
     if (global.__mindwtrNative && typeof global.__mindwtrNative.calendarCall === 'function') {
-        global.__mindwtrCalendarCall = fileChannel('calendarCall', 'calendarAbort');
+        var calendarRead = fileChannel('calendarCall', 'calendarAbort');
+        var calendarWrites = { createCalendar: true, deleteCalendar: true, createEvent: true, updateEvent: true, deleteEvent: true };
+        global.__mindwtrCalendarCall = function (request) {
+            if (!calendarWrites[request.op]) return calendarRead(request);
+            return new Promise(function (resolve, reject) {
+                refuseIfCancelled();
+                startIo(hostCall(native().calendarCall(JSON.stringify(request))), function (answer) {
+                    if (answer.error !== undefined) reject(new Error(answer.error));
+                    else resolve(answer.value);
+                });
+            });
+        };
     }
     if (global.__mindwtrNative && typeof global.__mindwtrNative.appSearchCall === 'function') {
 

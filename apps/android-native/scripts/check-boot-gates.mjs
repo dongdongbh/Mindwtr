@@ -9597,8 +9597,36 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
         assert.equal(absent.__mindwtrCalendarCall, undefined, 'calendar capability absent stays unavailable');
     }
 }
-
-
+// Calendar push review N2: a provider write another operation's deadline cancelled would still land in Kotlin while core saved
+// no row, an untracked event nothing updates or removes. So a started write is never cancelled: it settles with Kotlin's answer
+// and core saves its row. A write asked while the operation drains is refused before it starts, so nothing lands; reads cancel.
+{
+    const answers = [], aborted = [], submitted = [];
+    let sequence = 0;
+    const bridge = {
+        log() {}, nowMs: () => 0,
+        calendarCall(text) { submitted.push(JSON.parse(text).op); return `cal:${++sequence}`; },
+        calendarAbort(id) { aborted.push(id); },
+        ioNext: () => answers.shift() ?? '',
+        ioBody: () => '',
+    };
+    const state = vm.createContext({ __mindwtrNative: bridge });
+    vm.runInContext(readFileSync(resolve(app, 'bundle/host-polyfills.js'), 'utf8'), state);
+    const writes = ['createCalendar', 'deleteCalendar', 'createEvent', 'updateEvent', 'deleteEvent']
+        .map((op) => state.__mindwtrCalendarCall({ op }).then((value) => value, (error) => `${error.name}: ${error.message}`));
+    const read = state.__mindwtrCalendarCall({ op: 'getCalendars' }).then(() => 'resolved', (error) => error.name);
+    state.__cancelHostCalls('The host operation timed out');
+    assert.equal(await read, 'AbortError', 'a read still cancels');
+    assert.deepEqual(aborted, ['cal:6'], 'no started provider write is aborted');
+    await assert.rejects(state.__mindwtrCalendarCall({ op: 'createEvent' }), { name: 'AbortError' });
+    assert.equal(submitted.length, 6, 'a write asked while the operation drains never reaches Kotlin');
+    answers.push(...[1, 2, 3, 4, 5].map((n) => JSON.stringify({ id: `cal:${n}`, value: `v${n}` })));
+    assert.equal(state.__pumpTimers(), 5, 'each started write settles with its own answer');
+    assert.deepEqual(await Promise.all(writes), ['v1', 'v2', 'v3', 'v4', 'v5'], 'so core gets the event ID and saves its row');
+    state.__resumeHostCalls();
+}
+// Review finding 1 (A2): a managed attachment's delete asks core's keep() in the same engine turn as the delete itself, after every
+// file call queued before it. Here a delete waits behind a held file call while the attachment is restored: the bytes stay.
 {
     const bundled = await build({
         stdin: { contents: "export { createNativeAttachments } from './host-attachments';", resolveDir: resolve(app, 'bundle'), loader: 'ts' },
