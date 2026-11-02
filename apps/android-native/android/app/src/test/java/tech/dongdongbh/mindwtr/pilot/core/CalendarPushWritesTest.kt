@@ -19,6 +19,7 @@ class CalendarPushWritesTest {
         private var next = 100L
 
         override fun calendarExists(id: Long) = id in calendars
+        override fun calendarName(id: Long) = calendars[id]?.get(CalendarContract.Calendars.NAME) as String?
         override fun insertCalendar(accountName: String, accountType: String, values: Map<String, Any>): Long =
             (next++).also { calendars[it] = values; accounts[it] = accountName to accountType }
         override fun deleteCalendar(id: Long): Int = if (refuseCalendarDelete || calendars.remove(id) == null) 0 else 1
@@ -123,6 +124,19 @@ class CalendarPushWritesTest {
         assertEquals("Changed", rows.events[theirs.toLong()]!![CalendarContract.Events.TITLE])
         writes.deleteEvent(theirs, null)
         assertTrue(theirs.toLong() !in rows.events)
+    }
+
+    /**
+     * Review N3 at the moment of the delete: the provider hands a deleted calendar's _id to the next calendar (S23), so a
+     * calendar is deleted only while its internal name is RN's "mindwtr" or a marked "mindwtr:<marker>", never the user's.
+     */
+    @Test fun aCalendarDeleteRefusesACalendarWithoutMindwtrsInternalName() {
+        val users = writes.createCalendar(seed().put("name", "me@example.com"))
+        assertThrows(IllegalStateException::class.java) { writes.deleteCalendar(users) }
+        assertTrue(users.toLong() in rows.calendars)
+        val plain = writes.createCalendar(seed().put("name", "mindwtr"))
+        writes.deleteCalendar(plain)
+        assertTrue(plain.toLong() !in rows.calendars)
     }
 
     @Test fun aCalendarDeleteThatRemovesNoRowRefusesSoCoreKeepsTheSavedId_0c2782b76() {

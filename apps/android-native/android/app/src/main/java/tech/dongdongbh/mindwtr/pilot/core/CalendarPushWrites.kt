@@ -15,6 +15,8 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
     /** The calendar provider's rows as maps of CalendarContract columns, so the rules run on the JVM. */
     interface Rows {
         fun calendarExists(id: Long): Boolean
+        /** The calendar's internal NAME, or null when there is no such calendar. */
+        fun calendarName(id: Long): String?
         /** Inserts a calendar as the account's sync adapter, as expo does; the new ID, or null when none was made. */
         fun insertCalendar(accountName: String, accountType: String, values: Map<String, Any>): Long?
         fun deleteCalendar(id: Long): Int
@@ -53,9 +55,16 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
         return id.toString()
     }
 
-    /** expo's deleteCalendarAsync: no row deleted is a refusal (core then lists the calendars to see whether it is gone). */
+    /**
+     * expo's deleteCalendarAsync: no row deleted is a refusal (core then lists the calendars to see whether it is gone). Only
+     * a calendar whose internal name is still RN's "mindwtr" or a marked "mindwtr:<marker>" is deleted: core checked the name
+     * in its list, and the provider can hand a deleted calendar's _id to the user's next calendar.
+     */
     fun deleteCalendar(calendarId: String) {
-        check(rows.deleteCalendar(calendarId.toLong()) > 0) { "Calendar with id $calendarId could not be deleted" }
+        val id = calendarId.toLong()
+        val name = rows.calendarName(id)
+        check(name == null || name == MANAGED_NAME || name.startsWith("$MANAGED_NAME:")) { "Calendar with id $calendarId is not a Mindwtr calendar" }
+        check(rows.deleteCalendar(id) > 0) { "Calendar with id $calendarId could not be deleted" }
     }
 
     /** expo's createEventAsync; answers the new event's ID. */
@@ -100,6 +109,8 @@ internal class CalendarPushWrites(private val rows: Rows, private val zone: () -
 
     companion object {
         const val MISSING_EVENT = "Calendar event not found"
+        /** core's MANAGED_CALENDAR_NAME (calendar-push-service.ts). */
+        private const val MANAGED_NAME = "mindwtr"
 
         /** expo's calAccessConstantMatchingString. */
         private val ACCESS = mapOf(

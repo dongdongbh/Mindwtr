@@ -146,6 +146,9 @@ private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
     override fun calendarExists(id: Long): Boolean = resolver.query(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id),
         arrayOf(CalendarContract.Calendars._ID), null, null, null)?.use { it.count > 0 } ?: false
 
+    override fun calendarName(id: Long): String? = resolver.query(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id),
+        arrayOf(CalendarContract.Calendars.NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null }
+
     override fun insertCalendar(accountName: String, accountType: String, values: Map<String, Any>): Long? {
         val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
             .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
