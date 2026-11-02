@@ -21,6 +21,7 @@ import { MarkdownReferenceAutocompleteMenu, useMarkdownReferenceAutocomplete } f
 import { AttachmentProgressIndicator } from '../../AttachmentProgressIndicator';
 import { isFolderLinkAttachment, useBareFileReferenceCheck } from '../../../lib/attachment-reference';
 import { getAttachmentDisplayTitle } from '../../../lib/attachment-utils';
+import { isImeComposing } from '../../../lib/ime';
 
 type ProjectNotesSectionProps = {
     project: Project;
@@ -179,6 +180,7 @@ export function ProjectNotesSection({
     });
 
     const handleNotesKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (isImeComposing(event)) return;
         if (notesAutocomplete.handleKeyDown(event)) {
             return;
         }

@@ -6,6 +6,7 @@ import { GripVertical, Trash2 } from 'lucide-react';
 import { TaskItem } from '../../TaskItem';
 import { AreaColorPicker } from './AreaColorPicker';
 import type { ProjectAreaSection } from './project-area-collapse';
+import { isImeComposing } from '../../../lib/ime';
 
 type AreaRowProps = {
     area: Area;
@@ -65,6 +66,7 @@ export function SortableAreaRow({
                     commitAreaName(e.target.value);
                 }}
                 onKeyDown={(e) => {
+                    if (isImeComposing(e)) return;
                     if (e.key === 'Enter') {
                         e.preventDefault();
                         commitAreaName(e.currentTarget.value);

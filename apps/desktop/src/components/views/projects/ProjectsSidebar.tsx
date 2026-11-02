@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { AlertTriangle, ChevronDown, ChevronRight, ChevronsLeft, Folder, Plus } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import { FocusStarIcon } from '../../FocusStarIcon';
 import { SortableProjectRow } from './SortableRows';
 import { LIST_END_GAP } from '../list/list-toolbar';
@@ -574,6 +575,7 @@ export function ProjectsSidebar({
                             value={newProjectTitle}
                             onChange={(e) => onChangeNewProjectTitle(e.target.value)}
                             onKeyDown={(event) => {
+                                if (isImeComposing(event)) return;
                                 if (event.key === 'Escape') {
                                     event.preventDefault();
                                     onCancelCreate();
