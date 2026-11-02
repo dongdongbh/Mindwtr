@@ -1561,6 +1561,39 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         }));
     });
 
+    // Android's calendar provider hands a deleted event's _id to the next event (seen on a Galaxy S23), which can be the user's
+    // own event in another calendar. The binding reads the event's calendar first, so that event is never written or deleted.
+    it('never updates the user\'s event that took a pushed event\'s ID: core makes its own event instead', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'users-cal' }));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockCreateEventAsync).toHaveBeenCalledWith('cal-1', expect.objectContaining({ title: task.title }));
+        expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarEventId: 'evt-1' }));
+    });
+
+    it('never deletes the user\'s event that took a done task\'s event ID: the row is forgotten', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask({ status: 'done' });
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'users-cal' }));
+
+        await runFullCalendarSync();
+
+        expect(mockDeleteEventAsync).not.toHaveBeenCalled();
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(task.id, 'ios');
+    });
+
     it('clears the row of a done task whose event is already gone (RN bug 2)', async () => {
         mockPlatform.OS = 'android';
         androidCalendars();

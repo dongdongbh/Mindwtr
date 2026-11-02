@@ -27,11 +27,14 @@ const PLATFORM = Platform.OS;
  * expo-calendar on Android never reports a missing event (CalendarModule.kt): an update of one writes no row and
  * resolves, and a delete rejects "could not be deleted", as any failed delete does. Its event read rejects
  * E_EVENT_NOT_FOUND for an event that is gone (or marked deleted), so the binding reads the event and answers the
- * text core takes as missing: core then pushes the task again, or forgets the row.
+ * text core takes as missing: core then pushes the task again, or forgets the row. The read also answers 'elsewhere' when
+ * the ID now names an event in another calendar than the row's: Android's calendar provider hands a deleted event's _id to
+ * the next event, which can be the user's own (seen on a Galaxy S23), and that event is never written or deleted. A failed
+ * read answers 'here'.
  */
-const isEventGone = (eventId: string): Promise<boolean> => Calendar.getEventAsync(eventId).then(
-    () => false,
-    (error: unknown) => (error as { code?: unknown } | null)?.code === 'E_EVENT_NOT_FOUND',
+const eventPlace = (eventId: string, calendarId?: string): Promise<'gone' | 'elsewhere' | 'here'> => Calendar.getEventAsync(eventId).then(
+    (event) => (calendarId && event?.calendarId != null && String(event.calendarId) !== calendarId ? 'elsewhere' : 'here'),
+    (error: unknown) => ((error as { code?: unknown } | null)?.code === 'E_EVENT_NOT_FOUND' ? 'gone' : 'here'),
 );
 
 const missingEvent = (outcome: 'recreated' | 'cleared'): Error => {
@@ -68,15 +71,16 @@ const getService = (): CalendarPushService => {
             },
             deleteCalendar: (calendarId) => Calendar.deleteCalendarAsync(calendarId),
             createEvent: (calendarId, details) => Calendar.createEventAsync(calendarId, details),
-            updateEvent: async (eventId, details) => {
-                if (Platform.OS === 'android' && await isEventGone(eventId)) throw missingEvent('recreated');
+            updateEvent: async (eventId, details, context) => {
+                if (Platform.OS === 'android' && await eventPlace(eventId, context?.calendarId) !== 'here') throw missingEvent('recreated');
                 return Calendar.updateEventAsync(eventId, details);
             },
-            deleteEvent: async (eventId) => {
+            deleteEvent: async (eventId, context) => {
+                if (Platform.OS === 'android' && context && await eventPlace(eventId, context.calendarId) === 'elsewhere') throw missingEvent('cleared');
                 try {
                     return await Calendar.deleteEventAsync(eventId);
                 } catch (error) {
-                    if (Platform.OS === 'android' && await isEventGone(eventId)) throw missingEvent('cleared');
+                    if (Platform.OS === 'android' && await eventPlace(eventId) === 'gone') throw missingEvent('cleared');
                     throw error;
                 }
             },
