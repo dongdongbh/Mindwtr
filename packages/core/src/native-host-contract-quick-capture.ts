@@ -963,6 +963,8 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
          * A voice capture's save (host-voice.ts, RN's stopRecording): the popup's draft with the recording [attachments], titled
          * by the draft or else [fallbackTitle] ("Audio note" and the time), as RN's buildTaskProps. The task takes [captureId]
          * (one per recording), so a retry answers from its task. A date command the draft cannot read refuses: nothing written.
+         * A stop's save closes the popup, as RN's stopRecording. [openAfterSave] marks the popup's Save of a kept recording (RN's
+         * handleSave with its recovery attachment): Save and edit opens the task, Add another keeps the popup, as submitQuickCapture.
          */
         async submitQuickCaptureAudio(input: {
             text: string;
@@ -970,24 +972,28 @@ export function createQuickCaptureMethods(deps: QuickCaptureDeps) {
             captureId: string;
             fallbackTitle: string;
             attachments: Attachment[];
+            openAfterSave?: boolean;
         }): Promise<NativeHostResult<NativeQuickCaptureSubmitResult>> {
             const draft = readDraft(input);
             if (!draft.ok) return draft;
             if (!isText(input.fallbackTitle, TEXT_LIMIT) || !input.fallbackTitle.trim() || !Array.isArray(input.attachments)
-                || typeof input.captureId !== 'string' || !deps.requestIdPattern.test(input.captureId)) {
+                || typeof input.captureId !== 'string' || !deps.requestIdPattern.test(input.captureId)
+                || (input.openAfterSave !== undefined && typeof input.openAfterSave !== 'boolean')) {
                 return fail('INVALID_INPUT', 'A recording capture needs its UUID, a title and its attachments');
             }
             const { text, options } = draft.value;
             const captureId = input.captureId.toLowerCase();
             const fallbackTitle = input.fallbackTitle.trim();
+            const next = input.openAfterSave === undefined ? 'close' : input.openAfterSave ? 'open' : options.addAnother ? 'addAnother' : 'close';
             // Through the receipts, as submitQuickCapture: a write whose save failed is owed that save, and its retry makes it.
             return receipts.run<NativeQuickCaptureSubmitResult>(
                 input.captureId,
-                JSON.stringify(['captureAudio', text, options, fallbackTitle, input.attachments]),
+                JSON.stringify(['captureAudio', text, options, fallbackTitle, input.attachments, input.openAfterSave ?? null]),
                 async () => {
                     const saved = (taskId: string, projectId: string | undefined): NativeHostResult<NativeQuickCaptureSubmitResult> => {
                         rebuildParseOptions();
-                        return { ok: true, value: { kind: 'saved', taskId, projectId, next: 'close', reset: null } };
+                        return { ok: true, value: { kind: 'saved', taskId, projectId, next,
+                            reset: next === 'addAnother' ? { text: '', options: freshOptions(true) } : null } };
                     };
                     // After a restart the receipt is gone: the live task this capture ID made answers the retry; a deleted one does not.
                     const existing = useTaskStore.getState()._allTasks.find((task) => task.id === captureId);

@@ -83,6 +83,28 @@ describe('native host contract: the capture popup', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
+    // Voice V5 review N1: the popup's Save with a kept recording is RN's handleSave: Save and edit opens the task, and Add another
+    // keeps the popup with a fresh draft, as submitQuickCapture. A stop's save (no openAfterSave) closes, as RN's stopRecording.
+    it('a popup Save with a kept recording follows Save and edit and Add another; a stop closes', async () => {
+        const { host } = await openHost();
+        const options = value(host.openQuickCapture()).options;
+        const audio = (id: string) => ({
+            id, kind: 'file' as const, title: 'Audio note 1', uri: `file:///docs/attachments/${id}.m4a`, mimeType: 'audio/mp4',
+            createdAt: fixture.now, updatedAt: fixture.now, localStatus: 'available' as const,
+        });
+        const base = { text: 'Call the bank', fallbackTitle: 'Audio note', attachments: [audio('att-2')] };
+        expect(value(await host.submitQuickCaptureAudio({ ...base, options, captureId: generateUUID(), openAfterSave: true } as never)))
+            .toMatchObject({ kind: 'saved', next: 'open', reset: null });
+        const another = { ...options, addAnother: true };
+        const kept = value(await host.submitQuickCaptureAudio({ ...base, options: another, captureId: generateUUID(), openAfterSave: false } as never));
+        expect(kept).toMatchObject({ kind: 'saved', next: 'addAnother', reset: { text: '' } });
+        expect((kept as { reset: { options: { addAnother: boolean } } }).reset.options.addAnother).toBe(true);
+        expect(value(await host.submitQuickCaptureAudio({ ...base, options: another, captureId: generateUUID() })))
+            .toMatchObject({ kind: 'saved', next: 'close', reset: null });
+        expect(await host.submitQuickCaptureAudio({ ...base, options, captureId: generateUUID(), openAfterSave: 'yes' } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
     // Voice V3 review N1: a voice capture's retry owes the save its first call could not make, as submitQuickCapture's receipts do,
     // and a capture ID whose task was deleted since answers no "saved".
     it('retries a voice capture whose save failed by saving it, and refuses a capture ID whose task was deleted', async () => {

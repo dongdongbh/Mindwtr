@@ -38,6 +38,8 @@ const RELEASE_CHECK_FIELD_NAMES = [
     'job', 'reminders',
     // native-pull-sync reuses outcome; toast is yes/no.
     'toast',
+    // native-voice-capture reuses outcome, provider, durationMs and errorKind; copied is true/false for a kept recording's copy.
+    'copied',
 
     // web-attachment-upload reuses releaseCheck, stage and count; only acknowledged PUTs.
     // android-widget-capture-status: bounded creation status and picker origin; kind/outcome below.

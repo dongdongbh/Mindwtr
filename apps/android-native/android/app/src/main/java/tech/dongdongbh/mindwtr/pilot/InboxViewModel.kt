@@ -336,8 +336,9 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         io = { work -> voiceThreads.execute(work) },
         ui = ::ui,
         notice = ::showVoiceNotice,
-        // RN's handleClose after a voice capture saved.
-        saved = { closeCapture() },
+        // Core's answer, as a text save's: RN's handleClose after a recording saved; a kept recording's Save may open the task or
+        // go on with Add another (review N1).
+        saved = { reply -> finishCapture(JSONObject(reply.toString()).put("kind", "saved").apply { if (!has("next")) put("next", "close") }) },
         later = { delayMs, run -> main.postDelayed(run, delayMs) },
     )
 
@@ -543,6 +544,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
                     // first, then answers the prompt to open (the activity has no second writer: review O2e P3-A).
                     ProcessCoreHost.aboutStartup(runtime)
                     prompts.start(runtime)
+                    // The center +'s label follows the default capture method (voice V5 review N4).
+                    voice.refreshDefault()
                     if (screen != Screen.Inbox) ProcessCoreHost.startDeferredSync()
                     main.postDelayed({ ProcessCoreHost.startDeferredSync("boot-timeout") }, SYNC_FALLBACK_MS)
                     restored?.let { resumeEditor(it, savedDraft.optJSONObject("pending")) }
@@ -1675,11 +1678,17 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
     /** RN's Save (and Return): reads and edits still with core go first; the request is on disk before the call. */
     fun saveCapture(openAfterSave: Boolean) {
         val current = capture ?: return
-        // Review N2: a refused voice save kept its recording; the fixed draft saves with it (RN's recovery attachment).
-        if (voice.saveHeld(current.text, current.options)) return
+        // Voice V5 review B1: RN's handleSave waits while the microphone starts, stops or saves (saving || recordingBusy).
+        if (voice.state.busy) return
         if (current.requests.isNotEmpty() || captureInFlight != null) {
             keepCapture(current.copy(queuedSave = if (openAfterSave) "edit" else "save"), persist = false)
             return
+        }
+        // Review N2 and N1: a refused voice save kept its recording. The draft, as core has it once its edits are in, saves with
+        // it, as RN's handleSave with its recovery attachment (Save and edit and Add another too). The queued Save is spent here.
+        if (voice.state.held && !busy) {
+            keepCapture(current.copy(queuedSave = null), persist = false)
+            if (voice.saveHeld(current.text, current.options, openAfterSave)) return
         }
         val action = captureAction(current, openAfterSave)
         if (busy || (failedAction != null && failedAction != action)) return
@@ -2207,6 +2216,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             if (search != null) readSearch()
             return
         }
+        // A settings change can make Audio the default capture method: the center +'s label reads it again (review N4).
+        voice.refreshDefault()
         AfterCommandReads.run(AfterCommandReads.order(screen, menu.screen != null, search != null)) { step, done ->
             when (step) {
                 AfterCommandReads.Read.Search -> readSearch(done)

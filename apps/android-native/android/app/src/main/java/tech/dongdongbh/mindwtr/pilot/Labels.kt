@@ -116,6 +116,7 @@ val LABEL_KEYS = listOf(
     // The capture popup's microphone (CaptureVoice.kt, RN's QuickCaptureSheetBody and use-quick-capture-audio.ts).
     "quickAdd.audioRecord", "quickAdd.audioStop", "quickAdd.audioRecording", "quickAdd.audioProcessing", "quickAdd.speechNotConfigured",
     "quickAdd.audioPermissionTitle", "quickAdd.audioPermissionBody", "quickAdd.audioErrorTitle", "sandbox.unavailable",
+    "quickAdd.audioCaptureLabel",
 )
 
 /** The label map: core's text for each of [LABEL_KEYS]. It has no fallback text; a key core lacks shows as the key. */

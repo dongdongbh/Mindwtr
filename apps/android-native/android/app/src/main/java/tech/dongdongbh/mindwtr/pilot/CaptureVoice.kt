@@ -67,17 +67,21 @@ class CaptureVoice(
     private val io: (() -> Unit) -> Unit,
     private val ui: (() -> Unit) -> Unit,
     private val notice: (VoiceNotice) -> Unit,
-    private val saved: (String) -> Unit,
+    /** Core's answer to a save: its task, and its next step (close; for a kept recording's Save, open or Add another too). */
+    private val saved: (JSONObject) -> Unit,
     /** RN's 150 ms before the automatic start, on the main thread. */
     private val later: (Long, () -> Unit) -> Unit,
 ) {
     var state by mutableStateOf(VoiceUi())
         private set
 
-    // The popup's open whose answer we wait for; a newer open or a close makes an older answer void.
+    /** Settings › GTD's default capture method is Audio: RN's center + says quickAdd.audioCaptureLabel then (review N4). */
+    var defaultAudio by mutableStateOf(false)
+        private set
+
+    // The popup's open whose answer we wait for; a newer open or a close makes an older answer void. RN 4dea768a2: so the
+    // automatic start runs once per open, never again when it fails or records nothing.
     private var opening = 0
-    // RN 4dea768a2: an automatic start is tried once per open popup, never again when it fails or records nothing.
-    private var automaticTried = false
 
     private fun request(name: String, input: JSONObject = JSONObject(), answer: (JSONObject?) -> Unit) = io {
         val reply = runCatching { call(name, input) }.getOrNull()
@@ -89,17 +93,18 @@ class CaptureVoice(
     /** The popup opened: a voice session, then RN's automatic start when [auto] asks for one. */
     fun opened(auto: AutoRecord) {
         val mine = ++opening
-        automaticTried = false
         state = VoiceUi()
         request("open") { reply ->
             if (mine != opening || reply == null) return@request
             state = VoiceUi(session = reply.optInt("session"))
-            if (auto.wants(reply.optBoolean("defaultAudio")) && !automaticTried) {
-                automaticTried = true
-                later(150) { if (mine == opening) start() }
-            }
+            defaultAudio = reply.optBoolean("defaultAudio")
+            // RN skips the automatic start in Sandbox mode (review N3).
+            if (!reply.optBoolean("sandbox") && auto.wants(defaultAudio)) later(150) { if (mine == opening) start() }
         }
     }
+
+    /** Reads the default capture method again (after the boot and each command), for the center +'s label. */
+    fun refreshDefault() = request("defaults") { reply -> reply?.let { defaultAudio = it.optBoolean("defaultAudio") } }
 
     /** RN's mic button: stop and save while recording, else start. */
     fun toggle(text: String, options: JSONObject) {
@@ -132,11 +137,11 @@ class CaptureVoice(
     }
 
     /** The popup's Save while a refused save holds its recording: the draft saves with it (RN's recovery attachment). */
-    fun saveHeld(text: String, options: JSONObject): Boolean {
+    fun saveHeld(text: String, options: JSONObject, openAfterSave: Boolean): Boolean {
         val input = sessionInput() ?: return false
         if (!state.held || state.busy) return false
         state = state.copy(busy = true)
-        request("save", input.put("text", text).put("options", options)) { reply -> finished(input, reply) }
+        request("save", input.put("text", text).put("options", options).put("openAfterSave", openAfterSave)) { reply -> finished(input, reply) }
         return true
     }
 
@@ -145,7 +150,7 @@ class CaptureVoice(
         // The bundle says whether it still holds a refused save's recording; with no answer, nothing changed there.
         state = state.copy(busy = false, held = reply?.takeIf { it.has("held") }?.getBoolean("held") ?: state.held)
         when (reply?.optString("status")) {
-            "saved" -> saved(reply.optString("taskId"))
+            "saved" -> saved(reply)
             "refused" -> reply.optJSONObject("notice")?.let { notice(VoiceNotice.Core(it)) }
             "cancelled", "stale", "idle", "busy" -> Unit
             else -> notice(VoiceNotice.Alert("quickAdd.audioErrorTitle", "quickAdd.audioErrorBody"))

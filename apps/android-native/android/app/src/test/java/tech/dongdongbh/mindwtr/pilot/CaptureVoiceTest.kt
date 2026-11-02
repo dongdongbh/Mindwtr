@@ -8,10 +8,11 @@ import org.junit.Test
 
 /** Voice pass V5: the popup's microphone states (RN's recording, recordingBusy and recordingReady) over stand-in voice requests. */
 class CaptureVoiceTest {
-    private class Harness(var defaultAudio: Boolean = false) {
+    private class Harness(var defaultAudio: Boolean = false, var sandbox: Boolean = false) {
         val calls = mutableListOf<String>()
         val notices = mutableListOf<VoiceNotice>()
         val saved = mutableListOf<String>()
+        val inputs = mutableListOf<JSONObject>()
         val replies = mutableMapOf<String, ArrayDeque<JSONObject>>()
         var duringStop: VoiceUi? = null
         lateinit var voice: CaptureVoice
@@ -19,13 +20,15 @@ class CaptureVoiceTest {
         fun make(): CaptureVoice = CaptureVoice(
             call = { name, input ->
                 calls += if (input.has("text")) "$name:${input.getString("text")}" else name
+                inputs += JSONObject(input.toString())
                 if (name == "stop") duringStop = voice.state
                 when (name) {
-                    "open" -> JSONObject().put("session", 7).put("defaultAudio", defaultAudio)
+                    "open" -> JSONObject().put("session", 7).put("defaultAudio", defaultAudio).put("sandbox", sandbox)
+                    "defaults" -> JSONObject().put("defaultAudio", defaultAudio)
                     else -> replies[name]?.removeFirstOrNull() ?: JSONObject().put("status", "closed")
                 }
             },
-            io = { it() }, ui = { it() }, notice = { notices += it }, saved = { saved += it }, later = { _, run -> run() },
+            io = { it() }, ui = { it() }, notice = { notices += it }, saved = { saved += it.getString("taskId") }, later = { _, run -> run() },
         ).also { voice = it }
     }
 
@@ -75,6 +78,28 @@ class CaptureVoiceTest {
         assertEquals(2, h.calls.count { it == "start" })
     }
 
+    // Voice V5 review N3: RN skips the automatic start in Sandbox mode (no recording, no notice each time the popup opens).
+    @Test fun theAutomaticStartWaitsOutSandboxMode() {
+        val h = Harness(defaultAudio = true, sandbox = true)
+        val voice = h.make()
+        voice.opened(AutoRecord.DEFAULT)
+        voice.opened(AutoRecord.ON)
+        assertEquals(0, h.calls.count { it == "start" })
+        assertTrue(h.notices.isEmpty())
+    }
+
+    // Voice V5 review N4: the center + says RN's audio capture label while Audio is the default capture method.
+    @Test fun theDefaultCaptureMethodIsReadForTheCenterButton() {
+        val h = Harness(defaultAudio = true)
+        val voice = h.make()
+        assertFalse(voice.defaultAudio)
+        voice.refreshDefault()
+        assertTrue(voice.defaultAudio)
+        h.defaultAudio = false
+        voice.opened(AutoRecord.OFF)
+        assertFalse(voice.defaultAudio)
+    }
+
     // Voice V3 review N5: leaving the app ends the recording; the bundle forgets it and the next tap starts again.
     @Test fun leavingTheAppDuringARecordingClearsItAndTellsTheBundle() {
         val h = Harness()
@@ -101,10 +126,12 @@ class CaptureVoiceTest {
         voice.toggle("Call /due:someday", JSONObject())
         assertTrue(voice.state.held)
         assertEquals("Unreadable", (h.notices.single() as VoiceNotice.Core).notice.getString("message"))
-        assertTrue(voice.saveHeld("Call mom", JSONObject()))
+        assertTrue(voice.saveHeld("Call mom", JSONObject(), openAfterSave = true))
         assertEquals(listOf("t9"), h.saved)
+        // Review N1: Save and edit reaches the bundle (core then answers next = open).
+        assertTrue(h.inputs.last().getBoolean("openAfterSave"))
         assertFalse(voice.state.held)
-        assertFalse(voice.saveHeld("Again", JSONObject()))
+        assertFalse(voice.saveHeld("Again", JSONObject(), openAfterSave = false))
     }
 
     // RN's capture-quick route: a mode decides, else autoRecord, else the default capture method.

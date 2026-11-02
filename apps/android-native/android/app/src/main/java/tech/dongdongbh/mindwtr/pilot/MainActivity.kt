@@ -502,7 +502,8 @@ internal const val RN_TAB_ICON_IDLE = 0.64f
 private fun RowScope.CaptureButton(model: InboxViewModel) {
     val theme = LocalTheme.current
     val shape = RoundedCornerShape(theme.captureRadius)
-    val label = t("nav.addTask")
+    // RN's tab button says quickAdd.audioCaptureLabel while Audio is the default capture method (voice V5 review N4).
+    val label = t(if (model.voice.defaultAudio) "quickAdd.audioCaptureLabel" else "nav.addTask")
     Box(
         // RN's tab button: a tap records at once when Audio is the default capture method, a long press the other way.
         Modifier.weight(1f).fillMaxHeight().combinedClickable(role = Role.Button,

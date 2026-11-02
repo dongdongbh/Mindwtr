@@ -776,11 +776,12 @@ const nativeVoice = (() => {
             // A save, a transcript applied and a failure reach release logs (forced, as the widget's created line); the rest
             // show with Debug logging on.
             const failed = line.outcome === 'failed';
-            const force = failed || line.outcome === 'saved' || line.outcome === 'applied';
+            // A refused save that kept its recording (review N2, N6) is forced too: the tester cannot see it on screen.
+            const force = failed || line.outcome === 'saved' || line.outcome === 'applied' || line.outcome === 'kept';
             if (line.kind === 'capture') {
                 (failed ? logWarn : logInfo)('Native Android voice capture', { scope: 'capture', force, context: { releaseCheck: 'v1.3.8/native-voice-capture',
                     outcome: line.outcome, provider: line.provider, ...('durationMs' in line && line.durationMs ? { durationMs: line.durationMs } : {}),
-                    ...('errorKind' in line ? { errorKind: line.errorKind } : {}) } });
+                    ...('errorKind' in line ? { errorKind: line.errorKind } : {}), ...('copied' in line ? { copied: line.copied } : {}) } });
             } else {
                 (failed ? logWarn : logInfo)('Native Android voice transcription', { scope: 'capture', force,
                     context: { releaseCheck: 'v1.3.8/native-voice-transcribe', outcome: line.outcome, provider: line.provider,

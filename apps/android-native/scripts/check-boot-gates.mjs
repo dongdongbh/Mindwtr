@@ -10313,12 +10313,13 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(hostEntrySource, /persistAttachment: \(attachment\) => persistIntoManagedStorage\(attachment, \{\s*persist: \(entry\) => host\.persistAttachmentLocally\(entry\),/);
     assert.match(voiceTs, /export const managedAttachmentsDirectory = \(documents: string\): string => `\$\{documents\}\$\{ATTACHMENTS_DIR_NAME\}\/`;/);
     assert.equal((hostEntrySource.match(/createAIKeyStore\(\{/g) ?? []).length, 1, 'one AI key store for speech');
-    assert.match(hostEntrySource, /const force = failed \|\| line\.outcome === 'saved' \|\| line\.outcome === 'applied';/);
+    // Voice V5 review N7: a refused save that kept its recording is forced too.
+    assert.match(hostEntrySource, /const force = failed \|\| line\.outcome === 'saved' \|\| line\.outcome === 'applied' \|\| line\.outcome === 'kept';/);
     const voiceCallBlock = polyfills.slice(polyfills.indexOf('global.__mindwtrVoiceCall = function'), polyfills.indexOf('__mindwtrCalendarPushCall'));
     assert(voiceCallBlock.includes("native().voiceCall(JSON.stringify(request))") && !voiceCallBlock.includes('refuseIfCancelled'), 'a microphone call is never refused by a host deadline');
     assert.doesNotMatch(voiceTs, /whisperModelPath/, 'no stored Whisper model path counts as ready');
     const voiceLine = hostEntrySource.slice(hostEntrySource.indexOf('const voiceLine = '), hostEntrySource.indexOf('return createNativeVoice({'));
-    assert.deepEqual([...new Set([...voiceLine.matchAll(/\b(\w+): line\.\w+/g)].map((m) => m[1]))].sort(), ['durationMs', 'errorKind', 'outcome', 'provider'], 'a voice line holds fixed fields only');
+    assert.deepEqual([...new Set([...voiceLine.matchAll(/\b(\w+): line\.\w+/g)].map((m) => m[1]))].sort(), ['copied', 'durationMs', 'errorKind', 'outcome', 'provider'], 'a voice line holds fixed fields only');
     const voiceTested = spawnSync('bun', ['test', 'apps/android-native/bundle/host-voice.test.ts', 'apps/android-native/bundle/host-multipart.test.ts'], { cwd: resolve(app, '../..'), encoding: 'utf8' });
     assert.equal(voiceTested.status, 0, `bundle/host-voice.test.ts: ${voiceTested.stderr.slice(-1500)}`);
 }
@@ -10336,7 +10337,15 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(popup, /Text\(t\("quickAdd\.audioProcessing"\), style = rnText\(12, 600\), color = c\.secondaryText, maxLines = 2\)/);
     assert.match(viewModel, /if \(value == null && capture != null\) voice\.closed\(\)/);
     assert.match(viewModel, /keepCapture\(CaptureDraft\.opened\(view\)\.copy\(text = text\)\)\s*voice\.opened\(auto\)/);
-    assert.match(viewModel, /if \(voice\.saveHeld\(current\.text, current\.options\)\) return/);
+    // Voice V5 review B1: RN's saving || recordingBusy: the microphone starting, stopping or saving locks the popup (Back, the
+    // backdrop, X, Save, Save and edit and the fields), and Save waits. N1: a kept recording saves after the edit queue, with
+    // Save and edit, and its queued Save is spent; core's answer goes where a text save's does. N4: the center +'s label.
+    assert.match(popup, /val voiceBusy = voice\.state\.busy\s+val locked = busy \|\| failed \|\| voiceBusy\s+val canSave = [^\n]*&& !busy && !voiceBusy &&/);
+    assert.match(popup, /val closable = !busy && !failed && !voiceBusy/);
+    assert.match(popup, /BackHandler\(enabled = !failed\) \{\s+if \(busy \|\| voiceBusy\) return@BackHandler/);
+    assert.match(viewModel, /fun saveCapture\(openAfterSave: Boolean\) \{\s+val current = capture \?: return\s+\/\/[^\n]*\n\s+if \(voice\.state\.busy\) return\s+if \(current\.requests\.isNotEmpty\(\) \|\| captureInFlight != null\) \{[\s\S]*?return\s+\}\s+(\/\/[^\n]*\n\s+)+if \(voice\.state\.held && !busy\) \{\s+keepCapture\(current\.copy\(queuedSave = null\), persist = false\)\s+if \(voice\.saveHeld\(current\.text, current\.options, openAfterSave\)\) return/);
+    assert.match(viewModel, /saved = \{ reply -> finishCapture\(/);
+    assert.match(activity, /val label = t\(if \(model\.voice\.defaultAudio\) "quickAdd\.audioCaptureLabel" else "nav\.addTask"\)/);
     assert.match(activity, /if \(event == Lifecycle\.Event\.ON_STOP && !isChangingConfigurations\) \{ VoiceCapture\.recorder\?\.leave\(\); model\.voice\.left\(\) \}/);
     assert.match(source('EntryPoints.kt'), /openedCapture\(it, capture\.getString\("text"\), AutoRecord\.forCaptureLink\(url\)\)/);
 }

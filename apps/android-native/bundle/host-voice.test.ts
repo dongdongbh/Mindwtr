@@ -20,12 +20,14 @@ const deferred = <T,>() => {
 
 const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
     settings?: AppSettings; key?: string; transcript?: string | Promise<string>; tags?: string[]; projectTitle?: string; save?: 'fails' | 'refused-before-landing' | 'refused';
+    /** A save still in flight: the store write waits for it. */
+    gate?: Promise<void>;
 } = {}) => {
     const deleted: string[] = [];
     const persisted: string[] = [];
     const lines: VoiceCaptureLine[] = [];
     const calls: string[] = [];
-    const submitted: Array<{ text: string; fallbackTitle: string; attachments: Attachment[] }> = [];
+    const submitted: Array<{ text: string; fallbackTitle: string; attachments: Attachment[]; openAfterSave?: boolean }> = [];
     let next = 0;
     const state = {
         tasks: [] as Task[],
@@ -69,10 +71,12 @@ const harness = (overrides: Partial<NativeVoiceBindings> = {}, setup: {
             // Core's addTask lands the task before the save; a save that fails leaves it in the store (SAVE_FAILED).
             if (setup.save === 'refused-before-landing') return { ok: false, error: { code: 'ACTION_FAILED', message: 'Write failed' } };
             // An unreadable date command: core writes nothing and answers its notice.
+            await setup.gate;
             if (setup.save === 'refused') return { ok: true, value: { kind: 'refused', notice: { tone: 'warning', title: 'Date', message: 'Unreadable' } } };
             state.tasks = [...state.tasks, task];
             if (setup.save === 'fails') return { ok: false, error: { code: 'SAVE_FAILED', message: 'disk unavailable' } };
-            return { ok: true, value: { kind: 'saved', taskId: task.id, projectId: undefined, next: 'close', reset: null } };
+            const next = input.openAfterSave ? 'open' : 'close';
+            return { ok: true, value: { kind: 'saved', taskId: task.id, projectId: undefined, next, reset: null } };
         },
         readBytes: async () => new Uint8Array([1, 2, 3]),
         deleteFile: (uri) => { deleted.push(uri); },
@@ -372,9 +376,86 @@ describe('native voice capture', () => {
         expect(new Set(h.deleted.filter((uri) => uri.startsWith(`${DOCS}voice-captures/`))).size).toBe(3);
     });
 
+    // Voice V5 review B1 (the reviewer's repro): RN's handleClose waits for a running submission; here a close that still
+    // arrives while a kept recording's save runs keeps the files that save hands to the task.
+    it('a close during an in-flight save of a kept recording keeps the files the saved task points to', async () => {
+        let release!: () => void;
+        const setup: { save?: 'refused'; gate?: Promise<void> } = { save: 'refused' };
+        const h = harness({}, setup);
+        const session = await record(h);
+        expect(await h.voice.stop({ session, save: true, text: 'x /due:someday', options: OPTIONS })).toMatchObject({ status: 'refused' });
+        setup.save = undefined;
+        setup.gate = new Promise<void>((resolve) => { release = resolve; });
+        const saving = h.voice.save({ session, text: 'Call mom', options: OPTIONS });
+        await h.voice.close(session);
+        release();
+        expect(await saving).toMatchObject({ status: 'saved' });
+        const task = h.state.tasks.at(-1)!;
+        expect(task.attachments).toHaveLength(1);
+        expect(h.deleted).not.toContain(task.attachments![0]!.uri);
+        expect(h.voice.state()).toMatchObject({ held: false });
+    });
+
+    it('a kept recording whose save is refused again after the popup closed goes with the popup', async () => {
+        let release!: () => void;
+        const setup: { save?: 'refused'; gate?: Promise<void> } = { save: 'refused' };
+        const h = harness({}, setup);
+        const session = await record(h);
+        await h.voice.stop({ session, save: true, text: 'x /due:someday', options: OPTIONS });
+        setup.gate = new Promise<void>((resolve) => { release = resolve; });
+        const saving = h.voice.save({ session, text: 'y /due:someday', options: OPTIONS });
+        await h.voice.close(session);
+        release();
+        expect(await saving).toMatchObject({ status: 'refused' });
+        expect(h.voice.state()).toMatchObject({ held: false });
+        expect(h.deleted.filter((uri) => uri.startsWith(`${DOCS}attachments/`))).toHaveLength(1);
+    });
+
+    // Voice V5 review N6: with save audio off, a refused save copies the recording to keep it. A failed copy keeps the
+    // recording itself, as RN keeps its recovery attachment; the next Save copies it again before the task takes it.
+    it('a refused save whose recovery copy fails keeps the recording, and the next save copies it first', async () => {
+        let copies = 0;
+        const setup: { save?: 'refused'; settings?: AppSettings } = { save: 'refused', settings: { ...gemini(), gtd: { saveAudioAttachments: false } } as AppSettings };
+        const h = harness({
+            persistAttachment: async (attachment) => {
+                copies += 1;
+                if (copies === 1) throw new Error('E_ATTACHMENT_COPY');
+                return { ...attachment, uri: `${DOCS}attachments/${attachment.id}.m4a` };
+            },
+        }, setup);
+        const session = await record(h);
+        expect(await h.voice.stop({ session, save: true, text: 'x /due:someday', options: OPTIONS })).toMatchObject({ status: 'refused' });
+        expect(h.deleted).toEqual([]);
+        expect(h.voice.state()).toMatchObject({ held: true });
+        // Review N7: the kept recording is a forced line, since the tester cannot see it.
+        expect(h.lines).toContainEqual({ kind: 'capture', outcome: 'kept', provider: 'gemini', copied: false });
+        setup.save = undefined;
+        expect(await h.voice.save({ session, text: 'Call mom', options: OPTIONS })).toMatchObject({ status: 'saved' });
+        expect(h.submitted.at(-1)!.attachments.map((attachment) => attachment.uri)).toEqual([`${DOCS}attachments/${h.submitted.at(-1)!.attachments[0]!.id}.m4a`]);
+        expect(h.deleted).toEqual([`${DOCS}voice-captures/rec-1.m4a`]);
+    });
+
+    // Voice V5 review N1: the popup's Save with a kept recording is RN's handleSave: its Save and edit reaches core, and core's
+    // next step comes back for the popup; a stop's save says nothing of it (RN's stopRecording closes).
+    it('a kept recording\'s save carries Save and edit and answers core\'s next step', async () => {
+        const setup: { save?: 'refused' } = { save: 'refused' };
+        const h = harness({}, setup);
+        const session = await record(h);
+        await h.voice.stop({ session, save: true, text: 'x /due:someday', options: OPTIONS });
+        expect(h.submitted.at(-1)!.openAfterSave).toBeUndefined();
+        setup.save = undefined;
+        expect(await h.voice.request('save', { session, text: 'Call mom', options: OPTIONS, openAfterSave: true }))
+            .toMatchObject({ status: 'saved', next: 'open', held: false });
+        expect(h.submitted.at(-1)!.openAfterSave).toBe(true);
+    });
+
     it('opens a session that says whether Audio is the default capture method', async () => {
         expect(await harness({}, { settings: { ...gemini(), gtd: { defaultCaptureMethod: 'audio' } } as AppSettings }).voice.open()).toMatchObject({ defaultAudio: true });
-        expect(await harness().voice.open()).toMatchObject({ defaultAudio: false });
+        expect(await harness().voice.open()).toMatchObject({ defaultAudio: false, sandbox: false });
+        // Review N3: RN skips the automatic start in Sandbox mode; review N4: the center + reads the default method alone.
+        expect(await harness({ sandbox: () => true }).voice.open()).toMatchObject({ sandbox: true });
+        const audio = harness({}, { settings: { ...gemini(), gtd: { defaultCaptureMethod: 'audio' } } as AppSettings });
+        expect(await audio.voice.request('defaults', {})).toEqual({ defaultAudio: true });
     });
 
     it('a cancel deletes the recording and saves nothing', async () => {

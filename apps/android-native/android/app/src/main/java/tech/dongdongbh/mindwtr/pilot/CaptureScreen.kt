@@ -230,8 +230,10 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
     val view = draft.view
     val copy = view.getJSONObject("text")
     val failed = failedAction != null
-    val locked = busy || failed
-    val canSave = view.getBoolean("canSave") && writable && !busy && (failedAction == null || failedAction == draft.pending && draft.pending?.kind == "capture")
+    // Voice V5 review B1: RN's sheet takes saving || recordingBusy, so the microphone starting, stopping or saving locks it too.
+    val voiceBusy = voice.state.busy
+    val locked = busy || failed || voiceBusy
+    val canSave = view.getBoolean("canSave") && writable && !busy && !voiceBusy && (failedAction == null || failedAction == draft.pending && draft.pending?.kind == "capture")
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val titleFocus = remember { FocusRequester() }
@@ -261,11 +263,11 @@ fun CapturePopup(model: InboxViewModel, draft: CaptureDraft) = with(model) {
     }
     // Reads and edits wait while an action runs; they go on once none does.
     LaunchedEffect(busy, failed) { if (!busy && !failed) pumpCapture() }
-    val closable = !busy && !failed
+    val closable = !busy && !failed && !voiceBusy
     // RN's Import .txt: the system's document picker for a text file (DocumentPicker, type text/plain).
     val importText = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let(::importCaptureText) }
     BackHandler(enabled = !failed) {
-        if (busy) return@BackHandler
+        if (busy || voiceBusy) return@BackHandler
         when {
             draft.confirm != null -> cancelCaptureLines()
             draft.picker != null -> closeCapturePicker()
