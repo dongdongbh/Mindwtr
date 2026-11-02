@@ -9,6 +9,7 @@ import { buildPersonSearchQuery, DEFAULT_AREA_COLOR, formatI18nTemplate, getPers
 } from '@mindwtr/core';
 import { AreaColorPicker } from '../projects/AreaColorPicker';
 import { reportError } from '../../../lib/report-error';
+import { isImeComposing } from '../../../lib/ime';
 import { isTauriRuntime } from '../../../lib/runtime';
 import type { ConfirmationRequestOptions } from '../../../hooks/useConfirmDialog';
 
@@ -80,6 +81,7 @@ function SortableAreaRow({
                 defaultValue={area.name}
                 onBlur={(e) => commitName(e.target.value)}
                 onKeyDown={(e) => {
+                    if (isImeComposing(e)) return;
                     if (e.key === 'Enter') {
                         e.preventDefault();
                         commitName(e.currentTarget.value);
@@ -140,6 +142,7 @@ function SortableViewSectionRow({
                 aria-label={translateWithFallback(translate, 'viewSections.nameHint', 'Section name')}
                 onBlur={(event) => commitTitle(event.currentTarget.value)}
                 onKeyDown={(event) => {
+                    if (isImeComposing(event)) return;
                     if (event.key === 'Enter') {
                         event.preventDefault();
                         commitTitle(event.currentTarget.value);
@@ -198,6 +201,7 @@ function NewTokenRow({ kind, onCreate, translate, disabled = false }: {
                     value={name}
                     onChange={(event) => { if (!saving && !failed) setName(event.target.value); }}
                     onKeyDown={(event) => {
+                        if (isImeComposing(event)) return;
                         if (event.key === 'Enter') { event.preventDefault(); void save(); }
                         if (event.key === 'Escape' && !saving && !failed) { setName(''); setFailed(false); }
                     }}
@@ -250,6 +254,7 @@ function TokenRow({ value, state, disabled, onEdit, onDraft, onSave, onDelete, o
                         value={state.draft}
                         onChange={(event) => onDraft(event.target.value)}
                         onKeyDown={(event) => {
+                            if (isImeComposing(event)) return;
                             if (event.key === 'Enter') { event.preventDefault(); onSave(); }
                             if (event.key === 'Escape' && !busy && !state.failed) onCancel();
                         }}
@@ -342,6 +347,7 @@ function PersonRow({
                     defaultValue={person.name}
                     onBlur={(e) => commitName(e.target.value)}
                     onKeyDown={(e) => {
+                        if (isImeComposing(e)) return;
                         if (e.key === 'Enter') {
                             e.preventDefault();
                             commitName(e.currentTarget.value);
@@ -659,6 +665,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                             value={newAreaName}
                             onChange={(e) => setNewAreaName(e.target.value)}
                             onKeyDown={(e) => {
+                                if (isImeComposing(e)) return;
                                 if (e.key === 'Enter') {
                                     e.preventDefault();
                                     void handleCreateArea();
@@ -718,6 +725,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                             value={newPersonName}
                             onChange={(e) => setNewPersonName(e.target.value)}
                             onKeyDown={(e) => {
+                                if (isImeComposing(e)) return;
                                 if (e.key === 'Enter') {
                                     e.preventDefault();
                                     void handleCreatePerson();

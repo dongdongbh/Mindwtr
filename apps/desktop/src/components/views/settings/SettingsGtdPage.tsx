@@ -22,6 +22,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { isImeComposing } from '../../../lib/ime';
 import { reportSettingsFailure } from './settings-feedback';
 import { dispatchDesktopOnboardingEvent } from '../../../lib/desktop-onboarding-events';
 import { useUiStore } from '../../../store/ui-store';
@@ -542,6 +543,7 @@ export function SettingsGtdPage({
                         onChange={(event) => setDefaultScheduleTimeDraft(event.target.value)}
                         onBlur={commitDefaultScheduleTime}
                         onKeyDown={(event) => {
+                            if (isImeComposing(event)) return;
                             if (event.key === 'Enter') {
                                 event.currentTarget.blur();
                             }
