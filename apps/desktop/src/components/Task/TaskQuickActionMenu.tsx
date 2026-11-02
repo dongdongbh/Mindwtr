@@ -33,6 +33,7 @@ import { joinDateTime, splitDateTime } from '@mindwtr/core/date-draft';
 import { reportError } from '../../lib/report-error';
 import { copyTaskReference, copyTaskTitles } from '../../lib/task-clipboard';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { FocusStarIcon } from '../FocusStarIcon';
 import { Button } from '../ui/Button';
 import { DestinationSelector } from '../ui/DestinationSelector';
@@ -785,7 +786,7 @@ export function TaskQuickActionMenu({
     // consumes it one layer deeper (arriving here already default-prevented or
     // not at all), so both are left alone.
     const handlePanelKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-        if (event.key !== 'Enter' || event.defaultPrevented || !activePanel) return;
+        if (event.key !== 'Enter' || event.defaultPrevented || isImeComposing(event) || !activePanel) return;
         const target = event.target instanceof HTMLElement ? event.target : null;
         if (target?.closest('button, [data-selector-dropdown="true"]')) return;
         event.preventDefault();

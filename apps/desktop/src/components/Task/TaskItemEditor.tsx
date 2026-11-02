@@ -21,6 +21,7 @@ import { SectionSelector } from '../ui/SectionSelector';
 import { SomedaySectionSelector } from '../ui/SomedaySectionSelector';
 import { TaskInput, type TaskInputAcceptedSuggestion } from './TaskInput';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import {
     QUICK_ADD_FIELD_TOKENS,
     QuickAddTokenBadge,
@@ -305,6 +306,7 @@ export function TaskItemEditor({
                 onSubmit(event);
             }}
             onKeyDown={(event) => {
+                if (isImeComposing(event)) return;
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     event.stopPropagation();

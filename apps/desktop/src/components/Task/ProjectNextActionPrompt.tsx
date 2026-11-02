@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import { formatI18nTemplate, translateWithFallback, type Task } from '@mindwtr/core';
 import { Button } from '../ui/Button';
+import { isImeComposing } from '../../lib/ime';
 import { Dialog, DialogBody, DialogHeader } from '../ui/Dialog';
 
 type ProjectNextActionPromptProps = {
@@ -112,6 +113,7 @@ export function ProjectNextActionPrompt({
                         disabled={isAddingTask || titleLocked}
                         onChange={(event) => onNewTitleChange(event.target.value)}
                         onKeyDown={(event) => {
+                            if (isImeComposing(event)) return;
                             if (event.key === 'Escape') {
                                 event.preventDefault();
                                 onCancel();
