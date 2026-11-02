@@ -422,6 +422,7 @@ private fun InboxViewModel.TitleField(value: String, label: String, enabled: Boo
         // A hardware Enter saves too, with no line added, as RN's multi-line field with submitBehavior blurAndSubmit does
         // (an adb Enter in RN's popup saved it, 10-25); a pasted text keeps its lines (core's several-captures question).
         modifier = modifier.onPreviewKeyEvent { event ->
+            if (field.composition != null) return@onPreviewKeyEvent false
             val enter = event.key == Key.Enter || event.key == Key.NumPadEnter
             if (enter && event.type == KeyEventType.KeyDown) saveCapture(openAfterSave = false)
             enter
