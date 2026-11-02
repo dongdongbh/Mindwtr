@@ -542,6 +542,46 @@ describe('GlobalSearch', () => {
         expect(screen.queryByText('Include Done and Archived tasks')).not.toBeInTheDocument();
     });
 
+    // Closing mid-composition unmounts the input before compositionend, so the
+    // composing flag must not survive into the next open and swallow typing,
+    // Enter and the arrow keys there.
+    it('keeps Escape for the IME and answers typing and arrows after a reopen that cut off a composition', async () => {
+        const searchAll = vi.fn(async (value: string) => ({
+            tasks: tasks.filter((task) => task.title.toLowerCase().includes(value.toLowerCase())),
+            projects: [],
+        }));
+        setStorageAdapter({ ...initialStorageAdapter, searchAll });
+        useTaskStore.setState({ settings: {} });
+        render(<LanguageProvider><GlobalSearch onNavigate={vi.fn()} /></LanguageProvider>);
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+
+        fireEvent.compositionStart(screen.getByRole('textbox', { name: 'Search' }));
+        fireEvent.keyDown(window, { key: 'Escape', isComposing: true });
+        expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+        fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+        await act(async () => {
+            window.dispatchEvent(new Event('mindwtr:open-search'));
+            await vi.advanceTimersByTimeAsync(50);
+        });
+        const input = screen.getByRole('textbox', { name: 'Search' });
+        fireEvent.change(input, { target: { value: 'task' } });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(200);
+        });
+        const rows = () => Array.from(screen.getByRole('dialog').querySelectorAll('[data-search-index]'));
+        expect(rows()).toHaveLength(2);
+        expect(rows()[0]).toHaveClass('bg-accent');
+
+        fireEvent.keyDown(input, { key: 'ArrowDown' });
+        expect(rows()[1]).toHaveClass('bg-accent');
+    });
+
     // A project workspace never lists archived tasks and hides done ones unless
     // that project has them switched on, so routing a finished task there sent
     // the user to a page that could not show it (#991).

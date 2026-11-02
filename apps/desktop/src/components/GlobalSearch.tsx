@@ -29,6 +29,7 @@ import { shallow,
     } from '@mindwtr/core';
 import { useLanguage } from '../contexts/language-context';
 import { cn } from '../lib/utils';
+import { isImeComposing } from '../lib/ime';
 import { getUrgencyColor } from './Task/TaskItemDisplay';
 import { PromptModal } from './PromptModal';
 import { Dialog } from './ui/Dialog';
@@ -143,6 +144,9 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         setLocationQuery('');
         setDuePreset('any');
         setScope('all');
+        // A composition cut off by closing never delivers compositionend to the
+        // unmounted input, so a stale flag would swallow keys after reopening.
+        isComposingRef.current = false;
         setIsOpen(true);
         setTimeout(() => inputRef.current?.focus(), 0);
     }, [defaultIncludeCompleted]);
@@ -159,7 +163,8 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                 if (isOpenRef.current) setIsOpen(false);
                 else openSearch();
             }
-            if (e.key === 'Escape' && isOpenRef.current) {
+            // Escape during IME composition cancels the composition, not the search.
+            if (e.key === 'Escape' && isOpenRef.current && !isImeComposing(e)) {
                 setIsOpen(false);
             }
         };
@@ -373,6 +378,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
 
     // Keyboard navigation
     const handleListKeyDown = (e: React.KeyboardEvent) => {
+        if (isComposingRef.current || isImeComposing(e)) return;
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             setSelectedIndex(prev => Math.min(prev + 1, results.length - 1));
