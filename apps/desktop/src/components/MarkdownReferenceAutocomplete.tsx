@@ -15,6 +15,7 @@ import {
 } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
+import { isImeComposing } from '../lib/ime';
 import {
     getTextareaCaretViewportRect,
     resolveAutocompletePopoverPosition,
@@ -147,6 +148,7 @@ export function useMarkdownReferenceAutocomplete({
     }, [dismiss, isOpen, textareaRef]);
 
     const handleKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (isImeComposing(event)) return false;
         if (!activeQuery || textareaRef.current !== document.activeElement) return false;
         if (event.key === 'Escape') {
             dismiss();

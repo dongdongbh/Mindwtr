@@ -2,6 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type MouseEvent, type ReactNode,
 import { createPortal } from 'react-dom';
 
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
@@ -89,6 +90,7 @@ export function Dialog({
     }, [panel]);
 
     const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         onKeyDown?.(event);
         // Also covers a nested dialog: the inner one already consumed the key.
         if (event.defaultPrevented) return;

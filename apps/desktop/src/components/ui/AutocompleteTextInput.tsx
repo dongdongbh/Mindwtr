@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import type { InputHTMLAttributes, KeyboardEvent } from 'react';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 
 type AutocompleteTextInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
     value: string;
@@ -87,6 +88,7 @@ export function AutocompleteTextInput({
     };
 
     const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+        if (isImeComposing(event)) return;
         if (optionCount > 0) {
             if (event.key === 'ArrowDown') {
                 event.preventDefault();
