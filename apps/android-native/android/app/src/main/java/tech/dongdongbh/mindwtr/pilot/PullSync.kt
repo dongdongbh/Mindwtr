@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import org.json.JSONObject
 
 /**
  * RN's pull down to sync on a task list (Focus, the Inbox, Reference, Done, a project; RN's useManualPullSync, 5bb0ea8f): the
@@ -43,3 +44,10 @@ fun PullToRead(modifier: Modifier, read: (done: () -> Unit) -> Unit, content: @C
     var reading by remember { mutableStateOf(false) }
     PullToRefreshBox(isRefreshing = reading, onRefresh = { reading = true; read { reading = false } }, modifier = modifier, content = content)
 }
+
+/**
+ * A pull whose host call failed (a timeout, a stopped engine) ends as core's runManualPullSync ends a failed cycle (RN's
+ * useManualPullSync): the error bar and RN's "Sync failed" toast ([title], core's settings.lastSyncError) with the error's message.
+ */
+internal fun pullSyncFailure(title: String, failure: Throwable): JSONObject = JSONObject().put("indicator", "error").put("toast",
+    JSONObject().put("title", title).put("message", failure.message?.takeIf { it.isNotBlank() } ?: title).put("tone", "error").put("durationMs", 5200))

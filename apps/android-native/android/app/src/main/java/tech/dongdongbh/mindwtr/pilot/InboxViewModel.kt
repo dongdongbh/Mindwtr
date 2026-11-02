@@ -1224,7 +1224,7 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         Thread({
             val outcome = runCatching { runtime.pullSync() }.getOrElse { failure ->
                 Log.w(CoreHost.TAG, "Pull to sync failed ${failureForLog(failure)}")
-                JSONObject().put("indicator", "error")
+                pullSyncFailure(t("settings.lastSyncError"), failure)
             }
             ui {
                 pullRunning = false

@@ -18,6 +18,8 @@ val LABEL_KEYS = listOf(
     "savedFilters.saveTitle", "savedFilters.namePlaceholder",
     "nav.addTask", "quickAdd.inputLabel", "quickAdd.bulkImportTextFile", "quickAdd.bulkImportTextFileLabel", "common.more", "common.retry", "common.done", "common.edit", "common.back",
     "agenda.laterToday",
+    // A pull down to sync whose host call failed: RN's "Sync failed" toast title.
+    "settings.lastSyncError",
     "common.cancel", "common.close", "common.save", "common.ok", "common.clear", "common.discard",
     // The project header's actions sheet (RN ProjectDetailModal's "...") and its confirms; Delete's toast words are core's reply.
     "projects.actionsLabel", "projects.duplicate", "projects.complete", "projects.reactivate", "projects.cancel", "projects.archiveHelp",
