@@ -62,7 +62,7 @@ export function withAdbPort(env) {
     env.ANDROID_ADB_SERVER_PORT ||= ADB_PORT;
     return env;
 }
-export const setenvArgs = (env) => ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT', 'PARITY_ONLY'].filter((k) => env[k]).map((k) => `--setenv=${k}=${env[k]}`);
+export const setenvArgs = (env) => ['PATH', 'JAVA_HOME', 'HOME', 'ANDROID_ADB_SERVER_PORT', 'PARITY_ONLY', 'MINDWTR_UPGRADE_ONLY'].filter((k) => env[k]).map((k) => `--setenv=${k}=${env[k]}`);
 
 
 export function unreachable(result, port, total) {
