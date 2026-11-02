@@ -1,8 +1,8 @@
-import React, { useRef } from 'react';
-import { Alert, Pressable, Text, TouchableOpacity, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { Alert, Modal, Platform, Pressable, Text, TouchableOpacity, View } from 'react-native';
 import { getProjectRowStatus, isFocusedProjectMissingNextAction, tFallback, type Project } from '@mindwtr/core';
 import * as Haptics from 'expo-haptics';
-import { Copy, Trash2, AlertTriangle } from 'lucide-react-native';
+import { Copy, Trash2, AlertTriangle, MoreHorizontal } from 'lucide-react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 
 import { FocusStarIcon } from '@/components/FocusStarIcon';
@@ -11,6 +11,7 @@ import type { ProjectTaskSummary } from './project-list-model';
 
 type ThemeColors = {
     cardBg: string;
+    border?: string;
     secondaryText: string;
     text: string;
     tint: string;
@@ -32,6 +33,7 @@ type ProjectRowProps = {
     /** Present only when the project can move that way in the shown list (#1263). */
     onMoveUp?: () => void;
     onMoveDown?: () => void;
+    onMoveToArea?: () => void;
 };
 
 const ROW_ACTION_HIT_SLOP = { top: 12, bottom: 12, left: 12, right: 12 } as const;
@@ -52,12 +54,15 @@ export function ProjectRow({
     onToggleProjectFocus,
     onMoveUp,
     onMoveDown,
+    onMoveToArea,
 }: ProjectRowProps) {
     const nextAction = taskSummary?.nextAction;
     const taskCount = taskSummary?.activeTaskCount ?? 0;
     const taskCountLabel = `${taskCount} ${t('common.tasks')}`;
     const showFocusedWarning = isFocusedProjectMissingNextAction(project, taskSummary);
     const swipeableRef = useRef<Swipeable>(null);
+    const [menuOpen, setMenuOpen] = useState(false);
+    const pendingAction = useRef<(() => void) | null>(null);
 
     const handleDuplicate = () => {
         swipeableRef.current?.close();
@@ -85,12 +90,16 @@ export function ProjectRow({
         );
     };
 
-    // Long-press offers Move up / Move down, the same buttons areas and sections use (#1263).
+    // Keep the existing long-press and accessibility actions alongside the visible menu.
     const moveActions = [
         onMoveUp && { name: 'moveUp', label: t('projects.moveUp'), run: onMoveUp },
         onMoveDown && { name: 'moveDown', label: t('projects.moveDown'), run: onMoveDown },
     ].filter((action): action is { name: string; label: string; run: () => void } => Boolean(action));
 
+    const menuActions = [
+        ...moveActions,
+        ...(onMoveToArea ? [{ name: 'moveToArea', label: t('projects.areaLabel'), run: onMoveToArea }] : []),
+    ];
     const showMoveMenu = () => {
         if (moveActions.length === 0) return;
         void Haptics.selectionAsync().catch(() => {});
@@ -140,8 +149,8 @@ export function ProjectRow({
                 onPress={() => onOpenProject(project)}
                 onLongPress={moveActions.length > 0 ? showMoveMenu : undefined}
                 accessibilityRole="button"
-                accessibilityActions={moveActions.map(({ name, label }) => ({ name, label }))}
-                onAccessibilityAction={(event) => moveActions.find((action) => action.name === event.nativeEvent.actionName)?.run()}
+                accessibilityActions={menuActions.map(({ name, label }) => ({ name, label }))}
+                onAccessibilityAction={(event) => menuActions.find((action) => action.name === event.nativeEvent.actionName)?.run()}
             >
                 <View style={styles.projectContent}>
                     <View style={styles.projectTitleRow}>
@@ -177,6 +186,17 @@ export function ProjectRow({
                 </View>
             </TouchableOpacity>
             <View testID={`project-row-trailing-${project.id}`} style={styles.projectTrailingControls}>
+                {menuActions.length > 0 && project.status !== 'archived' ? (
+                    <TouchableOpacity
+                        testID={`project-row-menu-${project.id}`}
+                        onPress={() => setMenuOpen(true)}
+                        style={styles.focusButton}
+                        accessibilityRole="button"
+                        accessibilityLabel={`${t('common.more')}: ${project.title}`}
+                    >
+                        <MoreHorizontal size={18} color={tc.secondaryText} />
+                    </TouchableOpacity>
+                ) : null}
                 <View
                     accessible
                     accessibilityLabel={taskCountLabel}
@@ -213,6 +233,7 @@ export function ProjectRow({
     );
 
     return (
+        <>
         <Swipeable
             ref={swipeableRef}
             renderLeftActions={renderLeftActions}
@@ -227,5 +248,39 @@ export function ProjectRow({
         >
             {rowContent}
         </Swipeable>
+        <Modal
+            visible={menuOpen}
+            transparent
+            animationType="fade"
+            presentationStyle="overFullScreen"
+            onRequestClose={() => setMenuOpen(false)}
+            onDismiss={() => {
+                const action = pendingAction.current;
+                pendingAction.current = null;
+                action?.();
+            }}
+        >
+            <Pressable style={styles.overlay} onPress={() => setMenuOpen(false)}>
+                <Pressable style={[styles.pickerCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]} onPress={(event) => event.stopPropagation()}>
+                    <Text testID={`project-menu-title-${project.id}`} numberOfLines={2} accessibilityLabel={project.title} style={[styles.linkModalTitle, { color: tc.text }]}>{project.title}</Text>
+                    {menuActions.map((action) => (
+                        <TouchableOpacity
+                            key={action.name}
+                            accessibilityRole="button"
+                            accessibilityLabel={action.label}
+                            style={[styles.pickerRow, { borderColor: tc.border, minHeight: 44 }]}
+                            onPress={() => {
+                                if (Platform.OS === 'ios') pendingAction.current = action.run;
+                                setMenuOpen(false);
+                                if (Platform.OS !== 'ios') action.run();
+                            }}
+                        >
+                            <Text style={[styles.pickerRowText, { color: tc.text }]}>{action.label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </Pressable>
+            </Pressable>
+        </Modal>
+        </>
     );
 }

@@ -1,6 +1,6 @@
 import React from 'react';
 import renderer from 'react-test-renderer';
-import { Alert, Text } from 'react-native';
+import { Alert, Modal, Platform, Text } from 'react-native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ProjectRow } from './ProjectRow';
@@ -22,6 +22,7 @@ vi.mock('expo-haptics', () => ({
 vi.mock('lucide-react-native', () => ({
   AlertTriangle: (props: any) => React.createElement('AlertTriangle', props),
   Copy: (props: any) => React.createElement('Copy', props),
+  MoreHorizontal: (props: any) => React.createElement('MoreHorizontal', props),
   Star: (props: any) => React.createElement('Star', props),
   Trash2: (props: any) => React.createElement('Trash2', props),
 }));
@@ -111,6 +112,34 @@ describe('ProjectRow', () => {
     renderer.act(() => open.props.onAccessibilityAction({ nativeEvent: { actionName: 'moveDown' } }));
     expect(onMoveDown).toHaveBeenCalledTimes(2);
     renderer.act(() => tree.unmount());
+  });
+
+  it.each(['android', 'ios'])('opens a visible project menu without opening detail on %s', (os) => {
+    const previous = Platform.OS;
+    Platform.OS = os as typeof Platform.OS;
+    const menuProject = { ...project, title: 'A long imported project title '.repeat(120) };
+    const onOpenProject = vi.fn();
+    const onMoveToArea = vi.fn();
+    let tree!: renderer.ReactTestRenderer;
+    renderer.act(() => { tree = renderer.create(
+      <ProjectRow project={menuProject} tc={tc} focusedCount={0} statusPalette={statusPalette as any}
+        t={(key) => key} onDeleteProject={vi.fn()} onDuplicateProject={vi.fn()}
+        onOpenProject={onOpenProject} onToggleProjectFocus={vi.fn()} onMoveToArea={onMoveToArea}
+        onMoveUp={vi.fn()} onMoveDown={vi.fn()} />,
+    ); });
+    renderer.act(() => tree.root.findByProps({ testID: 'project-row-menu-project-1' }).props.onPress());
+    expect(tree.root.findByType(Modal).props.visible).toBe(true);
+    expect(tree.root.findByProps({ testID: 'project-menu-title-project-1' }).props).toEqual(expect.objectContaining({ numberOfLines: 2, accessibilityLabel: menuProject.title }));
+    renderer.act(() => tree.root.findByProps({ accessibilityLabel: 'projects.areaLabel' }).props.onPress());
+    expect(onOpenProject).not.toHaveBeenCalled();
+    expect(tree.root.findByType(Modal).props.visible).toBe(false);
+    if (os === 'ios') {
+      expect(onMoveToArea).not.toHaveBeenCalled();
+      renderer.act(() => tree.root.findByType(Modal).props.onDismiss());
+    }
+    expect(onMoveToArea).toHaveBeenCalledTimes(1);
+    renderer.act(() => tree.unmount());
+    Platform.OS = previous;
   });
 
   it('has no long-press menu when the project cannot move', () => {

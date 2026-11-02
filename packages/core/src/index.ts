@@ -211,7 +211,7 @@ export * from './gmail-receipt-store';
 export * from './quick-add';
 export * from './area-filter';
 export * from './area-utils';
-export { areaOrderIdsForIntent, type AreaOrderIntent } from './area-ordering';
+export { areaOrderIdsForIntent, sortAreasForOrderDisplay, type AreaOrderIntent } from './area-ordering';
 export { countLiveProjectsByArea } from './area-project-usage';
 export * from './calendar-scheduling';
 export * from './calendar-push-run';

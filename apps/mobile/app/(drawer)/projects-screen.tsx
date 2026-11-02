@@ -7,7 +7,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AREA_PRESET_COLORS, areaOrderIdsForIntent, Attachment, collectProjectTaskLinks, DEFAULT_PROJECT_COLOR, getProjectSectionsForView, planProjectMove, Project, type ProjectAreaGroup, projectTagsForIntent, shallow, Task, type Section, type TaskSortBy, undoProjectDelete, updateProjectFromDraft, useTaskStore } from '@mindwtr/core';
 import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { runAfterCaptureRouteGone, SHEET_DISMISS_SETTLE_MS } from '@/lib/capture-route-presence';
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react-native';
+import { ChevronDown, ChevronRight, MoreHorizontal, Plus } from 'lucide-react-native';
 
 import {
   DEFAULT_PROJECT_LIST_VIEW_STATE,
@@ -159,6 +159,8 @@ export default function ProjectsScreen() {
   const [taskModalOpenKey, setTaskModalOpenKey] = useState('manual');
   const [showAreaPicker, setShowAreaPicker] = useState(false);
   const [showAreaManager, setShowAreaManager] = useState(false);
+  const [areaPickerProject, setAreaPickerProject] = useState<Project | null>(null);
+  const [managerAreaId, setManagerAreaId] = useState<string | null>(null);
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaColor, setNewAreaColor] = useState('#3b82f6');
   const [expandedAreaColorId, setExpandedAreaColorId] = useState<string | null>(null);
@@ -588,6 +590,12 @@ export default function ProjectsScreen() {
         onToggleProjectFocus={toggleProjectFocus}
         onMoveUp={moveProject(project, group, 'up')}
         onMoveDown={moveProject(project, group, 'down')}
+        onMoveToArea={project.status === 'archived' ? undefined : () => {
+          const live = getLiveMutableProject(project.id);
+          if (!live) return;
+          setAreaPickerProject(live);
+          setShowAreaPicker(true);
+        }}
       />
     );
   };
@@ -740,39 +748,55 @@ export default function ProjectsScreen() {
 
     if (item.type === 'area-header') {
       return (
-        <TouchableOpacity
-          testID={`project-area-header-${item.sectionKind}-${item.areaId}`}
-          onPress={() => toggleAreaCollapse(item.areaId)}
-          style={styles.collapsibleAreaHeader}
-          accessibilityRole="button"
-          accessibilityLabel={item.title}
-          accessibilityState={{ expanded: !item.collapsed }}
-        >
-          <View style={styles.collapsibleAreaHeaderContent}>
-            {item.icon ? (
-              <Text
-                testID={`project-area-icon-${item.areaId}`}
-                style={[styles.collapsibleAreaIcon, { color: tc.secondaryText }]}
-              >
-                {item.icon}
+        <View style={styles.areaHeaderRow}>
+          <TouchableOpacity
+            testID={`project-area-header-${item.sectionKind}-${item.areaId}`}
+            onPress={() => toggleAreaCollapse(item.areaId)}
+            style={[styles.collapsibleAreaHeader, { flex: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={item.title}
+            accessibilityState={{ expanded: !item.collapsed }}
+          >
+            <View style={styles.collapsibleAreaHeaderContent}>
+              {item.icon ? (
+                <Text
+                  testID={`project-area-icon-${item.areaId}`}
+                  style={[styles.collapsibleAreaIcon, { color: tc.secondaryText }]}
+                >
+                  {item.icon}
+                </Text>
+              ) : item.color ? (
+                <View
+                  testID={`project-area-dot-${item.areaId}`}
+                  style={[
+                    styles.collapsibleAreaDot,
+                    { backgroundColor: item.color, borderColor: tc.border },
+                  ]}
+                />
+              ) : null}
+              <Text style={[styles.collapsibleAreaHeaderText, { color: tc.secondaryText }]} numberOfLines={1}>
+                {item.title}
               </Text>
-            ) : item.color ? (
-              <View
-                testID={`project-area-dot-${item.areaId}`}
-                style={[
-                  styles.collapsibleAreaDot,
-                  { backgroundColor: item.color, borderColor: tc.border },
-                ]}
-              />
-            ) : null}
-            <Text style={[styles.collapsibleAreaHeaderText, { color: tc.secondaryText }]} numberOfLines={1}>
-              {item.title}
-            </Text>
-          </View>
-          {item.collapsed
-            ? <ChevronRight size={16} color={tc.secondaryText} strokeWidth={2.2} />
-            : <ChevronDown size={16} color={tc.secondaryText} strokeWidth={2.2} />}
-        </TouchableOpacity>
+            </View>
+            {item.collapsed
+              ? <ChevronRight size={16} color={tc.secondaryText} strokeWidth={2.2} />
+              : <ChevronDown size={16} color={tc.secondaryText} strokeWidth={2.2} />}
+          </TouchableOpacity>
+          {areaById.has(item.areaId) ? (
+            <TouchableOpacity
+              testID={`project-area-menu-${item.sectionKind}-${item.areaId}`}
+              style={styles.focusButton}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('projects.manageAreas')}: ${item.title}`}
+              onPress={() => {
+                setManagerAreaId(item.areaId);
+                setShowAreaManager(true);
+              }}
+            >
+              <MoreHorizontal size={18} color={tc.secondaryText} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
       );
     }
 
@@ -939,6 +963,7 @@ export default function ProjectsScreen() {
   };
 
   const openAreaPicker = () => {
+    setAreaPickerProject(null);
     if (!selectedProject || !getLiveMutableProject(selectedProject.id)) return;
     openProjectAreaPicker({
       addArea,
@@ -1099,11 +1124,14 @@ export default function ProjectsScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel={t('areas.manage')}
-              onPress={() => setShowAreaManager(true)}
+              accessibilityLabel={t('projects.manageAreas')}
+              onPress={() => {
+                setManagerAreaId(null);
+                setShowAreaManager(true);
+              }}
               style={[styles.areaSortButton, { borderColor: tc.border, minHeight: 44, justifyContent: 'center' }]}
             >
-              <CompactText style={[styles.areaSortText, { color: tc.text }]}>{t('areas.manage')}</CompactText>
+              <CompactText style={[styles.areaSortText, { color: tc.text }]}>{t('projects.manageAreas')}</CompactText>
             </TouchableOpacity>
           </View>
           {showTagFilter ? renderProjectTagFilters() : null}
@@ -1249,6 +1277,7 @@ export default function ProjectsScreen() {
         onClose={() => setImagePreviewAttachment(null)}
       />
       <ProjectAreaModals
+        managerAreaId={managerAreaId}
         addArea={addArea}
         areaListMaxHeight={areaListMaxHeight}
         areaManagerListMaxHeight={areaManagerListMaxHeight}
@@ -1260,19 +1289,29 @@ export default function ProjectsScreen() {
         onCloseAreaManager={() => {
           setShowAreaManager(false);
           setExpandedAreaColorId(null);
+          setManagerAreaId(null);
         }}
         onDeleteArea={deleteArea}
         onSetExpandedAreaColorId={setExpandedAreaColorId}
         onSetNewAreaColor={setNewAreaColor}
         onSetNewAreaName={setNewAreaName}
-        onSetSelectedProject={setSelectedProject}
-        onSetShowAreaManager={setShowAreaManager}
-        onSetShowAreaPicker={setShowAreaPicker}
+        onSetSelectedProject={(project) => {
+          if (areaPickerProject) setAreaPickerProject(project);
+          else setSelectedProject(project);
+        }}
+        onSetShowAreaManager={(visible) => {
+          setManagerAreaId(null);
+          setShowAreaManager(visible);
+        }}
+        onSetShowAreaPicker={(visible) => {
+          setShowAreaPicker(visible);
+          if (!visible) setAreaPickerProject(null);
+        }}
         reorderAreas={reorderAreas}
         onShowToast={showToast}
         overlayModalPresentation={overlayModalPresentation}
         pickerCardMaxHeight={pickerCardMaxHeight}
-        selectedProject={selectedProject}
+        selectedProject={areaPickerProject ?? selectedProject}
         showAreaManager={showAreaManager}
         showAreaPicker={showAreaPicker}
         sortedAreas={sortedAreas}

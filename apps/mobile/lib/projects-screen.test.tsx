@@ -20,6 +20,7 @@ const asyncStorageMock = vi.hoisted(() => ({
 }));
 
 const routeParams = vi.hoisted(() => ({ current: {} as Record<string, string> }));
+const areaModals = vi.hoisted(() => ({ props: null as React.ComponentProps<typeof import('../components/projects-screen/ProjectAreaModals').ProjectAreaModals> | null }));
 const detailModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
 const tagPicker = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
 const taskEditModal = vi.hoisted(() => ({ props: null as Record<string, any> | null }));
@@ -117,6 +118,8 @@ beforeEach(() => {
   filteringHarness.useRealHook = false;
   routeParams.current = {};
   detailModal.props = null;
+  areaModals.props = null;
+  storeState.areas = [];
   taskEditModal.props = null;
   focusEffect.callback = null;
   consumePendingCaptureTaskOpenMock.mockReset();
@@ -232,9 +235,9 @@ vi.mock('@/hooks/use-theme-colors', () => ({
 
 vi.mock('@/hooks/use-mobile-area-filter', () => ({
   useMobileAreaFilter: () => ({
-    areaById: new Map<string, Area>(),
+    areaById: new Map<string, Area>((storeState.areas ?? []).map((area: Area) => [area.id, area])),
     resolvedAreaFilter: { included: [], excluded: [] },
-    sortedAreas: [],
+    sortedAreas: storeState.areas ?? [],
   }),
 }));
 
@@ -301,7 +304,7 @@ vi.mock('@/components/projects-screen/use-project-attachments', () => ({
   }),
 }));
 
-vi.mock('@/components/projects-screen/ProjectAreaModals', () => ({ ProjectAreaModals: () => null }));
+vi.mock('@/components/projects-screen/ProjectAreaModals', () => ({ ProjectAreaModals: (props: NonNullable<typeof areaModals.props>) => { areaModals.props = props; return null; } }));
 vi.mock('@/components/projects-screen/ProjectDetailModal', () => ({
   ProjectDetailModal: (props: Record<string, any>) => {
     detailModal.props = props;
@@ -904,5 +907,58 @@ describe('ProjectsScreen view state hydration', () => {
     // native windowing/layout, which react-test-renderer can't provide here.
     const rendered = list.props.renderItem({ item: projectRow, index: 0 });
     expect(rendered.props.taskSummary).toEqual({ activeTaskCount: 1, nextAction: testNextActionTask });
+  });
+});
+
+
+describe('ProjectsScreen management shortcuts', () => {
+  it.each(['active', 'deferred', 'archived'])('targets the real area without collapsing its %s header', async (sectionKind) => {
+    storeState.areas = [{ ...testArea, id: 'work', name: 'Work' }];
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); });
+    const list = tree.root.findByType(FlatList);
+    const item = { type: 'area-header', areaId: 'work', title: 'Work', sectionKind, collapsed: false };
+    let header!: ReturnType<typeof create>;
+    act(() => { header = create(list.props.renderItem({ item, index: 0 })); });
+    asyncStorageMock.setItem.mockClear();
+    act(() => header.root.findByProps({ testID: `project-area-menu-${sectionKind}-work` }).props.onPress());
+    expect(areaModals.props?.managerAreaId).toBe('work');
+    expect(areaModals.props?.showAreaManager).toBe(true);
+    expect(asyncStorageMock.setItem).not.toHaveBeenCalled();
+    expect(header.root.findByProps({ testID: `project-area-header-${sectionKind}-work` }).props.accessibilityState).toEqual({ expanded: true });
+    let synthetic!: ReturnType<typeof create>;
+    act(() => { synthetic = create(list.props.renderItem({ item: { ...item, areaId: '__no_area__' }, index: 1 })); });
+    expect(synthetic.root.findAllByProps({ testID: `project-area-menu-${sectionKind}-__no_area__` })).toHaveLength(0);
+    act(() => { header.unmount(); synthetic.unmount(); tree.unmount(); });
+  });
+
+  it('opens the area picker directly and applies the picker result without opening project detail', async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); });
+    const list = tree.root.findByType(FlatList);
+    const item = list.props.data.find((row: { type: string }) => row.type === 'project');
+    const row = list.props.renderItem({ item, index: 0 });
+    act(() => row.props.onMoveToArea());
+    expect(areaModals.props?.showAreaPicker).toBe(true);
+    expect(areaModals.props?.selectedProject?.id).toBe(testProject.id);
+    expect(detailModal.props?.project).toBeNull();
+    act(() => areaModals.props?.onSetSelectedProject({ ...testProject, areaId: 'work' }));
+    expect(detailModal.props?.project).toBeNull();
+    act(() => tree.unmount());
+  });
+
+  it('blocks the row shortcut if its project was archived or deleted after render', async () => {
+    let tree!: ReturnType<typeof create>;
+    await act(async () => { tree = create(<ProjectsScreen />); });
+    const list = tree.root.findByType(FlatList);
+    const item = list.props.data.find((row: { type: string }) => row.type === 'project');
+    const row = list.props.renderItem({ item, index: 0 });
+    for (const live of [[{ ...testProject, status: 'archived' }], []]) {
+      storeState._allProjects = live;
+      act(() => row.props.onMoveToArea());
+      expect(areaModals.props?.showAreaPicker).toBe(false);
+      expect(detailModal.props?.project).toBeNull();
+    }
+    act(() => tree.unmount());
   });
 });
