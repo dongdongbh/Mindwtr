@@ -1,6 +1,7 @@
 import { X } from 'lucide-react';
 
 import { cn } from '../lib/utils';
+import { isImeComposing } from '../lib/ime';
 
 type Props = {
     t: (key: string) => string;
@@ -33,7 +34,7 @@ export function InboxNextActionDrafts({
                 value={nextActionDraft}
                 onChange={(e) => setNextActionDraft(e.target.value)}
                 onKeyDown={(e) => {
-                    if (e.key !== 'Enter' || !nextActionDraft.trim()) return;
+                    if (isImeComposing(e) || e.key !== 'Enter' || !nextActionDraft.trim()) return;
                     e.preventDefault();
                     setExtraActionDrafts([...extraActionDrafts, '']);
                 }}
@@ -49,7 +50,7 @@ export function InboxNextActionDrafts({
                             extraActionDrafts.map((value, i) => (i === index ? e.target.value : value)),
                         )}
                         onKeyDown={(e) => {
-                            if (e.key !== 'Enter' || index !== extraActionDrafts.length - 1 || !draft.trim()) return;
+                            if (isImeComposing(e) || e.key !== 'Enter' || index !== extraActionDrafts.length - 1 || !draft.trim()) return;
                             e.preventDefault();
                             setExtraActionDrafts([...extraActionDrafts, '']);
                         }}

@@ -11,6 +11,7 @@ import { DEFAULT_PROJECT_COLOR, filterProjectsBySelectedArea, formatTimeEstimate
 } from '@mindwtr/core';
 
 import { cn } from '../lib/utils';
+import { isImeComposing } from '../lib/ime';
 import { useNativeDateInputLocale } from '../hooks/use-native-date-input-locale';
 import { InboxNextActionDrafts } from './InboxNextActionDrafts';
 import {
@@ -385,7 +386,7 @@ export function InboxProcessingQuickPanel({
     useEffect(() => {
         const handleDocumentKeyDown = (event: globalThis.KeyboardEvent) => {
             if (event.defaultPrevented) return;
-            if (event.key === 'Process' || event.isComposing) return;
+            if (isImeComposing(event)) return;
             if (!isQuickProcessingSubmitShortcut(event)) return;
             if (!shouldCommitQuickProcessingFromShortcut(event.target)) return;
 
@@ -407,7 +408,7 @@ export function InboxProcessingQuickPanel({
 
     const handlePanelKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
         if (event.defaultPrevented) return;
-        if (event.key === 'Process' || event.nativeEvent.isComposing) return;
+        if (isImeComposing(event)) return;
         if (isQuickProcessingSubmitShortcut(event)) return;
         if (event.key !== 'Enter' || event.shiftKey || event.altKey) return;
         if (!shouldCommitQuickProcessingFromEnter(event.target)) return;
