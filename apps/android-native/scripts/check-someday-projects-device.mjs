@@ -169,10 +169,12 @@ try {
     const nextTask = seen.items.slice(heading + 1).find((item) => item[0] !== 'project');
 
     // Someday from the More sheet, scrolled to the section.
-    let nodes = await tapExpecting(tab(await screen(), en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
-    nodes = await device.settle(nodes);
-    nodes = await tapExpecting(withDescription(nodes, en['nav.someday']) ?? fail('no Someday tile'),
-        (current) => Boolean(tagged(current, 'menu-screen')) && Boolean(textNode(current, en['someday.title'])), 'Someday');
+    const openSomeday = async () => {
+        const sheet = await device.settle(await tapExpecting(tab(await screen(), en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet'));
+        return tapExpecting(withDescription(sheet, en['nav.someday']) ?? fail('no Someday tile'),
+            (current) => Boolean(tagged(current, 'menu-screen')) && Boolean(textNode(current, en['someday.title'])), 'Someday');
+    };
+    let nodes = await openSomeday();
     nodes = await device.reveal(PROJECT, 60);
     nodes = await device.settle(nodes);
     const sectionNode = textNode(nodes, SECTION) ?? fail(`no heading "${SECTION}" beside the project`);
@@ -212,7 +214,9 @@ try {
         await sleep(1500);
         return core('view');
     };
-    await waitFor('Someday again', (current) => Boolean(textNode(current, en['someday.title'])), 15_000);
+    // The project opened on the Projects tab (openProjects while that tab holds Projects), so Back lands there: Someday again from the More sheet.
+    await sleep(1500);
+    if (!textNode(await screen(), en['someday.title'])) await openSomeday();
     seen = await moveTo(noSection, true);
     const noSectionHeading = seen.items.findIndex((item) => item[0] === 'heading' && item[2] === noSection);
     check(seen.project?.section === null && noSectionHeading >= 0 && seen.items.slice(noSectionHeading + 1).some((item) => item[0] === 'project' && item[1] === seen.project.id),
