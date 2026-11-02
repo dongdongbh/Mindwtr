@@ -6,6 +6,8 @@ import type { Area, AppSettings, Project, Task } from '@mindwtr/core';
 
 import ProjectsScreen from '../app/(drawer)/projects-screen';
 
+const routeParams = vi.hoisted(() => ({ current: {} as { projectId?: string } }));
+
 const asyncStorageMock = vi.hoisted(() => ({
   getItem: vi.fn(),
   setItem: vi.fn(),
@@ -76,6 +78,7 @@ const storeState: {
 };
 
 beforeEach(() => {
+  routeParams.current = { projectId: testProject.id };
   asyncStorageMock.getItem.mockReset();
   asyncStorageMock.getItem.mockResolvedValue(null);
   asyncStorageMock.setItem.mockReset();
@@ -109,7 +112,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
 vi.mock('expo-router', async () => {
   const react = await import('react');
   return {
-    useLocalSearchParams: () => ({ projectId: 'project-1' }),
+    useLocalSearchParams: () => routeParams.current,
     usePathname: () => '/projects-screen',
     useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
     useFocusEffect: (callback: () => void | (() => void)) => react.useEffect(callback, [callback]),
@@ -267,7 +270,7 @@ vi.mock('../lib/app-log', () => ({
   logWarn: vi.fn(),
 }));
 
-const renderOpenedProject = async () => {
+const renderScreen = async () => {
   let tree!: ReturnType<typeof create>;
   await act(async () => {
     tree = create(<ProjectsScreen />);
@@ -281,14 +284,16 @@ const renderOpenedProject = async () => {
 
 describe('ProjectsScreen per-project sort persistence', () => {
   it('opens area management directly from the Projects list', async () => {
-    const tree = await renderOpenedProject();
+    routeParams.current = {};
+    const tree = await renderScreen();
+    expect(modalCapture.overlayVisible).toBe(false);
     expect(modalCapture.areaManagerVisible).toBe(false);
-    act(() => tree.root.findByProps({ accessibilityLabel: 'areas.manage' }).props.onPress());
+    act(() => tree.root.findByProps({ accessibilityLabel: 'projects.manageAreas' }).props.onPress());
     expect(modalCapture.areaManagerVisible).toBe(true);
   });
 
   it('initializes the sort to default when the project has no persisted sort', async () => {
-    await renderOpenedProject();
+    await renderScreen();
 
     expect(modalCapture.overlayVisible).toBe(true);
     expect(modalCapture.projectTaskSortBy).toBe('default');
@@ -297,13 +302,13 @@ describe('ProjectsScreen per-project sort persistence', () => {
   it('initializes the sort from the project\'s persisted taskSortBy', async () => {
     storeState.projects = [{ ...testProject, taskSortBy: 'due' }];
 
-    await renderOpenedProject();
+    await renderScreen();
 
     expect(modalCapture.projectTaskSortBy).toBe('due');
   });
 
   it('persists a sort change to the open project via updateProject', async () => {
-    await renderOpenedProject();
+    await renderScreen();
 
     act(() => {
       modalCapture.onProjectTaskSortByChange?.('title');
