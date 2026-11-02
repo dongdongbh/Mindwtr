@@ -163,7 +163,7 @@ let stub = null;
 const started = new Date(Date.now() - 60_000).toISOString();
 const cleanup = cleanupOnExit([
     () => execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${PORT}`], { stdio: 'ignore' }),
-    () => sh(`pm grant ${PKG} ${MIC}`),
+    () => { sh(`pm clear-permission-flags ${PKG} ${MIC} user-set user-fixed`); sh(`pm grant ${PKG} ${MIC}`); },
     () => { void stub?.close(); },
     () => sh(`rm -f ${UI_FILE}`),
 ]);
@@ -175,6 +175,7 @@ try {
     stub = await serveStub();
     execFileSync(adbBin, ['-s', serial, 'reverse', `tcp:${PORT}`, `tcp:${PORT}`], { stdio: 'inherit' });
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
+    sh(`pm clear-permission-flags ${PKG} ${MIC} user-set user-fixed`);
     sh(`pm grant ${PKG} ${MIC}`);
     await restart();
 
@@ -252,6 +253,8 @@ try {
     await tapExpecting(withDescription(nodes, en['common.close']) ?? fail('no Close'), (current) => !popup(current), 'the popup closed');
 
     // (5) The permission refused: RN's alert, nothing records.
+    // Two denials make Android stop asking ("don't ask again"), and pm revoke keeps that flag: clear it, so each run sees the prompt.
+    sh(`pm clear-permission-flags ${PKG} ${MIC} user-set user-fixed`);
     sh(`pm revoke ${PKG} ${MIC}`);
     await restart();
     nodes = await openPopup();
@@ -268,6 +271,7 @@ try {
     check(nodes.some((node) => node.text === en['quickAdd.audioPermissionTitle']), `(5) a refused permission shows RN's alert: ${en['quickAdd.audioPermissionTitle']}`);
     await tapExpecting(alertOk(nodes), (current) => !alertShown(current), 'the alert closed');
     check(!recording(await screen()) && recordings().length === 0, '(5) nothing records');
+    sh(`pm clear-permission-flags ${PKG} ${MIC} user-set user-fixed`);
     sh(`pm grant ${PKG} ${MIC}`);
 
     // Speech off again, for the checks after this one.
