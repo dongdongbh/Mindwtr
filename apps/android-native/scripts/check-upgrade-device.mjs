@@ -60,8 +60,10 @@
 //       pushes three dated tasks to the Mindwtr calendar it makes on the phone's first owned account. With the app closed, one
 //       task's widget check-off waits in RN's Undo file and one event is deleted from the calendar provider. The native app's
 //       first start keeps RN's calendar (same ID, no second Mindwtr calendar), removes the done task's event, makes the
-//       deleted event again, updates the third in place, and logs v1.3.8/native-calendar-push adopted=existing. At the end
-//       the run deletes the calendar it made and every event in it, and prints the account type (never the account name).
+//       deleted event again, updates the third in place, and logs v1.3.8/native-calendar-push adopted=existing. Then, in the
+//       native Settings › Calendar push card, a color change leaves one Mindwtr calendar in the new color with both live
+//       events, and Delete Mindwtr calendar removes it, its events, the saved ID and the rows. At the end the run deletes
+//       every calendar it made and every event in it, and prints the account type (never the account name).
 //   11  an RN user's File Sync folder (pass S5): RN v1.3.2 picks Download/mts5u<run> in its own Sync screen (File, Select
 //       Folder, the system folder picker) and syncs into it. The native app shows RN's folder on its Sync screen, and its Sync
 //       now writes into data.json (a capture RN left queued, which the native boot imports) with no new pick: RN's grant is
@@ -1633,7 +1635,7 @@ const scenarioCalendarPush = async () => {
         await drained(items, 'three dated captures');
         // RN's own switch: the first Switch on Settings › Calendar is the push card's (calendar-settings-screen.tsx v1.3.2).
         openLink('mindwtr-upgradetest://settings?settingsScreen=calendar');
-        const nodes = await waitFor('RN\'s Settings › Calendar', (current) => current.some((node) => node.text === RN_PUSH_TITLE), 60_000);
+        let nodes = await waitFor('RN\'s Settings › Calendar', (current) => current.some((node) => node.text === RN_PUSH_TITLE), 60_000);
         const pushSwitch = nodes.find((node) => node.class === 'android.widget.Switch');
         check(pushSwitch?.checked === 'false', '(12) RN shows Push tasks to calendar off');
         await tap(pushSwitch);
@@ -1684,12 +1686,58 @@ const scenarioCalendarPush = async () => {
         check(liveEvents(calendarId).length === 2, '(12) the calendar holds exactly the two live tasks\' events');
         check(context.releaseCheck === 'v1.3.8/native-calendar-push' && context.outcome === 'pushed' && context.adopted === 'existing'
             && context.rowsBefore === '3' && context.rowsAfter === '2', `(12) the diagnostics line: ${JSON.stringify(context)}`);
+
+        // The native Settings push card (review N9): a color change makes a new Mindwtr calendar in that color with the live
+        // tasks' events (Android keeps a calendar's color only from its creation), then Delete Mindwtr calendar removes it.
+        device.launch(NATIVE_ACTIVITY);
+        nodes = await nativeScreen();
+        await tap(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'));
+        nodes = await waitFor('the More sheet', (current) => Boolean(tagged(current, 'more-sheet')), 10_000);
+        await tap(withDescription(nodes, en['nav.settings']) ?? fail('no Settings tile'));
+        nodes = await waitFor('native Settings', (current) => Boolean(tagged(current, 'settings-main')), 20_000);
+        const scrollTo = async (find, description) => {
+            let current = await screen();
+            for (let step = 0; step < 12 && !find(current); step += 1) current = await device.swipe(current, 'down');
+            return find(current) ?? fail(`no ${description} on screen`);
+        };
+        const rowOf = (label) => (current) => current.find((node) => (node['content-desc'] ?? '').startsWith(`${label}. `));
+        await tap(await scrollTo(rowOf(en['settings.advanced']), 'Advanced row'));
+        await waitFor('native Settings › Advanced', (current) => Boolean(tagged(current, 'settings-advanced')), 20_000);
+        await tap(await scrollTo(rowOf(en['settings.calendar']), 'Calendar row'));
+        nodes = await waitFor('native Settings › Calendar', (current) => Boolean(tagged(current, 'settings-calendar')), 30_000);
+        const PINK = '#DB2777';
+        const pink = (current) => current.find((node) => node['content-desc'] === `${en['settings.calendarMobile.mindwtrCalendarColor']} ${PINK}`);
+        if (!pink(nodes)) await tap(tagged(nodes, 'calendar-push') ?? fail('no push card'));
+        await tap(await scrollTo(pink, 'the pink color'));
+        const recolored = () => mindwtrCalendars().filter((row) => !earlier.has(row._id) && row._id !== calendarId);
+        await until('the Mindwtr calendar made again in the new color', () => recolored().length === 1 && liveEvents(recolored()[0]._id).length === 2
+            && !mindwtrCalendars().some((row) => row._id === calendarId), 60_000);
+        const newId = recolored()[0]._id;
+        made.push(newId);
+        const color = calendarRows(CALENDARS, ['_id', 'calendar_color', 'account_type'], `_id=${newId}`)[0];
+        console.log(`info - the recolored Mindwtr calendar's account type: ${color?.account_type}`);
+        check(Number(color?.calendar_color) === ((0xFF000000 | parseInt(PINK.slice(1), 16)) | 0) && liveEvents(calendarId).length === 0
+            && mindwtrCalendars().filter((row) => !earlier.has(row._id)).length === 1,
+            '(12) N9: a color change in the native card leaves one Mindwtr calendar, in the new color, with the two live events');
+        const deleteRow = (current) => current.find((node) => node['content-desc'] === en['settings.calendarMobile.deleteMindwtrCalendar']);
+        await tap(await scrollTo(deleteRow, 'Delete Mindwtr calendar'));
+        const confirm = (current) => tagged(current, 'calendar-delete-confirm');
+        await tap(await waitFor('the Delete question', (current) => Boolean(confirm(current)), 15_000).then(confirm));
+        await until('the Mindwtr calendar deleted', () => !mindwtrCalendars().some((row) => !earlier.has(row._id)), 60_000);
+        await stopApp();
+        const deletedKeys = asyncStorage('12-deleted');
+        check(liveEvents(newId).length === 0 && !deletedKeys.has(PUSH_KEYS.calendarId) && pushRows('12-deleted').size === 0,
+            '(12) N9: Delete Mindwtr calendar removes the calendar, its events, the saved ID and the pushed-event rows');
     } finally {
-        // Every Mindwtr calendar this run made goes, and its events with it (the provider deletes a calendar's events).
-        made = [...new Set([...made, ...mindwtrCalendars().filter((row) => !earlier.has(row._id)).map((row) => row._id)])];
-        for (const id of made) {
+        // Every Mindwtr calendar this run made goes, and its events with it (the provider deletes a calendar's events). The
+        // known IDs go first, so a list that fails now still leaves none of them behind (review N10); then the list finds any other.
+        const remove = (id) => {
             try { calendarCommand(`delete --uri ${CALENDARS}/${id}`); } catch (error) { console.log(`note - calendar ${id} delete: ${error.message}`); }
-        }
+        };
+        made.forEach(remove);
+        const others = mindwtrCalendars().filter((row) => !earlier.has(row._id) && !made.includes(row._id)).map((row) => row._id);
+        others.forEach(remove);
+        made = [...new Set([...made, ...others])];
         const left = made.filter((id) => mindwtrCalendars().some((row) => row._id === id) || liveEvents(id).length > 0);
         console.log(`cleanup - deleted ${made.length} Mindwtr calendar(s) this run made; left: ${left.length}`);
         if (left.length) fail(`(12) cleanup left calendar(s) ${left.join(',')}`);
