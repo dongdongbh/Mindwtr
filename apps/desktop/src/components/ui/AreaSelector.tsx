@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { Area } from '@mindwtr/core';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { ModalPortal } from '../ModalPortal';
 import { useDropdownPosition } from './use-dropdown-position';
 
@@ -135,6 +136,7 @@ export function AreaSelector({
     // quick-action menu) from reacting to keys the open dropdown consumes —
     // the dropdown is portaled outside any [role="menu"] ancestor.
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
@@ -176,7 +178,7 @@ export function AreaSelector({
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key !== 'Enter') return;
+        if (isImeComposing(event) || event.key !== 'Enter') return;
         const name = query.trim();
         if (!name) return;
 

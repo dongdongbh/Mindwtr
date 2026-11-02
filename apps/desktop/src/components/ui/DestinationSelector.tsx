@@ -10,6 +10,7 @@ import {
 import { ChevronDown, Folder, MapPin, Plus } from 'lucide-react';
 
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { ModalPortal } from '../ModalPortal';
 import { useDropdownPosition } from './use-dropdown-position';
 
@@ -165,6 +166,7 @@ export function DestinationSelector({
         options[nextIndex]?.focus();
     };
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
@@ -210,7 +212,7 @@ export function DestinationSelector({
     // to file the draft under the alphabetically first project), and with no
     // match it runs the create action only when exactly one is on offer.
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key !== 'Enter' || !normalizedQuery) return;
+        if (isImeComposing(event) || event.key !== 'Enter' || !normalizedQuery) return;
         const firstProject = filteredProjects[0];
         const firstArea = filteredAreas[0];
         if (firstProject || firstArea) {

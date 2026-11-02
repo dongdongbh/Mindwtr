@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import type { Section } from '@mindwtr/core';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { useDropdownPosition } from './use-dropdown-position';
 
 interface SectionSelectorProps {
@@ -91,6 +92,7 @@ export function SectionSelector({
     };
 
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             closeDropdown();
@@ -119,7 +121,7 @@ export function SectionSelector({
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key !== 'Enter') return;
+        if (isImeComposing(event) || event.key !== 'Enter') return;
         const title = query.trim();
         if (!title) return;
 

@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEve
 import { getProjectChoiceState, groupProjectsForPicker, useTaskStore, type Project } from '@mindwtr/core';
 import { ChevronDown, Plus } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { isImeComposing } from '../../lib/ime';
 import { ModalPortal } from '../ModalPortal';
 import { useDropdownPosition } from './use-dropdown-position';
 
@@ -132,6 +133,7 @@ export function ProjectSelector({
     };
 
     const handleDropdownKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        if (isImeComposing(event)) return;
         if (event.key === 'Escape') {
             event.preventDefault();
             event.stopPropagation();
@@ -173,7 +175,7 @@ export function ProjectSelector({
     };
 
     const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-        if (event.key !== 'Enter') return;
+        if (isImeComposing(event) || event.key !== 'Enter') return;
         const title = query.trim();
         if (!title) return;
 
