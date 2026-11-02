@@ -76,7 +76,7 @@ class WriteJournal(
             // The task editor's "..." menu (EditorMenu.kt): the action's request UUID, its task, and its kind (core's runTaskEditorAction).
             "taskEditorAction" to "{requestId,taskId,kind}",
         ) + listOf("archiveAction", "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction",
-            "boardCreate", "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "projectNextAction",
+            "boardCreate", "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "projectNextAction", "taskCompletedAt",
             "savedSearchDelete", "savedSearchSort", "generalSetting", "gtdSetting", "dataSetting", "notificationsSetting", "manageEditor", "manageDelete", "syncPreference",
             "setAISetting", "openAISettings", "calendarSetting").associateWith { "{requestId}" }
         val WRITES = SHAPES.keys

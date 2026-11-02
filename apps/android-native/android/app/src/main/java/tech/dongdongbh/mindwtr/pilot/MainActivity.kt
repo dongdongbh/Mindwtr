@@ -292,6 +292,8 @@ class MainActivity : FragmentActivity() {
                 if (writable) NextActionPrompt(model)
                 // The Projects screen's Manage areas sheet (#1263), over the whole screen as RN's modal.
                 if (writable) areaManager?.let { AreaOrderSheet(model, it) }
+                // RN's completion-time picker (its date and time dialogs, and its Time Spent card).
+                if (writable) CompletedAtFlow(model)
                 // RN's startup prompts (the welcome sheet, the announcement window), over everything, as RN's root modals.
                 if (writable) StartupPromptOverlays(model)
             } } } }

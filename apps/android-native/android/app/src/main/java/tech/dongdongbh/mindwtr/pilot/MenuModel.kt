@@ -36,7 +36,7 @@ private const val WINDOW = 100
 /** The Menu tab's commands (host-entry.ts MENU_COMMANDS); core can refuse each before writing. */
 val MENU_KINDS = setOf("activateProject", "somedayMove", "somedayUndo", "somedayTask", "somedaySection", "taskListSort", "archiveAction",
     "contextsAction", "trashAction", "reviewAction", "reviewTask", "calendarAction", "calendarCreate", "boardAction", "boardCreate",
-    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
+    "bulkAction", "focusGroup", "focusSave", "focusCriterion", "focusDelete", "focusReorder", "bulkCreate", "mindSweepAdd", "taskCompletedAt", "areaOrder", "areaColor", "projectNextAction", "savedSearchDelete", "savedSearchSort") + SETTINGS_KINDS
 /**
  * The creates whose exact request waits on disk until core answers: Someday's, the Weekly Review's project Add task, the
  * Calendar composer's Save, the Board's Duplicate, a saved Focus filter, Settings › Manage's editor Save (a new area or person),
@@ -1396,6 +1396,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
         "bulkCreate", "mindSweepAdd", "savedSearchDelete", "savedSearchSort" -> JSONObject(action.title).put("requestId", action.id)
         // The project next-action prompt's Choose, Add or Complete project (NextActionPrompt.kt): core's input and the request UUID.
         "projectNextAction" -> JSONObject(action.title).put("requestId", action.id)
+        // A row's Done at a picked time, or a finished row's time (CompletedAtFlow.kt): core's input and the request UUID.
+        "taskCompletedAt" -> JSONObject(action.title).put("requestId", action.id)
         // Settings: core's whole input and the request UUID; Manage's Someday section writes are target-state and take none.
         "generalSetting", "gtdSetting", "manageEditor", "manageDelete", "dataSetting", "syncPreference", "setAISetting", "calendarSetting" -> JSONObject(action.title).put("requestId", action.id)
         // Settings › Notifications' edit, as core gave it.
@@ -1472,6 +1474,8 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             if (action.kind == "dataSetting") settings.archiveSaveFailed(false, action)
             finish(action, reply)
         }
+        // RN's applyCompletedAt: a Done at a picked time (only mode "complete" replies completed) asks for the project's next action.
+        if (action.kind == "taskCompletedAt" && reply.optBoolean("completed")) shell.askNextAction(runtime, JSONObject(action.title).getString("taskId"))
     }
 
     private fun undoFailed() {

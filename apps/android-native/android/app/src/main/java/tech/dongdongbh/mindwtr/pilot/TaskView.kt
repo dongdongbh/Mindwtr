@@ -1,6 +1,7 @@
 package tech.dongdongbh.mindwtr.pilot
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.scrollBy
@@ -20,6 +21,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import kotlinx.coroutines.delay
 import android.util.Log
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +67,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.selected
@@ -139,7 +142,9 @@ fun TaskViewTab(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pick
             "status" -> ViewCard(row.getString("label")) {
                 val editable = row.getBoolean("editable") && !locked
                 val status = row.menuText("status")
-                if (row.getBoolean("editable") && status != null) StatusPill(status, row.getString("value"), editable, pickStatus)
+                // RN's TaskStatusBadge: a long-press on Done picks the draft's completion time (bca5e3e7e).
+                if (row.getBoolean("editable") && status != null) StatusPill(status, row.getString("value"), editable, pickStatus,
+                    if (status == "done") { { completedAt.openEditor() } } else null)
                 else Text(row.getString("value"), style = rnText(14, 600, 20), color = c.text)
             }
             "field" -> {
@@ -217,15 +222,23 @@ private fun ViewCard(label: String, spoken: String? = null, onClick: (() -> Unit
     }
 }
 
-/** RN's TaskStatusBadge in the View tab: core's status label in core's status colors; a tap opens the status choices. */
+/**
+ * RN's TaskStatusBadge in the View tab: core's status label in core's status colors; a tap opens the status choices, a
+ * long-press on Done runs [backdate] (RN's onBackdatedComplete), named for TalkBack as RN's accessibilityHint.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun StatusPill(status: String, label: String, enabled: Boolean, open: () -> Unit) {
+private fun StatusPill(status: String, label: String, enabled: Boolean, open: () -> Unit, backdate: (() -> Unit)? = null) {
     val colors = LocalTheme.current.status(status)
     val shape = RoundedCornerShape(8.dp)
     val spoken = t("task.aria.changeStatus").replace("{{status}}", label)
     Row(Modifier.fade(if (enabled) 1f else 0.6f).heightIn(min = 32.dp).clip(shape).background(colors.bg).rnBorder(1.dp, colors.border, shape)
-        .clearAndSetSemantics { contentDescription = spoken; role = Role.Button; if (enabled) onClick { open(); true } else disabled() }
-        .clickable(enabled = enabled, onClick = open).padding(horizontal = 12.dp, vertical = 6.dp),
+        .clearAndSetSemantics {
+            contentDescription = spoken; role = Role.Button
+            if (enabled) onClick { open(); true } else disabled()
+            if (enabled && backdate != null) onLongClick(t("task.completeBackdateHintMobile")) { backdate(); true }
+        }
+        .combinedClickable(enabled = enabled, onLongClick = backdate, onClick = open).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Text(label, style = rnText(12, 600), color = colors.text)
         Icon(Lucide.ChevronDown, null, tint = colors.text, modifier = Modifier.padding(start = 4.dp).size(12.dp))

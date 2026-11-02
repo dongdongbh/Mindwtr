@@ -92,9 +92,10 @@ private val FEED_LISTS = mapOf("calendar" to "calendar", "weeklyReview" to "week
 internal val UPDATE_REFUSALS = listOf("STALE_REVISION", "INVALID_INPUT", "TASK_NOT_FOUND")
 /**
  * The commands whose STALE_REVISION keeps core's line on screen: the editor save's conflict (with Reload), the status menu's update, and
- * the saves of a draft that stays open (the Calendar composer, Manage's editor), so a Save that wrote nothing never looks done.
+ * the saves of a draft that stays open (the Calendar composer, Manage's editor), so a Save that wrote nothing never looks done, and a
+ * picked completion time (CompletedAtFlow.kt), whose dialogs have closed: the next long-press reads the task again.
  */
-private val STALE_SHOWN = setOf("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo")
+private val STALE_SHOWN = setOf("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo", "taskCompletedAt")
 /** Commands core can refuse before writing: Done and its Undos, an update, an editor save, a saved search, a Process Inbox answer, and the Menu tab's commands. */
 private val REFUSABLE = setOf("complete", "completeUndo", "inboxDecisionUndo", "update", "saveDraft", "resetChecklist", "saveSearch", "inboxCommit", "inboxSkip", "capture", "captureLines", "capturePicker") + MENU_KINDS + CAPTURE_MODAL_KINDS + ATTACHMENT_KINDS + EDITOR_MENU_KINDS + PROJECT_DETAIL_KINDS
 
@@ -315,6 +316,8 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
         // RN's ProjectNextActionEditor opens over the screen the row was on (unlike the capture screen's Save & edit). The command
         // still holds busy when its reply lands, so the editor opens once it settled (perform would turn it away).
         openEditor = { taskId -> menu.whenIdle { openEditor(taskId, "task") } })
+    /** RN's completion-time picker: a Done at a picked time, a finished row's time, the editor's Done (CompletedAtFlow.kt). */
+    val completedAt = CompletedAtModel(this)
     /** A link, share or assistant note waiting to open (EntryPoints.kt). */
     // A file share's files are staged in the cache, where core's file port reads them (HostFiles), as RN's share module copies them.
     val entries = EntryRouter(this, File(app.noBackupFilesDir, "entries"), SharedFileStager(File(app.cacheDir, "shared-entries"), ContentSharedFileSource(app)))
@@ -718,14 +721,20 @@ class InboxViewModel(app: Application, private val saved: SavedStateHandle) : An
             val undo = reply.optJSONObject("undo")
             if (toast != null && undo != null) {
                 ui { showToast(null, toast.getString("message"), "info", toast.getString("undoLabel"), 5200) { undoCompletion(undo.put("id", id)) } }
-                if (askNext) {
-                    // A prompt that cannot be read is no failure of the completion: it just does not show.
-                    val prompt = runCatching { runtime.menuRead("projectNextActionPrompt", JSONObject().put("taskId", id).toString()).optJSONObject("prompt") }
-                        .onFailure { Log.w(CoreHost.TAG, "Project next action prompt not read ${failureForLog(it)}") }.getOrNull()
-                    if (prompt != null) ui { nextAction.show(prompt) }
-                }
+                if (askNext) askNextAction(runtime, id)
             }
         }
+    }
+
+    /**
+     * After a row's Done ([complete] with askNext, or a Done at a picked time, MenuModel's taskCompletedAt): RN's prompt for the
+     * project's next action when none is left (RN b98ced27a, applyCompletedAt). Runs on the action's thread.
+     */
+    internal fun askNextAction(runtime: CoreHost, taskId: String) {
+        // A prompt that cannot be read is no failure of the completion: it just does not show.
+        val prompt = runCatching { runtime.menuRead("projectNextActionPrompt", JSONObject().put("taskId", taskId).toString()).optJSONObject("prompt") }
+            .onFailure { Log.w(CoreHost.TAG, "Project next action prompt not read ${failureForLog(it)}") }.getOrNull()
+        if (prompt != null) ui { nextAction.show(prompt) }
     }
 
     /** A Process Inbox decision's Undo: core's undoInboxDecision with its receipt; an item changed since stays, with core's words. */

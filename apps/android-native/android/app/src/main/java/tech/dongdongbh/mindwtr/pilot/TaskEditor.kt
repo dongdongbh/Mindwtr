@@ -2,7 +2,9 @@ package tech.dongdongbh.mindwtr.pilot
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -769,8 +771,10 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
                     val active = editor.text("status") == status
                     // RN's requestStatusChange: moving to Waiting first asks who or what it waits for.
                     val choose = { if (status == "waiting" && !active) openWaitingPrompt() else editFields(mapOf("status" to status)) }
+                    // RN's long-press on Done (bca5e3e7e): complete with a different time, as a draft edit.
+                    val backdate = if (status == "done") t("task.completeBackdateHintMobile") to { completedAt.openEditor() } else null
                     Chip(active, !locked, "${t("taskEdit.statusLabel")}: ${t("status.$status")}", choose,
-                        Modifier.weight(1f), RoundedCornerShape(14.dp), compact = true) { color ->
+                        Modifier.weight(1f), RoundedCornerShape(14.dp), compact = true, longPress = backdate) { color ->
                         Icon(STATUS_ICONS[status] ?: Lucide.CircleDot, null, tint = color, modifier = Modifier.size(14.dp))
                         Text(t("status.$status"), style = rnText(13, 600), color = color, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.padding(start = 6.dp))
@@ -1352,15 +1356,19 @@ private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: 
  * [content] draws in the chip's text color. A one-of-many choice (the default) is selectable, so TalkBack
  * says "selected" as RN does and the checks read `selected`; an on/off chip ([toggle]) is toggleable.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Chip(active: Boolean, enabled: Boolean, description: String, onClick: () -> Unit, modifier: Modifier = Modifier,
                  shape: RoundedCornerShape = RoundedCornerShape(16.dp), compact: Boolean = false, horizontal: Int = if (compact) 10 else 12,
-                 toggle: Boolean = false, content: @Composable (androidx.compose.ui.graphics.Color) -> Unit) {
+                 toggle: Boolean = false, longPress: Pair<String, () -> Unit>? = null, content: @Composable (androidx.compose.ui.graphics.Color) -> Unit) {
     val c = LocalTheme.current.colors
     Row(modifier.fade(if (enabled || active) 1f else 0.6f).heightIn(min = 44.dp).clip(shape).background(if (active) c.tint else c.filterBg).rnBorder(1.dp, if (active) c.tint else c.border, shape)
         // One node for TalkBack and the checks: the click, the label, and the state.
         .semantics { contentDescription = description }
         .then(if (toggle) Modifier.toggleable(value = active, enabled = enabled, role = Role.Button, onValueChange = { onClick() })
+            // A chip with a long-press (RN's Done: complete at a different time) names it for TalkBack, as RN's accessibilityHint.
+            else if (longPress != null) Modifier.semantics { selected = active }.combinedClickable(enabled = enabled, role = Role.Tab,
+                onLongClickLabel = longPress.first, onLongClick = longPress.second, onClick = onClick)
             else Modifier.selectable(selected = active, enabled = enabled, role = Role.Tab, onClick = onClick))
         .padding(horizontal = horizontal.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = if (compact) Arrangement.Center else Arrangement.Start) {

@@ -111,6 +111,8 @@ val LABEL_KEYS = listOf(
     "settings.gmailCaptureImportedCount", "settings.gmailCaptureReceiptsReset", "settings.gmailCaptureCancelled",
     "settings.gmailCaptureDisconnected", "settings.gmailCaptureRevokeManually", "settings.gmailCaptureAuthFailed",
     "settings.gmailCaptureNetworkFailed", "settings.gmailCaptureConfigFailed", "settings.gmailCaptureStorageFailed", "settings.gmailCaptureFailed",
+    // RN's long-press on Done (complete with a different time) and a finished row's date (CompletedAtFlow.kt, bca5e3e7e).
+    "task.completeBackdateHintMobile", "task.editCompletedAt",
 )
 
 /** The label map: core's text for each of [LABEL_KEYS]. It has no fallback text; a key core lacks shows as the key. */

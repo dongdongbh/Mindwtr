@@ -283,6 +283,7 @@ import { createReviewViewMethods } from './native-host-contract-review-views';
 import { createQuickCaptureMethods } from './native-host-contract-quick-capture';
 import { createMindSweepMethods } from './native-host-contract-mind-sweep';
 import { createProjectNextActionPromptMethods } from './native-host-contract-project-next-action-prompt';
+import { createTaskBackdateMethods } from './native-host-contract-task-backdate';
 import { createOwnedEditorCompleteTaskDraftSaveMethods, createOwnedEditorFileEditTaskDraftSaveMethods } from './native-host-contract-owned-file-edit-save';
 import { createOwnedEditorFileAddTaskDraftSaveMethods } from './native-host-contract-owned-editor-save';
 import { createOwnedFileAddTaskDraftSaveMethods } from './native-host-contract-owned-file-save';
@@ -881,7 +882,9 @@ export type NativeTaskDraftEdit =
     /** The Time Spent input as typed. */
     | { type: 'timeSpent'; text: string }
     /** A completion picker confirmation, applied to the unsaved draft as one edit. */
-    | { type: 'backdatedCompletion'; completedAt: string; timeSpentText?: string };
+    | { type: 'backdatedCompletion'; completedAt: string; timeSpentText?: string }
+    /** The same from Android's date and time dialogs: the picked local day (yyyy-MM-dd) and time (HH:mm). */
+    | { type: 'backdatedCompletion'; day: string; time: string; timeSpentText?: string };
 
 export type NativeTaskDraftRecurrenceEdit =
     | Exclude<TaskDraftRecurrenceEdit, { kind: 'interval' } | { kind: 'weekdays' }>
@@ -1013,8 +1016,11 @@ const applyNativeTaskDraftEdit = (
             return isInputText(edit.text) ? withPatch({ timeSpentMinutes: parseTaskEditorTimeSpent(edit.text) }) : null;
         case 'backdatedCompletion': {
             if (edit.timeSpentText !== undefined && !isInputText(edit.timeSpentText)) return null;
+            const local = 'day' in edit || 'time' in edit;
+            const completedAt = local ? resolvePickedCompletedAt(edit.day, edit.time) : edit.completedAt;
+            if (local && (!completedAt || 'completedAt' in edit)) return null;
             const patch = resolveTaskEditorBackdatedCompletion({
-                completedAt: edit.completedAt as string,
+                completedAt: completedAt as string,
                 timeSpentText: edit.timeSpentText as string | undefined,
             });
             return patch ? applyTaskDraftPatch(draft, patch) : null;
@@ -2015,6 +2021,8 @@ export function createNativeHostContract(options: {
         ...createMindSweepMethods({ readiness, save, t: () => translate, revision: (now) => `${revision()}:${displayRevision(now)}` }),
         // A row's Done in a project left without a next action: RN's prompt and its three actions (native Android).
         ...createProjectNextActionPromptMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
+        // A row's Done at a picked time and a finished row's completion time (native Android; RN's CompletedAtPicker).
+        ...createTaskBackdateMethods({ readiness, save, t: () => translate, formatDate: () => createDateFormatter(dateFormatting()), requestIdPattern: CAPTURE_ID_PATTERN }),
         // The pending-captures queue and context automation: native-host-contract-capture-ingest.ts.
         ...createCaptureIngestMethods({ readiness, save, t: () => translate, requestIdPattern: CAPTURE_ID_PATTERN }),
         // Reminder alarms and notification taps: native-host-contract-reminders.ts.

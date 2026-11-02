@@ -814,11 +814,11 @@ assert.match(rowUi, /when \(swipe\.icon\) \{ "restore" -> Lucide\.RotateCcw; "do
 assert.match(rowUi, /val listed = actions\?\.status\s+val swipeOn = !selecting && if \(target == "done"\) completable && canComplete else if \(listed != null\) canEdit else completable && canMove/);
 assert.match(rowUi, /val canMove = writable && !busy && \(failedAction == null \|\| failedAction == statusAction\(task, target\)\)/);
 assert.match(rowUi, /val onSwipe = if \(target == "done"\) \{ \{ complete\(task\.id, task\.taskRevision, askNext = true\) \} \} else listed\?\.let \{ status -> \{ status\(target\) \} \} \?: \{ changeStatus\(task, target\) \}/);
-assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete\)/);
+assert.match(rowUi, /SwipeAction\(enabled = swipeOn, swipe = meta\.swipe, shape = shape, onSwipe = onSwipe, onMenu = \{ showStatusMenu\(task\) \}, onDelete = onDelete, onLongDone = onLongDone\)/);
 assert.match(rowUi, /if \(swipeOn\) customActions = listOf\(CustomAccessibilityAction\(swipeLabel\) \{ onSwipe\(\); true \},\s*CustomAccessibilityAction\(t\("taskStatus\.changeStatus"\)\) \{ showStatusMenu\(task\); true \}\)/);
 assert.doesNotMatch(code(rowUi + activity), /IconButton\(onClick = \{ complete\(/, 'no visible Done button: RN has none');
 // RN's reveal-then-tap (#1275): the swipe only reveals the button; its tap runs the action, its long-press opens the status menu.
-assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClick = \{ settle\(0f\); onMenu\(\) \}\) \{ settle\(0f\); onSwipe\(\) \}/);
+assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClick = \{ settle\(0f\); \(onLongDone \?: onMenu\)\(\) \}\) \{ settle\(0f\); onSwipe\(\) \}/);
 assert.match(rowUi, /onDragStopped = \{ settle\(if \(offset\.value > open \/ 2\) open else if \(offset\.value < left \/ 2\) left else 0f\) \}/, 'a drag only opens or closes the row');
 // RN's Delete swipe exists only where a list's contract trashes rows with core's Undo; a selecting list has no swipe.
 assert.match(rowUi, /val left = if \(onDelete != null\) -open else 0f/);
@@ -833,7 +833,12 @@ assert.match(model, /val refused = refusedUnwritten\(action\?\.kind, message\)/)
 // read again, and nothing shows but the conflict line of the editor save, the status menu, an open draft's Save, and a completion's
 // Undo refused because the task changed since (RN shows its failure too).
 assert.match(model, /stale = action != null && action\.kind !in STALE_SHOWN && message\.startsWith\("STALE_REVISION"\)/);
-assert.match(model, /private val STALE_SHOWN = setOf\("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo"\)/);
+assert.match(model, /private val STALE_SHOWN = setOf\("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo", "taskCompletedAt"\)/);
+// RN's applyCompletedAt (swipeable-task-item.tsx): a Done at a picked time asks for the project's next action, as a row's Done
+// does; both read core's prompt through one guarded helper (backdate review B1). An edit of a finished row's time never asks.
+assert.match(model, /internal fun askNextAction\(runtime: CoreHost, taskId: String\) \{\s+\/\/[^\n]*\s+val prompt = runCatching \{ runtime\.menuRead\("projectNextActionPrompt", JSONObject\(\)\.put\("taskId", taskId\)\.toString\(\)\)\.optJSONObject\("prompt"\) \}/);
+assert.match(model, /if \(askNext\) askNextAction\(runtime, id\)/);
+assert.match(menuModel, /if \(action\.kind == "taskCompletedAt" && reply\.optBoolean\("completed"\)\) shell\.askNextAction\(runtime, JSONObject\(action\.title\)\.getString\("taskId"\)\)/);
 assert.match(model, /if \(stale\) acknowledged\(action!!\)\s+else ui \{/);
 assert.match(model, /\(action != null && !refused\) \|\| message\.startsWith\("SAVE_FAILED"\)/);
 // While a failed command's retry is owed, only that exact command runs: no read starts, and the retry
@@ -933,7 +938,11 @@ assert.match(model, /if \(processing\?\.takeUnless \{ it\.hidden \}\?\.taskId ==
 assert.match(editorUi, /FieldHeading\(Lucide\.Folder, t\("task\.destination"\)\)\s+DateButton\(value, t\("task\.destination"\), !locked, Modifier\.fillMaxWidth\(\)\) \{ openPicker\("destination"\) \}/);
 // A chip's click, label, and state are one accessibility node: one-of-many choices are selectable (TalkBack says
 // "selected" as RN does; uiautomator reports selected), and only on/off chips (quick tokens, after completion) toggle.
-assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.then\(if \(toggle\) Modifier\.toggleable\(value = active, enabled = enabled, role = Role\.Button, onValueChange = \{ onClick\(\) \}\)\s+else Modifier\.selectable\(selected = active, enabled = enabled, role = Role\.Tab, onClick = onClick\)\)/);
+assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.then\(if \(toggle\) Modifier\.toggleable\(value = active, enabled = enabled, role = Role\.Button, onValueChange = \{ onClick\(\) \}\)\s+(?:\/\/[^\n]*\s+)?else if \(longPress != null\) Modifier\.semantics \{ selected = active \}\.combinedClickable\(enabled = enabled, role = Role\.Tab,\s+onLongClickLabel = longPress\.first, onLongClick = longPress\.second, onClick = onClick\)\s+else Modifier\.selectable\(selected = active, enabled = enabled, role = Role\.Tab, onClick = onClick\)\)/);
+// RN's long-press on Done (bca5e3e7e): the Form tab's Done chip and the View tab's Done badge open the completion-time picker.
+assert.match(editorUi, /val backdate = if \(status == "done"\) t\("task\.completeBackdateHintMobile"\) to \{ completedAt\.openEditor\(\) \} else null/);
+assert.match(source('TaskView.kt'), /StatusPill\(status, row\.getString\("value"\), editable, pickStatus,\s+if \(status == "done"\) \{ \{ completedAt\.openEditor\(\) \} \} else null\)/);
+assert.match(source('TaskView.kt'), /if \(enabled && backdate != null\) onLongClick\(t\("task\.completeBackdateHintMobile"\)\) \{ backdate\(\); true \}/);
 assert.equal(code(editorUi).match(/toggle = true/g).length, 2, 'only the quick token chips and "Repeat after completion" toggle');
 // RN's Waiting prompt: choosing Waiting asks for the person first, with core's people suggestions.
 assert.match(editorUi, /if \(status == "waiting" && !active\) openWaitingPrompt\(\) else editFields\(mapOf\("status" to status\)\)/);
@@ -1384,7 +1393,9 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
         // The task editor's "..." menu: the user's action (journaled ahead; core prepares and commits it, a replay answers its first reply).
         'runTaskEditorAction',
         // The project next-action prompt's Choose, Add or Complete project, under its receipt (a replay answers its first reply).
-        'runProjectNextAction'];
+        'runProjectNextAction',
+        // A row's Done at a picked time, or a finished row's time (RN's CompletedAtPicker), under its receipt.
+        'setTaskCompletedAt'];
     const contractFiles = readdirSync(resolve(app, '../../packages/core/src')).filter((name) => /^native-host-contract[\w-]*\.ts$/.test(name) && !name.endsWith('.test.ts'))
         .map((name) => readFileSync(resolve(app, '../../packages/core/src', name), 'utf8'));
     const contractSource = contractFiles.join('\n');
@@ -2133,7 +2144,7 @@ assert.doesNotMatch(themeCall, /requireSaved/);
 assert.match(model, /fun JSONObject\.taskRow\(\) = getJSONObject\("meta"\)\.let \{ meta ->/);
 assert.match(model, /meta\.getJSONArray\("parts"\)\.let \{ parts -> List\(parts\.length\(\)\) \{ parts\.getJSONObject\(it\)\.metaPart\(\) \} \}/);
 assert.match(rowUi, /val parts = if \(details\) meta\.parts else meta\.parts\.filter \{ !it\.detail \}/, 'detail parts show only where RN\'s list shows them');
-assert.match(rowUi, /for \(part in parts\) MetaPartView\(part\)/);
+assert.match(rowUi, /for \(part in parts\) MetaPartView\(part, if \(part\.kind == "completed"\) editCompleted else null\)/);
 assert.match(rowUi, /"due" -> MetaText\(part\.text, when \(part\.tone\) \{ "overdue" -> c\.danger; "dueSoon" -> c\.warning; else -> c\.secondaryText \}, 600\)/);
 assert.match(rowUi, /val strip = theme\.priority\(meta\.priority\)/);
 assert.match(rowUi, /contentDescription = meta\.accessibilityLabel/);
@@ -2612,7 +2623,9 @@ for (const text of [contextsUi, reviewUi, weeklyUi, dailyUi]) {
 }
 // The status menu's Done is core's completeTask with RN's Undo toast on every list; another status on a list whose contract writes
 // its rows is that list's setTaskStatus, elsewhere updateTask.
-assert.match(rowUi, /\.clickable\(enabled = enabled, role = Role\.Button\) \{ chooseStatus\(task, status\) \}/);
+// RN's long-press on Done (canBackdateCompletion, bca5e3e7e): the completion-time picker, for a task not done yet.
+assert.match(rowUi, /\.combinedClickable\(enabled = enabled, role = Role\.Button, onLongClickLabel = backdate\?\.let \{ t\("task\.completeBackdateHintMobile"\) \},\s+onLongClick = backdate\) \{ chooseStatus\(task, status\) \}/);
+assert.match(rowUi, /val backdate = if \(status == "done" && task\.status != "done" && failedAction == null\) \{ \{ showStatusMenu\(null\); completedAt\.open\(task, "complete"\) \} \} else null/);
 assert.match(model, /if \(status == "done" && task\.status != "done"\) \{ statusMenu = null; complete\(task\.id, task\.taskRevision, askNext = true\) \}\s+else if \(!menu\.rowStatus\(task, status\)\) changeStatus\(task, status\)/);
 // Only a row's Done (its swipe and its status menu, RN's SwipeableTaskItem) asks for the project's next action: Search's Done, the
 // Calendar's, Pomodoro's and the failure banner's retry complete without the prompt (next-action review N5).

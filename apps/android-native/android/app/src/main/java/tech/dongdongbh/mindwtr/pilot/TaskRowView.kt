@@ -113,6 +113,10 @@ fun TaskRowItem(
     val swipeOn = !selecting && if (target == "done") completable && canComplete else if (listed != null) canEdit else completable && canMove
     val onSwipe = if (target == "done") { { complete(task.id, task.taskRevision, askNext = true) } } else listed?.let { status -> { status(target) } } ?: { changeStatus(task, target) }
     val onDelete = actions?.delete?.takeIf { canEdit && !selecting }
+    // RN's long-press on the revealed Done, and on the status menu's Done (canBackdateCompletion): complete at a picked time.
+    val onLongDone = if (target == "done" && swipeOn && task.status != "done") { { completedAt.open(task, "complete") } } else null
+    // RN's tap on a finished row's "Completed:" date (onEditCompletedAt): its time, never while selecting.
+    val editCompleted = if (canEdit && !selecting && meta.parts.any { it.kind == "completed" }) { { completedAt.open(task, "edit") } } else null
     val onTap = { if (selecting) actions?.select?.invoke() else openEditor(task.id) }
     val shape = RoundedCornerShape(theme.rowRadius)
     val strip = theme.priority(meta.priority)
@@ -123,7 +127,7 @@ fun TaskRowItem(
     val highlighted = (focusHighlight && showStar && task.isFocusedToday || listed == null && isHighlighted(task.id)) && !selecting
     val picked = selecting && actions?.selected == true
     Box(Modifier.padding(bottom = 6.dp)) {
-        SwipeAction(enabled = swipeOn, swipe = meta.swipe, shape = shape, onSwipe = onSwipe, onMenu = { showStatusMenu(task) }, onDelete = onDelete) {
+        SwipeAction(enabled = swipeOn, swipe = meta.swipe, shape = shape, onSwipe = onSwipe, onMenu = { showStatusMenu(task) }, onDelete = onDelete, onLongDone = onLongDone) {
             Row(
                 Modifier.fillMaxWidth().clip(shape).background(c.bg).background(if (available && !selecting) theme.availableBg else c.taskItemBg)
                     .rnBorder(if (highlighted || selecting) 2.dp else 1.dp,
@@ -158,9 +162,11 @@ fun TaskRowItem(
                                     contentDescription = meta.accessibilityLabel
                                     if (selecting) selected = picked
                                     // RN's accessibility actions: the swipe's action, and the status menu its long-press opens.
+                                    val editDate = editCompleted?.let { edit -> CustomAccessibilityAction(t("task.editCompletedAt")) { edit(); true } }
                                     if (swipeOn) customActions = listOf(CustomAccessibilityAction(swipeLabel) { onSwipe(); true },
                                         CustomAccessibilityAction(t("taskStatus.changeStatus")) { showStatusMenu(task); true }) +
-                                        listOfNotNull(onDelete?.let { delete -> CustomAccessibilityAction(t("common.delete")) { delete(); true } })
+                                        listOfNotNull(onDelete?.let { delete -> CustomAccessibilityAction(t("common.delete")) { delete(); true } }, editDate)
+                                    else if (editDate != null) customActions = listOf(editDate)
                                 })
                         if (meta.parts.any { it.kind == "recurrence" }) {
                             Icon(Lucide.Repeat, null, tint = c.secondaryText,
@@ -178,7 +184,7 @@ fun TaskRowItem(
                     if (parts.isNotEmpty()) {
                         FlowRow(Modifier.padding(top = 2.dp).clearAndSetSemantics { }, horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp), itemVerticalAlignment = Alignment.CenterVertically) {
-                            for (part in parts) MetaPartView(part)
+                            for (part in parts) MetaPartView(part, if (part.kind == "completed") editCompleted else null)
                         }
                     }
                     note?.let { MetaText(it, if (available) c.tint else c.secondaryText, 600, Modifier.padding(top = 2.dp)) }
@@ -206,7 +212,7 @@ class RowActions(
 
 /** One meta part as RN's renderMetaPart draws it: its icon, color, and weight; core's text as is. */
 @Composable
-private fun MetaPartView(part: MetaPart) {
+private fun MetaPartView(part: MetaPart, onClick: (() -> Unit)? = null) {
     val theme = LocalTheme.current
     val c = theme.colors
     when (part.kind) {
@@ -229,7 +235,9 @@ private fun MetaPartView(part: MetaPart) {
         "recurrence" -> MetaIcon(Lucide.Repeat, part.text)
         "timeSpent" -> MetaIcon(Lucide.History, part.text)
         "attachments" -> MetaIcon(Lucide.Paperclip, part.text)
-        else -> MetaText(part.text, c.secondaryText, 500) // start, estimate, completed, cancelled
+        // RN's finished row: its "Completed:" date edits the completion time (onEditCompletedAt).
+        "completed" -> MetaText(part.text, c.secondaryText, 500, if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick).testTag("row-completed-at") else Modifier)
+        else -> MetaText(part.text, c.secondaryText, 500) // start, estimate, cancelled
     }
 }
 
@@ -326,10 +334,13 @@ fun StatusMenu(model: InboxViewModel) = with(model) {
                     val current = status == task.status
                     val enabled = writable && !busy && (failedAction == null
                         || failedAction == if (status == "done") completeAction(task.id, task.taskRevision) else statusAction(task, status))
+                    // RN's long-press on Done (canBackdateCompletion): the completion-time picker, for a task not done yet.
+                    val backdate = if (status == "done" && task.status != "done" && failedAction == null) { { showStatusMenu(null); completedAt.open(task, "complete") } } else null
                     Row(
                         Modifier.fade(if (enabled) 1f else 0.5f).fillMaxWidth(0.42f).clip(RoundedCornerShape(20.dp)).then(if (current) Modifier.background(colors.bg) else Modifier)
                             .rnBorder(1.dp, colors.text, RoundedCornerShape(20.dp))
-                            .clickable(enabled = enabled, role = Role.Button) { chooseStatus(task, status) }
+                            .combinedClickable(enabled = enabled, role = Role.Button, onLongClickLabel = backdate?.let { t("task.completeBackdateHintMobile") },
+                                onLongClick = backdate) { chooseStatus(task, status) }
                             .semantics { selected = current }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -398,7 +409,7 @@ fun ToastCard(model: InboxViewModel, modifier: Modifier) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SwipeAction(enabled: Boolean, swipe: RowSwipe, shape: RoundedCornerShape, onSwipe: () -> Unit, onMenu: () -> Unit,
-                        onDelete: (() -> Unit)? = null, content: @Composable () -> Unit) {
+                        onDelete: (() -> Unit)? = null, onLongDone: (() -> Unit)? = null, content: @Composable () -> Unit) {
     val theme = LocalTheme.current
     val density = LocalDensity.current
     val open = with(density) { 98.dp.toPx() } // the 90 button and RN's 8 gap
@@ -422,7 +433,8 @@ private fun SwipeAction(enabled: Boolean, swipe: RowSwipe, shape: RoundedCornerS
             val spoken = t("task.aria.action").replace("{{action}}", swipe.label)
             Column(Modifier.matchParentSize().padding(end = 8.dp).wrapContentWidth(Alignment.Start).width(90.dp).clip(shape)
                 .background(theme.status(swipe.target).text).testTag("swipe-action")
-                .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = { settle(0f); onMenu() }) { settle(0f); onSwipe() }
+                // RN's long-press on the revealed Done opens the completion-time picker (onLongPressDone); another action's opens the menu.
+                .combinedClickable(enabled = enabled, role = Role.Button, onLongClick = { settle(0f); (onLongDone ?: onMenu)() }) { settle(0f); onSwipe() }
                 .semantics { contentDescription = spoken },
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                 Icon(when (swipe.icon) { "restore" -> Lucide.RotateCcw; "done" -> Lucide.Circle; else -> Lucide.ArrowRight }, null,
