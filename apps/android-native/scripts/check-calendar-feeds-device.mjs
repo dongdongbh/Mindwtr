@@ -1,6 +1,27 @@
-
-
-
+// External calendars check for the isolated native Android development app (pass C3): Settings › Advanced › Calendar's ICS
+// subscriptions, and their events in the Calendar and the reviews, against a local ICS server only.
+//
+//   node apps/android-native/scripts/check-calendar-feeds-device.mjs <adb-serial> [apk]
+//
+// Serves a calendar on this computer (calendar-feed-server.mjs, 127.0.0.1:<port>, MINDWTR_CALENDAR_PORT or 18783) and maps the
+// phone's port to it (`adb reverse`). Then, through the app's own screens:
+//   (1) Settings › Advanced › Calendar opens with RN's push card (closed; this check never turns push on), the device calendars card and the subscription form; the device
+//       calendars stay off (this check never reads the phone's own calendars);
+//   (2) Add stores the subscription under RN's key in RKStorage and in the synced settings, and the list shows it; a URL with a
+//       user name and password shows masked, and neither URL reaches the write journal, the diagnostics log or logcat;
+//   (3) Test answers RN's toast ("Loaded N events"); no request carries an Origin header (#1309);
+//   (4) the Calendar's week shows the feed's events, the load's diagnostics line names it, and an event's sheet offers RN's
+//       Create task (no Open in calendar: a subscription's event has no calendar app to open it);
+//   (5) the Weekly and the Daily Review load their own external calendars;
+//   (6) a subscription answering 403, 500, a body cut short, or a declared body past the limit: Test answers RN's failure toast,
+//       nothing stored changes, and the Calendar shows the feed's events no more;
+//   (7) Remove takes the subscription out of RKStorage and the synced settings;
+//   (8) on an emulator only (never the test phone: it would read the owner's calendars): a local calendar and event seeded
+//       through the calendar provider; the device calendars switch asks with the system prompt (Don't allow: RN's denied
+//       text; Grant access asks again; Allow: the calendar listed), the Calendar's week shows the device event, and its sheet
+//       offers Open in calendar, which hands it to the calendar app. The switch goes off and the seeded calendar is deleted.
+// It installs with `install -r` (development data stays), touches only the development package, and on exit removes the port
+// mapping and stops the server. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -209,7 +230,7 @@ try {
     }
 
     let nodes = await openCalendarSettings();
-    check(!tagged(nodes, 'calendar-push'), '(1) Settings › Calendar opens without the push card (until calendar push, C4)');
+    check(Boolean(tagged(nodes, 'calendar-push')), '(1) Settings › Calendar opens with the push card (C4)');
     check(Boolean(tagged(nodes, 'calendar-device')), '(1) and the device calendars card');
     check(Boolean(await reveal((current) => tagged(current, 'calendar-url'), 'URL field')), '(1) and the subscription form');
 

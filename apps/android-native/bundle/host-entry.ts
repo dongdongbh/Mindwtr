@@ -635,10 +635,14 @@ const persistentCapture = nativeSync ? {
     },
 } : null;
 
-
+/**
+ * The external calendars, Settings › Calendar and calendar push (host-calendar.ts), on a host with the device calendar bridge
+ * (Android): RN's AsyncStorage keys, the polyfill's fetch and file reads, CalendarContract through HostCalendars, RN's
+ * calendar_sync rows on the boot adapter. The iOS host and the gates' stand-in bridge have none: no calendar, as before.
+ */
 const nativeCalendar = nativeSync && typeof globalThis.__mindwtrCalendarCall === 'function'
     ? createNativeCalendar(keyValue, () => globalThis.__mindwtrCalendarCall as never, () => globalThis.__mindwtrFileCall as never, () => {
-        if (!bootAdapter) throw new Error('Native storage is not loaded yet');
+        if (!bootAdapter || getStorageAdapter() !== bootAdapter) throw new Error('Native storage is not loaded yet');
         return bootAdapter;
     })
     : null;
@@ -5436,6 +5440,8 @@ globalThis.MindwtrHost = {
             const state = requireSync().start(appState);
 
             gmailLifecycle(() => nativeGmail?.start(appState));
+            // RN's root layout starts calendar push on mount (use-root-layout-sync-effects.ts); it runs on, so this answers now.
+            void nativeCalendar?.startPush();
             return state;
         });
     },

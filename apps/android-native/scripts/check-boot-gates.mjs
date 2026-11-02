@@ -1435,10 +1435,12 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(hostEntry, /\.\.\.\(persistentCapture \? \{ persistentCapture \} : \{\}\) \}\);/);
 
     assert.match(hostEntry, /const persistentCapture = nativeSync \? \{\s+read: \(\) => \(JSON\.parse\(checked\(native\(\)\.kvGet\(PERSISTENT_CAPTURE_STORAGE_KEY\)\)\) as \[string \| null\]\)\[0\] === 'true',/);
-
-    assert.match(hostEntry, /const nativeCalendar = nativeSync && typeof globalThis\.__mindwtrCalendarCall === 'function'\s*\? createNativeCalendar\(keyValue, \(\) => globalThis\.__mindwtrCalendarCall as never, \(\) => globalThis\.__mindwtrFileCall as never, \(\) => \{\s*if \(!bootAdapter\) throw new Error\('Native storage is not loaded yet'\);\s*return bootAdapter;\s*\}\)\s*: null;/);
-
-    assert.match(readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8'), /upsert: \(\) => Promise\.reject\(new Error\('Calendar push is not available on this host yet'\)\),\s*delete: \(\) => Promise\.reject\(/);
+    // C3: core's calendar device binds RN's AsyncStorage, the polyfill's fetch and file reads, and HostCalendars, only on a host with the calendar bridge.
+    assert.match(hostEntry, /const nativeCalendar = nativeSync && typeof globalThis\.__mindwtrCalendarCall === 'function'\s*\? createNativeCalendar\(keyValue, \(\) => globalThis\.__mindwtrCalendarCall as never, \(\) => globalThis\.__mindwtrFileCall as never, \(\) => \{\s*if \(!bootAdapter \|\| getStorageAdapter\(\) !== bootAdapter\) throw new Error\('Native storage is not loaded yet'\);\s*return bootAdapter;\s*\}\)\s*: null;/);
+    // C4b: RN's calendar_sync map is read and written on the boot adapter (the same rows RN pushed), and calendar push starts
+    // with sync, as RN's root layout starts it on mount (e98b4e796: a full push of the existing tasks).
+    assert.match(readFileSync(resolve(app, 'bundle/host-calendar.ts'), 'utf8'), /upsert: \(entry: CalendarSyncEntry\) => sync\(\)\.upsertCalendarSyncEntry\(entry\),\s*delete: \(taskId: string, platform: string\) => sync\(\)\.deleteCalendarSyncEntry\(taskId, platform\),/);
+    assert.match(hostEntry, /syncStart\(appState: string\): string \{\s*return submit\(async \(\) => \{\s*const state = requireSync\(\)\.start\(appState\);[^}]*?void nativeCalendar\?\.startPush\(\);\s*return state;/);
     assert.match(host, /menuCommand\(name: string, json: string\): string \{\s*return submit\(async \(\) => \{\s*const command = MENU_COMMANDS\[name as MenuCommand\];/);
 
 

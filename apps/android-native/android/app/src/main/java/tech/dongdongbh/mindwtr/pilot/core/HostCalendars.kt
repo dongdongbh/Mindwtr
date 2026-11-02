@@ -2,6 +2,7 @@ package tech.dongdongbh.mindwtr.pilot.core
 
 import android.Manifest
 import android.content.ContentUris
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,11 +14,18 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 
-
+/**
+ * The device calendar reads core's external calendars take (external-calendar-feeds.ts DeviceCalendarReader), as RN's
+ * expo-calendar gives them on Android (CalendarModule.kt): the permission (READ_CALENDAR and WRITE_CALENDAR together, with
+ * expo's "asked" record, so an upgrade from RN keeps its answer), every calendar row, and the instances of the chosen calendars.
+ * Calendar push's writes (pass C4) are [CalendarPushWrites] over the provider. Each call runs on HostIo's calendar thread;
+ * [call] answers once through `reply`.
+ */
 class HostCalendars(context: Context) {
     private val app = context.applicationContext
 
     private val asked = app.getSharedPreferences("expo.modules.permissions.asked", Context.MODE_PRIVATE)
+    private val writes = CalendarPushWrites(ProviderRows(app))
 
 
     fun call(json: String, reply: (Result<Any?>) -> Unit) {
@@ -36,6 +44,11 @@ class HostCalendars(context: Context) {
                 events(List(ids.length()) { ids.getString(it) }, Instant.parse(request.getString("start")).toEpochMilli(),
                     Instant.parse(request.getString("end")).toEpochMilli())
             })
+            "createCalendar" -> reply(runCatching { requireGranted(); writes.createCalendar(request.getJSONObject("details")) })
+            "deleteCalendar" -> reply(runCatching { requireGranted(); writes.deleteCalendar(request.getString("calendarId")); null })
+            "createEvent" -> reply(runCatching { requireGranted(); writes.createEvent(request.getString("calendarId"), request.getJSONObject("details")) })
+            "updateEvent" -> reply(runCatching { requireGranted(); writes.updateEvent(request.getString("eventId"), request.getJSONObject("details")); null })
+            "deleteEvent" -> reply(runCatching { requireGranted(); writes.deleteEvent(request.getString("eventId")); null })
             else -> reply(Result.failure(IllegalArgumentException("Unsupported calendar call $op")))
         }
     }
@@ -126,7 +139,55 @@ class HostCalendars(context: Context) {
     }
 }
 
+/** [CalendarPushWrites.Rows] on the calendar provider, as expo-calendar writes it on Android. */
+private class ProviderRows(context: Context) : CalendarPushWrites.Rows {
+    private val resolver = context.contentResolver
 
+    override fun calendarExists(id: Long): Boolean = resolver.query(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id),
+        arrayOf(CalendarContract.Calendars._ID), null, null, null)?.use { it.count > 0 } ?: false
+
+    override fun insertCalendar(accountName: String, accountType: String, values: Map<String, Any>): Long? {
+        val uri = CalendarContract.Calendars.CONTENT_URI.buildUpon()
+            .appendQueryParameter(CalendarContract.CALLER_IS_SYNCADAPTER, "true")
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_NAME, accountName)
+            .appendQueryParameter(CalendarContract.Calendars.ACCOUNT_TYPE, accountType).build()
+        return resolver.insert(uri, values.toContentValues())?.lastPathSegment?.toLongOrNull()
+    }
+
+    override fun deleteCalendar(id: Long): Int = resolver.delete(ContentUris.withAppendedId(CalendarContract.Calendars.CONTENT_URI, id), null, null)
+
+    override fun insertEvent(values: Map<String, Any>): Long? =
+        resolver.insert(CalendarContract.Events.CONTENT_URI, values.toContentValues())?.lastPathSegment?.toLongOrNull()
+
+    override fun eventIsLive(id: Long): Boolean = resolver.query(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id),
+        arrayOf(CalendarContract.Events._ID), "(${CalendarContract.Events.DELETED} != 1)", null, null)?.use { it.count > 0 } ?: false
+
+    override fun updateEvent(id: Long, values: Map<String, Any>): Int =
+        resolver.update(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), values.toContentValues(), null, null)
+
+    override fun deleteEvent(id: Long): Int = resolver.delete(ContentUris.withAppendedId(CalendarContract.Events.CONTENT_URI, id), null, null)
+
+    override fun deleteReminders(eventId: Long) {
+        resolver.delete(CalendarContract.Reminders.CONTENT_URI, "${CalendarContract.Reminders.EVENT_ID} = ?", arrayOf(eventId.toString()))
+    }
+
+    private fun Map<String, Any>.toContentValues() = ContentValues().also { out ->
+        forEach { (column, value) ->
+            when (value) {
+                is String -> out.put(column, value)
+                is Int -> out.put(column, value)
+                is Long -> out.put(column, value)
+                else -> error("Unsupported calendar column $column")
+            }
+        }
+    }
+}
+
+/**
+ * The system prompt for the calendar pair, on the open screen (MainActivity registers [launcher] and hands each answer to
+ * [answered]). A prompt asked while one shows waits for the same answer, as expo queues them; with no screen it answers at once
+ * (the status then reads denied: expo marked the permissions asked).
+ */
 object CalendarPermissionPrompt {
     private val main = Handler(Looper.getMainLooper())
 

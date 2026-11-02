@@ -115,22 +115,26 @@ describe('the reviews\' feeds', () => {
 });
 
 describe('the pushed-event map', () => {
-    it('reads RN\'s calendar_sync rows (an exported task mirror without the notes marker stays out of the feed), and writes none', async () => {
+    it('reads and writes RN\'s calendar_sync rows on the boot adapter (an exported task mirror without the notes marker stays out of the feed)', async () => {
         const rows = [{ taskId: 't1', calendarEventId: '42', calendarId: '7', platform: 'android', lastSyncedAt: '2026-10-01T00:00:00.000Z' }];
-        const asked: string[] = [];
+        const calls: unknown[][] = [];
         const host = createNativeCalendar(
             { get: async () => null, set: async () => undefined, remove: async () => undefined },
             () => async () => [], () => async () => new Uint8Array(),
             () => ({
-                getAllCalendarSyncEntries: async (platform: string) => { asked.push(platform); return rows; },
+                ensureSchema: async () => { calls.push(['ensureSchema']); },
+                getAllCalendarSyncEntries: async (platform: string) => { calls.push(['getAll', platform]); return rows; },
                 getCalendarSyncEntry: async (taskId: string) => rows.find((row) => row.taskId === taskId) ?? null,
+                upsertCalendarSyncEntry: async (entry) => { calls.push(['upsert', entry.taskId]); },
+                deleteCalendarSyncEntry: async (taskId: string, platform: string) => { calls.push(['delete', taskId, platform]); },
             }),
         );
         expect(await host.syncEntries!.getAll('android')).toEqual(rows);
         expect(await host.syncEntries!.get('t1', 'android')).toEqual(rows[0]);
-        expect(asked).toEqual(['android']);
-        await expect(host.syncEntries!.upsert(rows[0])).rejects.toThrow();
-        await expect(host.syncEntries!.delete('t1', 'android')).rejects.toThrow();
+        await host.syncEntries!.ensureReady();
+        await host.syncEntries!.upsert(rows[0]);
+        await host.syncEntries!.delete('t1', 'android');
+        expect(calls).toEqual([['getAll', 'android'], ['ensureSchema'], ['upsert', 't1'], ['delete', 't1', 'android']]);
     });
 });
 
@@ -149,5 +153,30 @@ describe('the device', () => {
             { op: 'readBytes', uri: 'content://downloads/7' },
         ]);
         expect(host.platform.os).toBe('android');
+    });
+});
+
+describe('the push writes', () => {
+    it('send HostCalendars epoch ms, keep core\'s UTC zone for an all-day event, and drop the url Android has no column for', async () => {
+        const calls: Record<string, unknown>[] = [];
+        const host = createNativeCalendar(
+            { get: async () => null, set: async () => undefined, remove: async () => undefined },
+            () => async (request) => { calls.push(request); return '9'; }, () => async () => new Uint8Array(),
+        );
+        const details = { title: 'T', startDate: new Date('2026-10-30T00:00:00Z'), endDate: new Date('2026-10-31T00:00:00Z'), allDay: true,
+            notes: 'N', location: '', url: 'https://example.com', timeZone: 'UTC', endTimeZone: 'UTC' };
+        expect(await host.calendars.createEvent!('7', { ...details, calendarId: '7' })).toBe('9');
+        await host.calendars.updateEvent!('9', { ...details, allDay: false, timeZone: undefined, endTimeZone: undefined });
+        await host.calendars.deleteEvent!('9');
+        await host.calendars.deleteCalendar!('7');
+        expect(await host.calendars.getSources!()).toEqual([]);
+        expect(host.calendars.updateCalendar).toBeUndefined();
+        const sent = { title: 'T', startMs: 1_793_318_400_000, endMs: 1_793_404_800_000, notes: 'N', location: '' };
+        expect(calls).toEqual([
+            { op: 'createEvent', calendarId: '7', details: { ...sent, allDay: true, timeZone: 'UTC', endTimeZone: 'UTC' } },
+            { op: 'updateEvent', eventId: '9', details: { ...sent, allDay: false } },
+            { op: 'deleteEvent', eventId: '9' },
+            { op: 'deleteCalendar', calendarId: '7' },
+        ]);
     });
 });
