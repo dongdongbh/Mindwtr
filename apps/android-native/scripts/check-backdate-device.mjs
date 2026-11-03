@@ -6,7 +6,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, connect, evidenced, fail, hasText, inboxCount, inEditor, projectTitled, Stopped, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
+import { box, button, check, connect, evidenced, fail, hasText, inboxCount, inEditor, inList, projectTitled, Stopped, tab, tabSelected, tagged, taskRow, withDescription } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -32,6 +32,7 @@ const { en } = await import(resolve(app, '../../packages/core/src/i18n/locales/e
 
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const title = `63${run}`;
+const archivedTitle = `65${run}`;
 
 const PROJECT = `BD${run}`;
 const projectTask = `64${run}`;
@@ -56,6 +57,12 @@ const archiveDays = () => {
     const [row] = JSON.parse(execFileSync('sqlite3', ['-json', resolve(work, 'db', DB), 'SELECT data FROM settings WHERE id = 1'], { encoding: 'utf8' }) || '[]');
     const configured = row ? JSON.parse(row.data).gtd?.autoArchiveDays : undefined;
     return Number.isFinite(configured) ? Math.max(0, Math.floor(configured)) : 7;
+};
+
+const pastArchiveWindow = (iso) => {
+    const days = archiveDays();
+    return Date.parse(iso) < Date.now() - days * 86_400_000
+        || fail(`${iso} is inside the ${days}-day auto-archive window, so core's #959 archive rule cannot run; set Settings > Archive after to 7 days`);
 };
 
 const localDay = (iso) => { const d = new Date(iso); return { y: d.getFullYear(), m: d.getMonth(), d: d.getDate(), whole: d.getSeconds() === 0 && d.getMilliseconds() === 0 }; };
@@ -96,7 +103,7 @@ const pickDay = async (day, forward = false) => {
 };
 
 
-const capture = async (text = title, shown = title) => {
+const capture = async (text = title, shown = text) => {
     let nodes = await screen();
     if (!inPopup(nodes)) nodes = await device.openCapture();
     await device.focusAtEnd(tagged(nodes, 'capture-title') ?? fail('no capture field'));
@@ -104,6 +111,24 @@ const capture = async (text = title, shown = title) => {
     sh(`input text '${text}'`);
     await waitFor(`"${shown}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === shown, 15_000);
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
+};
+const completeOnFifteenth = async (name) => {
+    const before = stored(name);
+    const nodes = await device.reveal(name);
+    longPress(await device.revealAction(nodes, name));
+    const doneItem = (current) => hasText(current, en['taskStatus.changeStatus'])
+        ? current.find((node) => node.text === en['status.done'] && node.class !== 'android.widget.EditText') : undefined;
+    longPress(doneItem(await waitFor('the status menu', (current) => Boolean(doneItem(current)), 10_000)));
+    await pickDay(15);
+    let done = stored(name);
+    for (const deadline = Date.now() + 15_000; done.status !== 'done' && Date.now() < deadline; await sleep(700)) done = stored(name);
+    await waitFor(`the row ${name} to leave the Inbox`, (current) => onInbox(current) && !taskRow(current, name), 15_000);
+    return { before, done };
+};
+const tapCompletedDate = (nodes, name) => {
+    const [left, , , bottom] = box(taskRow(nodes, name) ?? fail(`no row ${name} on screen`));
+    requireAppFront();
+    sh(`input tap ${left + 60} ${bottom + 24}`);
 };
 const openHistoryDone = async () => {
     let nodes = await screen();
@@ -145,45 +170,35 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onInbox, 60_000);
     await capture();
+    await capture(archivedTitle);
     await capture(`${projectTask}%s/next%s+${PROJECT}`, `${projectTask} /next +${PROJECT}`);
     const captured = stored();
+    const archivedCaptured = stored(archivedTitle);
+    check(archivedCaptured.status === 'inbox' && !archivedCaptured.completedAt, `the capture ${archivedTitle} is stored in Inbox, not done`);
+    const days = archiveDays();
+    check(days > 0, `the dev data's auto-archive window is ${days} days, so core's #959 archive rule can run`);
     const projectCaptured = stored(projectTask);
     check(projectCaptured.status === 'next' && Boolean(projectCaptured.projectId), `the capture ${projectTask} is a Next task in the new project ${PROJECT}`);
     check(captured.status === 'inbox' && !captured.completedAt, `the capture ${title} is stored in Inbox, not done`);
     const today = localDay(new Date().toISOString());
 
 
-    let nodes = await device.reveal(title);
-    longPress(await device.revealAction(nodes, title));
-    const doneItem = (current) => hasText(current, en['taskStatus.changeStatus'])
-        ? current.find((node) => node.text === en['status.done'] && node.class !== 'android.widget.EditText') : undefined;
-    nodes = await waitFor('the status menu', (current) => Boolean(doneItem(current)), 10_000);
     const logsBefore = saves();
-    longPress(doneItem(nodes));
-    await pickDay(15);
-    const done = await (async () => {
-        for (const deadline = Date.now() + 15_000; Date.now() < deadline; await sleep(700)) {
-            const row = stored();
-            if (row.status === 'done') return row;
-        }
-        return stored();
-    })();
+    const { done } = await completeOnFifteenth(title);
     const doneDay = localDay(done.completedAt ?? new Date(0).toISOString());
     const wantA = monthBefore(today);
     check(done.status === 'done' && doneDay.y === wantA.y && doneDay.m === wantA.m && doneDay.d === 15 && doneDay.whole
         && done.rev === captured.rev + 1,
         `(a) Done at the picked time: stored done at ${done.completedAt} (the 15th of month ${wantA.m + 1}, whole minute), one write`);
-    await waitFor('the row to leave the Inbox', (current) => onInbox(current) && !taskRow(current, title), 15_000);
     console.log(`note - "${LOG_LINE}" lines in logcat: ${saves() - logsBefore} after (a)`);
+    const second = await completeOnFifteenth(archivedTitle);
+    check(second.done.status === 'done' && localDay(second.done.completedAt).m === wantA.m && localDay(second.done.completedAt).d === 15
+        && second.done.rev === second.before.rev + 1,
+        `(b2 setup) ${archivedTitle} is stored done at ${second.done.completedAt} (the 15th of month ${wantA.m + 1}), one write`);
 
 
-    nodes = await openHistoryDone();
-    const row = taskRow(nodes, title);
-    const [left, , , bottom] = box(row);
-    requireAppFront();
-
-
-    sh(`input tap ${left + 60} ${bottom + 24}`);
+    let nodes = await openHistoryDone();
+    tapCompletedDate(nodes, title);
     await pickDay(today.d, true);
     let edited = stored();
     for (const deadline = Date.now() + 15_000; edited.rev === done.rev && Date.now() < deadline; await sleep(700)) edited = stored();
@@ -193,6 +208,27 @@ try {
         && new Date(edited.completedAt).toTimeString().slice(0, 5) === new Date(done.completedAt).toTimeString().slice(0, 5) && edited.rev === done.rev + 1,
         `(b) the done row's date moved its completion time to today, ${edited.completedAt}, at the same minute, and kept it done, one write`
         + ` (stored ${JSON.stringify(edited)}, before ${JSON.stringify(done)})`);
+
+
+    const wantB2 = monthBefore(wantA);
+    await device.reveal(archivedTitle);
+    tapCompletedDate(await waitFor(`the done row ${archivedTitle}`, (current) => Boolean(taskRow(current, archivedTitle)), 15_000), archivedTitle);
+    await pickDay(1);
+    let archived = stored(archivedTitle);
+    for (const deadline = Date.now() + 15_000; archived.rev === second.done.rev && Date.now() < deadline; await sleep(700)) archived = stored(archivedTitle);
+    const archivedDay = localDay(archived.completedAt);
+    pastArchiveWindow(archived.completedAt);
+    check(archived.status === 'archived' && archivedDay.y === wantB2.y && archivedDay.m === wantB2.m && archivedDay.d === 1 && archivedDay.whole
+        && archived.rev === second.done.rev + 1,
+        `(b2) the done row's date moved ${archivedTitle} to ${archived.completedAt} (the 1st of month ${wantB2.m + 1}), past the ${days}-day window,`
+        + ` and archived it in one write, as RN's updateTask does (#959) (stored ${JSON.stringify(archived)}, before ${JSON.stringify(second.done)})`);
+    await waitFor(`the row ${archivedTitle} to leave History > Done`, (current) => tabSelected(current, en['nav.done']) && !taskRow(current, archivedTitle), 15_000);
+    nodes = await device.reveal(archivedTitle);
+    check(tabSelected(nodes, en['nav.done']) && !inList(nodes, archivedTitle), `(b2) ${archivedTitle} is gone from History > Done`);
+    nodes = await tapExpecting(tab(nodes, en['nav.archived']) ?? fail('no Archived tab'), (current) => tabSelected(current, en['nav.archived']), 'the Archived tab');
+    nodes = await device.reveal(archivedTitle);
+    check(tabSelected(nodes, en['nav.archived']) && Boolean(inList(nodes, archivedTitle)), `(b2) ${archivedTitle} shows on History > Archived`);
+    await tapExpecting(tab(nodes, en['nav.done']) ?? fail('no Done tab'), (current) => tabSelected(current, en['nav.done']), 'the Done tab');
 
 
     await device.reveal(title);
@@ -214,11 +250,10 @@ try {
     const savedDay = localDay(saved.completedAt);
 
 
-    const days = archiveDays();
-    const wantStatus = days > 0 && Date.parse(saved.completedAt) < Date.now() - days * 86_400_000 ? 'archived' : 'done';
-    check(saved.status === wantStatus && savedDay.y === wantA.y && savedDay.m === wantA.m && savedDay.d === 5 && savedDay.whole && saved.rev === edited.rev + 1,
+    pastArchiveWindow(saved.completedAt);
+    check(saved.status === 'archived' && savedDay.y === wantA.y && savedDay.m === wantA.m && savedDay.d === 5 && savedDay.whole && saved.rev === edited.rev + 1,
         `(c) the editor's Save stored the picked completion ${saved.completedAt} (the 5th of month ${wantA.m + 1}) in one write, ${saved.status}`
-        + ` as core's ${days}-day auto-archive rule says (${wantStatus})`);
+        + ` as core's ${days}-day auto-archive rule says (archived)`);
     console.log(`note - "${LOG_LINE}" lines in logcat: ${saves() - logsBefore} after (a) and (b)`);
 
 
