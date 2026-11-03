@@ -3,10 +3,10 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 import { AlignLeft, Check, CircleDot, History, Hourglass, ListChecks, Paperclip, Repeat, UserRound } from 'lucide-react-native';
 import { useThemeTokens } from '../../hooks/use-theme-tokens';
 import { useStatusColors } from '../../hooks/use-status-colors';
+import { usePriorityColors } from '../../hooks/use-priority-colors';
 import {
     formatI18nTemplate,
     tFallback,
-    TASK_PRIORITY_COLORS,
 } from '@mindwtr/core';
 import type { ProjectSequenceTaskCue, Task, TaskRowMeta, TaskRowMetaPart } from '@mindwtr/core';
 import type { ThemeColors } from '../../hooks/use-theme-colors';
@@ -361,6 +361,7 @@ export function SwipeableTaskItemContent({
     };
 
     const { isMaterial, shape } = useThemeTokens();
+    const priorityColors = usePriorityColors();
     const visibleMetaParts = (hideDetails ? meta.parts.filter((part) => !part.detail) : meta.parts).map(renderMetaPart);
 
     return (
@@ -396,7 +397,7 @@ export function SwipeableTaskItemContent({
         >
             {meta.priority && (
                 <View
-                    style={[styles.priorityStrip, { backgroundColor: TASK_PRIORITY_COLORS[meta.priority] }]}
+                    style={[styles.priorityStrip, { backgroundColor: priorityColors[meta.priority] }]}
                     testID="task-priority-strip"
                     pointerEvents="none"
                 />

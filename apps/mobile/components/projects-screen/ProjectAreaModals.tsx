@@ -7,6 +7,7 @@ import { projectsScreenStyles as styles } from './projects-screen.styles';
 import { getLiveMutableProject } from './project-meta-pickers';
 import { logInfo } from '../../lib/app-log';
 import { useAndroidKeyboardInset } from '../../lib/use-android-keyboard-inset';
+import { useEinkSafeColor } from '../../hooks/use-eink-safe-color';
 
 type ThemeColors = {
     border: string;
@@ -85,6 +86,7 @@ export function ProjectAreaModals({
     updateProject,
 }: ProjectAreaModalsProps) {
     const keyboardInset = useAndroidKeyboardInset(showAreaManager);
+    const einkSafe = useEinkSafeColor();
     const [editingAreaId, setEditingAreaId] = React.useState<string | null>(null);
     const [areaName, setAreaName] = React.useState('');
     const [saving, setSaving] = React.useState(false);
@@ -219,7 +221,7 @@ export function ProjectAreaModals({
                                     disabled={saving}
                                     onPress={() => { void setProjectArea(area.id); }}
                                 >
-                                    <View style={[styles.areaDot, { backgroundColor: area.color || tc.tint }]} />
+                                    <View style={[styles.areaDot, { backgroundColor: einkSafe(area.color || tc.tint) }]} />
                                     <Text style={[styles.pickerRowText, { color: tc.text }]}>{area.name}</Text>
                                 </TouchableOpacity>
                             ))}
@@ -276,7 +278,7 @@ export function ProjectAreaModals({
                                                     onPress={() => { setEditingAreaId(area.id); setAreaName(area.name); }}
                                                     style={styles.areaManagerInfo}
                                                 >
-                                                    <View style={[styles.areaDot, { backgroundColor: area.color || tc.tint }]} />
+                                                    <View style={[styles.areaDot, { backgroundColor: einkSafe(area.color || tc.tint) }]} />
                                                     <Text numberOfLines={1} style={[styles.areaManagerText, { color: tc.text }]}>{area.name}</Text>
                                                 </TouchableOpacity>
                                                 <View style={[styles.areaManagerActions, managerAreaId && { flexWrap: 'wrap' }]}>

@@ -7,6 +7,7 @@ import { getProcessInboxConversionRows, replaceProcessInboxExtraAction } from '@
 import { styles } from '../inbox-processing-modal.styles';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
+import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 
 type Area = { id: string; name: string; color?: string };
 type Project = { id: string; title: string; status?: CoreProject['status']; areaId?: string; color?: string; colorOverride?: string | null };
@@ -71,6 +72,7 @@ export function InboxProjectSection({
   selectSection,
 }: Props) {
   const filledButton = useFilledButtonColors();
+  const einkSafe = useEinkSafeColor();
   const areas = useTaskStore((state) => state.areas);
   if (!show) return null;
 
@@ -99,7 +101,7 @@ export function InboxProjectSection({
             onPress={() => setSelectedAreaId(currentArea.id)}
             accessibilityState={{ selected: selectedAreaId === currentArea.id }}
           >
-            <View style={[styles.projectDot, { backgroundColor: currentArea.color || tc.secondaryText }]} />
+            <View style={[styles.projectDot, { backgroundColor: einkSafe(currentArea.color || tc.secondaryText) }]} />
             <Text style={[styles.projectChipText, { color: tc.text }]}>✓ {currentArea.name}</Text>
           </TouchableOpacity>
         )}
@@ -136,7 +138,7 @@ export function InboxProjectSection({
                 onPress={() => setSelectedAreaId(area.id)}
                 accessibilityState={{ selected: isSelected }}
               >
-                <View style={[styles.projectDot, { backgroundColor: area.color || tc.secondaryText }]} />
+                <View style={[styles.projectDot, { backgroundColor: einkSafe(area.color || tc.secondaryText) }]} />
                 <Text style={[styles.projectChipText, { color: tc.text }]}>{area.name}</Text>
               </TouchableOpacity>
             );

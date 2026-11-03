@@ -92,6 +92,7 @@ export const GRUVBOX_DARK_CONTEXT_COLOR_PALETTE = [
 ];
 
 const CONTEXT_COLOR_PALETTES_BY_THEME = new Map<AppTheme, readonly string[]>([
+    ['eink', ['#000000']],
     ['nord', NORD_CONTEXT_COLOR_PALETTE],
     ['catppuccin-macchiato', CATPPUCCIN_MACCHIATO_CONTEXT_COLOR_PALETTE],
     ['dracula', DRACULA_CONTEXT_COLOR_PALETTE],

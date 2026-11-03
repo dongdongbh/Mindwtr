@@ -3,7 +3,9 @@ import type { RefObject } from 'react';
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Switch, TextInput, TouchableOpacity, View } from 'react-native';
 import type { StyleProp, ViewStyle } from 'react-native';
 import { AtSign, CalendarDays, ChevronDown, ChevronUp, Clock, FileText, Flag, Folder, Layers, Mic, SlidersHorizontal, Square, X } from 'lucide-react-native';
-import { getQuickCaptureFocusLabel, getQuickCaptureText, tFallback, TASK_PRIORITY_COLORS, type TaskPriority } from '@mindwtr/core';
+import { getQuickCaptureFocusLabel, getQuickCaptureText, tFallback, type TaskPriority } from '@mindwtr/core';
+import { usePriorityColors } from '@/hooks/use-priority-colors';
+import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 import { ToastViewport } from '@/contexts/toast-context';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 import { CompactText, CompactTextInput } from '@/components/compact-text';
@@ -167,6 +169,8 @@ export function QuickCaptureSheetBody({
 
 
   const [syntaxHelpVisible, setSyntaxHelpVisible] = React.useState(false);
+  const priorityColors = usePriorityColors();
+  const einkSafe = useEinkSafeColor();
 
   const text = getQuickCaptureText(t, { priorities: prioritiesEnabled, timeEstimates: timeEstimatesEnabled });
   const optionsToggleLabel = optionsExpanded ? text.hideOptions : text.more;
@@ -198,8 +202,8 @@ export function QuickCaptureSheetBody({
       style={[
         chipStyle,
         {
-          backgroundColor: focusNewTask ? `${FOCUS_STAR_COLOR}22` : tc.filterBg,
-          borderColor: focusNewTask ? FOCUS_STAR_COLOR : tc.border,
+          backgroundColor: focusNewTask ? `${einkSafe(FOCUS_STAR_COLOR)}22` : tc.filterBg,
+          borderColor: focusNewTask ? einkSafe(FOCUS_STAR_COLOR) : tc.border,
         },
       ]}
       activeOpacity={0.85}
@@ -210,7 +214,7 @@ export function QuickCaptureSheetBody({
         size={16}
       />
       <CompactText
-        style={[styles.optionText, { color: focusNewTask ? FOCUS_STAR_COLOR : tc.text }]}
+        style={[styles.optionText, { color: focusNewTask ? einkSafe(FOCUS_STAR_COLOR) : tc.text }]}
         numberOfLines={1}
         ellipsizeMode="tail"
       >
@@ -511,7 +515,7 @@ export function QuickCaptureSheetBody({
                       accessibilityRole="button"
                       accessibilityLabel={`${t('taskEdit.priorityLabel')}: ${priorityLabel}`}
                     >
-                      <Flag size={16} color={selectedPriority ? TASK_PRIORITY_COLORS[selectedPriority] : tc.text} />
+                      <Flag size={16} color={selectedPriority ? priorityColors[selectedPriority] : tc.text} />
                       <CompactText
                         style={[styles.optionText, { color: tc.text }]}
                         numberOfLines={2}

@@ -66,10 +66,16 @@ describe('getContextColor', () => {
     it('leaves every other theme on the canonical palette', () => {
         for (const [token, canonical] of SLOT_TOKENS) {
             expect(getContextColor(token, 'sepia')).toBe(canonical);
-            expect(getContextColor(token, 'eink')).toBe(canonical);
             expect(getContextColor(token, 'dark')).toBe(canonical);
             expect(getContextColor(token, undefined)).toBe(canonical);
         }
+    });
+
+    it('stays monochrome on eink', () => {
+        for (const [token] of SLOT_TOKENS) {
+            expect(getContextColor(token, 'eink')).toBe('#000000');
+        }
+        expect(getContextColor('   ', 'eink')).toBe('#000000');
     });
 
     it('themes the empty-context fallback too', () => {

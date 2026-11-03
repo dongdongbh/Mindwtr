@@ -37,6 +37,7 @@ import {
 import { useRouter } from 'expo-router';
 
 import { useThemeColors } from '@/hooks/use-theme-colors';
+import { useEinkSafeColor } from '@/hooks/use-eink-safe-color';
 import { CompactText } from '@/components/compact-text';
 
 import { useSettingsLocalization, useSettingsScrollContent } from './settings.hooks';
@@ -90,6 +91,7 @@ function CollapsibleSection({
 export function ManageSettingsScreen() {
     const router = useRouter();
     const tc = useThemeColors();
+    const einkSafe = useEinkSafeColor();
     const { t } = useSettingsLocalization();
     const scrollContentStyle = useSettingsScrollContent();
     const areas = useTaskStore((state) => state.areas);
@@ -465,7 +467,7 @@ export function ManageSettingsScreen() {
 
     const AreaRow = ({ area }: { area: typeof sortedAreas[number] }) => (
         <View style={[styles.settingRow, { borderBottomWidth: 1, borderBottomColor: tc.border }]}>
-            <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: area.color || DEFAULT_AREA_COLOR, marginRight: 12 }} />
+            <View style={{ width: 24, height: 24, borderRadius: 6, backgroundColor: einkSafe(area.color || DEFAULT_AREA_COLOR), marginRight: 12 }} />
             <Text style={[styles.settingLabel, { color: tc.text, flex: 1 }]} numberOfLines={1}>{area.name}</Text>
             <TouchableOpacity
                 accessibilityLabel={editLabel(area.name)}

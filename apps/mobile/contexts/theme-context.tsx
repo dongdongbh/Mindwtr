@@ -138,10 +138,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     );
 }
 
+const DEFAULT_THEME_CONTEXT: ThemeContextType = {
+    themeMode: 'system',
+    themeStyle: 'default',
+    themePreset: 'default',
+    colorScheme: 'light',
+    setThemeMode: () => {},
+    setThemeStyle: () => {},
+    isDark: false,
+    isReady: false,
+};
+
 export function useTheme() {
-    const context = useContext(ThemeContext);
-    if (!context) {
-        throw new Error('useTheme must be used within a ThemeProvider');
-    }
-    return context;
+    return useContext(ThemeContext) ?? DEFAULT_THEME_CONTEXT;
 }

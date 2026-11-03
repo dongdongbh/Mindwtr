@@ -4694,7 +4694,7 @@ export const STATUS_COLORS_BY_THEME = {
   light: { done: { bg: '#22C55E20', text: '#22C55E', border: '#22C55E' } }, dark: { done: { bg: '#4ADE8026', text: '#4ADE80', border: '#4ADE80' } },
   nord: { done: { bg: '#A3BE8C26', text: '#A3BE8C', border: '#A3BE8C' } },
 };
-export const TASK_PRIORITY_COLORS = { urgent: '#dc2626', low: '#3b82f6' };
+export function getTaskPriorityColors() { return { urgent: '#dc2626', low: '#3b82f6' }; }
 export function themeDescriptor(theme) {
   return new Map([['nord', { scheme: 'dark', statusPreset: 'nord' }],
     ['material3-light', { scheme: 'light', statusPreset: null }]]).get(theme);

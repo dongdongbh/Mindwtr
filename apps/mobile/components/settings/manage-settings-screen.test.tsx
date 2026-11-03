@@ -90,6 +90,7 @@ vi.mock('@mindwtr/core', async (importOriginal) => ({
   }))(await importOriginal<typeof import('@mindwtr/core')>()),
   AREA_PRESET_COLORS: ['#3b82f6', '#10b981'],
   DEFAULT_AREA_COLOR: '#3b82f6',
+  einkSafeColor: (color: string) => color,
   formatI18nTemplate: (template: string, values: Record<string, string>) => (
     template.replace(/{{(\w+)}}/g, (_match, key: string) => values[key] ?? '')
   ),

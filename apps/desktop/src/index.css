@@ -206,6 +206,10 @@
     outline-offset: -2px;
   }
 
+  :root.theme-eink svg[data-priority-flag] {
+    stroke: hsl(var(--foreground));
+  }
+
   :root.theme-nord {
     color-scheme: dark;
     --background: 220 16.4% 21.6%;
