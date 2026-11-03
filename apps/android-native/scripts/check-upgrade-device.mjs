@@ -1778,23 +1778,26 @@ const scenarioCalendarPush = async () => {
         check(liveEvents(newId).length === 0 && !deletedKeys.has(PUSH_KEYS.calendarId) && pushRows('12-deleted').size === 0,
             '(12) N9: Delete Mindwtr calendar removes the calendar, its events, the saved ID and the pushed-event rows');
     } finally {
-        // Every Mindwtr calendar this run made goes, and its events with it (the provider deletes a calendar's events). The
-        // known IDs go first, so a list that fails now still leaves none of them behind (review N10); then the list finds any other.
-        const remove = (id) => {
-            try { calendarCommand(`delete --uri ${CALENDARS}/${id}`); } catch (error) { console.log(`note - calendar ${id} delete: ${error.message}`); }
+        // Every calendar this run made goes, and its events with it (the provider deletes a calendar's events). The known IDs
+        // go first (review N10), each only while it still carries the name this run gave it: the phone hands a freed _id to
+        // the next calendar (correction review note 11). Then a name sweep finds any other: every MtuUser test calendar, and
+        // this run's mindwtr / mindwtr:* calendars. The run fails if a test calendar or a test event is left.
+        const OURS = "(name='mindwtr' OR name LIKE 'mindwtr:%')";
+        const USER = "calendar_displayName LIKE 'MtuUser%'";
+        const remove = (id, named) => {
+            try { calendarCommand(`delete --uri ${CALENDARS} --where "_id=${id} AND ${named}"`); } catch (error) { console.log(`note - calendar ${id} delete: ${error.message}`); }
         };
-        made.forEach(remove);
-        if (userCalendar) {
-            remove(userCalendar);
-            console.log(`cleanup - the test user calendar: ${calendarRows(CALENDARS, ['_id'], `_id=${userCalendar}`).length ? 'LEFT' : 'deleted'}`);
-            if (calendarRows(CALENDARS, ['_id'], `_id=${userCalendar}`).length) fail('(12) cleanup left the test user calendar');
-        }
-        const others = mindwtrCalendars().filter((row) => !earlier.has(row._id) && !made.includes(row._id)).map((row) => row._id);
-        others.forEach(remove);
+        made.forEach((id) => remove(id, OURS));
+        if (userCalendar) remove(userCalendar, USER);
+        const users = calendarRows(CALENDARS, ['_id'], USER).map((row) => row._id);
+        users.forEach((id) => remove(id, USER));
+        const others = calendarRows(CALENDARS, ['_id'], OURS).map((row) => row._id).filter((id) => !earlier.has(id));
+        others.forEach((id) => remove(id, OURS));
         made = [...new Set([...made, ...others])];
-        const left = made.filter((id) => mindwtrCalendars().some((row) => row._id === id) || liveEvents(id).length > 0);
-        console.log(`cleanup - deleted ${made.length} Mindwtr calendar(s) this run made; left: ${left.length}`);
-        if (left.length) fail(`(12) cleanup left calendar(s) ${left.join(',')}`);
+        const left = calendarRows(CALENDARS, ['_id'], `${USER} OR ${OURS}`).map((row) => row._id).filter((id) => !earlier.has(id));
+        const events = calendarRows(EVENTS, ['_id'], "deleted=0 AND (title LIKE '12done%' OR title LIKE '12deleted%' OR title LIKE '12kept%' OR title LIKE '12user%')");
+        console.log(`cleanup - deleted ${made.length} Mindwtr and ${new Set([userCalendar, ...users].filter(Boolean)).size} test user calendar(s); left: ${left.length} calendar(s), ${events.length} test event(s)`);
+        if (left.length || events.length) fail(`(12) cleanup left calendar(s) ${left.join(',')} and ${events.length} test event(s)`);
     }
 };
 
