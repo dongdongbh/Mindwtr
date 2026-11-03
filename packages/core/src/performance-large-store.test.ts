@@ -1,7 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
     buildTasksByProjectId,
     buildTrashTimeline,
@@ -309,6 +309,71 @@ function measureBest(operation: () => number, attempts = 3): { durationMs: numbe
     return { durationMs: bestDurationMs, value: bestValue };
 }
 
+function measureHotPath(operation: () => number): { durationMs: number; value: number } {
+    operation();
+    const samples = Array.from({ length: 5 }, () => {
+        const sample = measureBest(() => {
+            let value = 0;
+            for (let iteration = 0; iteration < 3; iteration += 1) value = operation();
+            return value;
+        }, 1);
+        return { ...sample, durationMs: sample.durationMs / 3 };
+    });
+    samples.sort((left, right) => left.durationMs - right.durationMs);
+    return samples[2];
+}
+
+function expectGrowthWithinBudget(
+    operation: Pick<BudgetedOperation, 'label' | 'maxGrowthFrom10kTo50k'>,
+    tenKDuration: number,
+    fiftyKDuration: number,
+) {
+    if (tenKDuration < GROWTH_BASELINE_FLOOR_MS) return;
+    const growth = fiftyKDuration / tenKDuration;
+    expect(
+        growth,
+        `${operation.label} grew ${growth.toFixed(2)}x from 10k to 50k tasks; max allowed is ${operation.maxGrowthFrom10kTo50k}x`,
+    ).toBeLessThanOrEqual(operation.maxGrowthFrom10kTo50k);
+}
+
+describe('performance measurement harness', () => {
+    it('excludes warm-up and returns the median batch with its observed result', () => {
+        let clock = 0;
+        let calls = 0;
+        const durations = [100, ...[9, 11, 10, 1_000, 12].flatMap((duration) => [duration, duration, duration])];
+        const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+        try {
+            const result = measureHotPath(() => {
+                const duration = durations.shift();
+                if (duration === undefined) throw new Error('Unexpected measurement');
+                clock += duration;
+                return ++calls;
+            });
+            expect(result).toEqual({ durationMs: 11, value: 7 });
+            expect(durations).toEqual([]);
+        } finally {
+            now.mockRestore();
+        }
+    });
+
+    it('accepts linear growth and rejects quadratic growth through the measured budget gate', () => {
+        let clock = 0;
+        const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+        const operation = { label: 'Synthetic hot path', maxGrowthFrom10kTo50k: 8 };
+        const measureCost = (cost: number) => measureHotPath(() => {
+            clock += cost;
+            return 1;
+        }).durationMs;
+        try {
+            const tenKDuration = measureCost(10);
+            expect(() => expectGrowthWithinBudget(operation, tenKDuration, measureCost(50))).not.toThrow();
+            expect(() => expectGrowthWithinBudget(operation, tenKDuration, measureCost(250))).toThrow('grew 25.00x');
+        } finally {
+            now.mockRestore();
+        }
+    });
+});
+
 const PERF_MEASUREMENTS_PATH = '.perf/measurements.json';
 
 type PerfMeasurement = { actualMs: number; budgetMs: number; label: string; size: LargeStoreSize };
@@ -519,7 +584,7 @@ describePerf('large-store performance budgets', () => {
             expect(fixture.projects).toHaveLength(fixture.projectCount);
 
             operations.forEach((operation) => {
-                const result = measureBest(() => operation.run(fixture));
+                const result = measureHotPath(() => operation.run(fixture));
                 expect(result.value, `${operation.label} should produce a non-empty result`).toBeGreaterThan(0);
                 expectWithinBudget(
                     operation.label,
@@ -542,13 +607,7 @@ describePerf('large-store performance budgets', () => {
                 throw new Error(`Missing measurements for ${operation.label}`);
             }
 
-            if (tenKDuration >= GROWTH_BASELINE_FLOOR_MS) {
-                const growth = fiftyKDuration / tenKDuration;
-                expect(
-                    growth,
-                    `${operation.label} grew ${growth.toFixed(2)}x from 10k to 50k tasks; max allowed is ${operation.maxGrowthFrom10kTo50k}x`,
-                ).toBeLessThanOrEqual(operation.maxGrowthFrom10kTo50k);
-            }
+            expectGrowthWithinBudget(operation, tenKDuration, fiftyKDuration);
         });
     }, 30_000);
 
