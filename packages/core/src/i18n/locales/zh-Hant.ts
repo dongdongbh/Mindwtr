@@ -315,6 +315,7 @@ export const zhHant: Record<string, string> = {
         'nav.calendar': '日曆',
         'nav.review': '回顧',
         'nav.agenda': '日程',
+        'nav.resizeSubmenu': '調整導覽和子選單的高度',
         'nav.settings': '設置',
         'nav.done': '已完成',
         'nav.archived': '已封存',
