@@ -69,7 +69,7 @@ describe('InternalMarkdownLink', () => {
         await waitFor(() => expect(copy).toHaveBeenCalledWith(uri));
     });
 
-    it.each(['javascript:alert(1)', 'data:text/html,bad', 'file:///private/doc', 'obsidian://open?file=a', 'custom://open'])('keeps blocked Markdown href %s inert', (href) => {
+    it.each(['javascript:alert(1)', 'data:text/html,bad', 'file:///private/doc', 'obsidian:open?file=a', 'custom://open'])('keeps blocked Markdown href %s inert', (href) => {
         const { queryByRole } = render(
             <LanguageProvider><InternalMarkdownLink href={href} linkContext={currentLinkContext()}>Blocked</InternalMarkdownLink></LanguageProvider>
         );

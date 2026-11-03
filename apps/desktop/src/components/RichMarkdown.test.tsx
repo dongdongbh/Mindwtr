@@ -5,8 +5,7 @@ import { LanguageProvider } from '../contexts/language-context';
 import { RichMarkdown } from './RichMarkdown';
 
 describe('RichMarkdown', () => {
-    it('keeps explicit UpNote links clickable with the original encoded URI', () => {
-        const uri = 'upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true';
+    it.each(['upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true', 'obsidian://open?vault=Obsidian%20Vault&file=Folder%2FNote%2520&heading=Section%20One'])('keeps explicit app links clickable with the original URI: %s', (uri) => {
         render(<LanguageProvider><RichMarkdown markdown={`[Note](${uri})`} /></LanguageProvider>);
         expect(screen.getByRole('link', { name: 'Note' })).toHaveAttribute('title', uri);
     });

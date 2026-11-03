@@ -18,16 +18,18 @@ ${source.slice(start, end)}
 let original = ${JSON.stringify(original)}
 let opened = NativeMarkdownLinkURL.externalURL(original)!
 precondition(opened.absoluteString == original)
+let obsidian = "obsidian://open?vault=Obsidian%20Vault&file=Folder%2FNote%2520&heading=Section%20One"
+precondition(NativeMarkdownLinkURL.externalURL(obsidian)?.absoluteString == obsidian)
 let runs: [CoreObject] = [["type": "link", "target": ["kind": "external", "href": original]]]
 precondition(NativeMarkdownLinkURL.originalHref(opened, runs: runs) == original)
 for href in ["https://example.org", "http://example.org", "mailto:a@example.org", "tel:123"] {
     precondition(NativeMarkdownLinkURL.externalURL(href) != nil)
 }
-for href in ["javascript:alert(1)", "file:///secret", "data:text/plain,x", "obsidian://vault", "upnote:opaque"] {
+for href in ["javascript:alert(1)", "file:///secret", "data:text/plain,x", "obsidian:opaque", "upnote:opaque"] {
     precondition(NativeMarkdownLinkURL.externalURL(href) == nil)
 }
 precondition(NativeMarkdownLinkURL.originalHref(opened, runs: [["type": "link", "target": ["kind": "task", "href": original]]]) == nil)
-print("Native UpNote URL policy: exact encoded URI, original lookup, 4 ordinary and 5 blocked schemes passed")
+print("Native external URL policy: exact encoded URI, original lookup, Obsidian, 4 ordinary and 5 blocked schemes passed")
 `;
 const folder = resolve(app, '../../.orchestrator/tasks/native/swift-check');
 mkdirSync(folder, { recursive: true });

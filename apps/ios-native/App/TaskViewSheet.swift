@@ -1791,9 +1791,9 @@ struct NativeMarkdownContent: View {
 enum NativeMarkdownLinkURL {
     static func externalURL(_ href: String) -> URL? {
         guard let url = URL(string: href),
-              ["http", "https", "mailto", "tel", "upnote"].contains(url.scheme?.lowercased() ?? "") else { return nil }
-        if url.scheme?.lowercased() == "upnote" {
-            guard href.lowercased().hasPrefix("upnote://"), url.absoluteString == href else { return nil }
+              ["http", "https", "mailto", "tel", "upnote", "obsidian"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        if let scheme = url.scheme?.lowercased(), ["upnote", "obsidian"].contains(scheme) {
+            guard href.lowercased().hasPrefix("\(scheme)://"), url.absoluteString == href else { return nil }
         }
         return url
     }

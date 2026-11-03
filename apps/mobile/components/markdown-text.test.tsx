@@ -298,8 +298,7 @@ describe('MarkdownText', () => {
     expect(Linking.openURL).toHaveBeenCalledWith('https://example.com/docs');
   });
 
-  it('opens an explicit UpNote description link only after a tap, preserving its original URI', async () => {
-    const uri = 'upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true';
+  it.each(['upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true', 'obsidian://open?vault=Obsidian%20Vault&file=Folder%2FNote%2520&heading=Section%20One'])('opens explicit app links only after a tap, preserving the URI: %s', async (uri) => {
     const tree = renderMarkdown(`[My note](${uri})`);
     expect(Linking.openURL).not.toHaveBeenCalled();
     const link = tree.root.findAll((node) => typeof node.props.onPress === 'function'
@@ -310,7 +309,7 @@ describe('MarkdownText', () => {
   });
 
   it('keeps blocked schemes and unrelated custom protocols noninteractive', () => {
-    const tree = renderMarkdown('[Script](javascript:evil) [Data](data:text/plain,test) [Other](obsidian://open)');
+    const tree = renderMarkdown('[Script](javascript:evil) [Data](data:text/plain,test) [Other](custom://open)');
     expect(tree.root.findAll((node) => typeof node.props.onPress === 'function')).toHaveLength(0);
     expect(Linking.openURL).not.toHaveBeenCalled();
   });
