@@ -47,7 +47,8 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
 vi.mock('@/contexts/language-context', () => ({
   useLanguage: () => ({ t: (key: string) => english.strings[key] ?? key, language: 'en' }),
 }));
-vi.mock('@/contexts/theme-context', () => ({ useTheme: () => ({ isDark: false }) }));
+vi.mock('@/contexts/theme-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/contexts/theme-context')>(), useTheme: () => ({ isDark: false }) }));
 vi.mock('@/contexts/toast-context', () => ({
   useToast: () => ({
     showToast: (toast: { tone?: string; title?: string; message?: string; actionLabel?: string; onAction?: () => void }) => {

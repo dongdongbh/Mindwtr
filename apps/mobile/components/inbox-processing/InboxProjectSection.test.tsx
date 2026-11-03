@@ -1,4 +1,5 @@
 import React from 'react';
+import { View } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -64,7 +65,7 @@ describe('InboxProjectSection project chips', () => {
                 </ThemeContext.Provider>,
             );
         });
-        const dots = tree.root.findAll((node) => node.type === 'View' && Array.isArray(node.props.style) && node.props.style[0]?.width === 8);
+        const dots = tree.root.findAll((node) => node.type === View && Array.isArray(node.props.style) && node.props.style[0]?.width === 8);
         const colors = dots.map((node) => node.props.style[1].backgroundColor);
         expect(colors).toEqual(themePreset === 'eink' ? ['#000000', '#000000'] : ['#3b82f6', '#f97316']);
         act(() => tree.unmount());
