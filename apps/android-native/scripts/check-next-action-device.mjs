@@ -254,9 +254,14 @@ try {
     check(JSON.stringify(projectTasks()) === before, '(2) Skip closed the prompt and wrote nothing');
 
     await reveal((current) => taskRow(current, LATER.title), `the row ${LATER.title}`);
-    await device.swipeDone(await screen(), LATER.title);
+    await tap(await device.revealAction(await screen(), LATER.title, 'organize'));
+    const nextItem = (current) => {
+        const header = current.find((node) => node.text === en['taskStatus.changeStatus']);
+        return header && current.find((node) => node.text === en['status.next'] && node.class !== 'android.widget.EditText' && box(node)[1] > box(header)[1]);
+    };
+    await tap(nextItem(await waitFor('the status menu', (current) => Boolean(nextItem(current)), 10_000)));
     await until('the Someday task Next', () => projectTasks()[LATER.title] === 'next');
-    check(!prompted(await screen()), '(2) the Someday row\'s Next swipe shows no prompt');
+    check(!prompted(await screen()), '(2) the Someday row\'s tray Organize, then Next, shows no prompt');
     nodes = await doneUntilPrompt(LATER.title);
     check(!tagged(nodes, 'next-action-candidate'), '(2) that task\'s Done asks again, with no task to choose');
     const typed = `Typed ${run}`;
