@@ -7,16 +7,13 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.platform.LocalViewConfiguration
-import androidx.compose.ui.platform.ViewConfiguration
-import kotlin.math.sign
+import kotlin.math.abs
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -501,6 +498,9 @@ private const val TRAY_DRAG_TOSS = 0.05f
 
 internal fun trayWidthDp(buttons: Int): Int = if (buttons == 0) 0 else buttons * TRAY_BUTTON_DP + (buttons - 1) * TRAY_GAP_DP + TRAY_MARGIN_DP
 
+internal fun trayDragOffset(start: Float, dragged: Float, dragOffset: Float, left: Float, right: Float): Float =
+    if (abs(dragged) < dragOffset) start else (start + dragged / TRAY_FRICTION).coerceIn(-right, left)
+
 internal fun settleTray(start: Float, offset: Float, velocity: Float, threshold: Float, left: Float, right: Float): Float {
     val moved = offset - start + TRAY_DRAG_TOSS * velocity / TRAY_FRICTION
     return when {
@@ -525,7 +525,7 @@ private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, 
     val offset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     var start by remember { mutableFloatStateOf(0f) }
-    var fresh by remember { mutableStateOf(false) }
+    var dragged by remember { mutableFloatStateOf(0f) }
     val settle = { to: Float -> scope.launch { offset.animateTo(to) }; Unit }
     val view = LocalView.current
     val press = { action: TrayAction ->
@@ -539,24 +539,20 @@ private fun SwipeTray(tray: Tray?, enabled: Boolean, shape: RoundedCornerShape, 
         if (tray != null && offset.value > 0f) TrayButtons(tray.swipeRight, Alignment.Start, shape, labels, isEnabled, press,
             onLongDone?.let { long -> { settle(0f); view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS); long() } })
         if (tray != null && offset.value < 0f) TrayButtons(tray.swipeLeft, Alignment.End, shape, labels, isEnabled, press, null)
-        val system = LocalViewConfiguration.current
-        CompositionLocalProvider(LocalViewConfiguration provides TraySlop(system, dragOffset)) {
-            Box(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }.draggable(
-                state = rememberDraggableState { delta ->
-                    val moved = if (fresh) delta + sign(delta) * dragOffset else delta
-                    fresh = false
-                    scope.launch { offset.snapTo((offset.value + moved / TRAY_FRICTION).coerceIn(-right, left)) }
-                },
-                orientation = Orientation.Horizontal, enabled = enabled,
-                onDragStarted = { start = offset.targetValue; fresh = true },
-                onDragStopped = { velocity -> settle(settleTray(start, offset.value, velocity, threshold, left, right)) },
-            )) { CompositionLocalProvider(LocalViewConfiguration provides system) { content() } }
+        Box(Modifier.offset { IntOffset(offset.value.roundToInt(), 0) }.draggable(
+            state = rememberDraggableState { delta ->
+                dragged += delta
+                val to = trayDragOffset(start, dragged, dragOffset, left, right)
+                scope.launch { offset.snapTo(to) }
+            },
+            orientation = Orientation.Horizontal, enabled = enabled,
+            onDragStarted = { start = offset.targetValue; dragged = 0f },
+            onDragStopped = { velocity -> settle(settleTray(start, trayDragOffset(start, dragged, dragOffset, left, right), velocity, threshold, left, right)) },
+        )) {
+            content()
+            if (offset.targetValue != 0f) Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures(onLongPress = { }) { settle(0f) } })
         }
     }
-}
-
-private class TraySlop(private val system: ViewConfiguration, private val slop: Float) : ViewConfiguration by system {
-    override val touchSlop: Float get() = slop
 }
 
 @OptIn(ExperimentalFoundationApi::class)

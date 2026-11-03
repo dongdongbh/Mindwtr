@@ -43,4 +43,16 @@ class SwipeTrayTest {
         assertEquals(-right, settleTray(-right, -right + 50f, 0f, 72f, left, right))
         assertEquals(0f, settleTray(-right, -right + 73f, 0f, 72f, left, right))
     }
+
+    @Test fun dragMovesTheRowOnlyPastRnsActivationDistance() {
+        val left = 166f
+        val right = 248f
+        assertEquals(0f, trayDragOffset(0f, 27f, 28f, left, right))
+        assertEquals(0f, trayDragOffset(0f, -27f, 28f, left, right))
+        assertEquals(40f, trayDragOffset(0f, 50f, 28f, left, right))
+        assertEquals(left, trayDragOffset(0f, 1000f, 28f, left, right))
+        assertEquals(-right, trayDragOffset(0f, -1000f, 28f, left, right))
+        assertEquals(left, trayDragOffset(left, 20f, 28f, left, right))
+        assertEquals(left - 40f, trayDragOffset(left, -50f, 28f, left, right))
+    }
 }

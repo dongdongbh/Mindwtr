@@ -3,7 +3,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { box, button, check, connect, evidenced, fail, hasText, inboxCount, inEditor, Stopped, tab, tabSelected, tagged, taskRow } from './device.mjs';
+import { box, button, check, connect, EDGE_SAFE_X, evidenced, fail, hasText, inboxCount, inEditor, Stopped, tab, tabSelected, tagged, taskRow } from './device.mjs';
 
 const [serial, apkArg] = process.argv.slice(2);
 if (!serial) {
@@ -68,14 +68,15 @@ const shoot = async (name) => {
     console.log(`shot - ${name}.png`);
 };
 const shut = async (title, side) => {
-    const row = taskRow(await screen(), title);
-    if (!row) return;
+    const row = taskRow(await screen(), title) ?? fail(`no row ${title} on screen`);
     const [x1, y1, x2, y2] = box(row);
     const y = Math.round((y1 + y2) / 2);
     const from = Math.round((x1 + x2) / 2);
     requireAppFront();
-    sh(`input swipe ${from} ${y} ${side === 'right' ? Math.max(from - 440, 160) : from + 300} ${y} 300`);
-    await waitFor('the tray to shut', (current) => trayButtons(current).length === 0, 8_000);
+    if (side === 'right') sh(`input swipe ${from} ${y} ${Math.max(from - 440, EDGE_SAFE_X)} ${y} 300`);
+    else sh(`input tap ${from} ${y}`);
+    const nodes = await waitFor('the tray to shut', (current) => trayButtons(current).length === 0, 8_000);
+    if (side === 'left') check(onInbox(nodes) && Boolean(taskRow(nodes, title)), `a tap on ${title}'s open row shuts the tray and opens nothing, as RN's Swipeable does`);
 };
 const capture = async (text) => {
     let nodes = await screen();
