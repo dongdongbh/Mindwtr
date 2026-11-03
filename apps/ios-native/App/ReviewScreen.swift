@@ -69,6 +69,12 @@ struct ReviewScreen: View {
                                 }
                             }
                             .disabled(!model.reviewActionsEnabled).padding(.leading, 20)
+                        } else if item.text("type") == "later" {
+                            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsEnabled,
+                                palette: palette, id: "review-later-" + item.text("id")) {
+                                Task { await model.toggleReviewLater(item.text("id"), weekly: false) }
+                            }
+                            .accessibilityValue(model.label(item.flag("expanded") ? "markdown.collapse" : "markdown.expand"))
                         } else { group(item) }
                     }
                     if items.count < view.number("total") {
@@ -375,6 +381,12 @@ struct ReviewGuideScreen: View {
                 footer: daily ? item.object("followUp").text("label") : "", hideStatusBadge: item.flag("hideStatusBadge"),
                 showFocusToggle: daily && content.text("step") == "focus", onProject: { project in Task { await model.openProject(project) } })
                 .disabled(!model.reviewActionsEnabled)
+        } else if item.text("type") == "later" {
+            ReviewAction(title: item.text("label"), selected: item.flag("expanded"), enabled: model.reviewActionsEnabled,
+                palette: palette, id: "weekly-later-" + item.text("id")) {
+                Task { await model.toggleReviewLater(item.text("id"), weekly: true) }
+            }
+            .accessibilityValue(model.label(item.flag("expanded") ? "markdown.collapse" : "markdown.expand"))
         } else if item.text("type") == "project" {
             Button { Task { await model.expandWeeklyReviewProject(item.text("id")) } } label: {
                 VStack(alignment: .leading, spacing: 8) {

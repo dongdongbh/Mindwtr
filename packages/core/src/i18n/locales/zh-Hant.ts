@@ -1147,6 +1147,7 @@ export const zhHant: Record<string, string> = {
         'review.projectsStepDesc': '確保每個啟用中的專案都有下一步行動。',
         'review.projectsHint': '回顧每個專案。它至少有一個具體的下一步行動嗎？如果沒有，現在添加一個。將完成的專案標記爲完成。',
         'review.hasNextAction': '有下一步行動',
+    'review.projectDeferred': '已排程',
         'review.needsAction': '需要行動',
         'review.noActiveTasks': '沒有啟用中的任務',
         'review.somedayStep': '將來/也許',

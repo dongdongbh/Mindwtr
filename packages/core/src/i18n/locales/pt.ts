@@ -822,6 +822,7 @@ export const ptOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Certifique-se de que cada projeto ativo tenha uma próxima ação.',
         'review.projectsHint': 'Revise cada projeto. Tem pelo menos uma Próxima Ação concreta? Se não, adicione um agora. Marcar projetos concluídos como concluídos.',
         'review.hasNextAction': 'Tem próxima ação',
+    'review.projectDeferred': 'Agendado',
         'review.needsAction': 'Precisa de ação',
         'review.noActiveTasks': 'Nenhuma tarefa ativa',
         'review.somedayStep': 'Algum dia/Talvez',

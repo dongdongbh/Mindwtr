@@ -12,7 +12,7 @@ import {
     type AreaVisibilityContext,
 } from './area-filter';
 import { isTaskInActiveProject } from './project-utils';
-import { getSequentialFirstTaskIds, getTaskSequencing, isSequentialChainStatus, isTaskSequenceBlocked, shouldShowTaskForStart, sortTasksBy } from './task-utils';
+import { compareTasksByProjectOrder, getSequentialFirstTaskIds, getTaskSequencing, isSequentialChainStatus, isTaskSequenceBlocked, shouldShowTaskForStart, sortTasksBy } from './task-utils';
 import { isTaskActionable, isTaskCompleted } from './task-status';
 import { normalizeTimeSpentMinutes } from './time-spent';
 
@@ -95,25 +95,61 @@ export type WeeklyReviewSummary = {
     staleWaitingCount: number;
 };
 
-/** The review badge's answer to "can this project move?": a live `next` task
- * means yes; otherwise a live `waiting` task means it is delegated — blocked on
- * someone, not stuck (#1086, mirroring the sequential-chain rule where waiting
- * holds a slot); only a project with neither truly needs a next action. */
-export type ProjectNextActionState = 'next' | 'waiting' | 'none';
+/** Review health considers the actual sequence heads; waiting holds its slot. */
+export type ProjectNextActionState = 'next' | 'waiting' | 'deferred' | 'none';
 
 export function getProjectNextActionState(
-    tasks: ReadonlyArray<Pick<Task, 'status'>>,
+    tasks: ReadonlyArray<Pick<Task, 'status' | 'startTime'>>,
+    now: Date = new Date(),
 ): ProjectNextActionState {
-    if (tasks.some((task) => task.status === 'next')) return 'next';
+    if (tasks.some((task) => task.status === 'next' && !isFutureDate(task.startTime, now))) return 'next';
     if (tasks.some((task) => task.status === 'waiting')) return 'waiting';
+    if (tasks.some((task) => task.status === 'next')) return 'deferred';
     return 'none';
 }
 
 export type WeeklyReviewProjectEntry = {
     project: Project;
     tasks: Task[];
+    currentTasks: Task[];
+    laterTasks: Task[];
     nextActionState: ProjectNextActionState;
 };
+
+/** A read-only projection of manual sequences, before any review scope filters. */
+function reviewSequence(tasks: readonly Task[], projects: readonly Project[], sections: readonly Section[]) {
+    const sequencing = getTaskSequencing(projects, sections);
+    const firstTaskIds = getSequentialFirstTaskIds(
+        tasks.filter((task) => !task.deletedAt && !task.purgedAt && isSequentialChainStatus(task.status)),
+        sequencing.sequentialProjectIds,
+        { ...sequencing, sections },
+    );
+    const blocked = (task: Task) => isTaskSequenceBlocked(task, sequencing, firstTaskIds);
+    const sectionById = new Map(sections.filter((section) => !section.deletedAt).map((section) => [section.id, section]));
+    const sectionRank = new Map([...sectionById.values()]
+        .sort((a, b) => (a.order - b.order) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+        .map((section, index) => [section.id, index]));
+    const rank = (task: Task) => task.sectionId && sectionById.get(task.sectionId)?.projectId === task.projectId
+        ? sectionRank.get(task.sectionId) ?? Infinity : Infinity;
+    const partition = (items: Task[], keepDueCurrent: boolean, now: Date) => {
+        const currentTasks: Task[] = [];
+        const laterTasks: Task[] = [];
+        items.forEach((task) => {
+            (task.status === 'next' && blocked(task) && !(keepDueCurrent && isTaskDueForReview(task, now))
+                ? laterTasks : currentTasks).push(task);
+        });
+        laterTasks.sort((a, b) => rank(a) !== rank(b) ? rank(a) - rank(b) : compareTasksByProjectOrder(a, b));
+        return { currentTasks, laterTasks };
+    };
+    const headsByProject = new Map<string, Task[]>();
+    tasks.forEach((task) => {
+        if (!task.projectId || task.deletedAt || task.purgedAt || !isSequentialChainStatus(task.status) || blocked(task)) return;
+        const heads = headsByProject.get(task.projectId) ?? [];
+        heads.push(task);
+        headsByProject.set(task.projectId, heads);
+    });
+    return { blocked, partition, headsByProject };
+}
 
 export type WeeklyReviewLookBack = {
     completedCount: number;
@@ -137,7 +173,9 @@ function deriveWeeklyReview(
     staleThresholdDays: number,
     now: Date,
     weekStart?: AppSettings['weekStart'],
+    sections: readonly Section[] = [],
 ): WeeklyReviewDerivation {
+    const sequence = reviewSequence(tasks, projects, sections);
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     const activeProjects = projects.filter((project) => project.status === 'active' && !project.deletedAt);
     const projectTasksById = new Map(activeProjects.map((project) => [project.id, [] as Task[]]));
@@ -191,7 +229,8 @@ function deriveWeeklyReview(
             || !belongsToActiveProject
             || (task.status !== 'next' && task.status !== 'waiting')
             || isFutureDate(task.reviewAt, now)
-            || isFutureDate(task.startTime, now)
+            || (!isTaskDueForReview(task, now) && (isFutureDate(task.startTime, now)
+                || (task.status === 'next' && sequence.blocked(task))))
         ) return;
         const updated = new Date(task.updatedAt || task.createdAt);
         if (Number.isNaN(updated.getTime())) return;
@@ -232,7 +271,8 @@ function deriveWeeklyReview(
         return {
             project,
             tasks: projectTasks,
-            nextActionState: getProjectNextActionState(projectTasks),
+            ...sequence.partition(projectTasks, false, now),
+            nextActionState: getProjectNextActionState(projectTasks.filter((task) => !sequence.blocked(task)), now),
         };
     });
     const summary: WeeklyReviewSummary = {
@@ -261,8 +301,9 @@ export function getWeeklyReviewSummary(
     tasks: Task[],
     projects: Project[],
     now: Date = new Date(),
+    sections: readonly Section[] = [],
 ): WeeklyReviewSummary {
-    return deriveWeeklyReview(tasks, projects, 14, now).summary;
+    return deriveWeeklyReview(tasks, projects, 14, now, undefined, sections).summary;
 }
 
 export function getStaleItems(
@@ -270,8 +311,9 @@ export function getStaleItems(
     projects: Project[],
     staleThresholdDays = 14,
     now: Date = new Date(),
+    sections: readonly Section[] = [],
 ): ReviewSnapshotItem[] {
-    return deriveWeeklyReview(tasks, projects, staleThresholdDays, now).staleItems;
+    return deriveWeeklyReview(tasks, projects, staleThresholdDays, now, undefined, sections).staleItems;
 }
 
 // ---------------------------------------------------------------------------
@@ -446,7 +488,7 @@ export function getWeeklyReviewBuckets(
     opts: ReviewBucketOptions = {},
 ): WeeklyReviewBuckets {
     const now = opts.now ?? new Date();
-    const weekly = deriveWeeklyReview(tasks, projects, 14, now, opts.weekStart);
+    const weekly = deriveWeeklyReview(tasks, projects, 14, now, opts.weekStart, opts.sections);
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const upcomingEnd = new Date(startOfToday);
@@ -512,6 +554,8 @@ export function getWeeklyReviewBuckets(
 export type ReviewOverviewProjectGroup = {
     project?: Project;
     tasks: Task[];
+    currentTasks: Task[];
+    laterTasks: Task[];
     nextActionState: ProjectNextActionState;
 };
 
@@ -525,6 +569,7 @@ export type ReviewOverviewAreaGroup = {
 
 export type GetReviewOverviewGroupsParams = {
     tasks: Task[];
+    sections?: readonly Section[];
     projects: Project[];
     orderedAreas: Area[];
     areaFilter: AreaFilterSelection;
@@ -546,7 +591,9 @@ export function getReviewOverviewGroups({
     sortBy,
     scope = 'all',
     now = new Date(),
+    sections = [],
 }: GetReviewOverviewGroupsParams): ReviewOverviewAreaGroup[] {
+    const sequence = reviewSequence(tasks, projects, sections);
     const projectById = new Map(projects.map((project) => [project.id, project]));
     const areaById = new Map(orderedAreas.map((area) => [area.id, area]));
     const areaOrderById = new Map(orderedAreas.map((area, index) => [area.id, index]));
@@ -584,10 +631,11 @@ export function getReviewOverviewGroups({
         const projectGroup = areaGroup.projectGroups.get(projectKey) ?? {
             project,
             tasks: [],
+            currentTasks: [],
+            laterTasks: [],
             nextActionState: 'none' as ProjectNextActionState,
         };
         projectGroup.tasks.push(task);
-        projectGroup.nextActionState = getProjectNextActionState(projectGroup.tasks);
         areaGroup.projectGroups.set(projectKey, projectGroup);
         areaGroup.taskCount += 1;
         areaGroups.set(areaKey, areaGroup);
@@ -609,6 +657,10 @@ export function getReviewOverviewGroups({
                     return (left.project.order - right.project.order)
                         || left.project.title.localeCompare(right.project.title);
                 });
+            projectGroups.forEach((group) => {
+                Object.assign(group, sequence.partition(group.tasks, scope === 'due', now));
+                group.nextActionState = getProjectNextActionState(group.project ? sequence.headsByProject.get(group.project.id) ?? [] : group.currentTasks, now);
+            });
             const projectCount = projectGroups.filter((group) => Boolean(group.project)).length;
             const needsActionCount = projectGroups.filter(
                 (group) => Boolean(group.project) && group.nextActionState === 'none',

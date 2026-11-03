@@ -15,6 +15,7 @@ import { computeSyncChangeFingerprint } from './sync-helpers';
 import { mergeAppDataWithStats } from './sync';
 import { buildQuickAddParseOptions } from './quick-add';
 import { buildFocusPools, buildFocusTaskSections, deriveFocusTaskLists } from './focus-sections';
+import { getReviewOverviewGroups, getWeeklyReviewBuckets } from './review-utils';
 import { isTaskActionable } from './task-status';
 import { createProjectToSectionPreviewer } from './project-to-section';
 import type {
@@ -421,6 +422,25 @@ describePerf('large-store performance budgets', () => {
     afterAll(() => {
         mkdirSync(dirname(PERF_MEASUREMENTS_PATH), { recursive: true });
         writeFileSync(PERF_MEASUREMENTS_PATH, JSON.stringify(perfMeasurements, null, 2));
+    });
+
+    it('derives weekly and overview manual sequence projections within large-store budgets', () => {
+        const measurements = new Map<LargeStoreSize, number>();
+        for (const size of DATASET_SIZES) {
+            const fixture = createLargeStoreFixture(size);
+            const projects = fixture.projects.map((project) => ({ ...project, isSequential: true }));
+            const start = performance.now();
+            const weekly = getWeeklyReviewBuckets(fixture.tasks, projects, { now: NOW, sections: fixture.sections });
+            const overview = getReviewOverviewGroups({ tasks: fixture.tasks, projects, sections: fixture.sections, orderedAreas: fixture.areas,
+                areaFilter: { included: [], excluded: [] }, sortBy: 'default', now: NOW });
+            const duration = performance.now() - start;
+            measurements.set(size, duration);
+            expect(weekly.projectEntries.length).toBeGreaterThan(0);
+            expect(overview.length).toBeGreaterThan(0);
+            expect(weekly.projectEntries.some((entry) => entry.laterTasks.length > 0)).toBe(true);
+            expectWithinBudget('Review sequence derivation', size, duration, { 1000: 150, 10000: 700, 50000: 2500 }[size]);
+        }
+        if (measurements.get(10_000)! >= GROWTH_BASELINE_FLOOR_MS) expect(measurements.get(50_000)! / measurements.get(10_000)!).toBeLessThanOrEqual(10);
     });
 
     it('keeps full snapshot merging within absolute and growth budgets', () => {

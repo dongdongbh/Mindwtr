@@ -506,11 +506,12 @@ class MenuModel(internal val shell: InboxViewModel, private val saved: SavedStat
             "trash" -> JSONObject().put("selected", JSONObject().put("taskIds", own.optJSONArray("selectedTasks") ?: JSONArray())
                 .put("projectIds", own.optJSONArray("selectedProjects") ?: JSONArray()))
             // RN's Review opens on its Due scope.
-            "review" -> kept(listOf("expandedAreaIds", "expandedProjectIds")).put("scope", own.optString("scope", "due"))
+            "review" -> kept(listOf("expandedAreaIds", "expandedProjectIds", "expandedLaterProjectIds")).put("scope", own.optString("scope", "due"))
                 .put("selectedIds", own.optJSONArray("selected") ?: JSONArray()).also { dialogInputs(list, it) }
             // A review's place is the checkpoint core gave last, kept on the device as RN keeps its session.
             "weekly" -> JSONObject().put("checkpoint", prefs.getString(WEEKLY_REVIEW_KEY, null) ?: JSONObject.NULL)
                 .put("expandedProjectId", own.opt("expandedProjectId") ?: JSONObject.NULL)
+                .put("expandedLaterProjectIds", own.optJSONArray("expandedLaterProjectIds") ?: JSONArray())
             "daily" -> JSONObject().put("checkpoint", prefs.getString(DAILY_REVIEW_KEY, null) ?: JSONObject.NULL)
             "savedSearch" -> JSONObject().put("id", own.optString("id"))
             "widgetList" -> JSONObject().put("id", own.optString("id"))

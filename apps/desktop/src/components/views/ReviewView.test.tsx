@@ -95,6 +95,54 @@ describe('ReviewView', () => {
         });
     });
 
+    it('keeps sequence tails editable behind a local disclosure and never hides explicit due reviews', () => {
+        const project = makeProject('sequence', { isSequential: true });
+        const tasks = [
+            makeTask('head', { projectId: project.id, title: 'Waiting head', status: 'waiting', order: 0 }),
+            makeTask('tail', { projectId: project.id, title: 'Later tail', order: 1 }),
+            makeTask('due-tail', { projectId: project.id, title: 'Review due tail', order: 2, reviewAt: '2020-01-01' }),
+        ];
+        const updateTask = vi.fn();
+        useTaskStore.setState({ _allTasks: tasks, tasks, _allProjects: [project], projects: [project], updateTask });
+        const { getByRole, getByText, queryByText, container } = renderWithProviders(<ReviewView />);
+        expect(getByText('Review due tail')).toBeInTheDocument();
+        expect(queryByText('Later tail')).not.toBeInTheDocument();
+        expect(queryByText(/Later in sequence/)).not.toBeInTheDocument();
+        fireEvent.click(getByRole('button', { name: 'All open tasks' }));
+        expect(getByText('Waiting head')).toBeInTheDocument();
+        const disclosure = getByRole('button', { name: 'Later in sequence (2)' });
+        expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+        expect(queryByText('Later tail')).not.toBeInTheDocument();
+        fireEvent.click(disclosure);
+        expect(getByText('Later tail')).toBeInTheDocument();
+        expect(container.querySelector('[data-task-id="tail"]')).toBeInTheDocument();
+        fireEvent.click(disclosure);
+        expect(queryByText('Later tail')).not.toBeInTheDocument();
+        expect(updateTask).not.toHaveBeenCalled();
+        expect(useTaskStore.getState()._allTasks).toEqual(tasks);
+        fireEvent.click(disclosure);
+        fireEvent.doubleClick(getByText('Later tail'));
+        expect(useUiStore.getState().editingTaskId).toBe('tail');
+    });
+
+    it('keeps manual later sequence order when the ordinary review list uses title sort', () => {
+        const project = makeProject('sequence', { isSequential: true });
+        const tasks = [
+            makeTask('head', { projectId: project.id, status: 'waiting', order: 0 }),
+            makeTask('zulu', { projectId: project.id, title: 'Zulu comes first', order: 1 }),
+            makeTask('alpha', { projectId: project.id, title: 'Alpha comes later', order: 2 }),
+        ];
+        useTaskStore.setState({ _allTasks: tasks, tasks, _allProjects: [project], projects: [project], settings: { taskSortBy: 'title' } });
+        const { getByRole, getByText, container } = renderWithProviders(<ReviewView />);
+        fireEvent.click(getByRole('button', { name: 'All open tasks' }));
+        fireEvent.click(getByRole('button', { name: 'Select' }));
+        fireEvent.click(getByRole('button', { name: 'Select All' }));
+        expect(getByText('1 selected - 1 tasks')).toBeInTheDocument();
+        expect(getByRole('button', { name: 'Select All' })).toBeDisabled();
+        fireEvent.click(getByRole('button', { name: 'Later in sequence (2)' }));
+        expect(Array.from(container.querySelectorAll('[data-task-id]')).map((row) => row.getAttribute('data-task-id'))).toEqual(['head', 'zulu', 'alpha']);
+    });
+
     it('renders the review list with a guide button', () => {
         const { getByRole } = renderWithProviders(<ReviewView />);
         expect(getByRole('heading', { name: /^review$/i })).toBeInTheDocument();

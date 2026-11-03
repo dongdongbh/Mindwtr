@@ -981,6 +981,7 @@ export const csOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Ověřte, že každý aktivní projekt má další krok.',
         'review.projectsHint': 'Projděte každý projekt. Má aspoň jeden konkrétní Další krok? Pokud ne, přidejte ho teď. Dokončené projekty označte jako hotové.',
         'review.hasNextAction': 'Má další krok',
+    'review.projectDeferred': 'Naplánováno',
         'review.needsAction': 'Potřebuje krok',
         'review.noActiveTasks': 'Žádné aktivní úkoly',
         'review.somedayStep': 'Někdy/Možná',

@@ -190,12 +190,12 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
     const read = (edit?: NativeReviewExpansionEdit) => {
         if (edit) {
             // The edit resolves the expansion; the screen keeps what comes back.
-            const edited = ok(contract.getReviewOverview({ scope: 'all', expandedAreaIds, expandedProjectIds, selectedIds: selected, expansionEdit: edit, offset: 0, limit: 1 }));
+            const edited = ok(contract.getReviewOverview({ scope: 'all', expandedAreaIds, expandedProjectIds, expandedLaterProjectIds: useTaskStore.getState().projects.map((project) => `project:${project.id}`), selectedIds: selected, expansionEdit: edit, offset: 0, limit: 1 }));
             expandedAreaIds = edited.expandedAreaIds;
             expandedProjectIds = edited.expandedProjectIds;
         }
         return readAll(
-            (window) => contract.getReviewOverview({ scope: 'all', expandedAreaIds, expandedProjectIds, selectedIds: selected, ...window }),
+            (window) => contract.getReviewOverview({ scope: 'all', expandedAreaIds, expandedProjectIds, expandedLaterProjectIds: useTaskStore.getState().projects.map((project) => `project:${project.id}`), selectedIds: selected, ...window }),
             (view: NativeReviewOverview) => view.items,
         );
     };
@@ -224,6 +224,8 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
                 rows.push([item.row.id, selection, item.selected]);
                 return;
             }
+            // Historical parity exercises the disclosed plan; #1495's default fold has separate contract tests.
+            if (item.type === 'later') return;
             texts.push(item.title, item.summary);
             headers.push(item.type === 'area'
                 ? [item.accessibilityLabel, item.expanded, [item.color ?? THEME.tint], [THEME.text, THEME.secondaryText]]
@@ -273,7 +275,7 @@ async function replayReview(contract: Contract, scenario: ReviewScenario, record
 
     const perform = async ([kind, target, ...rest]: [string, ...unknown[]]) => {
         const { view, items } = read();
-        const header = (title: unknown) => items.find((item) => item.type !== 'task' && item.accessibilityLabel.startsWith(`${String(title)}, `));
+        const header = (title: unknown) => items.find((item) => (item.type === 'area' || item.type === 'project') && item.accessibilityLabel.startsWith(`${String(title)}, `));
         switch (kind) {
             case 'expand':
                 read({ type: 'cycle' });

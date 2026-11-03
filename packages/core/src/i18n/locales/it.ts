@@ -860,6 +860,7 @@ export const itOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Assicurati che ogni progetto attivo abbia una prossima azione.',
         'review.projectsHint': 'Rivedi ogni progetto. Ha almeno una Prossima azione concreta? Se no, aggiungine una adesso. Contrassegna come completati i progetti conclusi.',
         'review.hasNextAction': 'Ha una prossima azione',
+    'review.projectDeferred': 'Pianificato',
         'review.needsAction': 'Serve un\'azione',
         'review.noActiveTasks': 'Nessuna attività attiva',
         'review.somedayStep': 'Un giorno/Forse',

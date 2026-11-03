@@ -1333,8 +1333,16 @@ export function createAIMethods(deps: AIDeps) {
                 apiKey = ai.apiKey;
                 sent = ai.sent;
                 const { weekStart } = getWeeklyReviewSettings(state.settings);
-                const { staleItems } = getWeeklyReviewBuckets(state.tasks, state.projects, { weekStart });
+                const { staleItems } = getWeeklyReviewBuckets(state.tasks, state.projects, { weekStart, sections: state.sections });
                 if (staleItems.length === 0) return { ok: true, value: { error: null, suggestions: [], selectedIds: [] } };
+                host.log?.info('Weekly review sequence candidates prepared', {
+                    scope: 'ai',
+                    extra: {
+                        releaseCheck: 'v1.3.8/review-sequence', candidateCount: staleItems.length,
+                        staleTaskCount: staleItems.filter((item) => !item.id.startsWith('project:')).length,
+                        staleProjectCount: staleItems.filter((item) => item.id.startsWith('project:')).length,
+                    },
+                });
                 const response = await createAIProvider(ai.build()).analyzeReview({ items: staleItems }, options);
                 const analysis = readWeeklyReviewAnalysis(response, staleItems);
                 const labels = getWeeklyReviewLabels(t);

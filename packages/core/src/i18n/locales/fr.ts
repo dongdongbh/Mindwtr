@@ -961,6 +961,7 @@ export const frOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Assurez-vous que chaque projet actif a une prochaine action.',
         'review.projectsHint': 'Passez en revue chaque projet. Existe-t-il au moins une prochaine action concrète ? Sinon, ajoutez-en une maintenant. Marquez les projets terminés comme terminés.',
         'review.hasNextAction': 'Avec prochaine action',
+    'review.projectDeferred': 'Planifié',
         'review.needsAction': 'Nécessite une action',
         'review.noActiveTasks': 'Aucune tâche active',
         'review.somedayStep': 'Un jour/Peut-être',

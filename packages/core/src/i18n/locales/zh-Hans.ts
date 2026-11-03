@@ -1147,6 +1147,7 @@ export const zhHans: Record<string, string> = {
         'review.projectsStepDesc': '确保每个活动项目都有下一步行动。',
         'review.projectsHint': '回顾每个项目。它至少有一个具体的下一步行动吗？如果没有，现在添加一个。将完成的项目标记为完成。',
         'review.hasNextAction': '有下一步行动',
+    'review.projectDeferred': '已安排',
         'review.needsAction': '需要行动',
         'review.noActiveTasks': '没有活动任务',
         'review.somedayStep': '将来/也许',

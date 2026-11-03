@@ -205,6 +205,7 @@ export type NativeReviewActionResult = {
 };
 
 export type NativeReviewOverviewItem =
+    | { type: 'later'; id: string; projectId: string; label: string; expanded: boolean }
     | {
         type: 'area';
         id: string;
@@ -284,6 +285,7 @@ export type NativeStaleProject = { id: string; title: string; daysLabel: string 
 export type NativeWeeklyReviewList = 'staleProjects' | 'aiItems' | 'dayEvents' | 'contextTasks';
 
 export type NativeWeeklyReviewItem =
+    | { type: 'later'; id: string; projectId: string; label: string; expanded: boolean }
     | { type: 'task'; row: NativeTaskRow; scheduled: boolean; projectId: string | null }
     /** A context's card: the first window of its tasks; getWeeklyReviewList pages the rest ('contextTasks', key: context). */
     | { type: 'context'; context: string; moreLabel: string | null; tasks: NativeReviewWindow<{ id: string; title: string }> }
@@ -535,6 +537,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         const groups = decorateReviewOverviewGroups(getReviewOverviewGroups({
             tasks: state.tasks,
             projects: state.projects,
+            sections: state.sections,
             orderedAreas: areas,
             areaFilter: resolveAreaFilterSelection(state.settings.filters, areas),
             sortBy: getReviewOverviewSortBy(state.settings),
@@ -551,6 +554,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             || (scope !== 'due' && scope !== 'all')
             || (input.expandedAreaIds !== undefined && !isIdList(input.expandedAreaIds, true))
             || (input.expandedProjectIds !== undefined && !isIdList(input.expandedProjectIds, true))
+            || (input.expandedLaterProjectIds !== undefined && !isIdList(input.expandedLaterProjectIds, true))
             || (input.selectedIds !== undefined && !isIdList(input.selectedIds, true))
             || (input.busy !== undefined && typeof input.busy !== 'boolean')
             || (input.organize !== undefined && !isObjectRecord(input.organize))
@@ -576,16 +580,17 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         } else if (expansionEdit?.type === 'toggleProject') {
             projectIds = toggleReviewExpandedId(projectIds, expansionEdit.id);
         }
+        const laterIds = new Set((input.expandedLaterProjectIds as string[] | undefined) ?? []);
         // Mobile ends the selection once any selected row is not drawn (its area or project
         // folded, or the scope no longer shows it): judged on every drawn row, before paging.
         const drawnIds = new Set(groups.flatMap((area) => (!areaIds.has(area.id) ? [] : area.projectGroups.flatMap((project) => (
-            projectIds.has(project.id) ? project.tasks.map((task) => task.id) : []
+            projectIds.has(project.id) ? [...project.currentTasks, ...(laterIds.has(project.id) ? project.laterTasks : [])].map((task) => task.id) : []
         )))));
         const requested = (input.selectedIds as string[] | undefined) ?? [];
         const selectedIds = requested.every((id) => drawnIds.has(id)) ? requested : [];
         const expandedAreaIds = Array.from(areaIds);
         const expandedProjectIds = Array.from(projectIds);
-        const revision = `${base}:${paramsKey([scope, expandedAreaIds, expandedProjectIds, selectedIds])}`;
+        const revision = `${base}:${paramsKey([scope, expandedAreaIds, expandedProjectIds, selectedIds, ...(laterIds.size ? [[...laterIds]] : [])])}`;
         if (input.revision !== undefined && input.revision !== revision) return fail('STALE_REVISION', 'Review changed; restart paging from offset zero');
         const pickerInput = input.picker as { kind: NativeBulkPicker['kind']; query?: string; offset?: number; limit?: number; revision?: string } | undefined;
         if ((pickerInput?.offset ?? 0) > 0 && pickerInput?.revision !== revision) return fail('STALE_REVISION', 'Review changed; open the picker again');
@@ -595,7 +600,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         });
         if (input.organize !== undefined && !organize) return fail('INVALID_INPUT', 'A Bulk organize draft and edit with choices the dialog offers are required');
         // One flattened page source per revision and expansion; paging slices it.
-        const view = cached('overview-page', revision, () => buildOverviewPage(groups, text, t, areaIds, projectIds, selectedIds, scope));
+        const view = cached('overview-page', revision, () => buildOverviewPage(groups, text, t, areaIds, projectIds, laterIds, selectedIds, scope));
         let picker: NativeBulkPicker | null = null;
         if (pickerInput && view.bulk) {
             const window = { offset: pickerInput.offset ?? 0, limit: pickerInput.limit ?? NATIVE_HOST_MAX_WINDOW };
@@ -650,6 +655,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         t: Translate,
         areaIds: Set<string>,
         projectIds: Set<string>,
+        laterIds: Set<string>,
         selectedIds: string[],
         scope: ReviewOverviewScope,
     ) => {
@@ -666,9 +672,14 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                     accessibilityLabel: projectGroup.accessibilityLabel, statusTone: projectGroup.statusTone,
                     summaryTone: projectGroup.summaryTone, expanded: projectIds.has(projectGroup.id),
                 },
-                ...(!projectIds.has(projectGroup.id) ? [] : projectGroup.tasks.map((task): Entry => (
-                    { type: 'task', areaGroupId: group.id, projectGroupId: projectGroup.id, task }
-                ))),
+                ...(!projectIds.has(projectGroup.id) ? [] : [
+                    ...projectGroup.currentTasks.map((task): Entry => ({ type: 'task', areaGroupId: group.id, projectGroupId: projectGroup.id, task })),
+                    ...(projectGroup.laterTasks.length === 0 ? [] : [{
+                        type: 'later' as const, id: projectGroup.id, projectId: projectGroup.projectId ?? projectGroup.id,
+                        label: `${text.laterInSequence} (${projectGroup.laterTasks.length})`, expanded: laterIds.has(projectGroup.id),
+                    }]),
+                    ...(!laterIds.has(projectGroup.id) ? [] : projectGroup.laterTasks.map((task): Entry => ({ type: 'task', areaGroupId: group.id, projectGroupId: projectGroup.id, task }))),
+                ]),
             ])),
         ]);
         const control = getReviewExpansionControl(groups, { areaIds, projectIds }, text);
@@ -711,14 +722,14 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
 
     // ---- Weekly Review ---------------------------------------------------------
 
-    const buildWeekly = (base: string, checkpoint: string | null, calendar: NonNullable<ReturnType<typeof readCalendar>>, expandedProjectId: string | null, now: Date) => (
-        cached('weekly', `${base}:${paramsKey([checkpoint, calendar, expandedProjectId])}`, () => {
+    const buildWeekly = (base: string, checkpoint: string | null, calendar: NonNullable<ReturnType<typeof readCalendar>>, expandedProjectId: string | null, expandedLaterProjectIds: string[], now: Date) => (
+        cached('weekly', `${base}:${paramsKey([checkpoint, calendar, expandedProjectId, ...(expandedLaterProjectIds.length ? [expandedLaterProjectIds] : [])])}`, () => {
             const state = useTaskStore.getState();
             const t = deps.t();
             const formatDate = deps.formatDate();
             const labels = getWeeklyReviewLabels(t);
             const { aiEnabled, includeContextStep, weekStart } = getWeeklyReviewSettings(state.settings);
-            const buckets = getWeeklyReviewBuckets(state.tasks, state.projects, { now, weekStart });
+            const buckets = getWeeklyReviewBuckets(state.tasks, state.projects, { now, weekStart, sections: state.sections });
             const days = getExternalCalendarDaySummaries(calendar.events, 7, now);
             const flags = buildReviewSteps(buckets, {
                 kind: 'weekly', includeContextStep, externalCalendarDayCount: days.length, externalCalendarHasError: Boolean(calendar.error),
@@ -751,7 +762,17 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                     badge: entry.badge, countLabel, expanded,
                     openLabel: formatI18nTemplate(t('task.aria.openProject'), { name: entry.project.title }),
                 } });
-                if (expanded) entry.tasks.forEach((task) => pushTask(task, false, entry.project.id));
+                if (expanded) {
+                    entry.currentTasks.forEach((task) => pushTask(task, false, entry.project.id));
+                    if (entry.laterTasks.length > 0) {
+                        const laterExpanded = expandedLaterProjectIds.includes(entry.project.id);
+                        entries.push({ kind: 'item', item: {
+                            type: 'later', id: entry.project.id, projectId: entry.project.id,
+                            label: `${labels.laterInSequence} (${entry.laterTasks.length})`, expanded: laterExpanded,
+                        } });
+                        if (laterExpanded) entry.laterTasks.forEach((task) => pushTask(task, false, entry.project.id));
+                    }
+                }
             };
             let content: NativeWeeklyReview['content'];
             if (step === 'inbox') {
@@ -845,13 +866,14 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         const calendar = readCalendar(input.calendar);
         if (!calendar
             || (input.checkpoint !== undefined && input.checkpoint !== null && !isText(input.checkpoint, 1000))
-            || (input.expandedProjectId !== undefined && input.expandedProjectId !== null && !isText(input.expandedProjectId))) {
+            || (input.expandedProjectId !== undefined && input.expandedProjectId !== null && !isText(input.expandedProjectId))
+            || (input.expandedLaterProjectIds !== undefined && !isIdList(input.expandedLaterProjectIds, true))) {
             return null;
         }
         const now = new Date();
         const base = deps.revision(now);
-        const view = buildWeekly(base, (input.checkpoint as string | null | undefined) ?? null, calendar, (input.expandedProjectId as string | null | undefined) ?? null, now);
-        return { now, view, revision: `${base}:${paramsKey([view.checkpoint, calendar, input.expandedProjectId ?? null])}` };
+        const view = buildWeekly(base, (input.checkpoint as string | null | undefined) ?? null, calendar, (input.expandedProjectId as string | null | undefined) ?? null, (input.expandedLaterProjectIds as string[] | undefined) ?? [], now);
+        return { now, view, revision: `${base}:${paramsKey([view.checkpoint, calendar, input.expandedProjectId ?? null, ...((input.expandedLaterProjectIds as string[] | undefined)?.length ? [input.expandedLaterProjectIds] : [])])}` };
     };
 
     const weeklyReview = (input: Record<string, unknown>): NativeHostResult<NativeWeeklyReview> => {
@@ -1139,7 +1161,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
                 // Only suggestions for items the review offers, as mobile applies them; a task
                 // already where the suggestion puts it is not written again.
                 const { weekStart } = getWeeklyReviewSettings(store.settings);
-                const { staleItems } = getWeeklyReviewBuckets(store.tasks, store.projects, { weekStart });
+                const { staleItems } = getWeeklyReviewBuckets(store.tasks, store.projects, { weekStart, sections: store.sections });
                 const suggestions = filterReviewSuggestions(action.suggestions, staleItems).filter((suggestion) => (
                     isActionableReviewSuggestion(suggestion)
                     && liveTask(suggestion.id)?.status !== (suggestion.action === 'someday' ? 'someday' : 'archived')
@@ -1170,6 +1192,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
         getReviewOverview(input: {
             expandedAreaIds?: string[];
             expandedProjectIds?: string[];
+            expandedLaterProjectIds?: string[];
             expansionEdit?: NativeReviewExpansionEdit;
             selectedIds?: string[];
             /** Omitted for the previous whole-system overview; opt in to 'due' for reminders. */
@@ -1195,6 +1218,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             checkpoint?: string | null;
             calendar?: NativeReviewCalendar;
             expandedProjectId?: string | null;
+            expandedLaterProjectIds?: string[];
             offset: number;
             limit: number;
             revision?: string;
@@ -1215,6 +1239,7 @@ export function createReviewViewMethods(deps: ReviewViewDeps) {
             checkpoint?: string | null;
             calendar?: NativeReviewCalendar;
             expandedProjectId?: string | null;
+            expandedLaterProjectIds?: string[];
             list: NativeWeeklyReviewList;
             key?: string;
             offset: number;

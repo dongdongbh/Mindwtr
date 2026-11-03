@@ -118,6 +118,7 @@ const storeState = {
     get _allTasks() { return [...this.tasks, ...hiddenTasks]; },
     get _allProjects() { return this.projects; },
     _allSections: [] as Section[],
+    sections: [] as Section[],
     updateProject: vi.fn(),
     tasks: defaultTasks.map((task) => ({ ...task })),
     projects: defaultProjects.map((project) => ({ ...project })),
@@ -253,6 +254,7 @@ vi.mock('lucide-react-native', () => {
     return {
         Brain: icon('Brain'),
         ChevronRight: icon('ChevronRight'),
+        ChevronDown: icon('ChevronDown'),
         X: icon('X'),
         History: icon('History'),
         Inbox: icon('Inbox'),
@@ -351,6 +353,7 @@ describe('ReviewModal', () => {
         vi.clearAllMocks();
         hiddenTasks = [];
         storeState._allSections = [];
+        storeState.sections = [];
         storeState.updateProject.mockReset().mockImplementation(async (id: string, updates: Partial<Project>) => {
             storeState.projects = storeState.projects.map((project) => project.id === id ? { ...project, ...updates } : project);
             return { success: true };
@@ -376,6 +379,28 @@ describe('ReviewModal', () => {
         act(() => card.props.onPress());
         return tree;
     };
+
+    it.each(['project', 'perSection'] as const)('expands a %s sequential tail into the existing task editor without writing on disclosure', async (flow) => {
+        storeState.projects = [{ ...defaultProjects[0], isSequential: flow === 'project', perSectionFlow: flow === 'perSection' }];
+        storeState.sections = [{ id: 'sequence-section', projectId: 'project-1', title: 'Sequence', order: 0, isSequential: true, createdAt: at(2), updatedAt: at(2) }];
+        storeState.tasks = [
+            { ...defaultTasks[2], id: 'head', title: 'Waiting head', status: 'waiting', sectionId: 'sequence-section', order: 0 },
+            { ...defaultTasks[2], id: 'tail', title: 'Later tail', sectionId: 'sequence-section', order: 1 },
+        ];
+        const original = structuredClone(storeState.tasks);
+        const tree = await openProjectCompletion();
+        const rows = () => tree.root.findAll((node) => String(node.type) === 'SwipeableTaskItem');
+        expect(rows().map((row) => row.props.task.id)).toEqual(['head']);
+        const disclosure = () => tree.root.findAll((node) => node.props.accessibilityLabel === 'Later in sequence (1)' && typeof node.props.onPress === 'function').at(-1)!;
+        expect(disclosure().props.accessibilityState).toEqual({ expanded: false });
+        act(() => disclosure().props.onPress());
+        expect(rows().map((row) => row.props.task.id)).toEqual(['head', 'tail']);
+        expect(storeState.updateTask).not.toHaveBeenCalled();
+        expect(storeState.tasks).toEqual(original);
+        act(() => rows().find((row) => row.props.task.id === 'tail')!.props.actions.edit(storeState.tasks[1]));
+        expect(tree.root.findByType('TaskEditModal' as React.ElementType).props.task.id).toBe('tail');
+        await act(async () => tree.unmount());
+    });
 
     it('completes an empty project and retains Projects until the review closes', async () => {
         storeState.tasks = [];

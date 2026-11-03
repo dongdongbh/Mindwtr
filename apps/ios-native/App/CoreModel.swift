@@ -1934,6 +1934,7 @@ final class CoreModel: ObservableObject {
     private var reviewGuideDepth = 50
     private var reviewNestedDepth: [String: Int] = [:]
     private var reviewCheckpointInput: String?
+    private var reviewExpandedLaterProjects: Set<String> = []
     private var reviewExpandedProject: String?
     private var reviewFinishPending = false
     private let reviewPreferencePrefix = "nativeFoundation.review."
@@ -19223,6 +19224,21 @@ final class CoreModel: ObservableObject {
         await readReview()
     }
 
+    func toggleReviewLater(_ id: String, weekly: Bool) async {
+        guard reviewActionsEnabled else { return }
+        if weekly {
+            if reviewExpandedLaterProjects.contains(id) { reviewExpandedLaterProjects.remove(id) }
+            else { reviewExpandedLaterProjects.insert(id) }
+        } else {
+            var ids = Set(reviewOverviewParams["expandedLaterProjectIds"] as? [String] ?? [])
+            if ids.contains(id) { ids.remove(id) } else { ids.insert(id) }
+            reviewOverviewParams["expandedLaterProjectIds"] = ids.sorted()
+        }
+        busy = true
+        defer { finishOperation() }
+        await readReview()
+    }
+
     func toggleReviewContext(_ context: String) {
         guard reviewActionsEnabled, reviewGuidePresented, reviewKind == "weekly",
               reviewGuide.objects("items").contains(where: { $0.text("type") == "context"
@@ -19341,6 +19357,7 @@ final class CoreModel: ObservableObject {
         try validateReviewFirstWindow(view)
         var params: CoreObject = ["scope": view.object("scope").text("selected"),
             "expandedAreaIds": view["expandedAreaIds"] ?? [], "expandedProjectIds": view["expandedProjectIds"] ?? []]
+        params["expandedLaterProjectIds"] = input["expandedLaterProjectIds"] ?? []
         params["revision"] = view.text("revision")
         var items = view.objects("items")
         while items.count < min(reviewOverviewDepth, view.number("total")) {
@@ -19359,7 +19376,10 @@ final class CoreModel: ObservableObject {
 
     private func readReviewGuide() async throws {
         var input: CoreObject = ["checkpoint": reviewCheckpointInput as Any? ?? NSNull(), "offset": 0, "limit": pageSize]
-        if reviewKind == "weekly" { input["expandedProjectId"] = reviewExpandedProject as Any? ?? NSNull() }
+        if reviewKind == "weekly" {
+            input["expandedProjectId"] = reviewExpandedProject as Any? ?? NSNull()
+            input["expandedLaterProjectIds"] = reviewExpandedLaterProjects.sorted()
+        }
         let name = reviewKind == "daily" ? "dailyReview" : "weeklyReview"
         var view = try await query("menuRead", [name, try json(input)])
         try validateReviewFirstWindow(view)

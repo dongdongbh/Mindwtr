@@ -1153,6 +1153,7 @@ export const huOverrides: Record<string, string> = {
     'review.projectsStepDesc': 'Győződjön meg róla, hogy minden aktív projekthez tartozik következő teendő.',
     'review.projectsHint': 'Tekintse át az egyes projekteket. Van legalább egy konkrét következő teendőjük? Ha nincs, adjon hozzá most egyet. Jelölje késznek a befejezett projekteket.',
     'review.hasNextAction': 'Van következő teendője',
+    'review.projectDeferred': 'Ütemezve',
     'review.needsAction': 'Teendőre van szükség',
     'review.noActiveTasks': 'Nincs aktív feladat',
     'review.somedayStep': 'Ötlettár',

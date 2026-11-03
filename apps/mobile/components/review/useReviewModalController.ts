@@ -95,7 +95,7 @@ export function useReviewModalController({
     onClose,
     visible,
 }: UseReviewModalControllerParams) {
-    const { tasks, projects, people, areas, updateTask, deleteTask, settings, batchUpdateTasks, addTask } = useTaskStore();
+    const { tasks, projects, sections, people, areas, updateTask, deleteTask, settings, batchUpdateTasks, addTask } = useTaskStore();
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const { isDark } = useTheme();
     const { t, language } = useLanguage();
@@ -391,8 +391,8 @@ export function useReviewModalController({
 
     // Core owns the complete Weekly Review model (review-utils, review-views-model).
     const weeklyBuckets = useMemo(
-        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart }),
-        [projects, settings?.weekStart, tasks],
+        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections }),
+        [projects, sections, settings?.weekStart, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const completion = getWeeklyReviewCompletion(weeklyBuckets, settings, labels);
@@ -441,6 +441,14 @@ export function useReviewModalController({
         setAiLoading(true);
         try {
             const provider = createAIProvider(buildAIConfig(settings, apiKey, language));
+            void logInfo('Weekly review sequence candidates prepared', {
+                extra: {
+                    releaseCheck: 'v1.3.8/review-sequence',
+                    candidateCount: staleItems.length,
+                    staleTaskCount: staleItems.filter((item) => !item.id.startsWith('project:')).length,
+                    staleProjectCount: staleItems.filter((item) => item.id.startsWith('project:')).length,
+                },
+            });
             const response = await provider.analyzeReview({ items: staleItems });
             const analysis = readWeeklyReviewAnalysis(response, staleItems);
             setAiSuggestions(analysis.suggestions);

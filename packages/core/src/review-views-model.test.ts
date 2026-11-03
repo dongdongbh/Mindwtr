@@ -58,7 +58,28 @@ describe('review views parity with the frozen React Native fixture', () => {
                 expect((await contract.activate({ writeSafetyReady: true })).ok).toBe(true);
                 recorder.log.splice(0);
                 const observed = await replayReviewScenario({ part, fixture: fixture[part], scenario, recorder, contract });
-                expect(observed.map(projectObservation)).toEqual(fixture[part].observations[scenario.name].map(projectObservation));
+                const expected = structuredClone(fixture[part].observations[scenario.name]).map(projectObservation);
+                // Keep the frozen corpus: these are the two intentional #1495 deltas.
+                if (part === 'review' && scenario.name === 'overview: title sort') {
+                    for (const observation of expected) {
+                        const rows = observation.rows as [string, boolean, boolean][];
+                        const pack = rows.findIndex(([id]) => id === 'n-pack');
+                        const van = rows.findIndex(([id]) => id === 'n-van');
+                        if (pack >= 0 && van >= 0 && van < pack) [rows[pack], rows[van]] = [rows[van], rows[pack]];
+                    }
+                }
+                if (part === 'review' && scenario.name === 'rows: status, delete and edit') {
+                    for (const observation of expected) {
+                        observation.texts = (observation.texts as string[]).map((text, index, texts) => texts[index - 1] === 'Launch' && text === '1 active task · Has Next Action' ? '1 active task · Scheduled' : text);
+                        for (const header of observation.headers as unknown[][]) {
+                            if (header[0] === 'Launch, 1 active task · Has Next Action') {
+                                header[0] = 'Launch, 1 active task · Scheduled';
+                                header[2] = ['#f59e0b'];
+                            }
+                        }
+                    }
+                }
+                expect(observed.map(projectObservation)).toEqual(expected);
             });
         }
     }

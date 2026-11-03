@@ -40,9 +40,10 @@ import { useTaskListSelection } from '@/components/use-task-list-selection';
 
 export default function ReviewScreen() {
   const router = useRouter();
-  const { tasks, projects, updateTask, deleteTask, restoreTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, settings } = useTaskStore((state) => ({
+  const { tasks, projects, sections, updateTask, deleteTask, restoreTask, batchMoveTasks, batchDeleteTasks, batchUpdateTasks, settings } = useTaskStore((state) => ({
     tasks: state.tasks,
     projects: state.projects,
+    sections: state.sections,
     updateTask: state.updateTask,
     deleteTask: state.deleteTask,
     restoreTask: state.restoreTask,
@@ -59,6 +60,7 @@ export default function ReviewScreen() {
   const [reviewPickerVisible, setReviewPickerVisible] = useState(false);
   const [moveModalVisible, setMoveModalVisible] = useState(false);
   const [bulkOrganizeVisible, setBulkOrganizeVisible] = useState(false);
+  const [expandedLaterProjectIds, setExpandedLaterProjectIds] = useState<Set<string>>(new Set());
   const [expandedAreaIds, setExpandedAreaIds] = useState<Set<string>>(new Set());
   const [expandedReviewProjectIds, setExpandedReviewProjectIds] = useState<Set<string>>(new Set());
   const [scope, setScope] = useState<ReviewOverviewScope>('due');
@@ -92,12 +94,13 @@ export default function ReviewScreen() {
   const reviewOverviewGroups = useMemo(() => getReviewOverviewGroups({
     tasks,
     projects,
+    sections,
     orderedAreas: sortedAreas,
     areaFilter: resolvedAreaFilter,
     sortBy,
     scope,
     now: new Date(nowTick),
-  }), [nowTick, projects, resolvedAreaFilter, scope, sortBy, sortedAreas, tasks]);
+  }), [nowTick, projects, resolvedAreaFilter, scope, sections, sortBy, sortedAreas, tasks]);
   const unassignedAreaColor = settings?.appearance?.unassignedAreaColor;
   const reviewTaskGroups = useMemo(
     () => decorateReviewOverviewGroups(reviewOverviewGroups, { areaById, unassignedAreaColor, text, scope }),
@@ -105,9 +108,11 @@ export default function ReviewScreen() {
   );
   const renderedTaskIds = useMemo(() => new Set(reviewTaskGroups.flatMap((area) => (
     !expandedAreaIds.has(area.id) ? [] : area.projectGroups.flatMap((project) => (
-      expandedReviewProjectIds.has(project.id) ? project.tasks.map((task) => task.id) : []
+      expandedReviewProjectIds.has(project.id)
+        ? [...project.currentTasks, ...(expandedLaterProjectIds.has(project.id) ? project.laterTasks : [])].map((task) => task.id)
+        : []
     ))
-  ))), [expandedAreaIds, expandedReviewProjectIds, reviewTaskGroups]);
+  ))), [expandedAreaIds, expandedLaterProjectIds, expandedReviewProjectIds, reviewTaskGroups]);
   const canSelectTaskId = useCallback((id: string) => renderedTaskIds.has(id), [renderedTaskIds]);
   const {
     bulkActionLoading,
@@ -501,7 +506,28 @@ export default function ReviewScreen() {
                         </Pressable>
                         {projectExpanded && (
                           <View style={styles.reviewGroupedTasks}>
-                            {projectGroup.tasks.map(renderReviewTaskItem)}
+                            {projectGroup.currentTasks.map(renderReviewTaskItem)}
+                            {projectGroup.laterTasks.length > 0 && (
+                              <View>
+                                <Pressable
+                                  accessibilityRole="button"
+                                  accessibilityLabel={`${text.laterInSequence} (${projectGroup.laterTasks.length})`}
+                                  accessibilityState={{ expanded: expandedLaterProjectIds.has(projectGroup.id) }}
+                                  style={styles.reviewProjectHeader}
+                                  onPress={() => setExpandedLaterProjectIds((current) => toggleReviewExpandedId(current, projectGroup.id))}
+                                >
+                                  <View style={styles.reviewProjectTitleRow}>
+                                    <Text style={[styles.reviewProjectSummaryText, { color: tc.secondaryText }]}>
+                                      {text.laterInSequence} ({projectGroup.laterTasks.length})
+                                    </Text>
+                                    {expandedLaterProjectIds.has(projectGroup.id)
+                                      ? <ChevronDown size={17} color={tc.secondaryText} />
+                                      : <ChevronRight size={17} color={tc.secondaryText} />}
+                                  </View>
+                                </Pressable>
+                                {expandedLaterProjectIds.has(projectGroup.id) && projectGroup.laterTasks.map(renderReviewTaskItem)}
+                              </View>
+                            )}
                           </View>
                         )}
                       </View>

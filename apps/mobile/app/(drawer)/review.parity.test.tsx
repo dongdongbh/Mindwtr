@@ -178,14 +178,16 @@ const roundColor = (node: ReactTestInstance) => {
 };
 
 function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number; writes: number; pushes: number; shares: number }): Observation {
-  const allTexts = textsIn(root);
+  const sequenceLabel = harness.strings['projects.laterInSequence'];
+  const isSequenceDisclosure = (label: unknown) => String(label ?? '').startsWith(`${sequenceLabel} (`);
+  const allTexts = textsIn(root).filter((value) => !isSequenceDisclosure(value));
   const scopeTexts = [
     harness.strings['review.scopeDue'], harness.strings['review.scopeAll'],
     harness.strings['review.overviewHelp'], harness.strings['nav.done'],
   ];
   expect(allTexts.slice(0, scopeTexts.length)).toEqual(scopeTexts);
   const headers = hostsOf(root, 'Pressable')
-    .filter((node) => node.props.accessibilityState && 'expanded' in node.props.accessibilityState)
+    .filter((node) => node.props.accessibilityState && 'expanded' in node.props.accessibilityState && !isSequenceDisclosure(node.props.accessibilityLabel))
     .map((node) => [
       node.props.accessibilityLabel,
       node.props.accessibilityState.expanded,
@@ -283,6 +285,19 @@ async function perform(root: ReactTestInstance, action: [string, ...unknown[]]) 
   }
 }
 
+// Frozen pre-disclosure evidence still observes the whole plan. The focused
+// review-screen test separately checks the new collapsed default and its actions.
+async function expandSequencePlan(root: ReactTestInstance) {
+  const writesBefore = writeLog.length;
+  for (const disclosure of hostsOf(root, 'Pressable').filter((node) => (
+    String(node.props.accessibilityLabel ?? '').startsWith(`${harness.strings['projects.laterInSequence']} (`)
+    && node.props.accessibilityState?.expanded === false
+  ))) {
+    await act(async () => { disclosure.props.onPress(); });
+  }
+  expect(writeLog).toHaveLength(writesBefore);
+}
+
 async function runScenario(scenario: Scenario) {
   writeLog.length = 0;
   harness.alerts.length = 0;
@@ -298,10 +313,12 @@ async function runScenario(scenario: Scenario) {
   if (!allScope?.props.onPress) throw new Error('Missing All open tasks scope');
   await act(async () => { await allScope.props.onPress(); });
   const seen = { alerts: 0, toasts: 0, writes: 0, pushes: 0, shares: 0 };
+  await expandSequencePlan(renderer.root);
   const observations = [observe(renderer.root, seen)];
   for (const action of scenario.actions) {
     await perform(renderer.root, action);
     await act(async () => { await flushPendingSave(); });
+    await expandSequencePlan(renderer.root);
     observations.push(observe(renderer.root, seen));
   }
   await act(async () => { renderer.unmount(); });
@@ -325,7 +342,7 @@ describe('React Native Review screen parity fixture', () => {
     else process.env.TZ = originalTz;
   });
 
-  it('replays every scenario exactly as frozen', async () => {
+  it('replays frozen scenarios with explicit sequence presentation changes', async () => {
     const captured: Record<string, unknown> = {};
     for (const scenario of scenarios) captured[scenario.name] = await runScenario(scenario);
     const inputs = sharedInputs(settingsVariants, scenarios);
@@ -333,7 +350,19 @@ describe('React Native Review screen parity fixture', () => {
     const { observations, ...frozenInputs } = readFixturePart('review');
     expect(frozenInputs).toEqual(inputs);
     for (const scenario of scenarios) {
-      expect({ [scenario.name]: captured[scenario.name] }).toEqual({ [scenario.name]: observations[scenario.name] });
+      // Apply only the accepted sequence presentation changes to the old evidence.
+      let expected = JSON.stringify(observations[scenario.name])
+        .replaceAll('"Launch","1 active task · Has Next Action"', '"Launch","1 active task · Scheduled"');
+      for (const expanded of [false, true]) {
+        expected = expected.replaceAll(
+          `["Launch, 1 active task · Has Next Action",${expanded},["#10b981"]`,
+          `["Launch, 1 active task · Scheduled",${expanded},["#f59e0b"]`,
+        );
+      }
+      if (scenario.settings === 'sortTitle') {
+        expected = expected.replaceAll('["n-van",false,false],["n-pack",false,false]', '["n-pack",false,false],["n-van",false,false]');
+      }
+      expect({ [scenario.name]: captured[scenario.name] }).toEqual({ [scenario.name]: JSON.parse(expected) });
     }
   }, 120_000);
 });

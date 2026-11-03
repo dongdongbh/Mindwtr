@@ -1008,6 +1008,7 @@ export const viOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Đảm bảo mọi dự án đang hoạt động đều có hành động tiếp theo.',
         'review.projectsHint': 'Xem lại từng dự án. Nó có ít nhất một Hành động tiếp theo cụ thể không? Nếu không, thêm một ngay bây giờ. Đánh dấu các dự án đã hoàn thành là xong.',
         'review.hasNextAction': 'Có hành động tiếp theo',
+    'review.projectDeferred': 'Đã lên lịch',
         'review.needsAction': 'Cần hành động',
         'review.noActiveTasks': 'Không có nhiệm vụ đang hoạt động',
         'review.somedayStep': 'Tương lai/Có thể',

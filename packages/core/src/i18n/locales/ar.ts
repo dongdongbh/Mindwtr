@@ -865,6 +865,7 @@ export const arOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'تأكد من أن كل مشروع نشط لديه الإجراء التالي.',
         'review.projectsHint': 'مراجعة كل مشروع. هل لديها إجراء تالٍ واحد ملموس على الأقل؟ إذا لم يكن الأمر كذلك، أضف واحدًا الآن. وضع علامة على المشاريع المكتملة كما تم.',
         'review.hasNextAction': 'لديه الإجراء التالي',
+    'review.projectDeferred': 'مجدول',
         'review.needsAction': 'يحتاج إلى إجراء',
         'review.noActiveTasks': 'لا توجد مهام نشطة',
         'review.somedayStep': 'يوما ما / ربما',

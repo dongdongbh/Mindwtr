@@ -7,7 +7,7 @@ import { NATIVE_UNJOURNALED_COMMANDS } from './native-request-receipts';
 import { openSqliteHost } from './screen-parity.replay';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import { createTaskDraft, type TaskDraft } from './task-draft';
-import type { AppSettings, ChecklistItem, Project, Task } from './types';
+import type { AppSettings, ChecklistItem, Project, Section, Task } from './types';
 import { generateUUID } from './uuid';
 
 /**
@@ -117,12 +117,12 @@ function createDevice(input: Device, warnings: unknown[][] = []) {
 const writes: unknown[][] = [];
 let realActions: Record<string, (...args: any[]) => Promise<any>> | null = null;
 
-async function seed(data: { tasks?: Task[]; projects?: Project[]; settings: AppSettings }) {
+async function seed(data: { tasks?: Task[]; projects?: Project[]; sections?: Section[]; settings: AppSettings }) {
     await flushPendingSave();
     resetForTests();
     const state = useTaskStore.getState() as unknown as Record<string, (...args: any[]) => Promise<any>>;
     realActions ??= { updateTask: state.updateTask, batchUpdateTasks: state.batchUpdateTasks, updateSettings: state.updateSettings };
-    let stored = JSON.parse(JSON.stringify({ tasks: data.tasks ?? [], projects: data.projects ?? [], sections: [], areas: [], people: [], settings: data.settings }));
+    let stored = JSON.parse(JSON.stringify({ tasks: data.tasks ?? [], projects: data.projects ?? [], sections: data.sections ?? [], areas: [], people: [], settings: data.settings }));
     setStorageAdapter({ getData: async () => stored, saveData: async (next) => { stored = JSON.parse(JSON.stringify(next)); } });
     useTaskStore.setState({
         ...realActions,
@@ -883,6 +883,25 @@ describe('native host contract: AI keys stay out of views, errors and logs', () 
         const analysis = value(await (await openHost(createDevice({ queues: { analyzeReview: [changed] } }, warned).host)).requestWeeklyReviewAnalysis());
         expect(analysis.error).toContain('Upstream 401');
         expect(JSON.stringify([analysis, warned])).not.toContain('pw-old-1');
+    });
+
+    it('sends the same sequence-aware stale snapshot the wizard shows, including Per-section flow', async () => {
+        const stamp = '2026-01-01T00:00:00.000Z';
+        const project: Project = { id: 'p', title: 'Project', status: 'active', color: '#000000', order: 0, tagIds: [], perSectionFlow: true, createdAt: stamp, updatedAt: stamp };
+        const section: Section = { id: 's', projectId: 'p', title: 'Sequence', order: 0, isSequential: true, createdAt: stamp, updatedAt: stamp };
+        const task = (id: string, status: Task['status'], order: number): Task => ({ id, title: id, projectId: 'p', sectionId: 's', status, order, contexts: [], tags: [], createdAt: stamp, updatedAt: stamp });
+        await seed({ tasks: [task('head', 'waiting', 0), task('tail', 'next', 1)], projects: [project], sections: [section], settings: { ai: { enabled: true, provider: 'openai', baseUrl: 'http://local/v1' } } });
+        const dev = createDevice({ queues: { analyzeReview: [{ value: { suggestions: [] } }] } });
+        const info = vi.fn();
+        dev.host.log!.info = info;
+        const host = await openHost(dev.host);
+        const wizard = value(host.getWeeklyReview({ checkpoint: JSON.stringify({ step: 'stale', startedAt: new Date().toISOString() }), offset: 0, limit: 100 }));
+        expect(wizard.content.step).toBe('stale');
+        expect(wizard.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['head']);
+        await host.requestWeeklyReviewAnalysis();
+        const request = device.calls.find((call) => call[1] === 'analyzeReview')!;
+        expect((request[3] as { items: { id: string }[] }).items.map((item) => item.id)).toEqual(['head', 'project:p']);
+        expect(info).toHaveBeenCalledWith('Weekly review sequence candidates prepared', { scope: 'ai', extra: { releaseCheck: 'v1.3.8/review-sequence', candidateCount: 2, staleTaskCount: 1, staleProjectCount: 1 } });
     });
 
     // Review C1 2: sync installs a newer, still-stale copy of a task while the analysis waits; Apply must refuse it (CAS).

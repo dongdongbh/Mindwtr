@@ -131,6 +131,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
         toggleSuggestion,
         waitingList,
     } = useReviewModalController({ visible, onClose });
+    const [expandedLaterProjects, setExpandedLaterProjects] = useState<Set<string>>(new Set());
     const closeLabel = t('common.close');
     const closeText = closeLabel && closeLabel !== 'common.close' ? closeLabel : 'Close';
     const onFilled = filledButton.textColor ?? tc.onTint;
@@ -429,7 +430,7 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                 </TouchableOpacity>
                 {isExpanded && (
                     <View style={styles.projectTasks}>
-                        {entry.tasks.map((task) => (
+                        {entry.currentTasks.map((task) => (
                             <SwipeableTaskItem
                                 key={task.id}
                                 task={task}
@@ -438,6 +439,32 @@ export function ReviewModal({ visible, onClose }: ReviewModalProps) {
                                 actions={rowActions}
                             />
                         ))}
+                        {entry.laterTasks.length > 0 && (
+                            <View style={styles.scheduledSection}>
+                                <AppPressable
+                                    style={styles.scheduledToggle}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`${labels.laterInSequence} (${entry.laterTasks.length})`}
+                                    accessibilityState={{ expanded: expandedLaterProjects.has(entry.project.id) }}
+                                    onPress={() => setExpandedLaterProjects((current) => {
+                                        const next = new Set(current);
+                                        if (next.has(entry.project.id)) next.delete(entry.project.id);
+                                        else next.add(entry.project.id);
+                                        return next;
+                                    })}
+                                >
+                                    {expandedLaterProjects.has(entry.project.id)
+                                        ? <ChevronDown size={14} color={tc.secondaryText} />
+                                        : <ChevronRight size={14} color={tc.secondaryText} />}
+                                    <Text style={[styles.scheduledToggleText, { color: tc.secondaryText }]}>
+                                        {labels.laterInSequence} ({entry.laterTasks.length})
+                                    </Text>
+                                </AppPressable>
+                                {expandedLaterProjects.has(entry.project.id) && entry.laterTasks.map((task) => (
+                                    <SwipeableTaskItem key={task.id} task={task} isDark={isDark} tc={tc} actions={rowActions} />
+                                ))}
+                            </View>
+                        )}
                         <TouchableOpacity
                             style={styles.reviewOpenProjectButton}
                             accessibilityRole="button"

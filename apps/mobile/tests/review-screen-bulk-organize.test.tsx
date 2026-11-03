@@ -280,6 +280,37 @@ describe('ReviewScreen bulk organize', () => {
     mocks.storeState.tasks = [makeTask('task-1', 'Loose next action')];
   });
 
+  it('keeps sequence tails collapsed, editable on expansion, and visible when explicitly due', async () => {
+    const project: Project = {
+      id: 'sequence', title: 'Sequence', status: 'active', color: '#2563eb', order: 0,
+      tagIds: [], createdAt: now, updatedAt: now, isSequential: true,
+    };
+    mocks.storeState.projects = [project];
+    mocks.storeState.tasks = [
+      makeTask('head', 'Waiting head', { projectId: project.id, status: 'waiting', order: 0 }),
+      makeTask('tail', 'Later tail', { projectId: project.id, order: 1 }),
+      makeTask('due-tail', 'Review due tail', { projectId: project.id, order: 2, reviewAt: '2020-01-01' }),
+    ];
+    const original = structuredClone(mocks.storeState.tasks);
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ReviewScreen />); });
+    pressButtonWithLabel(tree, 'Expand areas');
+    pressButtonWithLabel(tree, 'Expand projects');
+    const rows = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem');
+    expect(rows().map((row) => row.props.task.id)).toEqual(['due-tail']);
+    pressButtonWithText(tree, 'All open tasks');
+    expect(rows().map((row) => row.props.task.id)).toEqual(['head']);
+    const disclosure = () => tree.root.findAllByType(Pressable).find((node) => node.props.accessibilityLabel === 'projects.laterInSequence (2)')!;
+    expect(disclosure().props.accessibilityState).toEqual({ expanded: false });
+    act(() => disclosure().props.onPress());
+    expect(rows().map((row) => row.props.task.id)).toEqual(['head', 'tail', 'due-tail']);
+    expect(mocks.updateTask).not.toHaveBeenCalled();
+    expect(mocks.storeState.tasks).toEqual(original);
+    act(() => rows().find((row) => row.props.task.id === 'tail')!.props.actions.edit(mocks.storeState.tasks[1]));
+    expect(tree.root.findByType('TaskEditModal' as React.ElementType).props.task.id).toBe('tail');
+    await act(async () => tree.unmount());
+  });
+
   it('bulk-applies an area from the review selection organize modal', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {

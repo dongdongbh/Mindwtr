@@ -89,7 +89,7 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
             expandedAreaIds: overview.expandedAreaIds, expandedProjectIds: [], expansionEdit: { type: 'cycle' }, ...page,
         }));
         expect(everything.items.map((item) => (item.type === 'task' ? item.row.id : item.id)))
-            .toEqual(groups.flatMap((group) => [group.id, ...group.projectGroups.flatMap((entry) => [entry.id, ...entry.tasks.map((task) => task.id)])]));
+            .toEqual(groups.flatMap((group) => [group.id, ...group.projectGroups.flatMap((entry) => [entry.id, ...entry.currentTasks.map((task) => task.id), ...(entry.laterTasks.length ? [entry.id] : [])])]));
         // Rows carry core meta.
         const row = everything.items.find((item) => item.type === 'task');
         expect(row?.type === 'task' && row.row.meta).toBeTruthy();
@@ -591,6 +591,34 @@ describe('native host contract: Review, Weekly Review and Daily Review', () => {
         await useTaskStore.getState().updateTask('bulk-0', { title: 'Renamed' });
         expect(host.getWeeklyReviewList({ ...contextInputs, list: 'contextTasks', key: '@bulk', offset: 100, limit: 10, revision: contexts.revision }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+    });
+
+    it('folds sequence tails locally, pages editable rows under that disclosure, and keeps Due reminders current', async () => {
+        freezeClock();
+        const project = { ...part.projects[0], id: 'sequence', isSequential: true, perSectionFlow: false, sequentialScope: 'project' as const };
+        const head = { ...part.tasks[0], id: 'head', title: 'Head', projectId: project.id, sectionId: undefined, status: 'waiting' as const, order: 0, reviewAt: undefined };
+        const tail = { ...head, id: 'tail', title: 'Tail', status: 'next' as const, order: 1, reviewAt: part.now.slice(0, 10) };
+        const { host } = await openHost(scenario(), undefined, { ...part, projects: [project], tasks: [tail, head] });
+        const areas = value(host.getReviewOverview({ scope: 'all', expansionEdit: { type: 'cycle' }, ...page }));
+        const input = { scope: 'all' as const, expandedAreaIds: areas.expandedAreaIds, expandedProjectIds: ['project:sequence'], ...page };
+        const folded = value(host.getReviewOverview(input));
+        expect(folded.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['head']);
+        expect(folded.items.find((item) => item.type === 'later')).toMatchObject({ label: 'Later in sequence (1)', expanded: false });
+        const open = value(host.getReviewOverview({ ...input, expandedLaterProjectIds: ['project:sequence'] }));
+        expect(open.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['head', 'tail']);
+        expect(host.getReviewOverview({ ...input, expandedLaterProjectIds: ['project:sequence'], revision: folded.revision, offset: 1, limit: 1 })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        const due = value(host.getReviewOverview({ ...input, scope: 'due' }));
+        expect(due.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['tail']);
+        expect(due.items.some((item) => item.type === 'later')).toBe(false);
+        const weeklyInput = { checkpoint: JSON.stringify({ step: 'projects', startedAt: part.now }), expandedProjectId: project.id, ...page };
+        const weekly = value(host.getWeeklyReview(weeklyInput));
+        expect(weekly.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['head']);
+        expect(weekly.items.find((item) => item.type === 'project')).toMatchObject({ badge: { label: 'Waiting' } });
+        const weeklyOpen = value(host.getWeeklyReview({ ...weeklyInput, expandedLaterProjectIds: [project.id] }));
+        expect(weeklyOpen.items.filter((item) => item.type === 'task').map((item) => item.row.id)).toEqual(['head', 'tail']);
+        const row = weeklyOpen.items.find((item) => item.type === 'task' && item.row.id === 'tail');
+        expect(row?.type === 'task' && row.row.taskRevision).toBeTruthy();
+        expect(host.getWeeklyReview({ ...weeklyInput, expandedLaterProjectIds: [project.id], revision: weekly.revision, offset: 1, limit: 1 })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
     });
 
     it('refuses invalid input', async () => {

@@ -1170,6 +1170,7 @@ export const svOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Säkerställ att varje aktivt projekt har ett nästa steg.',
         'review.projectsHint': 'Granska varje projekt. Har det minst ett konkret nästa steg? Om inte, lägg till ett nu. Markera slutförda projekt som klara.',
         'review.hasNextAction': 'Har nästa steg',
+    'review.projectDeferred': 'Schemalagt',
         'review.needsAction': 'Behöver åtgärd',
         'review.noActiveTasks': 'Inga aktiva uppgifter',
         'review.somedayStep': 'Någon gång/Kanske',

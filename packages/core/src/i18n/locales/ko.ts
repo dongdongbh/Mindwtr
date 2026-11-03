@@ -1116,6 +1116,7 @@ export const koOverrides: Record<string, string> = {
         'review.projectsStepDesc': '모든 활성 프로젝트에 다음 행동이 있는지 확인하세요.',
         'review.projectsHint': '각 프로젝트를 검토하세요. 구체적인 다음 행동이 하나 이상 있습니까? 그렇지 않다면 지금 추가하세요. 완료된 프로젝트를 완료로 표시합니다.',
         'review.hasNextAction': '다음 행동 있음',
+    'review.projectDeferred': '예정됨',
         'review.needsAction': '행동 필요',
         'review.noActiveTasks': '활성 할 일 없음',
         'review.somedayStep': '언젠가',

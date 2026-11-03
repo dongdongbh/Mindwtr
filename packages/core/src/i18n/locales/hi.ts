@@ -786,6 +786,7 @@ export const hiOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'सुनिश्चित करें कि प्रत्येक सक्रिय प्रोजेक्ट पर अगली कार्रवाई हो।',
         'review.projectsHint': 'प्रत्येक परियोजना की समीक्षा करें. क्या इसके पास कम से कम एक ठोस अगली कार्रवाई है? यदि नहीं, तो अभी एक जोड़ें. पूर्ण परियोजनाओं को पूर्ण के रूप में चिह्नित करें.',
         'review.hasNextAction': 'अगली कार्रवाई है',
+    'review.projectDeferred': 'निर्धारित',
         'review.needsAction': 'कार्रवाई की जरूरत है',
         'review.noActiveTasks': 'कोई सक्रिय कार्य नहीं',
         'review.somedayStep': 'किसी दिन/शायद',

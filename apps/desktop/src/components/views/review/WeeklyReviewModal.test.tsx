@@ -139,6 +139,40 @@ describe('WeeklyReviewGuideModal', () => {
         window.localStorage.setItem(storageKey, JSON.stringify({ step: 'projects', startedAt: new Date().toISOString() }));
         return updateProject;
     };
+    it('keeps the full sequential plan behind a collapsed disclosure without writing task data', () => {
+        const tasks = [
+            makeTask({ id: 'head', title: 'Waiting head', status: 'waiting', projectId: 'project-0', order: 0 }),
+            makeTask({ id: 'tail', title: 'Later tail', projectId: 'project-0', order: 1 }),
+        ];
+        seedProjects(tasks);
+        useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((project) => ({ ...project, isSequential: true })) }));
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        expect(screen.getByTestId('task-head')).toBeInTheDocument();
+        expect(screen.queryByTestId('task-tail')).not.toBeInTheDocument();
+        const disclosure = screen.getByRole('button', { name: 'projects.laterInSequence (1)' });
+        expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+        fireEvent.click(disclosure);
+        expect(screen.getByTestId('task-tail')).toBeInTheDocument();
+        fireEvent.click(disclosure);
+        expect(screen.queryByTestId('task-tail')).not.toBeInTheDocument();
+        expect(useTaskStore.getState().updateTask).not.toHaveBeenCalled();
+        expect(useTaskStore.getState()._allTasks).toEqual(tasks);
+    });
+
+    it('removes a retained stale Next row when a reorder blocks it again', () => {
+        const tasks = [
+            makeTask({ id: 'first', title: 'Stale first', projectId: 'project-0', order: 0 }),
+            makeTask({ id: 'waiting', title: 'Waiting blocker', status: 'waiting', projectId: 'project-0', order: 1 }),
+        ];
+        seedProjects(tasks);
+        useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((project) => ({ ...project, isSequential: true })) }));
+        window.localStorage.setItem(storageKey, JSON.stringify({ step: 'stale', startedAt: new Date().toISOString() }));
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        expect(screen.getByTestId('task-first')).toBeInTheDocument();
+        act(() => useTaskStore.setState({ _allTasks: tasks.map((task) => ({ ...task, order: task.id === 'waiting' ? 0 : 1 })) }));
+        expect(screen.queryByTestId('task-first')).not.toBeInTheDocument();
+    });
+
     const completeFirstProject = () => {
         const card = screen.getByRole('heading', { level: 3, name: 'Finish me' }).parentElement!.parentElement!;
         fireEvent.click(within(card).getByRole('button', { name: 'Complete project' }));

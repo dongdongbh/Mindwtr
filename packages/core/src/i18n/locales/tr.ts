@@ -796,6 +796,7 @@ export const trOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Her aktif projenin bir sonraki eylemi olduğundan emin olun.',
         'review.projectsHint': 'Her projeyi inceleyin. En az bir somut Sonraki Eylem var mı? Değilse, şimdi bir tane ekleyin. Tamamlanan projeleri tamamlandı olarak işaretleyin.',
         'review.hasNextAction': 'Sonraki İşlemi Var',
+    'review.projectDeferred': 'Planlandı',
         'review.needsAction': 'İşlem Gerekiyor',
         'review.noActiveTasks': 'Aktif görev yok',
         'review.somedayStep': 'Bir gün/Belki',

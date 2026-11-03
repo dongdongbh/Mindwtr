@@ -784,6 +784,7 @@ export const ruOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Убедитесь, что у каждого активного проекта есть следующее действие.',
         'review.projectsHint': 'Рассмотрите каждый проект. Есть ли у него хотя бы одно конкретное следующее действие? Если нет, добавьте его сейчас. Отмечайте завершенные проекты как выполненные.',
         'review.hasNextAction': 'Имеет следующее действие',
+    'review.projectDeferred': 'Запланировано',
         'review.needsAction': 'Требует действий',
         'review.noActiveTasks': 'Нет активных задач',
         'review.somedayStep': 'Когда-нибудь/Может быть',

@@ -1200,6 +1200,7 @@ export const jaOverrides: Record<string, string> = {
         'review.projectsStepDesc': '進行中のすべてのプロジェクトに次のアクションがあるか確認します。',
         'review.projectsHint': 'プロジェクトを1つずつ確認します。具体的な次のアクションが少なくとも1つありますか？なければ今のうちに追加しましょう。終わったプロジェクトは完了にします。',
         'review.hasNextAction': '次のアクションあり',
+    'review.projectDeferred': '予定済み',
         'review.needsAction': '次のアクションが必要',
         'review.noActiveTasks': '進行中のタスクなし',
         'review.somedayStep': 'いつか・たぶん',

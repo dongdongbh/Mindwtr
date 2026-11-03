@@ -1175,6 +1175,7 @@ export const faOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'مطمئن شوید هر پروژه فعال یک اقدام بعدی دارد.',
         'review.projectsHint': 'هر پروژه را مرور کنید. آیا حداقل یک اقدام بعدی مشخص دارد؟ اگر نه، همین حالا یکی اضافه کنید. پروژه‌های تکمیل‌شده را انجام‌شده علامت بزنید.',
         'review.hasNextAction': 'دارای اقدام بعدی',
+    'review.projectDeferred': 'زمان‌بندی‌شده',
         'review.needsAction': 'نیاز به اقدام دارد',
         'review.noActiveTasks': 'کار فعالی نیست',
         'review.somedayStep': 'یک روزی/شاید',

@@ -1190,6 +1190,7 @@ export const en: Record<string, string> = {
         'review.projectsStepDesc': 'Ensure every active project has a next action.',
         'review.projectsHint': 'Review each project. Does it have at least one concrete Next Action? If not, add one now. Mark completed projects as done.',
         'review.hasNextAction': 'Has Next Action',
+    'review.projectDeferred': 'Scheduled',
         'review.needsAction': 'Needs Action',
         'review.noActiveTasks': 'No active tasks',
         'review.somedayStep': 'Someday/Maybe',

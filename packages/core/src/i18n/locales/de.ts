@@ -877,6 +877,7 @@ export const deOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Sicherstellen, dass jedes aktive Projekt eine nächste Aktion enthält.',
         'review.projectsHint': 'Jedes Projekt revidieren. Enthält es zumindest eine konkrete nächste Aktion? Wenn nicht, füge jetzt eine hinzu. Markiere abgeschlossene Projekte als erledigt.',
         'review.hasNextAction': 'Enthält eine nächste Aktion',
+    'review.projectDeferred': 'Geplant',
         'review.needsAction': 'Benötigt eine nächste Aktion',
         'review.noActiveTasks': 'Keine aktiven Aufgaben',
         'review.somedayStep': 'Irgendwann/Vielleicht',

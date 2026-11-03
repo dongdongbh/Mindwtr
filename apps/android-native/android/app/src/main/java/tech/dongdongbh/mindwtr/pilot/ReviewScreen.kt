@@ -48,6 +48,7 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -121,6 +122,7 @@ fun ReviewList(model: InboxViewModel) = with(model.menu) {
                 when (item.type) {
                     "area" -> ReviewArea(model, item.json)
                     "project" -> ReviewProject(model, item.json)
+                    "later" -> ReviewLater(model, item.json, "review")
                     else -> item.row?.let { row ->
                         Column(Modifier.padding(start = 30.dp, top = 8.dp)) {
                             TaskRowItem(model, row, status = RowStatus.Badge, actions = RowActions(
@@ -337,3 +339,24 @@ private fun MenuModel.reviewScope(id: String) {
 
 /** An expansion control's edit (RN's cycle, and an area's or project's fold): core applies it and answers the new expansion. */
 private fun MenuModel.reviewExpansion(edit: JSONObject) = reload(edit)
+
+/** Session-only disclosure; core still builds and pages the editable task rows. */
+@Composable
+internal fun ReviewLater(model: InboxViewModel, item: JSONObject, list: String) = with(model.menu) {
+    val expanded = item.getBoolean("expanded")
+    val id = item.getString("id")
+    val c = LocalTheme.current.colors
+    Row(Modifier.padding(start = 30.dp).heightIn(min = 44.dp)
+        .clickable(enabled = idle, role = Role.Button) {
+            editOwn(list) {
+                val ids = optJSONArray("expandedLaterProjectIds")?.let { values -> (0 until values.length()).map { values.getString(it) }.toMutableSet() } ?: mutableSetOf()
+                if (expanded) ids.remove(id) else ids.add(id)
+                put("expandedLaterProjectIds", JSONArray(ids.toList()))
+            }
+            refresh()
+        }.semantics { stateDescription = t(if (expanded) "markdown.collapse" else "markdown.expand") },
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(if (expanded) Lucide.ChevronDown else Lucide.ChevronRight, null, Modifier.size(16.dp), tint = c.secondaryText)
+        Text(item.getString("label"), style = rnText(13, 500), color = c.secondaryText)
+    }
+}

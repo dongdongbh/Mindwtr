@@ -492,7 +492,9 @@ private fun LazyListScope.projectEntries(model: InboxViewModel, list: List<MenuI
     list.forEachIndexed { index, entry ->
         val row = entry.row
         val id = open?.getString("id")
-        if (row == null) {
+        if (entry.type == "later") {
+            item(key = "later:${entry.key}") { ReviewLater(model, entry.json, "weekly") }
+        } else if (row == null) {
             open = entry.json.takeIf { it.getBoolean("expanded") }
             item(key = entry.key) { ProjectCard(model, entry.json, labels) }
         } else if (id != null && entry.json.menuText("projectId") == id) {
@@ -501,7 +503,7 @@ private fun LazyListScope.projectEntries(model: InboxViewModel, list: List<MenuI
         // ponytail: the link follows the rows loaded so far; past one page of rows it shows early until the rest load.
         val card = open ?: return@forEachIndexed
         val next = list.getOrNull(index + 1)
-        if (next?.row != null && next.json.menuText("projectId") == card.getString("id")) return@forEachIndexed
+        if (next != null && (next.row != null || next.type == "later") && next.json.menuText("projectId") == card.getString("id")) return@forEachIndexed
         item(key = "open:${card.getString("id")}") { ExpandedTask { OpenProjectLink(model, card) } }
         open = null
     }
