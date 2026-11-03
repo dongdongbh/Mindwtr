@@ -1620,6 +1620,24 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(done.id, 'ios');
     });
 
+    // Correction review note 5: an event read that fails for another reason writes nothing by the bare ID; the row stays for
+    // the next push.
+    it('writes nothing and keeps the row when the event read fails for another reason', async () => {
+        mockPlatform.OS = 'android';
+        androidCalendars();
+        setupEnabled();
+        const task = makeTask();
+        setStoreTasks([task]);
+        setCalendarSyncEntries([{ taskId: task.id, calendarEventId: 'evt-1', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' }]);
+        mockGetEventAsync.mockRejectedValue(Object.assign(new Error('provider busy'), { code: 'E_EVENT_READ' }));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockCreateEventAsync).not.toHaveBeenCalled();
+        expect(calendarSyncEntries.get(calendarSyncEntryKey(task.id, 'ios'))).toEqual(expect.objectContaining({ calendarEventId: 'evt-1' }));
+    });
+
     it('clears the row of a done task whose event is already gone (RN bug 2)', async () => {
         mockPlatform.OS = 'android';
         androidCalendars();
