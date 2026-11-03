@@ -654,8 +654,13 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             try {
                 const calendars = await device.getCalendars();
                 const selected = calendars.find((calendar) => calendar.id === selectedId);
-                const selectedIsReusedMindwtrId = host.os() === 'android' && selectedId === await getStoredCalendarId() && !savedIsOwned(calendars, selectedId);
-                if (selected && isWritableCalendar(selected) && !selectedIsReusedMindwtrId) {
+                const storedId = host.os() === 'android' ? await getStoredCalendarId() : null;
+                const lostStoredId = storedId && !savedIsOwned(calendars, storedId) ? storedId : null;
+                if (selected && isWritableCalendar(selected) && selectedId !== lostStoredId) {
+                    if (lostStoredId) {
+                        const forgotten = await forgetCalendarRows(lostStoredId).then(() => true, () => false);
+                        if (!forgotten) return null;
+                    }
                     return { id: selectedId };
                 }
                 await setCalendarPushTargetCalendarId(null);

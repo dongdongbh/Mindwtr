@@ -699,6 +699,20 @@ describe('calendar push behind the host ports', () => {
         expect(phone.entries.has('t3')).toBe(false);
     });
 
+    it('on Android forgets the rows of a saved calendar now held by another calendar even while pushing into another chosen calendar', async () => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const personal = { id: 'personal', title: 'Personal', name: 'alex@gmail.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const phone = device({
+            calendars: [PRIMARY, personal, reused],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'personal' },
+            tasks: [task('t1', { dueDate: '2026-09-10' })],
+            entries: [{ taskId: 't1', calendarEventId: 'e70', calendarId: 'saved', platform: 'android', lastSyncedAt: '' }],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.writes.filter(([name, id]) => (name === 'updateEvent' || name === 'deleteEvent') && id === 'e70')).toEqual([]);
+        expect(phone.entries.get('t1')?.calendarId).toBe('personal');
+    });
+
     it('on Android a chosen calendar that is the saved ID now held by another calendar is not pushed into', async () => {
         const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
         const phone = device({
