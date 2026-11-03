@@ -1981,6 +1981,7 @@ assert.match(editorUi, /for \(status in editor\.view\.statuses\)/);
 assert.match(editorUi, /ChoiceChips\(editor, "priority", editor\.view\.priorities, !locked, t\("taskEdit\.priorityLabel"\), \{ t\("priority\.\$it"\) \}\)/);
 assert.match(editorUi, /Chip\(custom, !locked, t\("recurrence\.custom"\), \{ openPicker\(MONTHLY_CUSTOM\) \}\)/);
 assert.match(editorUi, /MONTHLY_CUSTOM -> MonthlyCustomDialog\(model, editor, locked\) \{ picker = null \}/);
+assert.match(editorUi, /description = "\$\{t\("recurrence\.repeatEvery"\)\}, \$\{t\("recurrence\.monthUnit"\)\}", tag = "monthly-custom-interval"/);
 assert.match(editorUi, /rememberSaveable \{ mutableStateOf\(MonthlyCustom\.of\(recurrence\.getJSONObject\("monthlyCustom"\)\)\.save\(\)\) \}/);
 assert.match(editorUi, /val save = \{ editDraft\(recurrenceEdit\(state\.edit\(\)\)\); dismiss\(\) \}/);
 assert.doesNotMatch(editorUi, /Chip\(true, false, t\("recurrence\.custom"\)/, 'the read-only Custom chip is gone');

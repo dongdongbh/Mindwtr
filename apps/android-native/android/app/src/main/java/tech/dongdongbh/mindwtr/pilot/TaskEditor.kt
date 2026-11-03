@@ -1472,7 +1472,7 @@ private fun MonthlyCustomDialog(model: InboxViewModel, editor: TaskEditor, locke
                 Text(t("recurrence.repeatEvery"), style = rnText(13, 600), color = c.secondaryText)
                 Box(Modifier.widthIn(min = 64.dp, max = 80.dp)) {
                     EditorInput(state.intervalText, { set(state.copy(intervalText = it)) }, null, !locked, singleLine = true,
-                        description = t("recurrence.repeatEvery"), tag = "monthly-custom-interval", number = true)
+                        description = "${t("recurrence.repeatEvery")}, ${t("recurrence.monthUnit")}", tag = "monthly-custom-interval", number = true)
                 }
                 Text(t("recurrence.monthUnit"), style = rnText(13, 600), color = c.secondaryText)
             }

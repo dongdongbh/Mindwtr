@@ -925,11 +925,11 @@ const readRecurrenceEdit = (value: unknown, draft: TaskDraft): TaskDraftRecurren
         case 'until':
             return isEditorDay(value.date) ? { kind: 'until', date: value.date } : null;
         case 'monthlyCustom': {
-            if (!isMonthlyCustom(value.custom)) return null;
-            if (value.intervalText === undefined) return { kind: 'monthlyCustom', custom: value.custom };
-            return isInputText(value.intervalText)
-                ? { kind: 'monthlyCustom', custom: { ...value.custom, interval: parseRecurrenceIntervalInput(value.intervalText) ?? 1 } }
-                : null;
+            if (value.intervalText !== undefined && !isInputText(value.intervalText)) return null;
+            const custom = value.intervalText === undefined || !isObjectRecord(value.custom)
+                ? value.custom
+                : { ...value.custom, interval: parseRecurrenceIntervalInput(value.intervalText) ?? 1 };
+            return isMonthlyCustom(custom) ? { kind: 'monthlyCustom', custom } : null;
         }
         default:
             return null;

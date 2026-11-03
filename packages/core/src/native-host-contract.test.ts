@@ -2421,7 +2421,7 @@ describe('native host contract', () => {
 
             it('saves the custom monthly dialog choices as RN stores them, with the interval as typed (#1271)', async () => {
                 const originalTz = process.env.TZ;
-                const cases: Array<{ tz?: string; dueDate: string; custom: TaskEditorMonthlyCustom; intervalText: string; rrule: string; next: string }> = [
+                const cases: Array<{ tz?: string; storedRRule?: string; dueDate: string; custom: TaskEditorMonthlyCustom; intervalText: string; rrule: string; next: string }> = [
                     { dueDate: '2027-02-09', custom: { interval: 1, mode: 'nth', ordinal: '2', weekday: 'TU', monthDays: [9] }, intervalText: '1',
                         rrule: 'FREQ=MONTHLY;BYDAY=2TU', next: '2027-03-09' },
                     { dueDate: '2027-01-29', custom: { interval: 1, mode: 'nth', ordinal: '-1', weekday: 'WEEKDAY', monthDays: [29] }, intervalText: '1',
@@ -2436,6 +2436,10 @@ describe('native host contract', () => {
                         rrule: 'FREQ=MONTHLY;BYMONTHDAY=31', next: '2027-03-31' },
                     { dueDate: '2027-01-15', custom: { interval: 1, mode: 'date', ordinal: '1', weekday: 'FR', monthDays: [15, 1] }, intervalText: '',
                         rrule: 'FREQ=MONTHLY;BYMONTHDAY=1,15', next: '2027-02-01' },
+                    { storedRRule: 'FREQ=MONTHLY;INTERVAL=1000', dueDate: '2027-01-15', custom: { interval: 1000, mode: 'nth', ordinal: '2', weekday: 'FR', monthDays: [15] },
+                        intervalText: '1000', rrule: 'FREQ=MONTHLY;INTERVAL=999;BYDAY=2FR', next: '2110-04-11' },
+                    { dueDate: '2027-01-15', custom: { interval: 1, mode: 'date', ordinal: '1', weekday: 'FR', monthDays: [15, -1] }, intervalText: '1',
+                        rrule: 'FREQ=MONTHLY;BYMONTHDAY=-1,15', next: '2027-01-31' },
                     { dueDate: '2027-01-15', custom: { interval: 1, mode: 'date', ordinal: '1', weekday: 'FR', monthDays: [15] }, intervalText: '1500',
                         rrule: 'FREQ=MONTHLY;INTERVAL=999;BYMONTHDAY=15', next: '2110-04-15' },
                     { tz: 'America/New_York', dueDate: '2027-03-09T09:00', custom: { interval: 1, mode: 'nth', ordinal: '2', weekday: 'TU', monthDays: [9] },
@@ -2448,7 +2452,7 @@ describe('native host contract', () => {
                         if (entry.tz) process.env.TZ = entry.tz;
                         else if (originalTz === undefined) delete process.env.TZ;
                         else process.env.TZ = originalTz;
-                        const saved = editTask({ dueDate: entry.dueDate, recurrence: { rule: 'monthly', strategy: 'strict', rrule: 'FREQ=MONTHLY' } });
+                        const saved = editTask({ dueDate: entry.dueDate, recurrence: { rule: 'monthly', strategy: 'strict', rrule: entry.storedRRule ?? 'FREQ=MONTHLY' } });
                         const host = await activateEditor([saved]);
                         const draft = openDraft(host);
                         const native = edited(host, draft, {
