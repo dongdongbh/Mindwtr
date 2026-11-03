@@ -102,7 +102,9 @@ const openDatabase = (file: string): Database => {
     const Database = bun
         ? (require('bun:sqlite') as { Database: new (file: string) => Database }).Database
         : (require('node:sqlite') as { DatabaseSync: new (file: string) => Database }).DatabaseSync;
-    return new Database(file);
+    const database = new Database(file);
+    database.exec('PRAGMA synchronous = OFF');
+    return database;
 };
 
 const clientOf = (database: Database): SqliteClient => {
