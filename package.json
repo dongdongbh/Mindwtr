@@ -130,6 +130,7 @@
     "mobile:ios:dev": "bun run --filter mobile ios:dev",
     "mobile:startup:bench": "bash apps/mobile/scripts/android_startup_benchmark.sh",
     "test:perf-tools": "bun test scripts/performance",
+    "test:native-bundle": "bash scripts/ci/run-native-bundle-tests.sh",
     "perf:web": "node scripts/performance/web-startup.mjs",
     "perf:native": "node scripts/performance/native-desktop.mjs",
     "perf:storage": "bun scripts/performance/storage-sync.ts",
