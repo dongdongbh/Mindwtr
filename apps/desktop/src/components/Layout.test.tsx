@@ -185,6 +185,13 @@ afterEach(() => {
 });
 
 describe('Layout content width', () => {
+    it('keeps navigation usable when resize observation is unavailable', () => {
+        vi.stubGlobal('ResizeObserver', undefined);
+        const { container, getByRole } = renderLayout('projects');
+        expect(container.querySelector('[data-view-sidebar-slot]')).toBeNull();
+        expect(getByRole('button', { name: 'Add Task (Inbox)' })).toBeInTheDocument();
+    });
+
     it.each(['projects', 'contexts'])('keeps the %s submenu standalone when the sidebar cannot fit both panes', (view) => {
         vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockReturnValue(new DOMRect(0, 0, 256, 400));
         const { container, queryByRole } = renderLayout(view);

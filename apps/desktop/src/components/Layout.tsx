@@ -160,7 +160,7 @@ export function Layout({
     const isFocusMode = useUiStore((state) => state.isFocusMode);
     useEffect(() => {
         const sidebar = sidebarSplitRef.current;
-        if (!sidebar) return;
+        if (!sidebar || typeof ResizeObserver !== 'function') return;
         const measure = () => {
             const textSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
             setSidebarHasRoom(sidebar.getBoundingClientRect().height >= textSize * 30 + 12);
