@@ -481,6 +481,13 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
     const savedIsOwned = (calendars: DeviceCalendar[], savedId: string | null): savedId is string => Boolean(savedId)
         && calendars.some((calendar) => calendar.id === savedId && (host.os() !== 'android' || hasManagedCalendarName(calendar)));
 
+    /** Forgets the pushed-event rows of a calendar that is gone (their events went with it). */
+    const forgetCalendarRows = async (calendarId: string): Promise<void> => {
+        for (const entry of (await syncEntries.getAll(PLATFORM)).filter((item) => item.calendarId === calendarId)) {
+            await syncEntries.delete(entry.taskId, PLATFORM);
+        }
+    };
+
     /**
      * The calendar this install owns, in a list the device answered (never a failed
      * read taken as empty): the saved one while it exists, else the one a creation cut
@@ -511,7 +518,7 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                         sourceName: getCalendarSourceName(calendar),
                         color: typeof calendar.color === 'string' && calendar.color.trim().length > 0 ? calendar.color : undefined,
                         isMindwtrDedicated,
-                        isMindwtrManaged: isStoredMindwtrManagedCalendar(calendar, storedCalendarId),
+                        isMindwtrManaged: isStoredMindwtrManagedCalendar(calendar, storedCalendarId) && savedIsOwned([calendar], storedCalendarId),
                         isLocalOnly: isLocalOnlyCalendar(calendar),
                     };
                 })
@@ -569,8 +576,12 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
                     extra: { releaseCheck: 'v1.3.8/calendar-push-reused-id', outcome: 'skipped' },
                 });
             }
-
-
+            // Android: the saved calendar is gone or now another calendar's, and its events went with it. Its rows are
+            // forgotten, as Delete forgets them, before anything is pushed: the phone hands freed event IDs to new events
+            // (the user's, or the ones this push makes), so a stale row must never reach an event by its ID.
+            if (host.os() === 'android' && storedId) await forgetCalendarRows(storedId);
+            // The saved calendar was deleted externally (or none was saved): a calendar a
+            // creation cut short made is adopted, else a new one is made.
             const adoptedId = host.os() === 'android' ? await resolveOwnedCalendar(allCalendars, null) : null;
             if (adoptedId) return adoptedId;
 
@@ -669,7 +680,9 @@ export function createCalendarPushService(host: CalendarPushServiceHost) {
             try {
                 const calendars = await device.getCalendars();
                 const selected = calendars.find((calendar) => calendar.id === selectedId);
-                if (selected && isWritableCalendar(selected)) {
+                // On Android a chosen Mindwtr calendar whose ID the phone gave another calendar is no longer the choice.
+                const lostMindwtr = host.os() === 'android' && selectedId === await getStoredCalendarId() && !savedIsOwned(calendars, selectedId);
+                if (selected && isWritableCalendar(selected) && !lostMindwtr) {
                     return { id: selectedId };
                 }
                 await setCalendarPushTargetCalendarId(null);

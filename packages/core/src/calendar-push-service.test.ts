@@ -680,6 +680,49 @@ describe('calendar push behind the host ports', () => {
 
     // Calendar push review N3 (an RN bug too): Android's calendar provider can give a deleted calendar's _id to a new calendar.
     // The saved ID is then the user's calendar: push never writes into it, and a Delete or a recolor never deletes it.
+    // Correction review BLOCK 1: the phone reuses both IDs. The deleted Mindwtr calendar's ID goes to the user's next calendar,
+    // and a freed pushed-event ID to the user's event in it. The saved calendar's rows name events that died with it, so they
+    // are forgotten (as Settings Delete forgets them) before anything is pushed: no stale row reaches the user's event.
+    it.each(['reused', 'gone'])('on Android forgets the rows of a saved calendar it does not keep (%s), and touches no event by them', async (how) => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const dated = (id: string) => task(id, { dueDate: '2026-09-10' });
+        const phone = device({
+            calendars: how === 'reused' ? [PRIMARY, reused] : [PRIMARY],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' },
+            tasks: [dated('t1'), dated('t2'), task('t3', { dueDate: '2026-09-10', status: 'done' })],
+            entries: [
+                { taskId: 't1', calendarEventId: 'e70', calendarId: 'saved', platform: 'android', lastSyncedAt: '' },
+                { taskId: 't3', calendarEventId: 'e71', calendarId: 'saved', platform: 'android', lastSyncedAt: '' },
+                { taskId: 't2', calendarEventId: 'e9', calendarId: 'primary', platform: 'android', lastSyncedAt: '' },
+            ],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        const touched = phone.writes.filter(([name]) => name === 'updateEvent' || name === 'deleteEvent').map(([, id]) => id);
+        expect(touched).not.toContain('e70');
+        expect(touched).not.toContain('e71');
+        expect(phone.entries.get('t1')?.calendarId).toBe('created-1');
+        expect(phone.entries.has('t3')).toBe(false);
+    });
+
+    it('on Android a chosen calendar that is the saved ID now held by another calendar is not pushed into', async () => {
+        const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', accessLevel: 'owner', allowsModifications: true, source: google };
+        const phone = device({
+            calendars: [PRIMARY, reused],
+            storage: { [CALENDAR_PUSH_ENABLED_KEY]: '1', [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved', [CALENDAR_PUSH_TARGET_ID_KEY]: 'saved' },
+            tasks: [task('t1', { dueDate: '2026-09-10' })],
+            entries: [{ taskId: 't1', calendarEventId: 'e70', calendarId: 'saved', platform: 'android', lastSyncedAt: '' }],
+        });
+        await createCalendarPushService(phone.host).runFullCalendarSync();
+        expect(phone.writes.filter(([name, id]) => (name === 'updateEvent' || name === 'deleteEvent') && id === 'e70')).toEqual([]);
+        expect(phone.writes.filter(([name, id]) => name === 'createEvent' && id === 'saved')).toEqual([]);
+        expect(phone.storage.has(CALENDAR_PUSH_TARGET_ID_KEY)).toBe(false);
+        expect(phone.entries.get('t1')?.calendarId).toBe('created-1');
+        // Settings no longer marks the other calendar as Mindwtr's (review note 9).
+        const listed = await createCalendarPushService(device({ calendars: [PRIMARY, reused], storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'saved' } }).host)
+            .getCalendarPushTargetCalendars();
+        expect(listed.find((entry) => entry.id === 'saved')?.isMindwtrManaged).toBe(false);
+    });
+
     it('on Android a saved ID now held by a calendar without Mindwtr\'s internal name is not its own', async () => {
         const reused = { id: 'saved', title: 'Work', name: 'alex@work.com', color: '#0B8043', accessLevel: 'owner', allowsModifications: true, source: google };
         const setup = () => device({
@@ -727,7 +770,7 @@ describe('calendar push behind the host ports', () => {
                 { id: 'frozen', title: 'Frozen', allowsModifications: false, source: google },
                 { id: 'named', title: 'Mindwtr', accessLevel: 'owner', source: { name: 'local account', type: 'LOCAL' } },
                 { id: 'alpha', title: 'Alpha', accessLevel: 'owner', source: google },
-                { id: 'managed', title: 'Tasks', accessLevel: 'owner', source: google },
+                { id: 'managed', title: 'Tasks', name: 'mindwtr:11111111-1111-4111-8111-111111111111', accessLevel: 'owner', source: google },
             ],
             storage: { [CALENDAR_PUSH_CALENDAR_ID_KEY]: 'managed' },
         });

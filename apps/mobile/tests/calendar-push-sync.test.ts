@@ -1594,6 +1594,32 @@ describe('Android: expo-calendar never reports a missing event, so the binding r
         expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(task.id, 'ios');
     });
 
+    // Correction review BLOCK 1: the phone gave the deleted Mindwtr calendar's ID to the user's next calendar, and a freed
+    // pushed-event ID to the user's event in it. The event's calendar matches the row's, so only forgetting the rows of a
+    // saved calendar push does not keep (core) keeps that event safe.
+    it('never touches the user\'s event when both the Mindwtr calendar\'s ID and the event\'s ID were reused', async () => {
+        mockPlatform.OS = 'android';
+        // The new Mindwtr calendar gets the old ID back too (the mock's createCalendarAsync answers 'cal-1').
+        mockGetCalendarsAsync.mockResolvedValue([{ id: 'cal-1', title: 'Work', name: 'work@example.com', ownerAccount: 'me@gmail.com',
+            accessLevel: 'owner', allowsModifications: true, source: { name: 'me@gmail.com', type: 'com.google' } }]);
+        setupEnabled();
+        const live = makeTask();
+        const done = makeTask({ id: 'task-done', status: 'done' });
+        setStoreTasks([live, done]);
+        setCalendarSyncEntries([
+            { taskId: live.id, calendarEventId: 'evt-reused', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' },
+            { taskId: done.id, calendarEventId: 'evt-reused-2', calendarId: 'cal-1', platform: 'ios', lastSyncedAt: '' },
+        ]);
+        mockGetEventAsync.mockImplementation(async (id: string) => ({ id, calendarId: 'cal-1' }));
+
+        await runFullCalendarSync();
+
+        expect(mockUpdateEventAsync).not.toHaveBeenCalled();
+        expect(mockDeleteEventAsync).not.toHaveBeenCalled();
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(live.id, 'ios');
+        expect(mockDeleteCalendarSyncEntry).toHaveBeenCalledWith(done.id, 'ios');
+    });
+
     it('clears the row of a done task whose event is already gone (RN bug 2)', async () => {
         mockPlatform.OS = 'android';
         androidCalendars();

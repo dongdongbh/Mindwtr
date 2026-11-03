@@ -219,6 +219,41 @@ describe('an event ID the provider reused (review N9: the S23 hands a deleted _i
     });
 });
 
+// Correction review BLOCK 1 (rcal2's repro): the S23 reuses the deleted Mindwtr calendar's ID for the user's next calendar and
+// a freed pushed-event ID for the user's event in it. The rows of a saved calendar push does not keep are forgotten first.
+describe('both the calendar ID and an event ID reused (correction review BLOCK 1)', () => {
+    it('keeps the user\'s event in the calendar that took the deleted Mindwtr calendar\'s ID', async () => {
+        const device = phone([calendar('1'), calendar('7', { title: 'Work', name: 'work@example.com' })], { 70: { calendarId: '7', title: 'Dentist' } });
+        const app = await upgrade({ tasks: [task('t1')], kv: { [KEY.enabled]: '1', [KEY.calendarId]: '7' },
+            device, rows: [{ taskId: 't1', eventId: '70', calendarId: '7' }] });
+        await app.host.startPush();
+        expect(device.state.events.get('70')).toEqual({ calendarId: '7', title: 'Dentist' });
+        expect(device.state.calls.filter((call) => call.eventId === '70')).toEqual([]);
+        expect(await app.rows()).toEqual([['t1', '501', '500']]);
+    });
+
+    it('keeps it when the user had chosen the Mindwtr calendar, whose ID the other calendar took, as the push target', async () => {
+        const device = phone([calendar('1'), calendar('7', { title: 'Work', name: 'work@example.com' })], { 70: { calendarId: '7', title: 'Dentist' } });
+        const app = await upgrade({ tasks: [task('t1')], kv: { [KEY.enabled]: '1', [KEY.calendarId]: '7', [KEY.target]: '7' },
+            device, rows: [{ taskId: 't1', eventId: '70', calendarId: '7' }] });
+        await app.host.startPush();
+        expect(device.state.events.get('70')).toEqual({ calendarId: '7', title: 'Dentist' });
+        expect(device.state.calls.filter((call) => call.eventId === '70' || (call.op === 'createEvent' && call.calendarId === '7'))).toEqual([]);
+    });
+
+    it('gives each task its own event when the new Mindwtr calendar and its events get the old IDs back', async () => {
+        const device = phone([calendar('1')]);
+        const ids = ['t1', 't2', 't3', 't4', 't5'];
+        const app = await upgrade({ tasks: ids.map((id) => task(id)), kv: { [KEY.enabled]: '1', [KEY.calendarId]: '500' }, device,
+            rows: [...ids.slice(0, 4).map((id, index) => ({ taskId: id, eventId: String(900 + index), calendarId: '500' })),
+                { taskId: 't5', eventId: '501', calendarId: '500' }] });
+        await app.host.startPush();
+        const rows = await app.rows();
+        expect(new Set(rows.map((row) => row[1])).size).toBe(5);
+        for (const [taskId, eventId] of rows) expect(device.state.events.get(eventId)?.title).toBe(`PRIVATE ${taskId}`);
+    });
+});
+
 describe('Settings › Calendar on the Android host', () => {
     const mindwtr = () => calendar('7', { title: 'Mindwtr', name: `mindwtr:${MARKER}`, color: '#3B82F6' });
     const open = async (app: Awaited<ReturnType<typeof upgrade>>) => {
