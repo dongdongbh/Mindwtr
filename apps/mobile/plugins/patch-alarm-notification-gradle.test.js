@@ -284,6 +284,7 @@ ${guard}
   static Calendar millisFromNow(long delta) { Calendar c=Calendar.getInstance(); c.setTimeInMillis(c.getTimeInMillis()+delta); return c; }
   static void check(boolean ok) { if (!ok) throw new AssertionError(); }
   public static void main(String[] args) {
+    TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
     GuardCheck g=new GuardCheck();
     check(g.discardStaleOneShot(new AlarmModel(1,"once",hoursFromNow(-25))) && g.db.deleted==1);
     g.db.deleted=0;
