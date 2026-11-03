@@ -315,6 +315,7 @@ try {
     await device.completeUntil(titles.host, 'the second device\'s task moved on', (current) => !taskRow(current, titles.host));
     const movedTo = phoneTasks()[titles.host];
     check(Boolean(movedTo) && movedTo !== 'inbox', `(3) the phone moved the emoji task on (${movedTo})`);
+    await waitFor('the Done toast to time out', (current) => !current.some((node) => node.text === en['common.undo']), 60_000);
     await capture(titles.phone);
 
     await until('the phone\'s automatic sync to upload its change and its capture', () => {
