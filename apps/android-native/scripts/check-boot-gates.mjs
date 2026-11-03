@@ -916,7 +916,7 @@ assert.match(editorUi, /val checklistFormScroll = rememberScrollState\(\)/);
 assert.match(editorUi, /\.imePadding\(\)\.onSizeChanged \{ formViewport = it\.height \}\s+\.onGloballyPositioned \{ checklistFormBounds = it\.boundsInWindow\(\) \}\s+\.verticalScroll\(checklistFormScroll, enabled = !checklistDragging\)/);
 
 
-assert.match(editorUi, /keyboardOptions = if \(commit != null\) KeyboardOptions\(imeAction = ImeAction\.Done\) else KeyboardOptions\.Default,\s+keyboardActions = KeyboardActions\(onDone = \{ focusManager\.clearFocus\(\) \}\)/);
+assert.match(editorUi, /keyboardOptions = KeyboardOptions\(keyboardType = if \(number\) KeyboardType\.Number else KeyboardType\.Unspecified,\s+imeAction = if \(commit != null\) ImeAction\.Done else ImeAction\.Unspecified\),\s+keyboardActions = KeyboardActions\(onDone = \{ focusManager\.clearFocus\(\) \}\)/);
 assert.match(editorUi, /\.onFocusChanged \{ if \(focused && !it\.isFocused\) commit\?\.invoke\(\); focused = it\.isFocused \}/);
 assert.match(editorUi, /!locked, singleLine = true, description = label, tag = "editor-\$id",\s+commit = \{ committedTokens\(editor\.input\(id\), suggestions\[id\]\)\?\.let \{ editInput\(id, it\) \} \}\)/);
 
@@ -1979,6 +1979,11 @@ for (const [list, prefix] of [['EDITOR_STATUSES', 'status'], ['EDITOR_PRIORITIES
 }
 assert.match(editorUi, /for \(status in editor\.view\.statuses\)/);
 assert.match(editorUi, /ChoiceChips\(editor, "priority", editor\.view\.priorities, !locked, t\("taskEdit\.priorityLabel"\), \{ t\("priority\.\$it"\) \}\)/);
+assert.match(editorUi, /Chip\(custom, !locked, t\("recurrence\.custom"\), \{ openPicker\(MONTHLY_CUSTOM\) \}\)/);
+assert.match(editorUi, /MONTHLY_CUSTOM -> MonthlyCustomDialog\(model, editor, locked\) \{ picker = null \}/);
+assert.match(editorUi, /rememberSaveable \{ mutableStateOf\(MonthlyCustom\.of\(recurrence\.getJSONObject\("monthlyCustom"\)\)\.save\(\)\) \}/);
+assert.match(editorUi, /val save = \{ editDraft\(recurrenceEdit\(state\.edit\(\)\)\); dismiss\(\) \}/);
+assert.doesNotMatch(editorUi, /Chip\(true, false, t\("recurrence\.custom"\)/, 'the read-only Custom chip is gone');
 
 {
     const modelSource = readFileSync(resolve(app, '../../packages/core/src/task-editor-model.ts'), 'utf8');

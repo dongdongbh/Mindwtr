@@ -30,7 +30,9 @@ import { normalizeFocusTaskLimit } from './focus-utils';
 import { buildTaskRowMeta, getTaskRowMetaValidUntil, resolveTaskRowFeatures, resolveTaskRowLookup } from './task-row-meta';
 import { isTaskActionable } from './task-status';
 import { splitTodayTasksByStartTime } from './task-utils';
-import { createTaskDraft, setTaskDraftField, type TaskDraft } from './task-draft';
+import { createTaskDraft, setTaskDraftField, taskDraftToUpdatePatch, type TaskDraft } from './task-draft';
+import { buildTaskEditorMonthlyCustomRRule, parseRecurrenceIntervalInput, type TaskEditorMonthlyCustom } from './task-editor-schedule';
+import { createNextRecurringTask } from './recurrence';
 import { DEFAULT_TASK_EDITOR_HIDDEN } from './task-editor-layout';
 import { buildTaskEditorModel, buildTaskEditUpdatePatch, createTaskEditDraft, getTaskEditorSuggestions } from './task-editor-model';
 import { getEnglishI18nValue, getTranslator, tFallback } from './i18n';
@@ -2415,6 +2417,71 @@ describe('native host contract', () => {
                 const lastWeekday = recurrence({ kind: 'monthlyCustom', custom: { interval: 1, mode: 'nth', ordinal: '-1', weekday: 'WEEKDAY', monthDays: [28] } });
                 expect(lastWeekday.draft.recurrenceRRule).toBe('FREQ=MONTHLY;BYDAY=FR,MO,TH,TU,WE;BYSETPOS=-1;COUNT=5');
                 expect(lastWeekday.fields.recurrence.monthlyCustom).toMatchObject({ mode: 'nth', ordinal: '-1', weekday: 'WEEKDAY' });
+            });
+
+            it('saves the custom monthly dialog choices as RN stores them, with the interval as typed (#1271)', async () => {
+                const originalTz = process.env.TZ;
+                const cases: Array<{ tz?: string; dueDate: string; custom: TaskEditorMonthlyCustom; intervalText: string; rrule: string; next: string }> = [
+                    { dueDate: '2027-02-09', custom: { interval: 1, mode: 'nth', ordinal: '2', weekday: 'TU', monthDays: [9] }, intervalText: '1',
+                        rrule: 'FREQ=MONTHLY;BYDAY=2TU', next: '2027-03-09' },
+                    { dueDate: '2027-01-29', custom: { interval: 1, mode: 'nth', ordinal: '-1', weekday: 'WEEKDAY', monthDays: [29] }, intervalText: '1',
+                        rrule: 'FREQ=MONTHLY;BYDAY=FR,MO,TH,TU,WE;BYSETPOS=-1', next: '2027-02-26' },
+                    { dueDate: '2027-01-29', custom: { interval: 1, mode: 'nth', ordinal: '-1', weekday: 'FR', monthDays: [29] }, intervalText: '1',
+                        rrule: 'FREQ=MONTHLY;BYDAY=-1FR', next: '2027-02-26' },
+                    { dueDate: '2028-01-31', custom: { interval: 1, mode: 'lastDay', ordinal: '1', weekday: 'MO', monthDays: [31] }, intervalText: '1',
+                        rrule: 'FREQ=MONTHLY;BYMONTHDAY=-1', next: '2028-02-29' },
+                    { dueDate: '2027-01-15', custom: { interval: 1, mode: 'date', ordinal: '1', weekday: 'FR', monthDays: [15] }, intervalText: '2',
+                        rrule: 'FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=15', next: '2027-03-15' },
+                    { dueDate: '2027-01-31', custom: { interval: 1, mode: 'date', ordinal: '1', weekday: 'SU', monthDays: [31] }, intervalText: '1',
+                        rrule: 'FREQ=MONTHLY;BYMONTHDAY=31', next: '2027-03-31' },
+                    { dueDate: '2027-01-15', custom: { interval: 1, mode: 'date', ordinal: '1', weekday: 'FR', monthDays: [15, 1] }, intervalText: '',
+                        rrule: 'FREQ=MONTHLY;BYMONTHDAY=1,15', next: '2027-02-01' },
+                    { dueDate: '2027-01-15', custom: { interval: 1, mode: 'date', ordinal: '1', weekday: 'FR', monthDays: [15] }, intervalText: '1500',
+                        rrule: 'FREQ=MONTHLY;INTERVAL=999;BYMONTHDAY=15', next: '2110-04-15' },
+                    { tz: 'America/New_York', dueDate: '2027-03-09T09:00', custom: { interval: 1, mode: 'nth', ordinal: '2', weekday: 'TU', monthDays: [9] },
+                        intervalText: '1', rrule: 'FREQ=MONTHLY;BYDAY=2TU', next: '2027-04-13T09:00' },
+                    { tz: 'Pacific/Auckland', dueDate: '2027-03-31T09:00', custom: { interval: 1, mode: 'nth', ordinal: '-1', weekday: 'WEEKDAY', monthDays: [31] },
+                        intervalText: '1', rrule: 'FREQ=MONTHLY;BYDAY=FR,MO,TH,TU,WE;BYSETPOS=-1', next: '2027-04-30T09:00' },
+                ];
+                try {
+                    for (const entry of cases) {
+                        if (entry.tz) process.env.TZ = entry.tz;
+                        else if (originalTz === undefined) delete process.env.TZ;
+                        else process.env.TZ = originalTz;
+                        const saved = editTask({ dueDate: entry.dueDate, recurrence: { rule: 'monthly', strategy: 'strict', rrule: 'FREQ=MONTHLY' } });
+                        const host = await activateEditor([saved]);
+                        const draft = openDraft(host);
+                        const native = edited(host, draft, {
+                            type: 'recurrence', edit: { kind: 'monthlyCustom', custom: entry.custom, intervalText: entry.intervalText },
+                        }).draft;
+                        expect(native.recurrenceRRule).toBe(entry.rrule);
+                        const rnRRule = buildTaskEditorMonthlyCustomRRule(draft.recurrenceRRule, {
+                            ...entry.custom, interval: parseRecurrenceIntervalInput(entry.intervalText) ?? 1,
+                        });
+                        const rnDraft = setTaskDraftField(setTaskDraftField(setTaskDraftField(createTaskDraft(saved),
+                            'recurrence', 'monthly'), 'recurrenceStrategy', draft.recurrenceStrategy), 'recurrenceRRule', rnRRule);
+                        expect(await host.saveTaskDraft({ id: 'edit', ...changes(draft, native), requestId: newRequestId() }))
+                            .toMatchObject({ ok: true });
+                        const stored = storedTask();
+                        await flushPendingSave();
+                        await activateEditor([saved]);
+                        expect((await useTaskStore.getState().updateTask('edit', taskDraftToUpdatePatch(rnDraft, saved)!)).success).toBe(true);
+                        await flushPendingSave();
+                        expect(stored?.recurrence).toEqual(storedTask()?.recurrence);
+                        expect(stored?.recurrence).toMatchObject({ rrule: `${entry.rrule};X-MINDWTR-SERIES-ID=edit` });
+                        expect(createNextRecurringTask(stored!, '2027-01-01T12:00:00.000Z', 'next')?.dueDate).toBe(entry.next);
+                    }
+                    const host = await activateEditor([editTask({ recurrence: { rule: 'monthly', strategy: 'strict', rrule: 'FREQ=MONTHLY' } })]);
+                    const draft = openDraft(host);
+                    for (const intervalText of [2, null, 'x'.repeat(201)]) {
+                        expect(host.editTaskDraft({ id: 'edit', draft, edit: { type: 'recurrence', edit: {
+                            kind: 'monthlyCustom', custom: cases[0].custom, intervalText,
+                        } } as unknown as NativeTaskDraftEdit })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+                    }
+                } finally {
+                    if (originalTz === undefined) delete process.env.TZ;
+                    else process.env.TZ = originalTz;
+                }
             });
 
             it('offers quick dates, the date issue, reminder intervals, and parses estimates and time spent', async () => {

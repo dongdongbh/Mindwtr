@@ -859,11 +859,12 @@ export type NativeTaskDraftEdit =
     | { type: 'backdatedCompletion'; day: string; time: string; timeSpentText?: string };
 
 export type NativeTaskDraftRecurrenceEdit =
-    | Exclude<TaskDraftRecurrenceEdit, { kind: 'interval' } | { kind: 'weekdays' }>
+    | Exclude<TaskDraftRecurrenceEdit, { kind: 'interval' } | { kind: 'weekdays' } | { kind: 'monthlyCustom' }>
 
     | { kind: 'interval'; text: string }
 
-    | { kind: 'weekday'; day: RecurrenceWeekday };
+    | { kind: 'weekday'; day: RecurrenceWeekday }
+    | { kind: 'monthlyCustom'; custom: TaskEditorMonthlyCustom; intervalText?: string };
 
 const EDITOR_DATE_FIELDS: readonly string[] = ['startTime', 'dueDate', 'reviewAt'];
 const RELATIVE_START_UNITS: readonly string[] = ['minute', 'hour', 'day', 'week'];
@@ -923,8 +924,13 @@ const readRecurrenceEdit = (value: unknown, draft: TaskDraft): TaskDraftRecurren
             return isInputText(value.text) ? { kind: 'count', text: value.text } : null;
         case 'until':
             return isEditorDay(value.date) ? { kind: 'until', date: value.date } : null;
-        case 'monthlyCustom':
-            return isMonthlyCustom(value.custom) ? { kind: 'monthlyCustom', custom: value.custom } : null;
+        case 'monthlyCustom': {
+            if (!isMonthlyCustom(value.custom)) return null;
+            if (value.intervalText === undefined) return { kind: 'monthlyCustom', custom: value.custom };
+            return isInputText(value.intervalText)
+                ? { kind: 'monthlyCustom', custom: { ...value.custom, interval: parseRecurrenceIntervalInput(value.intervalText) ?? 1 } }
+                : null;
+        }
         default:
             return null;
     }

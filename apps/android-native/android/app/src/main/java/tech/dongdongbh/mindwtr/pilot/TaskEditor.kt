@@ -79,6 +79,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -605,6 +606,7 @@ fun TaskEditorScreen(model: InboxViewModel, editor: TaskEditor) = with(model) {
             PickerItem(t("taskEdit.noSectionOption")) { editFields(mapOf("sectionId" to "")); picker = null }
             for (section in editor.view.projectSections) PickerItem(section.title) { editFields(mapOf("sectionId" to section.id)); picker = null }
         }
+        MONTHLY_CUSTOM -> MonthlyCustomDialog(model, editor, locked) { picker = null }
     }
 
     if (descriptionExpanded && !editor.readOnly) DescriptionFullscreen(model, editor, locked, follow) { descriptionExpanded = false }
@@ -864,7 +866,7 @@ private fun EditorField(model: InboxViewModel, editor: TaskEditor, id: String, l
         }
         "recurrence" -> FormGroup {
             FieldHeading(Lucide.Repeat, t("taskEdit.recurrenceLabel"))
-            RecurrenceField(model, editor, locked, pickDate)
+            RecurrenceField(model, editor, locked, pickDate, openPicker)
         }
 
         "checklist" -> ChecklistField(model, editor, locked)
@@ -1012,7 +1014,7 @@ private fun Reminders(model: InboxViewModel, editor: TaskEditor, locked: Boolean
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun RecurrenceField(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pickDate: (String) -> Unit) = with(model) {
+private fun RecurrenceField(model: InboxViewModel, editor: TaskEditor, locked: Boolean, pickDate: (String) -> Unit, openPicker: (String) -> Unit) = with(model) {
     val c = LocalTheme.current.colors
     val rule = editor.text("recurrence")
     val details = editor.view.fields.recurrence
@@ -1055,7 +1057,7 @@ private fun RecurrenceField(model: InboxViewModel, editor: TaskEditor, locked: B
             Text(t("recurrence.monthlyOnDay"), style = rnText(14, 400), color = color)
         }
 
-        if (custom) Chip(true, false, t("recurrence.custom"), {}) { color -> Text(t("recurrence.custom"), style = rnText(14, 400), color = color) }
+        Chip(custom, !locked, t("recurrence.custom"), { openPicker(MONTHLY_CUSTOM) }) { color -> Text(t("recurrence.custom"), style = rnText(14, 400), color = color) }
     }
     Text(t("recurrence.endsLabel"), style = rnText(13, 600), color = c.secondaryText, modifier = Modifier.padding(top = 8.dp))
     val ends = details.getString("ends")
@@ -1256,7 +1258,7 @@ private fun DescriptionFullscreen(model: InboxViewModel, editor: TaskEditor, loc
 
 @Composable
 private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: String?, enabled: Boolean, singleLine: Boolean = false,
-                        minHeight: Int = 0, description: String? = null, tag: String? = null, commit: (() -> Unit)? = null) {
+                        minHeight: Int = 0, description: String? = null, tag: String? = null, commit: (() -> Unit)? = null, number: Boolean = false) {
     val c = LocalTheme.current.colors
     val focusManager = LocalFocusManager.current
     val shape = RoundedCornerShape(10.dp)
@@ -1275,7 +1277,8 @@ private fun EditorInput(value: String, onChange: (String) -> Unit, placeholder: 
     if (field.text != value) field = TextFieldValue(value, TextRange(value.length))
     BasicTextField(field, { typed -> field = typed; if (typed.text != value) onChange(typed.text) }, enabled = enabled, singleLine = singleLine, textStyle = rnText(16, 400).copy(color = if (enabled) c.text else c.secondaryText),
         cursorBrush = SolidColor(c.tint),
-        keyboardOptions = if (commit != null) KeyboardOptions(imeAction = ImeAction.Done) else KeyboardOptions.Default,
+        keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Number else KeyboardType.Unspecified,
+            imeAction = if (commit != null) ImeAction.Done else ImeAction.Unspecified),
         keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
         modifier = Modifier.bringIntoViewRequester(reveal).onSizeChanged { size = it }.onFocusChanged { if (focused && !it.isFocused) commit?.invoke(); focused = it.isFocused }.fillMaxWidth().heightIn(min = minHeight.dp).clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape)
             .then(if (tag != null) Modifier.testTag(tag) else Modifier)
@@ -1411,6 +1414,137 @@ private fun WaitingPrompt(model: InboxViewModel, text: String, locked: Boolean) 
     }
 }
 
+const val MONTHLY_CUSTOM = "monthlyCustom"
+
+internal val MONTH_GRID = (1..31).toList() + -1
+
+internal val MONTHLY_ORDINALS = listOf("1", "2", "3", "4", "-1")
+
+internal fun ordinalLabel(ordinal: String, t: (String) -> String) =
+    t("recurrence.ordinal." + when (ordinal) { "-1" -> "last"; "2" -> "second"; "3" -> "third"; "4" -> "fourth"; else -> "first" })
+
+internal data class MonthlyCustom(val interval: Int, val mode: String, val ordinal: String, val weekday: String, val monthDays: List<Int>,
+                                  val intervalText: String) {
+    fun toggleDay(day: Int) = copy(monthDays = MONTH_GRID.filter { (it == day) != (it in monthDays) }.ifEmpty { monthDays })
+
+    fun monthDaysLabel(t: (String) -> String): String {
+        val numbered = t("recurrence.onDayOfMonth").replace("{day}", monthDays.filter { it != -1 }.joinToString(", "))
+        return if (-1 !in monthDays) numbered else if (monthDays.size > 1) "$numbered + ${t("recurrence.lastDay")}" else t("recurrence.lastDay")
+    }
+
+    fun nthLabel(t: (String) -> String, dayName: (String) -> String) = t("recurrence.onNthWeekday").replace("{ordinal}", ordinalLabel(ordinal, t))
+        .replace("{weekday}", if (weekday == "WEEKDAY") t("recurrence.weekdayMonFri") else dayName(weekday))
+
+    private fun custom() = JSONObject().put("interval", interval).put("mode", mode).put("ordinal", ordinal).put("weekday", weekday)
+        .put("monthDays", JSONArray(monthDays))
+
+    fun edit(): JSONObject = JSONObject().put("kind", "monthlyCustom").put("custom", custom()).put("intervalText", intervalText)
+
+    fun save() = custom().put("intervalText", intervalText).toString()
+
+    companion object {
+        fun of(core: JSONObject) = MonthlyCustom(core.getInt("interval"), core.getString("mode"), core.getString("ordinal"),
+            core.getString("weekday"), core.getJSONArray("monthDays").let { days -> List(days.length()) { days.getInt(it) } },
+            core.optString("intervalText", "${core.getInt("interval")}"))
+
+        fun restore(text: String) = of(JSONObject(text))
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MonthlyCustomDialog(model: InboxViewModel, editor: TaskEditor, locked: Boolean, dismiss: () -> Unit) = with(model) {
+    val theme = LocalTheme.current
+    val c = theme.colors
+    val recurrence = editor.view.fields.recurrence
+    var saved by rememberSaveable { mutableStateOf(MonthlyCustom.of(recurrence.getJSONObject("monthlyCustom")).save()) }
+    val state = MonthlyCustom.restore(saved)
+    val set = { next: MonthlyCustom -> saved = next.save() }
+    val weekdays = recurrence.getJSONArray("weekdays").objects()
+    BackHandler(onBack = dismiss)
+    Box(Modifier.fillMaxSize().background(theme.pickerScrim).pointerInput(Unit) { detectTapGestures { dismiss() } }.imePadding().padding(20.dp)
+        .semantics { testTagsAsResourceId = true }, contentAlignment = Alignment.Center) {
+        val shape = RoundedCornerShape(12.dp)
+        Column(Modifier.widthIn(max = 420.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
+            .pointerInput(Unit) { detectTapGestures { } }.verticalScroll(rememberScrollState()).padding(16.dp).testTag("monthly-custom")) {
+            Text(t("recurrence.customTitle"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(t("recurrence.repeatEvery"), style = rnText(13, 600), color = c.secondaryText)
+                Box(Modifier.widthIn(min = 64.dp, max = 80.dp)) {
+                    EditorInput(state.intervalText, { set(state.copy(intervalText = it)) }, null, !locked, singleLine = true,
+                        description = t("recurrence.repeatEvery"), tag = "monthly-custom-interval", number = true)
+                }
+                Text(t("recurrence.monthUnit"), style = rnText(13, 600), color = c.secondaryText)
+            }
+            Text(t("recurrence.onLabel"), style = rnText(13, 600), color = c.secondaryText, modifier = Modifier.padding(top = 12.dp))
+            FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val dayName = { day: String -> weekdays.firstOrNull { it.getString("day") == day }?.getString("longLabel") ?: day }
+                for ((mode, label) in listOf("date" to state.monthDaysLabel(::t), "lastDay" to t("recurrence.lastDay"), "nth" to state.nthLabel(::t, dayName))) {
+                    Chip(state.mode == mode, !locked, label, { set(state.copy(mode = mode)) }, Modifier.testTag("monthly-custom-mode-$mode")) { color ->
+                        Text(label, style = rnText(14, 400), color = color)
+                    }
+                }
+            }
+            if (state.mode == "nth") {
+                FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (ordinal in MONTHLY_ORDINALS) {
+                        val label = ordinalLabel(ordinal, ::t)
+                        DialogButton(label, label, state.ordinal == ordinal, !locked, "monthly-custom-ordinal-$ordinal", Modifier.widthIn(min = 54.dp)) {
+                            set(state.copy(ordinal = ordinal))
+                        }
+                    }
+                }
+                FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (day in weekdays) {
+                        val code = day.getString("day")
+                        DialogButton(day.getString("label"), day.getString("longLabel"), state.weekday == code, !locked, "monthly-custom-weekday-$code",
+                            Modifier.size(44.dp)) { set(state.copy(weekday = code)) }
+                    }
+                    val monFri = t("recurrence.weekdayMonFri")
+                    DialogButton(monFri, monFri, state.weekday == "WEEKDAY", !locked, "monthly-custom-weekday-WEEKDAY", Modifier.widthIn(min = 54.dp)) {
+                        set(state.copy(weekday = "WEEKDAY"))
+                    }
+                }
+            }
+            if (state.mode == "date") Column(Modifier.padding(top = 10.dp)) {
+                for (row in MONTH_GRID.chunked(7)) Row(Modifier.fillMaxWidth()) {
+                    for (day in row) {
+                        val on = day in state.monthDays
+                        val description = if (day == -1) t("recurrence.lastDayOfMonth") else t("recurrence.onDayOfMonth").replace("{day}", "$day")
+                        Box(Modifier.weight(1f).heightIn(min = 44.dp).selectable(on, enabled = !locked, role = Role.Button) { set(state.toggleDay(day)) }
+                            .semantics { contentDescription = description }.testTag("monthly-custom-day-$day").padding(2.dp)) {
+                            val cell = RoundedCornerShape(12.dp)
+                            Box(Modifier.fillMaxWidth().heightIn(min = 40.dp).clip(cell).background(if (on) c.tint else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, cell),
+                                contentAlignment = Alignment.Center) {
+                                Text(if (day == -1) t("recurrence.ordinal.last") else "$day", style = rnText(12, 600), color = if (on) c.onTint else c.text, maxLines = 1)
+                            }
+                        }
+                    }
+                    repeat(7 - row.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
+                val save = { editDraft(recurrenceEdit(state.edit())); dismiss() }
+                for ((label, action, color) in listOf(Triple("common.cancel", dismiss, c.secondaryText), Triple("common.save", save, c.tint))) {
+                    Box(Modifier.heightIn(min = 44.dp).clickable(enabled = !locked || action == dismiss, role = Role.Button) { action() }
+                        .testTag("monthly-custom-${label.substringAfter('.')}").padding(horizontal = 10.dp), contentAlignment = Alignment.Center) {
+                        Text(t(label), style = rnText(14, 700), color = color)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DialogButton(text: String, description: String, on: Boolean, enabled: Boolean, tag: String, modifier: Modifier, onClick: () -> Unit) {
+    val c = LocalTheme.current.colors
+    Box(modifier.heightIn(min = 44.dp).clip(CircleShape).background(if (on) c.tint else c.cardBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
+        .selectable(on, enabled = enabled, role = Role.Button, onClick = onClick).semantics { contentDescription = description }.testTag(tag)
+        .padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = rnText(12, 600), color = if (on) c.onTint else c.text, textAlign = TextAlign.Center)
+    }
+}
 
 @Composable
 internal fun PickerDialog(title: String, dismiss: () -> Unit, search: (@Composable () -> Unit)? = null, items: @Composable ColumnScope.() -> Unit) {
