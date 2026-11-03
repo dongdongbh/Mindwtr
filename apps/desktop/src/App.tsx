@@ -35,6 +35,7 @@ import {
     recordUpdateReminderChecked,
     recordUpdateReminderDismissed,
     recordUpdateReminderShown,
+    setHostSystemLocale,
     shouldShowAppAnnouncement,
     shouldShowDonationPrompt,
     withSupportPromptShown,
@@ -76,6 +77,7 @@ import { migratePortableAttachments } from './lib/portable-migration';
 import { logDesktopStartupContext } from './lib/startup-context';
 import * as LocalDataWatcher from './lib/local-data-watcher';
 import { invokeNative } from './lib/tauri-invoke';
+import { getSystemDefaultLocale } from './lib/system-locale';
 import { getInstallSourceOrFallback, isFlatpakRuntime, isLinuxRuntime, isTauriRuntime } from './lib/runtime';
 import { useDesktopShellSync } from './lib/desktop-shell-sync';
 import { useAppLockStore } from './lib/app-lock';
@@ -707,10 +709,8 @@ function App() {
     }, [currentView]);
 
     useEffect(() => {
-        const systemLocale = (() => {
-            const candidates = navigator.languages?.length ? navigator.languages : [navigator.language];
-            return String(candidates?.[0] || '').trim();
-        })();
+        const systemLocale = getSystemDefaultLocale();
+        setHostSystemLocale(systemLocale || null);
         configureDateFormatting({
             language: settingsLanguage || language,
             dateFormat: settingsDateFormat,

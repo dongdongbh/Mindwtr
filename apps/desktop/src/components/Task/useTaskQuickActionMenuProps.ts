@@ -24,6 +24,7 @@ import { useLanguage } from '../../contexts/language-context';
 import { logInfo } from '../../lib/app-log';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { resolveNativeDateInputLocale } from '../../lib/native-date-input-locale';
+import { getSystemDefaultLocale } from '../../lib/system-locale';
 import { reportError } from '../../lib/report-error';
 import { registerUndoableAction } from '../../lib/undo-registry';
 import { undoTaskCompletion } from '../../lib/undo-task-completion';
@@ -150,16 +151,13 @@ export function useTaskQuickActionMenuProps(
         shallow,
     );
     const nativeDateInputLocale = useMemo(() => {
-        const systemLocale = typeof navigator !== 'undefined'
-            ? String(navigator.languages?.[0] || navigator.language || '').trim()
-            : '';
         return resolveNativeDateInputLocale({
             language,
             dateFormat: settings?.dateFormat,
             calendarSystem: settings?.calendarSystem,
             timeFormat: settings?.timeFormat,
             weekStart: normalizeWeekStartSetting(settings?.weekStart),
-            systemLocale,
+            systemLocale: getSystemDefaultLocale(),
         });
     }, [language, settings?.calendarSystem, settings?.dateFormat, settings?.timeFormat, settings?.weekStart]);
 
