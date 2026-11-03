@@ -17,6 +17,7 @@ on:
       - "scripts/ci/validate-mobile-npm-audit.js"
       - "scripts/ci/validate-npm-audit.js"
       - "scripts/ci/audit-build-tool-topology.json"
+      - "scripts/ci/check-audit-exception-upstreams.js"
       - "tools/eas-cli/package.json"
   push:
     branches: [main]
@@ -33,6 +34,7 @@ on:
       - "scripts/ci/validate-mobile-npm-audit.js"
       - "scripts/ci/validate-npm-audit.js"
       - "scripts/ci/audit-build-tool-topology.json"
+      - "scripts/ci/check-audit-exception-upstreams.js"
       - "tools/eas-cli/package.json"
   workflow_dispatch:
 
@@ -85,10 +87,13 @@ jobs:
             echo "deepmerge $deepmerge_latest is released: check GHSA-gcqx-w48m-w2h4 and drop its audit exception." >&2
             exit 1
           fi
+          bun scripts/ci/check-audit-exception-upstreams.js
           if ! bun audit \
             --ignore=GHSA-5p2g-fcmc-qvqq \
             --ignore=GHSA-w3rx-r6r6-pgpr \
-            --ignore=GHSA-gcqx-w48m-w2h4; then
+            --ignore=GHSA-gcqx-w48m-w2h4 \
+            --ignore=GHSA-3g3m-2fjr-6pw4 \
+            --ignore=GHSA-g3hv-75wg-m249; then
             echo "bun audit reported vulnerabilities or failed." >&2
             exit 1
           fi
@@ -96,7 +101,10 @@ jobs:
       - name: Audit shipped npm package locks
         run: |
           set -euo pipefail
-          npm audit --prefix apps/desktop --audit-level=low
+          desktop_audit_report="$RUNNER_TEMP/desktop-npm-audit.json"
+          if ! npm audit --prefix apps/desktop --audit-level=low --json > "$desktop_audit_report"; then
+            bun scripts/ci/validate-npm-audit.js "$desktop_audit_report" desktop
+          fi
           mobile_audit_report="$RUNNER_TEMP/mobile-npm-audit.json"
           if ! npm audit --prefix apps/mobile --audit-level=low --json > "$mobile_audit_report"; then
 
