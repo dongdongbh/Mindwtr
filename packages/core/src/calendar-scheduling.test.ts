@@ -5,6 +5,8 @@ import {
     buildCalendarEventTaskDraft,
     buildCalendarPushEventFields,
     hasCalendarPushTaskMarker,
+    calendarPushTaskMarkerLine,
+    notesCarryCalendarPushTaskMarker,
     buildCalendarQuickAddTaskDraft,
     createCustomTimeEstimate,
     findFreeSlotForDay,
@@ -493,6 +495,19 @@ describe('buildCalendarPushEventFields (#743)', () => {
         expect(hasCalendarPushTaskMarker(result.notes.replace(/\n/g, '\r\n'))).toBe(true);
     });
 
+
+    it('tells whether an event\'s notes carry one task\'s marker line, and names no line for a task ID it cannot encode', () => {
+        const notes = buildCalendarPushEventFields(task({ id: 'task:projected/one', description: 'Mindwtr-Task-ID: someone-else' })).notes;
+        const line = calendarPushTaskMarkerLine('task:projected/one');
+        expect(line).toBe('Mindwtr-Task-ID: task%3Aprojected%2Fone');
+        expect(notesCarryCalendarPushTaskMarker(notes, line!)).toBe(true);
+        expect(notesCarryCalendarPushTaskMarker(`${notes.replace(/\n/g, '\r\n')}  \r\n`, line!)).toBe(true);
+        expect(notesCarryCalendarPushTaskMarker(notes, calendarPushTaskMarkerLine('task-two')!)).toBe(false);
+        expect(notesCarryCalendarPushTaskMarker('Dentist', line!)).toBe(false);
+        expect(notesCarryCalendarPushTaskMarker(null, line!)).toBe(false);
+        expect(calendarPushTaskMarkerLine(' padded ')).toBeNull();
+        expect(calendarPushTaskMarkerLine('')).toBeNull();
+    });
 
     it('still finds the marker when a calendar service pads the notes with trailing whitespace', () => {
         const notes = 'Project: Update Will\nStatus: Next\n\n[Mindwtr Calendar Mirror]\nMindwtr-Task-ID: 3f7e355c-620d-4ee9-a8d6-23cc15f1903a\n[/Mindwtr Calendar Mirror]';

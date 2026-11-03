@@ -504,15 +504,23 @@ function hasCalendarPushControlCharacter(value: string): boolean {
     return false;
 }
 
-function formatCalendarPushTaskMarker(taskId: string): string {
-    if (!taskId || taskId.trim() !== taskId || hasCalendarPushControlCharacter(taskId)) return '';
+export function calendarPushTaskMarkerLine(taskId: string): string | null {
+    if (!taskId || taskId.trim() !== taskId || hasCalendarPushControlCharacter(taskId)) return null;
     try {
         const encoded = encodeURIComponent(taskId);
-        if (encoded.length > 512) return '';
-        return `${CALENDAR_PUSH_MIRROR_START}\nMindwtr-Task-ID: ${encoded}\n${CALENDAR_PUSH_MIRROR_END}`;
+        return encoded.length > 512 ? null : `Mindwtr-Task-ID: ${encoded}`;
     } catch {
-        return '';
+        return null;
     }
+}
+
+function formatCalendarPushTaskMarker(taskId: string): string {
+    const line = calendarPushTaskMarkerLine(taskId);
+    return line ? `${CALENDAR_PUSH_MIRROR_START}\n${line}\n${CALENDAR_PUSH_MIRROR_END}` : '';
+}
+
+export function notesCarryCalendarPushTaskMarker(notes: unknown, markerLine: string): boolean {
+    return typeof notes === 'string' && notes.split(/\r\n?|\n/).some((line) => line.replace(/[ \t\u00a0]+$/, '') === markerLine);
 }
 
 

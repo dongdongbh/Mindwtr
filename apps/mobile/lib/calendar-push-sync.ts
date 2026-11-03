@@ -5,7 +5,9 @@ import * as Calendar from 'expo-calendar';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+    calendarPushTaskMarkerLine,
     createCalendarPushService,
+    notesCarryCalendarPushTaskMarker,
     useTaskStore,
     type CalendarPushService,
 } from '@mindwtr/core';
@@ -23,12 +25,31 @@ export { CALENDAR_PUSH_COLOR_OPTIONS, type CalendarPushTargetCalendar } from '@m
 
 const PLATFORM = Platform.OS;
 
-const eventPlace = (eventId: string, calendarId?: string): Promise<'gone' | 'elsewhere' | 'here'> => Calendar.getEventAsync(eventId).then(
-    (event) => (calendarId && event?.calendarId != null && String(event.calendarId) !== calendarId ? 'elsewhere' : 'here'),
-    (error: unknown) => {
+type EventPlace = 'gone' | 'elsewhere' | 'unmarked' | 'here';
+
+const eventPlace = (eventId: string, owner?: { taskId: string; calendarId: string }): Promise<EventPlace> => Calendar.getEventAsync(eventId).then(
+    (event): EventPlace => {
+        if (owner && event?.calendarId != null && String(event.calendarId) !== owner.calendarId) return 'elsewhere';
+        const markerLine = owner ? calendarPushTaskMarkerLine(owner.taskId) : null;
+        return markerLine && !notesCarryCalendarPushTaskMarker(event?.notes, markerLine) ? 'unmarked' : 'here';
+    },
+    (error: unknown): EventPlace => {
         if ((error as { code?: unknown } | null)?.code === 'E_EVENT_NOT_FOUND') return 'gone';
         throw error;
     },
+);
+
+const unmarkedEvent = (outcome: 'recreated' | 'cleared'): Error => {
+    void logWarn('Calendar push left an event it did not make', {
+        scope: 'calendar-push',
+        force: true,
+        extra: { releaseCheck: 'v1.3.8/calendar-push-unmarked-event', outcome },
+    });
+    return new Error('Calendar event not found');
+};
+
+const notOwnEvent = (place: EventPlace, outcome: 'recreated' | 'cleared'): Error => (
+    place === 'unmarked' ? unmarkedEvent(outcome) : missingEvent(outcome)
 );
 
 const missingEvent = (outcome: 'recreated' | 'cleared'): Error => {
@@ -66,11 +87,13 @@ const getService = (): CalendarPushService => {
             deleteCalendar: (calendarId) => Calendar.deleteCalendarAsync(calendarId),
             createEvent: (calendarId, details) => Calendar.createEventAsync(calendarId, details),
             updateEvent: async (eventId, details, context) => {
-                if (Platform.OS === 'android' && await eventPlace(eventId, context?.calendarId) !== 'here') throw missingEvent('recreated');
+                const place = Platform.OS === 'android' ? await eventPlace(eventId, context) : 'here';
+                if (place !== 'here') throw notOwnEvent(place, 'recreated');
                 return Calendar.updateEventAsync(eventId, details);
             },
             deleteEvent: async (eventId, context) => {
-                if (Platform.OS === 'android' && context && await eventPlace(eventId, context.calendarId) === 'elsewhere') throw missingEvent('cleared');
+                const place = Platform.OS === 'android' && context ? await eventPlace(eventId, context) : 'here';
+                if (place === 'elsewhere' || place === 'unmarked') throw notOwnEvent(place, 'cleared');
                 try {
                     return await Calendar.deleteEventAsync(eventId);
                 } catch (error) {
