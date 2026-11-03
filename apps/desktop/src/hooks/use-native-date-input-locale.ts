@@ -3,6 +3,7 @@ import { normalizeWeekStartSetting, useTaskStore } from '@mindwtr/core';
 
 import { useLanguage } from '../contexts/language-context';
 import { resolveNativeDateInputLocale } from '../lib/native-date-input-locale';
+import { getSystemDefaultLocale } from '../lib/system-locale';
 
 
 export function useNativeDateInputLocale(): {
@@ -16,16 +17,13 @@ export function useNativeDateInputLocale(): {
     const weekStart = useTaskStore((state) => state.settings?.weekStart);
 
     const nativeDateInputLocale = useMemo(() => {
-        const systemLocale = typeof navigator !== 'undefined'
-            ? String(navigator.languages?.[0] || navigator.language || '').trim()
-            : '';
         return resolveNativeDateInputLocale({
             language,
             dateFormat,
             calendarSystem,
             timeFormat,
             weekStart: normalizeWeekStartSetting(weekStart),
-            systemLocale,
+            systemLocale: getSystemDefaultLocale(),
         });
     }, [language, calendarSystem, dateFormat, timeFormat, weekStart]);
 

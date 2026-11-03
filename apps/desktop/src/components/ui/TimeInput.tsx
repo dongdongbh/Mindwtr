@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { flushSync } from 'react-dom';
 import { isImeComposing } from '../../lib/ime';
+import { getSystemDefaultLocale } from '../../lib/system-locale';
 import {
     normalizeClockTimeInput,
     normalizeTimeFormatSetting,
@@ -20,15 +21,7 @@ import {
 type ResolvedTimeInputFormat = Exclude<TimeFormatSetting, 'system'>;
 
 function getDeviceLocale(): string {
-    if (typeof navigator !== 'undefined') {
-        const locale = String(navigator.languages?.[0] || navigator.language || '').trim();
-        if (locale) return locale;
-    }
-    try {
-        return Intl.DateTimeFormat().resolvedOptions().locale || 'en-US';
-    } catch {
-        return 'en-US';
-    }
+    return getSystemDefaultLocale() || 'en-US';
 }
 
 export function resolveTimeInputFormat(

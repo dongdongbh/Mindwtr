@@ -72,6 +72,7 @@ import { registerUndoableAction } from '../lib/undo-registry';
 import { undoTaskCompletion } from '../lib/undo-task-completion';
 import { createSomedaySection } from '../lib/someday-section-actions';
 import { resolveNativeDateInputLocale } from '../lib/native-date-input-locale';
+import { getSystemDefaultLocale } from '../lib/system-locale';
 import { setCalendarTaskDragData } from '../lib/calendar-task-drag';
 import { useTaskItemStoreState, useTaskItemUiState } from './Task/useTaskItemStoreState';
 import type { TaskInputAcceptedSuggestion } from './Task/TaskInput';
@@ -206,16 +207,13 @@ export const TaskItem = memo(function TaskItem({
     );
     const { t, language } = useLanguage();
     const nativeDateInputLocale = useMemo(() => {
-        const systemLocale = typeof navigator !== 'undefined'
-            ? String(navigator.languages?.[0] || navigator.language || '').trim()
-            : '';
         return resolveNativeDateInputLocale({
             language,
             dateFormat: settings?.dateFormat,
             calendarSystem: settings?.calendarSystem,
             timeFormat: settings?.timeFormat,
             weekStart: normalizeWeekStartSetting(settings?.weekStart),
-            systemLocale,
+            systemLocale: getSystemDefaultLocale(),
         });
     }, [language, settings?.calendarSystem, settings?.dateFormat, settings?.timeFormat, settings?.weekStart]);
     const recurrenceWeekdayLabels = useMemo(

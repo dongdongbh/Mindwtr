@@ -36,6 +36,7 @@ import { useTimelineDateEditing } from './timeline/useTimelineDateEditing';
 import { TASK_STATUS_ICONS } from '../../lib/task-status-icons';
 import { useDropdownPosition } from '../ui/use-dropdown-position';
 import { cn } from '../../lib/utils';
+import { getSystemDefaultLocale } from '../../lib/system-locale';
 import { dispatchNavigateEvent } from '../../lib/navigation-events';
 import { useUiStore } from '../../store/ui-store';
 import { getProjectAccentColor, getTaskAccentColor } from '../../lib/task-accent-color';
@@ -271,7 +272,7 @@ export function TimelineView() {
         language,
         dateFormat,
         calendarSystem,
-        systemLocale: typeof navigator === 'undefined' ? undefined : navigator.language,
+        systemLocale: getSystemDefaultLocale(),
     }), [calendarSystem, dateFormat, language]);
     const axisDateFormatters = React.useMemo(() => {
         const create = (options: Intl.DateTimeFormatOptions) => {
