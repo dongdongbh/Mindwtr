@@ -1675,7 +1675,7 @@ const scenarioCalendarPush = async () => {
         check(liveEvents(newId).length === 0 && !deletedKeys.has(PUSH_KEYS.calendarId) && pushRows('12-deleted').size === 0,
             '(12) N9: Delete Mindwtr calendar removes the calendar, its events, the saved ID and the pushed-event rows');
     } finally {
-        const OURS = "(name='mindwtr' OR name LIKE 'mindwtr:%')";
+        const OURS = "(name='mindwtr' OR name GLOB 'mindwtr:*')";
         const USER = "calendar_displayName LIKE 'MtuUser%'";
         const remove = (id, named) => {
             try { calendarCommand(`delete --uri ${CALENDARS} --where "_id=${id} AND ${named}"`); } catch (error) { console.log(`note - calendar ${id} delete: ${error.message}`); }
