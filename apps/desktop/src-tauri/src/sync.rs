@@ -5733,9 +5733,10 @@ mod tests {
             .split_once("\nconst SYNC_FOLDER_PROBE_BYTES")
             .expect("end of atomic helper")
             .0;
+        let helper_tokens: String = helper_body.split_whitespace().collect();
         for required in ["root.create_new(", ".write_all(", ".sync_all(", ".rename("] {
             assert!(
-                helper_body.contains(required),
+                helper_tokens.contains(required),
                 "the shared helper must own the atomic write primitive {required}"
             );
         }
@@ -5799,7 +5800,7 @@ mod tests {
             .split_once(&real_write_declaration)
             .expect("write_sync_file_to_dir_with")
             .1
-            .split_once("\n// Off the UI thread for the same reason as `read_sync_file`")
+            .split_once("\n#[tauri::command(async)]")
             .expect("end of write_sync_file_to_dir_with")
             .0;
         assert!(
@@ -5854,9 +5855,7 @@ mod tests {
             .split_once(&write_command_declaration)
             .expect("write_sync_file")
             .1
-            .split_once(
-                "\n// ---------------------------------------------------------------------------",
-            )
+            .split_once("\nconst SYNC_ENCRYPTION_TRANSITION_TMP_SUFFIX")
             .expect("end of write_sync_file")
             .0;
         assert!(
