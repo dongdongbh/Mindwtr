@@ -829,7 +829,7 @@ assert.match(model, /stale = action != null && action\.kind !in STALE_SHOWN && m
 assert.match(model, /private val STALE_SHOWN = setOf\("saveDraft", "update", "calendarCreate", "manageEditor", "completeUndo", "inboxDecisionUndo", "taskCompletedAt"\)/);
 
 
-assert.match(model, /internal fun askNextAction\(runtime: CoreHost, taskId: String\) \{\s+\/\/[^\n]*\s+val prompt = runCatching \{ runtime\.menuRead\("projectNextActionPrompt", JSONObject\(\)\.put\("taskId", taskId\)\.toString\(\)\)\.optJSONObject\("prompt"\) \}/);
+assert.match(model, /internal fun askNextAction\(runtime: CoreHost, taskId: String\) \{\s+val prompt = runCatching \{ runtime\.menuRead\("projectNextActionPrompt", JSONObject\(\)\.put\("taskId", taskId\)\.toString\(\)\)\.optJSONObject\("prompt"\) \}/);
 assert.match(model, /if \(askNext\) askNextAction\(runtime, id\)/);
 assert.match(menuModel, /if \(action\.kind == "taskCompletedAt" && reply\.optBoolean\("completed"\)\) shell\.askNextAction\(runtime, JSONObject\(action\.title\)\.getString\("taskId"\)\)/);
 assert.match(model, /if \(stale\) acknowledged\(action!!\)\s+else ui \{/);
@@ -856,15 +856,15 @@ assert.match(model, /AfterCommandReads\.run\(AfterCommandReads\.order\(screen, m
 assert.doesNotMatch(backgroundFn, /busy = /);
 assert.equal(code(model).match(/\bbusy = true\b/g).length, 1, 'only a user action takes busy');
 
-assert.match(model, /fun refreshFocus\(\) \{\s+\/\/[^\n]*\s+if \(focus == null && busy\) return menu\.whenIdle\(::refreshFocus\)\s+val depth = focus\.depth\(\)\s+val controls = menu\.focusControls\.state\.toString\(\)\s+background\(/);
+assert.match(model, /fun refreshFocus\(\) \{\s+if \(focus == null && busy\) return menu\.whenIdle\(::refreshFocus\)\s+val depth = focus\.depth\(\)\s+val controls = menu\.focusControls\.state\.toString\(\)\s+background\(/);
 
 
-assert.match(model, /fun refreshProjects\(\) \{\s+(?:\/\/[^\n]*\s+)+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
+assert.match(model, /fun refreshProjects\(\) \{\s+if \(busy\) return menu\.whenIdle\(::refreshProjects\)\s+val at = depth\(\)\s+background\(/);
 assert.match(model, /private fun refreshAll\(synced: Boolean = false\) \{\s+val at = depth\(\)\s+if \(synced\) \{\s+background\(Part\.entries, \{ runtime -> applySyncedChoices\(runtime, prefs\); read\(runtime, at\) \}, apply = ::showLists\)/);
 
 assert.match(model, /AfterCommandReads\.Read\.AllLists -> background\(Part\.entries, \{ runtime -> read\(runtime, at\) \}, done, ::showLists\)/);
 
-assert.match(model, /try \{\s+\/\/[^\n]*\s+debugProperty\("delay_action_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+work\(runtime\); done = true\s+\}/);
+assert.match(model, /try \{\s+debugProperty\("delay_action_ms"\)\.toLongOrNull\(\)\?\.let\(Thread::sleep\)\s+work\(runtime\); done = true\s+\}/);
 assert.match(model, /ui \{\s+busy = false\s+if \(\(done \|\| stale\) && action != null\) refreshAll\(\)\s+finished\?\.invoke\(\)\s+\}/);
 assert.doesNotMatch(code(model.slice(model.indexOf('fun add()'), model.indexOf('fun openEditor('))), /read\(runtime/);
 
@@ -928,7 +928,7 @@ assert.match(model, /if \(processing\?\.takeUnless \{ it\.hidden \}\?\.taskId ==
 assert.match(editorUi, /FieldHeading\(Lucide\.Folder, t\("task\.destination"\)\)\s+DateButton\(value, t\("task\.destination"\), !locked, Modifier\.fillMaxWidth\(\)\) \{ openPicker\("destination"\) \}/);
 
 
-assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.then\(if \(toggle\) Modifier\.toggleable\(value = active, enabled = enabled, role = Role\.Button, onValueChange = \{ onClick\(\) \}\)\s+(?:\/\/[^\n]*\s+)?else if \(longPress != null\) Modifier\.semantics \{ selected = active \}\.combinedClickable\(enabled = enabled, role = Role\.Tab,\s+onLongClickLabel = longPress\.first, onLongClick = longPress\.second, onClick = onClick\)\s+else Modifier\.selectable\(selected = active, enabled = enabled, role = Role\.Tab, onClick = onClick\)\)/);
+assert.match(editorUi, /\.semantics \{ contentDescription = description \}\s+\.then\(if \(toggle\) Modifier\.toggleable\(value = active, enabled = enabled, role = Role\.Button, onValueChange = \{ onClick\(\) \}\)\s+else if \(longPress != null\) Modifier\.semantics \{ selected = active \}\.combinedClickable\(enabled = enabled, role = Role\.Tab,\s+onLongClickLabel = longPress\.first, onLongClick = longPress\.second, onClick = onClick\)\s+else Modifier\.selectable\(selected = active, enabled = enabled, role = Role\.Tab, onClick = onClick\)\)/);
 
 assert.match(editorUi, /val backdate = if \(status == "done"\) t\("task\.completeBackdateHintMobile"\) to \{ completedAt\.openEditor\(\) \} else null/);
 assert.match(source('TaskView.kt'), /StatusPill\(status, row\.getString\("value"\), editable, pickStatus,\s+if \(status == "done"\) \{ \{ completedAt\.openEditor\(\) \} \} else null\)/);
@@ -968,7 +968,7 @@ assert.match(guard, /check\(blocked == null\)[^\n]*\n(?:(?!return Opened\()[\s\S
 }
 
 
-assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*(?:\/\/[^\n]*\n\s*)*recoverInstalls\(installer\)\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
+assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s*recoverInstalls\(installer\)\s*if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)/);
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCore", "AndroidAttachmentInstallerFileOps"\)\.map \{ "main\/java\/\$installer\/\$it\.kt" \}\)/);
 
 assert.match(readFileSync(resolve(app, 'android/app/build.gradle.kts'), 'utf8'), /include\(listOf\("AttachmentFileInstallerCoreTest", "AndroidAttachmentInstallerFileOpsTest"\)\.map \{ "test\/java\/\$installer\/\$it\.kt" \}\)/);
@@ -1000,7 +1000,6 @@ assert.match(guard, /jsonAhead \|\| \(backupPresent && \(!reconciled \|\| !datab
 assert.match(hostEntry, /contract\.saveTaskDraft\(\{ \.\.\.JSON\.parse\(json\), mergeSyncedChanges: globalThis\.__mindwtrHostPlatform !== 'ios' \}\)/);
 assert.match(hostEntry, /contract\.startInboxProcessing\(\{ mode: mode as 'guided' \| 'quick', mergeSyncedChanges: globalThis\.__mindwtrHostPlatform !== 'ios' \}\)/);
 assert.match(hostEntry, /legacyCheck\(legacyState: string, legacyBackup: string\): string \{\s*return submit\(async \(\) => \{\s*const state = JSON\.parse\(legacyState\) as LegacyState;\s*assertNativeLegacyBackupSafe\(\{ jsonAhead: state\.jsonAhead, backupJson: state\.backupPresent \? legacyBackup : null \}\);/);
-assert.match(guard, /\/\/ ponytail: copies the whole database on every boot\. Skip it once a native-owned\s*\/\/ marker proves the last shutdown was clean\./);
 
 
 const originalUses = [...guard.matchAll(/\b(asyncStorage|database|file|source)\.(\w+)/g)].map(([, name, member]) => `${name}.${member}`);
@@ -1055,7 +1054,7 @@ assert.match(model, /focus = pending\.focus\s+focusRevision = pending\.focus\?\.
 
 assert.equal(model.match(/ProcessCoreHost\.failure\?\.let \{ pending -> ui \{ host = runtime; restore\(pending, storedProcessing, storedCapture\); keepRoutes\(\) \}/g).length, 2);
 assert.match(model, /runtime\.completeTask\(id, taskRevision\)\s+acknowledged\(action\)/);
-assert.match(model, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{[\s\S]{0,300}?throw failure\s+\}\s+acknowledged\(action\)\s+(?:\/\/[^\n]*\s+)*if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+(?:\/\/[^\n]*\s+)*ui \{ editorMenu\.saved\(action\.id\); closeEditor\(settle = false\) \}/);
+assert.match(model, /runtime\.saveTaskDraft\(action\.id, draftJson\(action\.base\), draftJson\(action\.patch\), action\.title, action\.attachments, action\.requestId\)\s+\} catch \(failure: Exception\) \{[\s\S]{0,300}?throw failure\s+\}\s+acknowledged\(action\)\s+if \(action\.attachments\.isNotEmpty\(\)\) attachments\.settleSaved\(runtime, action\.id, JSONObject\(action\.attachments\)\)\s+ui \{ editorMenu\.saved\(action\.id\); closeEditor\(settle = false\) \}/);
 
 for (const [call, fn] of [
     ['runtime\\.setTaskFocus\\(id, focused, taskRevision\\)', 'fun setTaskFocus('], ['runtime\\.setProjectFocus\\(id, focused, projectRevision\\)', 'fun setProjectFocus('],
@@ -1086,7 +1085,7 @@ assert.match(model, /private fun read\(runtime: CoreHost, at: Depth, shown: Scre
 assert.equal(code(model).match(/\bread\(runtime, at\b[^)]*\)/g).join(' | '), 'read(runtime, at, screen) | read(runtime, at) | read(runtime, at) | read(runtime, at, Screen.Focus) | read(runtime, at, Screen.Projects) | read(runtime, at)',
     'the boot reads the tab on screen; a read\'s Try again and a sync\'s refreshAll read all; a command\'s refreshAll reads the tab on screen, then all (AfterCommandReads)');
 assert.match(model, /fun contentShown\(\) \{\s+if \(focus == null\) refreshFocus\(\)\s+if \(projects == null\) refreshProjects\(\)\s+ProcessCoreHost\.contentShown\(\)\s+\}/);
-assert.match(model, /loading = false\s+\/\/[^\n]*\s+if \(screen == Screen\.Focus && lists\.focus == null\) refreshFocus\(\)\s+if \(screen == Screen\.Projects && lists\.projects == null\) refreshProjects\(\)/);
+assert.match(model, /loading = false\s+if \(screen == Screen\.Focus && lists\.focus == null\) refreshFocus\(\)\s+if \(screen == Screen\.Projects && lists\.projects == null\) refreshProjects\(\)/);
 
 assert.match(model, /lists\.projects\?\.let \{ read ->\s+if \(fresh\(mine, Part\.Projects\)\) projects = read\s+if \(fresh\(mine, Part\.Project\)\) showProject\(lists\.projectId, lists\.project\)\s+\}/);
 for (const [fn, js] of [['setTaskFocus', 'taskFocus'], ['setProjectFocus', 'projectFocus'], ['createProject', 'createProject'], ['areaFilter', 'areaFilter'], ['setAreaFilter', 'setAreaFilter']]) {
@@ -1168,7 +1167,7 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     assert.match(hostIo, /override fun onResponse\(call: Call, response: Response\) \{[^{}]*?try \{\s*answers\.add\(runCatching \{ response\.use \{ read\(id, it, redirect\) \} \}\.getOrElse \{ failure\(id, call, it\) \}\)\s*\} finally \{\s*calls\.remove\(id\)\s*\}/);
     assert.equal(hostIo.match(/calls\.remove\(id\)/g).length, 3);
     assert.match(hostIo, /fun close\(\) \{\s*calls\.values\.forEach \{ it\.cancel\(\) \}/);
-    assert.match(hostIo, /secretThread\.execute \{\s*\/\/ A read the closed host would never take is not made\.\s*if \(op == "get" && answers\.closed\) return@execute\s*answers\.add\(runCatching \{/, 'a secret call runs on the secrets thread');
+    assert.match(hostIo, /secretThread\.execute \{\s*if \(op == "get" && answers\.closed\) return@execute\s*answers\.add\(runCatching \{/, 'a secret call runs on the secrets thread');
 
 
     assert.match(hostIo, /fileJobs\.start\(id, FileJobs\.readsPickedDocument\(json\), \{\s*val request = JSONObject\(json\)/, 'a file call runs off the engine');
@@ -1193,7 +1192,7 @@ assert.match(coreHost, /private fun kvFault\(\) = check\(debugFault\("fail_kv_se
     assert.doesNotMatch(hostIo, /catch \(|getOrNull|getOrDefault/);
     assert.deepEqual(hostIo.match(/runCatching \{[\s\S]*?\}\.getOrElse \{ [^\n]*/g).map((line) => /getOrElse \{ (failure\(id, call, it\)|(Answer\()?JSONObject\(\)\.put\("id", id\)\.put\("error")/.test(line)), [true, true, false]);
 
-    assert.match(hostIo, /runCatching \{ cryptoReply\(id, json\) \}\.getOrElse \{ failure ->\s+val answer = JSONObject\(\)\.put\("id", id\)[\s\S]{0,400}?Answer\(answer\.toString\(\)\)\s+\}\s+\/\/[^\n]*\s+if \(reply != null\) answers\.add\(reply\)\s+wake\(\)/);
+    assert.match(hostIo, /runCatching \{ cryptoReply\(id, json\) \}\.getOrElse \{ failure ->\s+val answer = JSONObject\(\)\.put\("id", id\)[\s\S]{0,400}?Answer\(answer\.toString\(\)\)\s+\}\s+if \(reply != null\) answers\.add\(reply\)\s+wake\(\)/);
 
     assert.match(fileJobs, /val result = runCatching \{[\s\S]*?compute\(\)\s*\}[\s\S]*?deliver\(result\)/);
     assert.match(hostIo, /\}\) \{ Answer\(JSONObject\(\)\.put\("id", id\)\.put\("error", it\.message \?: it\.javaClass\.simpleName\)\.toString\(\)\) \}\)/);
@@ -1322,7 +1321,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.deepEqual(shapes[backupCommit], ['{id,sha256}', 'id'], 'the backup commit journals its reference and snapshot name');
     assert.match(host, /\n    backupDocumentCommit\(referenceJSON: string, planJSON: string, snapshotName: string, budgetMs\?: number\): string \{/);
 
-    assert.match(coreHost, /val \(plan, sha256\) = checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\)(?:\s*\/\/[^\n]*)?\s+return arrayOf\(args\[0\], data\.openRead\(plan, expectedSha256 = sha256\), args\[1\], deadline\(method, args\.toList\(\)\)\)/);
+    assert.match(coreHost, /val \(plan, sha256\) = checkNotNull\(backups\)\.plan\(args\[0\] as String, args\[1\] as String\)\s+return arrayOf\(args\[0\], data\.openRead\(plan, expectedSha256 = sha256\), args\[1\], deadline\(method, args\.toList\(\)\)\)/);
 
 
     const pomodoroCommit = 'pomodoroTransitionCommit';
@@ -1616,7 +1615,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.equal(callAsyncFn.match(/\bcall\(call\.method, \*sent\)/g).length, 1, 'start() starts a call\'s operation, after begin() journaled it');
     assert.match(callAsyncFn, /val sent = try \{ sendArgs\(call\.method, call\.args\) \} catch \(mismatch: BackupOperations\.Mismatch\)/);
 
-    assert.match(callAsyncFn, /if \(entry != null\) \{\s+checkNotNull\(sqlite\)\.failCommits = debugFault\("fail_commit"\) == "1"\s+\/\/ [^\n]*\n\s+sqlite\?\.stopAfterCommit = debugFault\("commit_stop"\) == WriteJournal\.key\(method, args\.toList\(\)\)\s+debugDelay\("delay_before_ms"\)\s+journalStop\(stop, "before", entry\)\s+\}/);
+    assert.match(callAsyncFn, /if \(entry != null\) \{\s+checkNotNull\(sqlite\)\.failCommits = debugFault\("fail_commit"\) == "1"\s+sqlite\?\.stopAfterCommit = debugFault\("commit_stop"\) == WriteJournal\.key\(method, args\.toList\(\)\)\s+debugDelay\("delay_before_ms"\)\s+journalStop\(stop, "before", entry\)\s+\}/);
     assert.equal(coreHost.match(/\banswer\(/g).length, 4, 'answer(): its definition, answerChecked (a backup commit\'s plan put in, callAsync and replayJournal), resumeActivation and the legacy preflight');
     assert.equal(coreHost.match(/\banswerChecked\(/g).length, 3, 'answerChecked(): its definition, callAsync and replayJournal');
     assert.equal(coreHost.match(/\bcall\(method, \*args\)/g).length, 2, 'answer() and callLong (an unjournaled command only) start host methods');
@@ -1636,19 +1635,19 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(replayFn, /val entries = journal\.pending\(\)/);
     assert.match(replayFn, /Log\.i\(TAG, "Native Android journal replay sent=/);
     assert(coreHost.indexOf('journal = WriteJournal(journalDir') < coreHost.indexOf('engine.evaluate(bundle'));
-    assert.match(owner, /private fun replay\(runtime: CoreHost\): Boolean \{\s+val replay = runtime\.replayJournal\(\)\s+replay\.owed\?\.let \{ recordFailure\(PendingFailure\(FailedAction\("journal", ""\), it, null\)\); return false \}\s+(?:\/\/[^\n]*\s+)+if \(replay\.left > 0\) return true\s+runCatching \{ runtime\.pruneReceipts\(\) \}[\s\S]*?return true\s+\}/);
+    assert.match(owner, /private fun replay\(runtime: CoreHost\): Boolean \{\s+val replay = runtime\.replayJournal\(\)\s+replay\.owed\?\.let \{ recordFailure\(PendingFailure\(FailedAction\("journal", ""\), it, null\)\); return false \}\s+if \(replay\.left > 0\) return true\s+runCatching \{ runtime\.pruneReceipts\(\) \}[\s\S]*?return true\s+\}/);
 
 
-    assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s+(?:\/\/[^\n]*\s+)*recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+(?:\/\/[^\n]*\s+)*deferredWidgets\.hold\(runtime\)\s+return runtime/);
+    assert.match(owner, /loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/syncStart\(/g).length, 1, 'one start of the triggers, in startSync');
     assert.equal([activity, model, owner, menuModel].join('\n').match(/startSync\(app, runtime\)/g).length, 3, 'startSync only in recovered, after the drain (held for the first screen\'s content, or CoreWork\'s through startSyncWithScreen)');
 
 
-    assert.match(owner, /startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\/\/[^\n]*\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},/);
+    assert.match(owner, /startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},/);
     assert.match(owner, /fun startDeferredSync\(trigger: String = "content"\) \{\s+synchronized\(deferredSync\) \{\s+screenShown = true\s+deferredSync\.getAndSet\(null\)\s+\}\?\.let \{ start -> syncThread\.execute \{ start\(\) \} \}\s+deferredWidgets\.take\(\)\?\.let \{ publishHeldWidgets\(it, trigger\) \}\s+\}/, 'the boot\'s widget publication waits with its sync start');
 
 
-    assert.match(owner, /private fun startSyncWithScreen\(app: Application, runtime: CoreHost\) \{\s+val now = synchronized\(deferredSync\) \{\s+(?:\/\/[^\n]*\s+)*if \(!screenShown\) deferredSync\.compareAndSet\(null\) \{ startSync\(app, runtime\) \}\s+screenShown\s+\}\s+if \(now\) startSync\(app, runtime\)\s+\}/);
+    assert.match(owner, /private fun startSyncWithScreen\(app: Application, runtime: CoreHost\) \{\s+val now = synchronized\(deferredSync\) \{\s+if \(!screenShown\) deferredSync\.compareAndSet\(null\) \{ startSync\(app, runtime\) \}\s+screenShown\s+\}\s+if \(now\) startSync\(app, runtime\)\s+\}/);
     assert.match(owner, /fun contentShown\(\) \{\s+startDeferredSync\(\)/);
     assert.match(owner, /private fun startSync\(app: Application, runtime: CoreHost\): Unit = synchronized\(syncLock\) \{\s+if \(syncHost != null\) return/);
     assert.match(model, /if \(screen != Screen\.Inbox\) ProcessCoreHost\.startDeferredSync\(\)\s+main\.postDelayed\(\{ ProcessCoreHost\.startDeferredSync\("boot-timeout"\) \}, SYNC_FALLBACK_MS\)/);
@@ -1658,7 +1657,7 @@ assert.equal(coreHost.match(/debugFault\("language"\)/g).length, 1);
     assert.match(coreHost, /fun pruneReceipts\(\): JSONObject = callAsync\("pruneReceipts"\)/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/pruneReceipts\(\)/g).length, 1, 'one prune call, after the boot replay');
     assert.equal(owner.match(/replay\(runtime\)|replayJournal\(\)/g).length, 3, 'the boot\'s replay, and CoreWork\'s recovery');
-    assert.match(model, /"journal" -> perform\(action\) \{ runtime ->\s+runtime\.replayJournal\(\)\.owed\?\.let \{ throw IllegalStateException\(it\) \}\s+acknowledged\(action\)\s+\/\/[^\n]*\s+if \(!ProcessCoreHost\.recovered\(getApplication\(\), runtime\)\) throw IllegalStateException\(ProcessCoreHost\.failure\?\.error \?: "SAVE_FAILED"\)\s+\}/);
+    assert.match(model, /"journal" -> perform\(action\) \{ runtime ->\s+runtime\.replayJournal\(\)\.owed\?\.let \{ throw IllegalStateException\(it\) \}\s+acknowledged\(action\)\s+if \(!ProcessCoreHost\.recovered\(getApplication\(\), runtime\)\) throw IllegalStateException\(ProcessCoreHost\.failure\?\.error \?: "SAVE_FAILED"\)\s+\}/);
     assert.equal([activity, model, owner, menuModel].join('\n').match(/replayJournal\(\)/g).length, 3, 'the boot, the owed retry and CoreWork\'s recovery replay; nothing else');
 
     const journalTest = readFileSync(resolve(app, 'android/app/src/test/java/tech/dongdongbh/mindwtr/pilot/core/WriteJournalTest.kt'), 'utf8');
@@ -1684,7 +1683,7 @@ assert.match(hostEntry, /editorModel\(id: string\): string \{\s*return submit\(a
 
 
 assert.match(hostEntry, /taskView\(json: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getTaskView\(editorJson\(json\) as Parameters<typeof contract\.getTaskView>\[0\]\)\);/);
-assert.match(hostEntry, /const editorJson = \(json: string\): unknown => \{\s*try \{ if \(json\.length <= 2_000_000\) return JSON\.parse\(json\); \}\s*catch \{ \/\*[^*]*\*\/ \}\s*throw new Error\('Invalid bounded editor request'\);\s*\};/);
+assert.match(hostEntry, /const editorJson = \(json: string\): unknown => \{\s*try \{ if \(json\.length <= 2_000_000\) return JSON\.parse\(json\); \}\s*catch \{\s*\}\s*throw new Error\('Invalid bounded editor request'\);\s*\};/);
 assert.match(hostEntry, /editChecklist\(json: string\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.editTaskChecklist\(JSON\.parse\(json\)\)\);/);
 assert.match(hostEntry, /resetChecklist\(json: string\): string \{\s*return submit\(async \(\) => taskResult\('resetChecklist', await contract\.resetTaskChecklist\(JSON\.parse\(json\)\)\)\);/);
 assert.match(hostEntry, /editorSuggestions\(id: string, field: string, query: string, limit: number\): string \{\s*return submit\(async \(\) => \{\s*requireSaved\(\);\s*return unwrap\(contract\.getTaskEditorSuggestions\(\{ id, field: [^,]*, query, limit \}\)\);/);
@@ -1757,7 +1756,7 @@ assert.match(model, /keepEditor\(current\.queued\(edit\.toString\(\), field\)\)\
 assert.match(model, /keepEditor\(now\.viewed\(step\.view, sent\)\.copy\(pending = now\.pending\.drop\(1\)\)\.withChecklist\(step\.checklist \?: now\.checklist\)\)/);
 assert.match(editorUi, /\.put\("edits", JSONArray\(\)\.apply \{ pending\.forEach/);
 assert.match(editorUi, /val edits = saved\.optJSONArray\("edits"\)/);
-assert.match(model, /restored\?\.let \{ resumeEditor\(it, savedDraft\.optJSONObject\("pending"\)\) \}\s+\/\/[^\n]*\s+pumpEdits\(\)/);
+assert.match(model, /restored\?\.let \{ resumeEditor\(it, savedDraft\.optJSONObject\("pending"\)\) \}\s+pumpEdits\(\)/);
 
 assert.match(model, /error = editRefusal\s+saveQueued = false/);
 assert.match(editorUi, /LaunchedEffect\(coreValue\) \{ if \(!pending\) text = coreValue \}/);
@@ -1899,11 +1898,11 @@ assert.match(labelsKt, /strings = LABEL_KEYS\.filter\(values::has\)\.associateWi
 assert.match(labelsKt, /if \(logged\.add\(name\)\) Log\.w\(/, 'a missing key is logged once');
 assert.equal(kotlinFiles.join('\n').match(/Labels\.load\(/g).length, 1);
 assert.match(owner, /runtime\.language\(stored \?: "", Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
-assert.match(owner, /runtime\.start\([^\n]*\)\s+(?:\/\/[^\n]*\s+)*if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+(?:\/\/[^\n]*\s+)*recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+(?:\/\/[^\n]*\s+)*deferredWidgets\.hold\(runtime\)\s+return runtime/);
+assert.match(owner, /runtime\.start\([^\n]*\)\s+if \(legacy != null\) \{\s+runtime\.logLine\([^}]*\}\s+setLanguage\(runtime, language \?: legacy\?\.language\)\s+loadTheme\(runtime, legacy\?\.theme\)\s+recoverInstalls\(installer\)\s+if \(replay\(runtime\)\) recovered\(app, runtime, deferSync = true\)\s+deferredWidgets\.hold\(runtime\)\s+return runtime/);
 
 
-assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+(?:\/\/[^\n]*\s+)*startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+\/\/[^\n]*\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
-assert.match(source('StartOrder.kt'), /Drain\.Done -> \{\s+startSync\(\)\s+return true\s+\}\s+Drain\.Unswept -> \{\s+startSync\(\)\s+(?:\/\/[^\n]*\s+)*refreshWidgets\(\)\s+retryLater\(\)\s+\}\s+Drain\.Waiting -> retryLater\(\)\s+is Drain\.Failed -> \{\s+owe\(result\.message\)\s+retryLater\(\)\s+\}/);
+assert.match(owner, /fun recovered\(app: Application, runtime: CoreHost, deferSync: Boolean = false\): Boolean = StartOrder\.afterReplay\(\s+drain = \{ drain\(runtime, queue\(app\), app\) \},\s+owe = \{ message -> recordFailure\(PendingFailure\(FailedAction\("journal", ""\), message, null\)\) \},\s+retryLater = \{ runCatching \{ CoreWork\.retryDrain\(app\) \}[^\n]*\},\s+startSync = \{\s+if \(deferSync\) deferredSync\.set \{\s+startSync\(app, runtime\)\s+startReminders\(runtime\)\s+startAppSearch\(runtime\)\s+\} else \{\s+startSyncWithScreen\(app, runtime\)\s+startReminders\(runtime\)\s+if \(screenShown\) startAppSearch\(runtime\)\s+\}\s+\},\s+refreshWidgets = \{ refreshWidgets\(runtime\) \},\s+\)/);
+assert.match(source('StartOrder.kt'), /Drain\.Done -> \{\s+startSync\(\)\s+return true\s+\}\s+Drain\.Unswept -> \{\s+startSync\(\)\s+refreshWidgets\(\)\s+retryLater\(\)\s+\}\s+Drain\.Waiting -> retryLater\(\)\s+is Drain\.Failed -> \{\s+owe\(result\.message\)\s+retryLater\(\)\s+\}/);
 assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueue\(context, CoreJob\.INGEST, emptyMap\(\), ExistingWorkPolicy\.KEEP\)/, 'a retry never cancels a running drain');
 
 
@@ -1962,8 +1961,8 @@ assert.match(source('CoreWork.kt'), /fun retryDrain\(context: Context\) = enqueu
 
 
 assert.match(owner, /fun queue\(app: Application\) = File\(app\.filesDir, PendingCaptureWriter\.DIRECTORY\)/, 'the queue is RN\'s writer\'s folder');
-assert.match(owner, /private fun drain\(runtime: CoreHost, queue: File, app: Application\): StartOrder\.Drain \{\s+if \(failure != null\) return StartOrder\.Drain\.Waiting\s+(?:\/\/[^\n]*\s+)*val unswept = runCatching \{ CheckoffStore\.sweep\(app\)\.failed > 0 \}[^\n]*\.getOrDefault\(true\)\s+if \(unswept\) runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unswept"\)\)\s+val drained = if \(unswept\) StartOrder\.Drain\.Unswept else StartOrder\.Drain\.Done\s+when \(StartOrder\.queueEmpty\(queue\.list\(\), queue\.exists\(\)\)\) \{\s+true -> return drained\s+(?:\/\/[^\n]*\s+)*null -> \{\s+runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unreadable"\)\)\s+return StartOrder\.Drain\.Unswept\s+\}\s+false -> Unit\s+\}\s+return try \{\s+val ingested = runtime\.ingestPendingCaptures\(UUID\.randomUUID\(\)\.toString\(\)\)/, 'a failed check-off sweep is retried, the queue still drained');
-assert.match(owner, /val ingested = [^\n]+\n\s+(?:\/\/[^\n]*\s+)*runCatching \{ CoreWork\.owedUploads\(app\)\.add\(ingested\) \}[^\n]+\n[^\n]+"drained"[^\n]+\n\s+drained\n/, 'what a drain stored is owed to CoreWork\'s next background run, across process death (S4a, review 2)');
+assert.match(owner, /private fun drain\(runtime: CoreHost, queue: File, app: Application\): StartOrder\.Drain \{\s+if \(failure != null\) return StartOrder\.Drain\.Waiting\s+val unswept = runCatching \{ CheckoffStore\.sweep\(app\)\.failed > 0 \}[^\n]*\.getOrDefault\(true\)\s+if \(unswept\) runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unswept"\)\)\s+val drained = if \(unswept\) StartOrder\.Drain\.Unswept else StartOrder\.Drain\.Done\s+when \(StartOrder\.queueEmpty\(queue\.list\(\), queue\.exists\(\)\)\) \{\s+true -> return drained\s+null -> \{\s+runtime\.logLine\("Native Android queue drain", JSONObject\(\)\.put\("outcome", "unreadable"\)\)\s+return StartOrder\.Drain\.Unswept\s+\}\s+false -> Unit\s+\}\s+return try \{\s+val ingested = runtime\.ingestPendingCaptures\(UUID\.randomUUID\(\)\.toString\(\)\)/, 'a failed check-off sweep is retried, the queue still drained');
+assert.match(owner, /val ingested = [^\n]+\n\s+runCatching \{ CoreWork\.owedUploads\(app\)\.add\(ingested\) \}[^\n]+\n[^\n]+"drained"[^\n]+\n\s+drained\n/, 'what a drain stored is owed to CoreWork\'s next background run, across process death (S4a, review 2)');
 assert.match(source('CoreWork.kt'), /return host\.backgroundSync\(trigger, if \(ProcessCoreHost\.appActive\) 0 else stored\)\.also \{ owed\.settle\(stored\) \}/, 'an owed upload is settled only once its run settled');
 assert.match(owner, /\.put\("error", message\.substringBefore\(':'\)\)\)\s+StartOrder\.Drain\.Failed\(message\)/);
 
@@ -2450,7 +2449,7 @@ assert.match(menuModel, /fun saveCreate\(\) \{\s+val action = createAction\(\) \
 assert.match(menuModel, /FileOutputStream\(partial\)\.use \{ out -> out\.write\(state\.toString\(\)\.toByteArray\(\)\); out\.fd\.sync\(\) \}\s+check\(partial\.renameTo\(file\)\)/);
 assert.match(model, /val menu = MenuModel\(this, saved, prefs, File\(app\.noBackupFilesDir, "menu"\)\)/);
 assert.match(menuModel, /store\.read\(\)\?\.let \{ pending ->\s+if \(shell\.failedAction == null\) \{\s+shell\.owe\(pending\)\s+send\(pending\)/);
-assert.match(model, /if \(reopenCapture != null\) resumeCapture\(reopenCapture\) else captureStore\.delete\(\)\s+\/\/[^\n]*\s+menu\.start\(sheet\)/);
+assert.match(model, /if \(reopenCapture != null\) resumeCapture\(reopenCapture\) else captureStore\.delete\(\)\s+menu\.start\(sheet\)/);
 assert.match(menuModel, /if \(refused && action\.kind in CREATES\) shell\.ui \{ store\.delete\(\) \}/, 'a refused create wrote nothing: its record goes');
 assert.match(menuModel, /shell\.acknowledged\(action\)\s+shell\.ui \{\s+if \(action\.kind in CREATES\) store\.delete\(\)/, 'an acknowledged create\'s record goes');
 assert.equal(code(menuModel).match(/store\.delete\(\)/g).length, 2, 'only an answer from core removes a pending create');
@@ -2937,7 +2936,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(code(settingsModel), /menuCommand\(|\bsend\(|shell\.perform\(action|\.perform\([A-Za-z]/, 'SettingsModel writes only through MenuModel.command or create');
 
     assert.match(menuModel, /if \(action\.kind in SETTINGS_KINDS\) settings\.applied\(runtime, reply\)\s+shell\.acknowledged\(action\)/);
-    assert.match(settingsModel, /internal fun applied\(runtime: CoreHost, reply: JSONObject\) \{\s+(?:\/\/[^\n]*\s+)*reply\.optJSONObject\("persistentCapture"\)\?\.let \{ PersistentCapture\.switched\(shell\.getApplication<Application>\(\), it, runtime::logLine\) \}\s+val writes = reply\.optJSONArray\("deviceWrites"\) \?: return\s+val keys = /);
+    assert.match(settingsModel, /internal fun applied\(runtime: CoreHost, reply: JSONObject\) \{\s+reply\.optJSONObject\("persistentCapture"\)\?\.let \{ PersistentCapture\.switched\(shell\.getApplication<Application>\(\), it, runtime::logLine\) \}\s+val writes = reply\.optJSONArray\("deviceWrites"\) \?: return\s+val keys = /);
 
 
     assert.doesNotMatch(settingsModel.slice(settingsModel.indexOf('internal fun applied(')), /^\s+store\(writes\)/m);
@@ -2961,7 +2960,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(coreHost, /private fun settle\(entry: WriteJournal\.Entry\?, result: JSONObject, replay: Boolean\): Boolean \{\s+result\.optJSONObject\("value"\)\?\.optJSONArray\("deviceWrites"\)\?\.let \{ devices\.store\(it, entry\?\.sequence, replay\) \}\s+return entry != null && checkNotNull\(journal\)\.settle\(entry, result\.error\(\), replay\)/);
     assert.equal(coreHost.match(/(?<!\.)\bsettle\((?:call\.)?entry, /g).length, 3, 'settle(): the first send (finish), the replay, and a backup commit\'s finish (backupFinish, pass D1a)');
     assert.match(settingsModel, /runtime\.language\(prefs\.getString\(LANGUAGE_KEY, null\)\.orEmpty\(\), Locale\.getDefault\(\)\.toLanguageTag\(\)\)\s+Labels\.load\(runtime\.strings\(LABEL_KEYS\)\)/);
-    assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\)\)\s+\/\/[^\n]*\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
+    assert.match(model, /val runtime = ProcessCoreHost\.get\(getApplication\(\), prefs\.getString\(LANGUAGE_KEY, null\)\)\s+applyDeviceChoices\(runtime, prefs\)/, 'the device\'s own language and theme apply at boot, before any screen');
     for (const [kotlin, file, core] of [['LANGUAGE_KEY', 'i18n/i18n-constants.ts', 'LANGUAGE_STORAGE_KEY'], ['THEME_KEY', 'general-settings-model.ts', 'MOBILE_THEME_STORAGE_KEY'],
         ['MANAGE_SECTIONS_KEY', 'manage-settings-model.ts', 'MANAGE_OPEN_SECTIONS_STORAGE_KEY'], ['TASK_OPEN_MODE_KEY', 'gtd-settings-model.ts', 'MOBILE_TASK_OPEN_MODE_STORAGE_KEY']]) {
         const value = new RegExp(`export const ${core} = '([^']+)'`).exec(coreFile(file))[1];
@@ -3028,7 +3027,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
     assert.match(taskViewUi, /val text = model\.editor\?\.checklistAdd\.orEmpty\(\)\n[\s\S]*?BasicTextField\(text, model::typeChecklistAdd,/,
         'the View tab add box binds to the draft\'s checklistAdd');
-    assert.match(model, /fun saveEditor\(\) \{\n(?:\s*\/\/.*\n)*\s+if \(editor\?\.checklistAdd\?\.isNotBlank\(\) == true\) submitChecklistAdd\(\)\n/,
+    assert.match(model, /fun saveEditor\(\) \{\n\s+if \(editor\?\.checklistAdd\?\.isNotBlank\(\) == true\) submitChecklistAdd\(\)\n/,
         'Save adds the add box text before it saves');
     assert.match(model, /keepEditor\(now\.refused\(now\.pending\.first\(\)\)\)/, 'a refused edit goes through TaskEditor.refused');
     assert.match(model, /private fun currentChecklistEdit\(edit: JSONObject, checklist: String\): JSONObject\? \{\s+if \(!edit\.has\("itemId"\)\) return edit\s+val items = JSONArray\(checklist\)\s+val index = \(0 until items\.length\(\)\)\.firstOrNull \{ items\.getJSONObject\(it\)\.getString\("id"\) == edit\.getString\("itemId"\) \} \?: return null/);
@@ -3083,7 +3082,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(hostEntry.slice(hostEntry.indexOf('appLock(): string {'), hostEntry.indexOf('    projects(): string {')), /requireSaved/);
     assert.match(coreHost, /fun appLock\(\): JSONObject = callAsync\("appLock"\)/);
 
-    assert.match(model, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)\s+\/\/[^\n]*\n\s+lock\.boot\(runtime\)\s+ProcessCoreHost\.failure\?\.let/);
+    assert.match(model, /applyDeviceChoices\(runtime, prefs\)\s+applySyncedChoices\(runtime, prefs\)\s+lock\.boot\(runtime\)\s+ProcessCoreHost\.failure\?\.let/);
     assert.match(lockKt, /val row = runtime\.appLock\(\)\s+val on = row\.getBoolean\("value"\)\s+shell\.ui \{ enabled = on; locked = on; relock\.delayMinutes = row\.optInt\("relockDelayMinutes"\) \}/);
 
 
@@ -3110,7 +3109,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.doesNotMatch(lockKt, /android\.hardware\.biometrics/, 'no platform prompt beside AndroidX\'s');
     assert.match(lockKt, /prompt\(title, Authenticators\.BIOMETRIC_WEAK or Authenticators\.DEVICE_CREDENTIAL\)/);
 
-    assert.match(lockKt, /val activity = host\?\.get\(\) \?: return answered\("unavailable"\)\s+\/\/[^\n]*\n\s+if \(debugProperty\("app_lock_answer"\) == "yes"\) return answered\(null\)\s+try \{\s+if \(!activity\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceSecure\) return answered\("unavailable"\)\s+if \(activity\.supportFragmentManager\.isStateSaved\) return answered\("cancelled"\)/);
+    assert.match(lockKt, /val activity = host\?\.get\(\) \?: return answered\("unavailable"\)\s+if \(debugProperty\("app_lock_answer"\) == "yes"\) return answered\(null\)\s+try \{\s+if \(!activity\.getSystemService\(KeyguardManager::class\.java\)\.isDeviceSecure\) return answered\("unavailable"\)\s+if \(activity\.supportFragmentManager\.isStateSaved\) return answered\("cancelled"\)/);
     assert.match(lockKt, /BiometricPrompt\.PromptInfo\.Builder\(\)\.setTitle\(title\)\.setAllowedAuthenticators\(authenticators\)\.setConfirmationRequired\(true\)\.build\(\)/);
     assert.match(lockKt, /BiometricPrompt\(activity, ContextCompat\.getMainExecutor\(activity\), object : BiometricPrompt\.AuthenticationCallback\(\) \{\s+override fun onAuthenticationSucceeded\(result: BiometricPrompt\.AuthenticationResult\) = answered\(null\)\s+override fun onAuthenticationError\(code: Int, message: CharSequence\) = failed\(title, code\)/);
 
@@ -3239,7 +3238,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
 
 
     const sweepCheck = readFileSync(resolve(app, 'scripts/check-sweep-saved-device.mjs'), 'utf8');
-    assert.match(sweepCheck, /const restore = async \(\) => \{\s+for \(const name of PROPS\) \{ try \{ setProp\(name, ''\); \} catch \{ \/\* device gone \*\/ \} \}\s+await settleOwed\(\);/);
+    assert.match(sweepCheck, /const restore = async \(\) => \{\s+for \(const name of PROPS\) \{ try \{ setProp\(name, ''\); \} catch \{\s*\} \}\s+await settleOwed\(\);/);
     assert.match(sweepCheck, /if \(!retry && !pendingOnDisk\(\)\) \{/);
     assert.match(sweepCheck, /RESTORE FAILED: \$\{owed\} is still owed[^\n]*\n\s+process\.exitCode = 1;/);
     assert.equal(sweepCheck.match(/owed = '/g).length, 1, 'the injected failure is named while its retry is owed');
@@ -3485,11 +3484,11 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(entryKt, /override fun ownProvider\(authority: String\): Boolean = context\.packageManager\.resolveContentProvider\(authority, 0\)\?\.packageName == context\.packageName\s+&& !\(BuildConfig\.DEBUG && authority == "\$\{context\.packageName\}\.sharetest"\)/);
     assert.match(entryKt, /JSONObject\(\)\.put\("requestId", entry\.id\)\.put\("files", staged\)/);
     assert.match(entryKt, /lifecycle\.dismissed\(entry\)\s+stager\.discard\(entry\.id\)/);
-    assert.match(entryKt, /lifecycle\.opened\(entry\)\s+\/\/[^\n]*\s+stager\.discard\(entry\.id\)/);
+    assert.match(entryKt, /lifecycle\.opened\(entry\)\s+stager\.discard\(entry\.id\)/);
     assert.match(entryKt, /runtime\.openQuickCapture\(\)\s+runtime\.quickCaptureView\(JSONObject\(\)\.put\("text", open\.getString\("text"\)\)\.put\("options", open\.getJSONObject\("options"\)\)\.toString\(\)\)/);
 
     assert.match(entryKt, /private val lifecycle = EntryLifecycle\(queue\) \{ SystemClock\.uptimeMillis\(\) \}/);
-    assert.match(entryKt, /\} catch \(failure: Throwable\) \{\s+ui\(threads\.guarded \{ failed\(entry, failure\.message\) \}\)\s+\/\/[^\n]*\s+if \(!entryRetryable\(failure\.message\)\) return@perform\s+throw failure\s+\}\s+\/\/[^\n]*\s+ui\(threads\.guarded \{ menu\.whenIdle\(threads\.guarded \{ opened\(entry, reply, view\) \}\) \}\)/);
+    assert.match(entryKt, /\} catch \(failure: Throwable\) \{\s+ui\(threads\.guarded \{ failed\(entry, failure\.message\) \}\)\s+if \(!entryRetryable\(failure\.message\)\) return@perform\s+throw failure\s+\}\s+ui\(threads\.guarded \{ menu\.whenIdle\(threads\.guarded \{ opened\(entry, reply, view\) \}\) \}\)/);
     assert.match(entryKt, /is EntryLifecycle\.Failure\.Retry -> threads\.later\(outcome\.delayMs\) \{ pump\(\) \}\s+is EntryLifecycle\.Failure\.Refused -> \{\s+shell\.showToast\(null, outcome\.notice, \"warning\"\)\s+lifecycle\.dismissed\(entry\)/, 'a refused entry shows its notice before it leaves');
 
     assert.match(entryKt, /if \(blocked && reply\.optJSONObject\("contextAutomation"\) == null\) \{\s+lifecycle\.deferred\(entry\)\s+return\s+\}\s+open\(reply, view, runCatching \{ JSONObject\(entry\.input\)\.optString\("url"\)\.ifEmpty \{ null \} \}\.getOrNull\(\)\)\s+lifecycle\.opened\(entry\)/);
@@ -4029,7 +4028,7 @@ assert.match(model, /val sheet = runCatching \{ menu\.readSheet\(runtime\) \}\.g
     assert.match(ownerKt, /private fun refreshWidgets\(runtime: CoreHost, leave: Boolean = false\) = widgetThread\.execute \{\s+runCatching \{ runtime\.refreshWidgets\(leave\) \}\.onFailure \{ Log\.w\(CoreHost\.TAG, "Native Android widget refresh failed", it\) \}\s+\}/);
 
 
-    assert.match(ownerKt, /if \(!changed\) return\s+(?:\/\/[^\n]*\s+)*boot\?\.takeIf \{ it\.isDone \}\?\.let \{ task -> runCatching \{ task\.get\(\) \}\.getOrNull\(\) \}\?\.let \{ runtime ->\s+if \(state == "active"\) \{\s+(?:\/\/[^\n]*\s+)*val generation = deferredWidgets\.hold\(runtime\)\s+widgetThread\.schedule\(\{ deferredWidgets\.takeIf\(generation\)\?\.let \{ publishHeldWidgets\(it, "resume-fallback"\) \} \},\s+WIDGET_FALLBACK_MS, TimeUnit\.MILLISECONDS\)\s+\} else \{\s+(?:\/\/[^\n]*\s+)*refreshWidgets\(runtime, leave = !deferredWidgets\.leave\(\)\)\s+\}\s+\}/, 'a resume\'s fallback publishes only its own hold (HeldPublicationTest)');
+    assert.match(ownerKt, /if \(!changed\) return\s+boot\?\.takeIf \{ it\.isDone \}\?\.let \{ task -> runCatching \{ task\.get\(\) \}\.getOrNull\(\) \}\?\.let \{ runtime ->\s+if \(state == "active"\) \{\s+val generation = deferredWidgets\.hold\(runtime\)\s+widgetThread\.schedule\(\{ deferredWidgets\.takeIf\(generation\)\?\.let \{ publishHeldWidgets\(it, "resume-fallback"\) \} \},\s+WIDGET_FALLBACK_MS, TimeUnit\.MILLISECONDS\)\s+\} else \{\s+refreshWidgets\(runtime, leave = !deferredWidgets\.leave\(\)\)\s+\}\s+\}/, 'a resume\'s fallback publishes only its own hold (HeldPublicationTest)');
 
     const hostWidgetsKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/HostWidgets.kt'), 'utf8');
     assert.match(hostWidgetsKt, /\.put\("stale", stale\)/);
@@ -9821,7 +9820,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 
     assert.match(header, /\{ openProjectId\?\.let\(::openProjectCapture\) \}[\s\S]{0,200}testTag\("project-add-task-button"\)/);
     assert.match(source('InboxViewModel.kt'), /fun openProjectCapture\(projectId: String\) \{[\s\S]{0,200}put\("initialProps", JSONObject\(\)\.put\("projectId", projectId\)\.put\("status", "next"\)\.toString\(\)\)\s+\.put\("returnTo", "\/projects-screen\?projectId=\$\{android\.net\.Uri\.encode\(projectId\)\}"\)[\s\S]{0,300}ui \{ closeProject\(\); captureModal\.opened\(params, reply\) \}/);
-    assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+(?:\/\/.*\n\s+)?close\.menuText\("returnToProjectId"\)\?\.let \{ id -> shell\.menu\.whenIdle \{ shell\.openProject\(id\) \} \}/);
+    assert.match(source('CaptureModalModel.kt'), /private fun end\(close: JSONObject, leave: Boolean = true\) \{\s+keep\(null\)\s+inFlight = null\s+close\.menuText\("returnToProjectId"\)\?\.let \{ id -> shell\.menu\.whenIdle \{ shell\.openProject\(id\) \} \}/);
 
     assert.doesNotMatch(source('CaptureScreen.kt') + source('InboxViewModel.kt'), /presetPatch|withPreset|val preset: JSONObject/);
 }
@@ -9858,7 +9857,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(header, /if \(projectDetails\.reorderMode\) \{[\s\S]{0,400}LazyColumn\([^\n]*userScrollEnabled = false\) \{\s+openProjectId\?\.let \{ id -> projectDetailsItems\(model, id, detail\) \}\s+\}\s+ProjectReorderList\(model, Modifier\.weight\(1f\)\)\s+return@Column/);
 
 
-    assert.match(header, /if \(projectDetails\.reorderMode\) \{\s+(?:\/\/[^\n]*\n\s+)*LaunchedEffect\(detail\) \{ projectDetails\.readOrder\(\) \}/);
+    assert.match(header, /if \(projectDetails\.reorderMode\) \{\s+LaunchedEffect\(detail\) \{ projectDetails\.readOrder\(\) \}/);
     assert.doesNotMatch(details, /if \(reorderMode\) readOrder\(\)/);
     assert.match(details, /customActions = moves/);
 
@@ -9879,7 +9878,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 {
 
     assert.doesNotMatch(editorUi, /CompactRow/, 'RN draws no compact date row: every date field is its heading over its box');
-    assert.match(editorUi, /"dueDate", "startTime", "reviewAt" -> FormGroup \{[\s\S]{0,600}FieldHeading\(icon, label\)\s+\/\/[^\n]*\n\s+Row\(verticalAlignment = Alignment\.CenterVertically\) \{\s+DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
+    assert.match(editorUi, /"dueDate", "startTime", "reviewAt" -> FormGroup \{[\s\S]{0,600}FieldHeading\(icon, label\)\s+Row\(verticalAlignment = Alignment\.CenterVertically\) \{\s+DateButton\(part\.label, label, !locked, Modifier\.weight\(1f\)\) \{ pickDate\(id\) \}/);
 
     assert.match(editorUi, /Row\(Modifier\.fillMaxWidth\(\)\.heightIn\(min = 60\.dp\)\.background\(c\.cardBg\)\.rnBorderBottom\(c\.border\)\.padding\(start = 16\.dp, end = 16\.dp, top = 12\.dp, bottom = 12\.dp\)/);
 
@@ -9916,7 +9915,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(model, /editorMenu\.promoteTitle != null/);
 
 
-    assert.match(activity, /else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)\s+(?:\/\/[^\n]*\s+)*ToastCard\(model, /);
+    assert.match(activity, /else if \(open != null && writable\) Box\(Modifier\.fillMaxSize\(\)\) \{\s+TaskEditorScreen\(model, open\)\s+ToastCard\(model, /);
     assert.match(menuKt, /shell\.menu\.whenIdle \{ shell\.menu\.openProjects\(projectId\) \}/);
     assert.match(menuKt, /if \(editor\.patch\.keys\.any \{ it in RECURRENCE_FIELDS \}\) editor\.model\.recurrenceBase/);
 }
@@ -9968,7 +9967,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 {
     const coreHostKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/core/CoreHost.kt'), 'utf8');
     const processKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/ProcessCoreHost.kt'), 'utf8');
-    assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+(?:\/\/[^\n]*\n\s+)*resumedRuntime\(\)\?\.let \{ runtime ->\s+(?:\/\/[^\n]*\n\s+)*val ended = runtime\.awaitQuiet\(resumedAt, quietSince = resumedAt\) \{ appState != "active" \}[\s\S]{0,900}?\}\s+\}\s+runCatching \{ reminders\.resume\(\) \}/);
+    assert.match(processKt, /if \(state == "active"\) syncThread\.execute \{\s+resumedRuntime\(\)\?\.let \{ runtime ->\s+val ended = runtime\.awaitQuiet\(resumedAt, quietSince = resumedAt\) \{ appState != "active" \}[\s\S]{0,900}?\}\s+\}\s+runCatching \{ reminders\.resume\(\) \}/);
 
     assert.match(processKt, /if \(ended != "quiet" \|\| resumeCycleLogged\.compareAndSet\(false, true\)\) \{/);
 
@@ -9977,14 +9976,14 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 
     assert.equal(processKt.match(/syncThread\.execute/g)?.length, 5);
     assert.match(readFileSync(resolve(app, 'bundle/host-sync.ts'), 'utf8'), /useTaskStore\.subscribe\(nameNotifyListener\('auto-sync-trigger'/);
-    assert.match(coreHostKt, /if \(leave\) callAsync\("widgetsRefresh", "leave"\) else \{\s+(?:\/\/[^\n]*\n\s+)*awaitQuiet\(\)\s+callAsync\("widgetsRefresh"\)/);
+    assert.match(coreHostKt, /if \(leave\) callAsync\("widgetsRefresh", "leave"\) else \{\s+awaitQuiet\(\)\s+callAsync\("widgetsRefresh"\)/);
 }
 
 
 {
     const popup = source('CaptureScreen.kt');
 
-    assert.match(popup, /TitleField\(draft\.text, [^\n]*\n\s+MicButton\(voice\.state\) \{ voice\.toggle\(draft\.text, draft\.options\) \}\n\s+\}\n\s+\/\/[^\n]*\n\s+NoteField\(draft, copy\.getString\("notePlaceholder"\), copy\.getString\("noteLabel"\), !locked\)/);
+    assert.match(popup, /TitleField\(draft\.text, [^\n]*\n\s+MicButton\(voice\.state\) \{ voice\.toggle\(draft\.text, draft\.options\) \}\n\s+\}\n\s+NoteField\(draft, copy\.getString\("notePlaceholder"\), copy\.getString\("noteLabel"\), !locked\)/);
     assert.doesNotMatch(popup, /Text\(noteLabel, style = rnText\(12, 600\)/);
     assert.match(popup, /\.padding\(top = 8\.dp\)\.fillMaxWidth\(\)\.heightIn\(min = 44\.dp, max = 96\.dp\)\.clip\(shape\)/);
 }
@@ -10004,7 +10003,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(activity, /windowInsetsPadding\(WindowInsets\.systemBars\.only\(WindowInsetsSides\.Top \+ WindowInsetsSides\.Horizontal\)\)/);
     assert.match(activity, /internal fun Modifier\.rnTabPress\(selected: Boolean, onClick: \(\) -> Unit\): Modifier/);
     for (const kt of [activity, more]) assert.match(kt, /fade\(if \((active|open)\) 1f else RN_TAB_ICON_IDLE\)/);
-    assert.match(activity, /fun Modifier\.hairline\(color: Color, top: Boolean\) = drawBehind \{\s+(?:\/\/[^\n]*\s+)*drawRect\(color, Offset\(0f, if \(top\) 0f else size\.height - 1f\), Size\(size\.width, 1f\)\)/);
+    assert.match(activity, /fun Modifier\.hairline\(color: Color, top: Boolean\) = drawBehind \{\s+drawRect\(color, Offset\(0f, if \(top\) 0f else size\.height - 1f\), Size\(size\.width, 1f\)\)/);
 }
 
 
@@ -10051,7 +10050,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     for (const line of ['addTasks: (items) => useTaskStore.getState().addTasks(items),', 'flushPendingSave,', 'requireSaved: () => requireSaved(),', 'sandbox: isSandboxMode,']) {
         assert(gmailBlock.includes(line), `host-entry binds Gmail's ${line}`);
     }
-    assert.match(hostEntry, /const state = requireSync\(\)\.start\(appState\);\s*\/\/[^\n]*\s*gmailLifecycle\(\(\) => nativeGmail\?\.start\(appState\)\);/);
+    assert.match(hostEntry, /const state = requireSync\(\)\.start\(appState\);\s*gmailLifecycle\(\(\) => nativeGmail\?\.start\(appState\)\);/);
     assert.match(hostEntry, /gmailLifecycle\(\(\) => nativeGmail\?\.appState\(appState\)\);\s*return requireSync\(\)\.appState\(appState\);/);
     assert.match(coreHost, /fun gmailRequest\(name: String, json: String\): JSONObject = callLong\("gmailRequest", name, json\)/);
 
@@ -10143,7 +10142,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
 
 {
     const viewModelKt = readFileSync(resolve(app, 'android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/InboxViewModel.kt'), 'utf8');
-    assert.match(viewModelKt, /private fun showFocus\(view: FocusView\?\) \{\s+focusRevision = view\?\.revision\.orEmpty\(\)\s+(?:\/\/[^\n]*\n\s+)*if \(view != null && focus\?\.sameShown\(view\) == true\) return/);
+    assert.match(viewModelKt, /private fun showFocus\(view: FocusView\?\) \{\s+focusRevision = view\?\.revision\.orEmpty\(\)\s+if \(view != null && focus\?\.sameShown\(view\) == true\) return/);
     assert.match(viewModelKt, /val view = focus\?\.copy\(revision = focusRevision\) \?: return/);
     for (const name of ['FocusControls.kt', 'FocusModel.kt', 'Pomodoro.kt', 'InboxViewModel.kt']) {
         assert.doesNotMatch(readFileSync(resolve(app, `android/app/src/main/java/tech/dongdongbh/mindwtr/pilot/${name}`), 'utf8'), /focus\?\.revision(?!\.orEmpty\(\)\s*$)/m, `${name} pages at focusRevision`);
@@ -10222,7 +10221,7 @@ console.log('Runner: CoreWork on the one host after the app\'s boot order, the q
     assert.match(popup, /val voiceBusy = voice\.state\.busy\s+val locked = busy \|\| failed \|\| voiceBusy\s+val canSave = [^\n]*&& !busy && !voiceBusy &&/);
     assert.match(popup, /val closable = !busy && !failed && !voiceBusy/);
     assert.match(popup, /BackHandler\(enabled = !failed\) \{\s+if \(busy \|\| voiceBusy\) return@BackHandler/);
-    assert.match(viewModel, /fun saveCapture\(openAfterSave: Boolean\) \{\s+val current = capture \?: return\s+\/\/[^\n]*\n\s+if \(voice\.state\.busy\) return\s+if \(current\.requests\.isNotEmpty\(\) \|\| captureInFlight != null\) \{[\s\S]*?return\s+\}\s+(\/\/[^\n]*\n\s+)+if \(voice\.state\.held && !busy\) \{\s+keepCapture\(current\.copy\(queuedSave = null\), persist = false\)\s+if \(voice\.saveHeld\(current\.text, current\.options, openAfterSave\)\) return/);
+    assert.match(viewModel, /fun saveCapture\(openAfterSave: Boolean\) \{\s+val current = capture \?: return\s+if \(voice\.state\.busy\) return\s+if \(current\.requests\.isNotEmpty\(\) \|\| captureInFlight != null\) \{[\s\S]*?return\s+\}\s+if \(voice\.state\.held && !busy\) \{\s+keepCapture\(current\.copy\(queuedSave = null\), persist = false\)\s+if \(voice\.saveHeld\(current\.text, current\.options, openAfterSave\)\) return/);
     assert.match(viewModel, /saved = \{ reply -> finishCapture\(/);
     assert.match(activity, /val label = t\(if \(model\.voice\.defaultAudio\) "quickAdd\.audioCaptureLabel" else "nav\.addTask"\)/);
     assert.match(activity, /if \(event == Lifecycle\.Event\.ON_STOP && !isChangingConfigurations\) \{ VoiceCapture\.recorder\?\.leave\(\); model\.voice\.left\(\) \}/);
