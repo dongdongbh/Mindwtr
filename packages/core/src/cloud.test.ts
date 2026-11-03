@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     CLOUD_SYNC_TOKEN_PATTERN,
     CloudHttpError,
@@ -56,6 +56,10 @@ const hangingBodyResponse = () => {
         response: new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 }),
     };
 };
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 describe('cloud sync http helpers', () => {
     it('times out and cancels a JSON body that stalls after response headers', async () => {
@@ -371,13 +375,16 @@ describe('cloud sync http helpers', () => {
             'https://example.com/v1/file', { fetcher, timeoutMs: 1 },
         )],
     ])('times out and cancels a stalled successful %s response body', async (kind, request) => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const status = kind === 'DELETE 404' ? 404 : 200;
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status });
 
-        await expect(request(async () => response)).rejects.toThrow('Cloud request timed out');
+        const outcome = expect(request(async () => response)).rejects.toThrow('Cloud request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('exposes status on file get failures', async () => {
         const fetcher = vi.fn(async () => errorResponse(404, 'Not Found'));
@@ -542,14 +549,17 @@ describe('cloudGetFile download cap', () => {
     });
 
     it('times out and cancels a file body that stalls after response headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const { cancel, response } = hangingBodyResponse();
 
-        await expect(cloudGetFile('https://example.com/v1/files/a', {
+        const outcome = expect(cloudGetFile('https://example.com/v1/files/a', {
             fetcher: async () => response,
             timeoutMs: 1,
         })).rejects.toThrow('Cloud request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 });
 
 describe('cloudAttachmentExists (#1119 follow-up)', () => {

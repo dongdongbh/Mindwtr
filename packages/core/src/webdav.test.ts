@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     __webdavTestUtils,
     assertWebdavStrongEtagSupport,
@@ -98,6 +98,10 @@ const createWebdavCapabilityFetcher = (
     }) as unknown as typeof fetch;
     return { fetcher, getProbeUrl: () => probeUrl, requests };
 };
+
+afterEach(() => {
+    vi.useRealTimers();
+});
 
 describe('webdav http helpers', () => {
     it('allows HTTP for private IP targets', async () => {
@@ -519,16 +523,19 @@ describe('webdav http helpers', () => {
     });
 
     it('times out and cancels a stalled JSON PUT error body after response headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 500 });
 
-        await expect(webdavPutJson(
+        const outcome = expect(webdavPutJson(
             'https://example.com/mindwtr/data.json',
             { ok: true },
             { fetcher: async () => response, timeoutMs: 1 },
         )).rejects.toThrow('WebDAV request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('caps parent MKCOL creation depth for pathological nested paths', async () => {
         const nestedSegments = Array.from({ length: 40 }, (_, index) => `level-${index + 1}`).join('/');
@@ -586,15 +593,18 @@ describe('webdavGetFile download cap', () => {
     });
 
     it('times out and cancels a download body that stalls after headers', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
 
-        await expect(webdavGetFile('https://example.com/dav/a.bin', {
+        const outcome = expect(webdavGetFile('https://example.com/dav/a.bin', {
             fetcher: async () => response,
             timeoutMs: 1,
         })).rejects.toThrow('WebDAV request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 });
 
 describe('versioned WebDAV transition byte operations', () => {
@@ -665,12 +675,15 @@ describe('versioned WebDAV transition byte operations', () => {
             'https://example.com/dav/a.bin', { fetcher, timeoutMs: 1 },
         )],
     ])('times out and cancels a stalled successful %s response body', async (_kind, request) => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
         const cancel = vi.fn();
         const response = new Response(new ReadableStream<Uint8Array>({ cancel }), { status: 200 });
 
-        await expect(request(async () => response)).rejects.toThrow('WebDAV request timed out');
+        const outcome = expect(request(async () => response)).rejects.toThrow('WebDAV request timed out');
+        await vi.advanceTimersByTimeAsync(1);
+        await outcome;
         expect(cancel).toHaveBeenCalledOnce();
-    }, 100);
+    });
 
     it('preflights an empty remote with enforced create-only and stale replacement conditions', async () => {
         const documentUrl = 'https://example.com/dav/data.json';
