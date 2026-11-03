@@ -49,8 +49,8 @@ const normalizeOptionalString = (value: unknown): string | undefined =>
 const normalizeStringArray = (value: unknown): string[] => {
     if (!Array.isArray(value)) return [];
     const strings = value.filter((item): item is string => typeof item === 'string');
-    // Every element survived the filter, so the copy is value-identical: keep the
-    // input array so its owner can keep its own identity (#766).
+
+
     return strings.length === value.length ? (value as string[]) : strings;
 };
 
@@ -73,14 +73,14 @@ const containsAttachmentTraversalSegment = (value: string): boolean => {
             const decoded = decodeURIComponent(current);
             if (decoded !== current) enqueueCandidate(decoded);
         } catch {
-            // Keep evaluating other candidates when decoding fails.
+
         }
         const trimmed = current.trim();
         if (trimmed.startsWith('//')) {
             try {
                 enqueueCandidate(new URL(`file:${trimmed}`).pathname);
             } catch {
-                // Keep evaluating the raw candidate when URL parsing fails.
+
             }
             continue;
         }
@@ -88,7 +88,7 @@ const containsAttachmentTraversalSegment = (value: string): boolean => {
             try {
                 enqueueCandidate(new URL(trimmed).pathname);
             } catch {
-                // Keep evaluating the raw candidate when URL parsing fails.
+
             }
         }
     }
@@ -112,8 +112,7 @@ export const sanitizeAttachmentCloudKeyForSyncMerge = (value: unknown): string |
     return ATTACHMENT_CLOUD_KEY_PATTERN.test(trimmed) ? trimmed : undefined;
 };
 
-/** A malformed digest can never match real bytes, so keeping it would either strand the
- *  attachment or (before the fail-closed check) disable validation entirely. Drop it. */
+
 export const sanitizeAttachmentFileHashForSyncMerge = (value: unknown): string | undefined =>
     (isSha256Hex(value) ? value : undefined);
 
@@ -143,9 +142,7 @@ type RevisionMetadata = {
 
 const hasOwnKey = (item: object, key: string): boolean => Object.prototype.hasOwnProperty.call(item, key);
 
-/** True when normalizeRevisionMetadata would emit `item` unchanged. Deliberately
- *  does not call normalizeRevision, whose clamp path logs — a clamp is a change,
- *  so it falls through to the real normalizer and logs exactly once (#766). */
+
 const hasNormalizedRevisionMetadata = (item: RevisionMetadata): boolean => {
     const rawRev = item.rev;
     const revIsNormalized = isValidRevision(rawRev)
@@ -181,19 +178,10 @@ export const normalizeRevisionMetadata = <T extends RevisionMetadata>(item: T): 
     return normalized;
 };
 
-// CloudKit's macOS bridge can box booleans read off iOS-written records as
-// numeric NSNumbers (1/0), which NSJSONSerialization then emits as JSON
-// numbers rather than JSON booleans (see macos_cloudkit_bridge.m,
-// ck_json_from_record). Synced booleans in the merge normalizers below must
-// tolerate that shape so a numeric `true` never gets coerced to `false` (#902).
+
 const normalizeSyncedBoolean = (value: unknown): boolean => value === true || value === 1;
 
-/**
- * Flow mode booleans (#1429) keep three states: true, false, and absent (never set).
- * The old-client keep rule in sync.ts reads absent as "this writer never carried
- * the field", so false must stay false. Only a present key is touched, which keeps
- * the record identical when the field is absent.
- */
+
 const normalizeFlowBoolean = <T extends object>(item: T, key: keyof T & string): T => {
     if (!hasOwnKey(item, key)) return item;
     const value = (item as Record<string, unknown>)[key];
@@ -214,7 +202,7 @@ const normalizeProjectStatusForMerge = (value: unknown): Project['status'] => {
     return 'active';
 };
 
-/** Older clients uploaded `deletedAtBeforeProjectArchive: null`; absent is canonical (#1156). */
+
 export const normalizeSectionForSyncMerge = (section: Section): Section => normalizeFlowBoolean(
     section.deletedAtBeforeProjectArchive === null
         ? { ...section, deletedAtBeforeProjectArchive: undefined }
@@ -269,12 +257,13 @@ export const normalizeTaskForSyncMerge = (
         reminderPolicy: normalizeTaskReminderPolicy(normalized.reminderPolicy),
         repeatReminderMinutes: normalized.repeatReminderMinutes,
         dueReminderLeadMinutes: normalized.dueReminderLeadMinutes,
+        startReminderLeadMinutes: normalized.startReminderLeadMinutes,
         reviewAt: normalized.reviewAt,
         completedAt: normalized.completedAt,
         cancelledAt: normalized.cancelledAt,
         archivedAt: normalizeOptionalString(normalized.archivedAt),
         statusBeforeProjectArchive: normalized.statusBeforeProjectArchive,
-        // Older clients uploaded these as explicit `null`; absent is the canonical shape (#1156).
+
         completedAtBeforeProjectArchive: normalized.completedAtBeforeProjectArchive ?? undefined,
         isFocusedTodayBeforeProjectArchive: normalized.isFocusedTodayBeforeProjectArchive ?? undefined,
         projectArchivedAt: normalized.projectArchivedAt,
@@ -288,18 +277,11 @@ export const normalizeTaskForSyncMerge = (
         orderNum: normalized.orderNum,
         boardOrder: normalized.boardOrder,
         focusOrder: normalized.focusOrder,
-        // Fields not listed here are stripped from every task on every merge.
-        // The satisfies clause turns a forgotten new Task field into a compile error.
-        // Keep this an exhaustive literal: the explicit-undefined keys it emits only
-        // ever match a previous merge output held in memory — a JSON round-trip drops
-        // them — so rewriting it as conditional spreads would change the emitted
-        // shape without ever buying remote-side identity (#766).
+
+
     } satisfies Record<keyof Task, unknown>;
-    // normalizeRevisionMetadata runs next in the merge pipeline and deletes an
-    // undefined revBy own key. Emit that same shape here, or a task without a
-    // revBy oscillates between key sets and never reaches an identity fixed
-    // point across the composed pipeline (#766). rev needs no such branch:
-    // normalizeTaskForLoad always backfills it to a valid number.
+
+
     if (candidate.revBy === undefined) delete candidate.revBy;
     if (!hasOwnKey(normalized, 'viewSectionIds')) delete candidate.viewSectionIds;
     return sameShallowRecord(task, candidate) ? task : candidate;
@@ -648,7 +630,7 @@ function* validateEntityShape(
 
 export const validateMergedSyncData = (data: AppData): string[] => runToEnd(validateMergedSyncDataPass(data));
 
-/** {@link validateMergedSyncData} as a cooperative pass (cooperative.ts): it only reads [data]. */
+
 export function* validateMergedSyncDataPass(data: AppData): CooperativePass<string[]> {
     const errors: string[] = [];
     if (!Array.isArray(data.tasks)) errors.push('tasks must be an array');

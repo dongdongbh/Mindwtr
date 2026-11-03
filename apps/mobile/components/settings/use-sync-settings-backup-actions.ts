@@ -63,7 +63,7 @@ import { clearLog, ensureLogFilePath, logInfo } from '@/lib/app-log';
 import { logSyncEncryptionDiagnosticsBlock } from '@/lib/sync-encryption-state';
 import { logSettingsError } from '@/lib/settings-utils';
 
-/** A failure's own words: an Error's message (never JavaScript's "Error: " prefix), else the value as text. */
+
 const failureText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export type BackupAction =
@@ -161,8 +161,7 @@ export function useSyncSettingsBackupActions({
         }
     }, [tr, setBackupAction, showSettingsErrorToast]);
 
-    // `undo` only swaps the copy: an undo IS a snapshot restore, so it keeps the
-    // same destructive-confirmation weight and the same restore path.
+
     const handleExportTaskNotes = useCallback(async () => {
         setBackupAction('export:tasknotes');
         try {
@@ -619,9 +618,8 @@ export function useSyncSettingsBackupActions({
     }, [settings.diagnostics, updateSettings]);
 
     const handleShareLog = useCallback(async () => {
-        // Stamp the current encryption posture into the log before it leaves the device: a
-        // shared log has to answer "what state was this device in" even when the user never
-        // opened the Encryption block and only turned Debug logging on after the failure.
+
+
         await logSyncEncryptionDiagnosticsBlock().catch(() => undefined);
         const path = await ensureLogFilePath();
         if (!path) {

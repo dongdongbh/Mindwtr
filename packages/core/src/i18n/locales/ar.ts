@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const arOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "قبل البدء",
     "settings.desktopAppLockDesc": "اطلب Windows Hello أو Touch ID (أو كلمة مرور Mac) عند فتح Mindwtr وبعد ابتعادك. هذا يخفي نافذة التطبيق فقط؛ يظل بإمكان أداة macOS وواجهة API المحلية وخادم MCP قراءة بياناتك.",
     "settings.desktopAppLockUnavailable": "أعدّ Windows Hello أو كلمة مرور تسجيل الدخول على Mac لاستخدام قفل التطبيق.",
     "appLock.lockNow": "قفل Mindwtr",
@@ -864,6 +865,7 @@ export const arOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'تأكد من أن كل مشروع نشط لديه الإجراء التالي.',
         'review.projectsHint': 'مراجعة كل مشروع. هل لديها إجراء تالٍ واحد ملموس على الأقل؟ إذا لم يكن الأمر كذلك، أضف واحدًا الآن. وضع علامة على المشاريع المكتملة كما تم.',
         'review.hasNextAction': 'لديه الإجراء التالي',
+    'review.projectDeferred': 'مجدول',
         'review.needsAction': 'يحتاج إلى إجراء',
         'review.noActiveTasks': 'لا توجد مهام نشطة',
         'review.somedayStep': 'يوما ما / ربما',
@@ -1564,7 +1566,7 @@ export const arOverrides: Record<string, string> = {
         'captureNotification.text': 'انقر للالتقاط إلى صندوق الوارد',
         'captureNotification.channelName': 'التقاط سريع',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'تفريغ الذهن',
         'mindSweep.title': 'تفريغ الذهن',
         'mindSweep.intro': 'تنقّل بين بضع قوائم من المحفّزات ودوّن كل ما يخطر ببالك. لا تُصفِّ ولا تُنظّم — كل عنصر يذهب إلى البريد الوارد لترتيبه لاحقًا.',

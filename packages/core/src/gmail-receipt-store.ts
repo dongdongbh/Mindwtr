@@ -1,5 +1,5 @@
-// RN's Gmail receipt store (apps/mobile/lib/gmail-capture-storage.ts), shared with the native hosts. Moved as is. Each host
-// passes its own file calls in its device-private GmailCapture folder to openGmailReceiptStore, which owns the reset rule.
+
+
 export type GmailReceiptConfig = { account: string | null; label: string | null; enabled: boolean; blocked: boolean };
 type SqlValue = string | number | null;
 export type GmailReceiptDatabase = { executeSync: (sql: string, params?: SqlValue[]) => { rows: Record<string, unknown>[] } };
@@ -18,7 +18,7 @@ export function createGmailReceiptStore(db: GmailReceiptDatabase, newlyCreated: 
     const transaction = (work: () => void) => {
         execute('BEGIN IMMEDIATE');
         try { work(); execute('COMMIT'); } catch (error) {
-            try { execute('ROLLBACK'); } catch { /* Preserve the original failure. */ }
+            try { execute('ROLLBACK'); } catch {                                      }
             throw error;
         }
     };
@@ -58,11 +58,11 @@ export function createGmailReceiptStore(db: GmailReceiptDatabase, newlyCreated: 
     };
 }
 
-/** A host's file calls inside its device-private GmailCapture folder. Every argument is a bare file name, never a path. */
+
 export type GmailReceiptFiles = {
     exists: (name: string) => boolean;
     size: (name: string) => number;
-    /** Creates an empty file; fails if one exists. */
+
     create: (name: string) => void;
     rename: (from: string, to: string) => void;
     remove: (name: string) => void;
@@ -70,7 +70,7 @@ export type GmailReceiptFiles = {
     open: (name: string) => GmailReceiptDatabase & { close: () => void };
 };
 export type GmailReceiptOpenOptions = {
-    /** The step now running, for the host's failure line (file, open, schema). */
+
     onStage?: (stage: 'file' | 'open' | 'schema') => void;
     logWarn?: (message: string, extra: Record<string, string>) => void;
     now?: () => number;
@@ -78,16 +78,11 @@ export type GmailReceiptOpenOptions = {
 const receiptsFile = 'receipts.sqlite';
 const resetMarker = 'receipts-reset';
 
-/**
- * Opens the receipts file. A file left empty (a crash before its schema) or one that fails the schema check would stop
- * capture for good, with nothing in Settings to recover it. It is moved aside with its journal files, never deleted, and a
- * fresh file starts with capture off: the user starts it again, and the deterministic task IDs keep mail captured before
- * from duplicating.
- */
+
 export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailReceiptOpenOptions = {}): GmailReceiptStore {
     const now = options.now ?? Date.now;
-    // The marker goes first: a reset cut short anywhere after it is finished by the next open's carry-over below. The journals
-    // move before the file, so a hot journal is never left beside a fresh file to be played back into it.
+
+
     const moveAside = () => {
         if (!files.exists(resetMarker)) files.create(resetMarker);
         let time = now();
@@ -97,9 +92,8 @@ export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailRe
         }
         files.create(receiptsFile);
     };
-    // While the marker is kept (Settings shows the reset until capture starts again), every receipt still readable from any
-    // moved file goes into the fresh one, so starting capture again never captures that mail twice (a task whose tombstone
-    // was purged would come back). INSERT OR IGNORE makes a repeat harmless; an unreadable file carries none.
+
+
     const carryOver = (fresh: GmailReceiptStore, stage: string) => {
         let carried = 0;
         for (const moved of files.list().filter((name) => /^receipts\.corrupt-\d+\.sqlite$/.test(name)).sort()) {
@@ -113,8 +107,8 @@ export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailRe
                     if (messages) messages.push(row.message); else byAccount.set(row.account, [row.message]);
                 }
                 for (const [account, messages] of byAccount) { fresh.acknowledge(account, messages); carried += messages.length; }
-            } catch { /* nothing readable to carry */ }
-            finally { try { old?.close(); } catch { /* the moved file stays as it is */ } }
+            } catch {                                 }
+            finally { try { old?.close(); } catch {                                     } }
         }
         options.logWarn?.('Gmail receipt storage recovered', {
             releaseCheck: 'v1.3.8/gmail-receipts-recovered', stage, count: String(carried),
@@ -122,7 +116,7 @@ export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailRe
     };
     options.onStage?.('file');
     let newlyCreated = !files.exists(receiptsFile);
-    // An earlier start moved the file (perhaps cut short); this open carries over again, unless it moves a file itself.
+
     let stage = 'resume';
     if (newlyCreated) files.create(receiptsFile);
     else if (files.size(receiptsFile) < 100) { moveAside(); stage = 'file'; newlyCreated = true; }
@@ -145,16 +139,16 @@ export function openGmailReceiptStore(files: GmailReceiptFiles, options: GmailRe
         if (files.exists(resetMarker)) carryOver(store, stage);
         return store;
     } catch (error) {
-        try { database?.close(); } catch { /* Keep the database intact for diagnosis. */ }
+        try { database?.close(); } catch {                                               }
         throw error;
     }
 }
 
-/** True after a damaged receipts file was moved aside and capture restarted off, until [clearGmailReceiptsReset]. */
+
 export function gmailReceiptsWereReset(files: Pick<GmailReceiptFiles, 'exists'>): boolean {
     return files.exists(resetMarker);
 }
-/** Capture was started again (or the account disconnected): Settings no longer explains the reset. */
+
 export function clearGmailReceiptsReset(files: Pick<GmailReceiptFiles, 'exists' | 'remove'>): void {
     if (files.exists(resetMarker)) files.remove(resetMarker);
 }

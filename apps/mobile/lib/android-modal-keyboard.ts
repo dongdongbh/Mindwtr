@@ -17,7 +17,7 @@ export async function measureAndroidModalKeyboardInset(input: TextInput): Promis
     const inset = await native.getModalKeyboardInsetAsync(tag);
     return typeof inset === 'number' && Number.isFinite(inset) && inset >= 0 ? inset : null;
   } catch {
-    // Old development clients and detached inputs keep the existing event path.
+
     return null;
   }
 }

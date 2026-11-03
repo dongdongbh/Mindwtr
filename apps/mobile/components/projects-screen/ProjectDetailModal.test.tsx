@@ -92,9 +92,7 @@ vi.mock('../../contexts/language-context', () => ({
   useLanguage: () => ({ t: translate, language: 'en', setLanguage: () => {}, isReady: true }),
 }));
 
-// The modal reads its section/project writers straight off the store. The real
-// zustand hook cannot run here (mobile vitest resolves a second React copy), so
-// the store is a plain selector over spies.
+
 const storeActions = vi.hoisted(() => ({
     _allProjects: [] as Project[],
     _projectsById: new Map<string, Project>(),
@@ -324,8 +322,7 @@ const createProjectDetailModalProps = (
     ...overrides,
 });
 
-// The section, status, area, tag and date controls live behind the collapsed
-// details toggle, so anything reaching them has to expand it first.
+
 const expandProjectDetails = (tree: ReturnType<typeof create>) => {
     act(() => {
         tree.root.findByProps({ testID: 'project-details-toggle' }).props.onPress();
@@ -774,8 +771,7 @@ describe('ProjectDetailModal metadata pickers', () => {
         expect(storeActions.updateProject).toHaveBeenCalledWith('project-1', { startDate: '2026-10-05' });
         expect(tree.root.findAllByType(DateTimePicker)).toHaveLength(0);
 
-        // The clear button only exists once a date is stored, and the mocked
-        // store never writes back, so it needs a project that already has one.
+
         let stored!: ReturnType<typeof create>;
         act(() => {
             stored = create(<ProjectDetailModal {...createProjectDetailModalProps({
@@ -1181,8 +1177,6 @@ describe('ProjectDetailModal project task scrolling', () => {
     });
 
 
-    // Reorder mode pins the list header above the reorder list, outside the list's padded content: it keeps the
-    // list's 12 on the sides and top instead of running edge to edge (native draws it so).
     it('keeps the pinned header in the list padding in reorder mode', () => {
         let tree!: ReturnType<typeof create>;
         act(() => {
@@ -1196,10 +1190,7 @@ describe('ProjectDetailModal project task scrolling', () => {
         expect(pinned.findAllByProps({ testID: 'project-details-toggle' }).length).toBeGreaterThan(0);
     });
 
-    // #784: exiting reorder mode must NOT restore the pre-reorder offset —
-    // TaskList scrolls to the region the reorder view was showing instead, and
-    // a restore here would yank the viewport away from the dropped task. The
-    // saved offset is reset so it cannot leak into a later bulk-bar restore.
+
     it('drops the pre-reorder scroll offset when exiting reorder mode', () => {
         act(() => {
             create(<ProjectDetailModal {...createProjectDetailModalProps()} />);
@@ -1341,8 +1332,8 @@ describe('ProjectDetailModal lifecycle actions', () => {
     });
 
     it('deletes the project from the actions menu after a confirm', () => {
-        // The swipe action on the project list was the only way to delete a
-        // project on mobile; a reporter looking next to Archive found nothing (#1142).
+
+
         vi.spyOn(Alert, 'alert').mockImplementation(((_title, _message, buttons) => {
             buttons?.[1]?.onPress?.();
         }) as typeof Alert.alert);
@@ -1622,9 +1613,7 @@ describe('ProjectDetailModal archived projects', () => {
     });
 });
 
-// The manual "Order" entry used to disappear entirely while a custom sort was
-// active, which read as "manual ordering doesn't exist" (Discord report). It
-// now stays visible, disabled, with a hint naming the way back.
+
 describe('ProjectDetailModal reorder option under a custom sort', () => {
     it('shows the Order row disabled with a default-sort hint instead of hiding it', () => {
         let tree!: ReturnType<typeof create>;

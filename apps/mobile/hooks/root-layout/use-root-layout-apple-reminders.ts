@@ -15,13 +15,10 @@ type ToastOptions = {
     durationMs?: number;
 };
 
-// A foreground burst (unlock, switcher, share sheet) can fire several 'active'
-// events in a row; reading the Reminders store each time is wasted work.
+
 const MIN_RUN_GAP_MS = 30_000;
 
-// Runs the opted-in Apple Reminders import on startup and every foreground
-// (#1238). iOS gives no background access to Reminders, so this is the only
-// moment the app can look. Silent unless something was imported.
+
 export function useRootLayoutAppleRemindersAutoImport({
     canonicalDataReady,
     disabled = false,
@@ -66,8 +63,8 @@ export function useRootLayoutAppleRemindersAutoImport({
                 });
             }
         } catch (error) {
-            // Never surface a toast here: the user did not ask for anything
-            // on this foreground, and the settings button reports errors.
+
+
             void logError(error, { scope: 'import', extra: { message: 'Apple Reminders auto-import failed' } });
         } finally {
             runningRef.current = false;

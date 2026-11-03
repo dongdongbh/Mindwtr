@@ -3,8 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual bundled JSC/SQLite consumers; resource proofs below are minted by
-/// the existing native stage/publication primitives, never by matching bytes.
+
 final class AttachmentAvailabilityHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -68,8 +67,8 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
     private func publication(_ proof: NativeAttachmentFiles.PublishedAttachmentProof) -> Store.Published {
         .init(sha256: proof.sha256, size: proof.size, identity: proof.identity, directoryIdentity: proof.directoryIdentity)
     }
-    // Private bundle suffix produces JSON-string ordering for the frozen fixture.
-    // The real V5 lineage consumer independently recomputes all patch policy.
+
+
     private func frozen(_ before: EditorDraftSnapshot, resolved: [String: Any], terminal: Bool) async throws -> (String, String) {
         let selected = try XCTUnwrap((object(before.payloadJSON)["attachments"] as? [[String: Any]])?.first)
         let identity = try json([attachmentID, selected["cloudKey"] ?? NSNull(), selected["fileHash"] ?? NSNull(), selected["contentRev"] ?? 0])
@@ -324,8 +323,8 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
         XCTAssertEqual((candidates[0]["authority"] as? [String: Any])?["kind"] as? String, "ownedAvailability")
         let replacement = root.appendingPathComponent("replacement.txt"); try bytes.write(to: replacement)
         try FileManager.default.removeItem(at: target); try FileManager.default.moveItem(at: replacement, to: target)
-        // Remove only the conservative durable tombstone reference so retry
-        // must reprove the recorded owned publication, rather than keep it.
+
+
         _ = try sql("UPDATE tasks SET attachments='[]' WHERE id=?", [taskID])
         let replacementIdentity = try inode(target), saved = try rows()
         physicalJobs = 0
@@ -351,7 +350,7 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
         XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), bytes); XCTAssertEqual(try rows(), saved)
         XCTAssertNil(try store.readAvailability()); XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
-    /// Core's `normalizeAttachmentCleanupUri` treats percent-encoded and plain spellings as one file.
+
     func testDurableOnlyPercentEncodedReferenceRetainsBytes() async throws {
         let seeded = try await seed(), id = UUID().uuidString.lowercased(), identity = try inode(target)
         let live = host(); _ = try await live.start(); _ = try await discard(live, requestId: id)
@@ -536,7 +535,7 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
             let seeded = try await seed(), initial = seeded.operations[0].before
             var historicalPayload = try object(initial.payloadJSON)
             if wrapperVersion == 2 {
-                // The sealed legacy Save checkpoint predates complete checklist ownership.
+
                 historicalPayload.removeValue(forKey: "checklistBase"); historicalPayload.removeValue(forKey: "checklistValue")
             }
             let original = EditorDraftSnapshot(sessionID: initial.sessionID, taskID: initial.taskID, generation: initial.generation,
@@ -606,8 +605,8 @@ final class AttachmentAvailabilityHostTests: XCTestCase {
         let live = host(); _ = try await live.start()
         await refused { _ = try await live.recoverAttachmentDraftV3(expectedSession: seeded.session.sessionID) }
         let retained = try record()
-        // A valid recovery re-ACK may re-encode the sidecar. Its frozen strings
-        // and every recorded resource receipt must remain the original proof.
+
+
         XCTAssertEqual(retained, seeded)
         let original = seeded.operations[0], actual = retained.operations[0]
         XCTAssertEqual(Data(actual.requestJSON.utf8), Data(original.requestJSON.utf8))

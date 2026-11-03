@@ -21,21 +21,7 @@ import {
     type WebDavDocumentVersion,
 } from './webdav';
 
-/**
- * ADR 0014 completion — the one implementation of the `SyncBackendIO` port.
- *
- * `sync-run-ports.ts` declared the port; desktop and mobile each hand-wrote
- * the same five-way backend ladder (cloudkit / webdav / cloud+selfhosted /
- * cloud+dropbox / file) across four methods. This module owns that ladder,
- * the `dropbox:v1:rev=` fingerprint wire format, the Dropbox conflict
- * mapping, the Dropbox auth-retry-once policy, and remote-URL normalization.
- * Platforms inject only their genuine transport truths — see `SyncTransport`.
- */
 
-/** Ladder-visible sync config for one cycle. Mutated in place by the ladder
- *  (`syncUrl`, `dropboxRev`) so platform code and the returned `SyncBackendIO`
- *  observe the same values a request used — preserve that reporting channel's
- *  semantics exactly; platforms read it for error context and fast-sync scope. */
 export type SyncBackendContext = {
     backend: SyncBackend;
     cloudProvider: CloudProvider;
@@ -43,34 +29,30 @@ export type SyncBackendContext = {
     cloud?: { url: string } | null;
     filePath?: string;
     dropboxAppKey?: string;
-    /** Remote location of the last request this cycle made; mutated by the ladder. */
+
     syncUrl?: string;
-    /** Cached Dropbox content-hash rev; mutated by the ladder after every
-     *  Dropbox read/write/fingerprint call. */
+
+
     dropboxRev: string | null;
-    /** True only when the platform has proven both that sync encryption is exactly
-     * off and that this endpoint is the legacy weak/no-ETag compatibility case. */
+
+
     allowLegacyWebdavPlaintext?: boolean;
-    /** True when the platform has proven sync encryption is exactly off for this cycle
-     * (state 'off', no incomplete transition). Only this posture may degrade to the
-     * legacy plaintext write when a read arrives without a strong ETag. */
+
+
     syncEncryptionOff?: boolean;
 };
 
-/** One remote-write transport result (webdav/cloud PUT response shape). */
+
 type RemoteWriteResult = Parameters<typeof normalizeRemoteWriteResult>[1];
 type RemoteHeadResult = { exists: boolean; fingerprint: string | null } | null | undefined;
 type DropboxRevResult = { rev: string | null };
 type DropboxDownloadResult = { data: AppData | null; rev: string | null };
 type AttachmentSyncResult = Promise<AppData | boolean | null | undefined>;
 
-/** An ordinary document read: the plaintext body, or the decrypted one. */
+
 export type WebdavSyncDocumentRead = WebDavDocumentVersion & { state?: 'data'; data: AppData | null };
 
-/** The RAW WebDAV read a transport returns. Transports no longer decide what a
- *  non-`data` state means — `createSyncBackendIO` owns that (see
- *  `SyncEncryptionPosture`). Desktop's Tauri path decrypts in Rust and therefore
- *  never reports a state at all, which reads as `data`. */
+
 export type WebdavSyncReadResult =
     | WebdavSyncDocumentRead
     | (WebDavDocumentVersion & { state: 'encrypted-no-key'; salt: Uint8Array; params: SyncCryptoKdfParams })
@@ -83,29 +65,19 @@ export type FileSyncReadResult = {
     needsRepair?: boolean;
 };
 
-/**
- * Platform transport for one sync cycle's active backend. Every member here
- * is a deliberate platform truth carried over verbatim from the desktop/mobile
- * orchestrators (see `sync-run-ports.ts` for the ones ADR 0014 already
- * codified): desktop forks `isTauriRuntimeEnv()` between `tauriInvoke` and
- * `fetch` and resolves the WebDAV password from the OS keyring; mobile wraps
- * WebDAV calls in its rate-limit controller and threads an `AbortSignal`.
- * Retry wrapping (attempt counts, backoff, which errors are retryable) is
- * also a platform truth — each method already includes whatever retry policy
- * that platform runs today. This ladder does not add or remove retries.
- */
+
 export type SyncTransport = {
     acquireWebdavRemoteMutationFence?(): Promise<SyncRemoteMutationFenceLease>;
     acquireDropboxRemoteMutationFence?(token: string): Promise<SyncRemoteMutationFenceLease>;
     webdavGet(): Promise<WebdavSyncReadResult>;
-    /** null means create-only (If-None-Match:*); a value is the strong GET ETag (If-Match). */
+
     webdavPut(
         sanitized: AppData,
         expectedEtag: string | null,
         assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
     ): Promise<RemoteWriteResult>;
-    /** One-shot compatibility write for plaintext providers without strong ETags.
-     * Core rereads and compares the remote snapshot immediately before calling this. */
+
+
     webdavPutLegacyPlaintext?(
         sanitized: AppData,
         assertRemoteMutationFenceHeld?: (minRemainingMs?: number) => Promise<void>,
@@ -118,7 +90,7 @@ export type SyncTransport = {
     fileWrite(sanitized: AppData, expectedFingerprint?: string): Promise<void>;
     cloudKitRead(): Promise<AppData | null | undefined>;
     cloudKitWrite(sanitized: AppData): Promise<void>;
-    /** Resolve a Dropbox access token; `forceRefresh` on the auth-retry pass. */
+
     resolveDropboxToken(forceRefresh: boolean): Promise<string>;
     dropboxDownload(token: string): Promise<DropboxDownloadResult>;
     dropboxUpload(
@@ -138,13 +110,10 @@ export type SyncTransport = {
 const DROPBOX_REV_FINGERPRINT_PREFIX = 'dropbox:v1:rev=';
 const WEBDAV_ETAG_FINGERPRINT_PREFIX = 'webdav:v1:etag=';
 
-/** `dropbox:v1:rev=` cached-fingerprint wire format — one place, not four. */
+
 export const buildDropboxRevFingerprint = (rev: string): string => `${DROPBOX_REV_FINGERPRINT_PREFIX}${rev}`;
 
-/** The strong ETag inside a `webdav:v1:etag=` fast-check fingerprint, or null.
- *  `buildHttpRemoteFileFingerprint` also emits a `mtime=/len=` form for servers
- *  that send no ETag, and copies a weak (`W/"…"`) validator through verbatim;
- *  neither is a compare-and-swap primitive, so both answer null here. */
+
 const strongEtagFromWebdavFingerprint = (fingerprint: string): string | null => (
     fingerprint.startsWith(WEBDAV_ETAG_FINGERPRINT_PREFIX)
         ? normalizeStrongWebdavEtag(fingerprint.slice(WEBDAV_ETAG_FINGERPRINT_PREFIX.length))
@@ -173,15 +142,7 @@ export function createSyncBackendIO(
         data: remote.data,
     });
 
-    /**
-     * The WebDAV read encryption posture — one decision, previously copied into
-     * desktop's native path, desktop's web path, and mobile's transport.
-     *
-     * Order is load-bearing on every refusing branch: emit the `remote-read`
-     * diagnostics line first (a shared log must never show a refusal with no
-     * posture behind it), persist the durable discovery second (it has to
-     * survive a restart), throw last. Nothing on the remote is touched here.
-     */
+
     const readWebdavDocument = async (): Promise<WebdavSyncDocumentRead> => {
         const remote = await transport.webdavGet();
         const material = posture?.material ?? null;
@@ -212,16 +173,13 @@ export function createSyncBackendIO(
                 foreignSalt: material !== null,
                 decision: version === 'strong' ? 'no-key' : 'version-unavailable',
             });
-            // The encrypted CAS depends on the strong ETag. Refuse before persisting
-            // anything: a discovery recorded here would block the location on evidence
-            // this cycle could not safely act on.
+
+
             if (version !== 'strong') {
                 throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
             }
-            // Only a posture port can name this refusal: desktop wraps the Rust-mirrored
-            // sentinel, mobile raises its own class. Spelling a fallback sentinel here
-            // would be a third copy of a string that already lives in two places, so a
-            // transport that can report ciphertext must come with a port.
+
+
             if (!posture) {
                 throw new Error('WebDAV remote is encrypted; createSyncBackendIO needs a SyncEncryptionPosture to read it');
             }
@@ -229,12 +187,7 @@ export function createSyncBackendIO(
             throw posture.noKeyError();
         }
 
-        // `syncEncryptionOff` is the proven-plaintext posture for the whole cycle;
-        // `material` is what actually happened to these bytes. They agree except in the
-        // states that hold no usable key (a locked keyring, an unresolved no-key
-        // discovery), and those must fail closed rather than write plaintext. An
-        // unset `syncEncryptionOff` is a caller that models no encryption at all, so
-        // it reads as plaintext and this whole block stays inert for it.
+
         const encryptedRead = material !== null || ctx.syncEncryptionOff === false;
         logRemoteRead({
             artifact: encryptedRead ? syncEncryptedArtifactName(SYNC_FILE_NAME) : SYNC_FILE_NAME,
@@ -255,8 +208,8 @@ export function createSyncBackendIO(
                 throw new SyncEncryptionRemoteVersionUnavailableError('WebDAV encrypted sync document');
             }
             if (!ctx.allowLegacyWebdavPlaintext) {
-                // The ladder below degrades this cycle to the bounded legacy write.
-                // Log the validator the server actually sent so the next report says so.
+
+
                 posture?.onWeakEtagPlaintextRead?.(remote.strongEtag ?? null);
             }
         }
@@ -266,11 +219,7 @@ export function createSyncBackendIO(
         return remote;
     };
 
-    /** Dropbox token-retry policy: try with the current token; on an
-     *  unauthorized response, force-refresh once and retry once; any other
-     *  error, or a second unauthorized response, propagates. Outer transient
-     *  retry (backoff, attempt counts) is each platform's own, already baked
-     *  into `resolveDropboxToken`/`dropboxDownload`/`dropboxUpload`/`dropboxMetadata`. */
+
     const runDropboxWithAuthRetry = async <T>(operation: (token: string) => Promise<T>): Promise<T> => {
         let forceRefresh = false;
         let retried = false;
@@ -289,12 +238,8 @@ export function createSyncBackendIO(
     return {
         acquireRemoteMutationFence: async () => {
             if (ctx.backend === 'webdav' && ctx.webdav?.url) {
-                // The legacy plaintext compatibility mode exists specifically for
-                // providers that cannot supply strong ETags. The WebDAV fence uses
-                // the same conditional-write capability, so attempting to acquire it
-                // would fail before the bounded legacy reread/write path can run.
-                // Current-version callers still serialize cycles locally; without a
-                // server CAS primitive, cross-device atomicity cannot be guaranteed.
+
+
                 if (ctx.allowLegacyWebdavPlaintext) return null;
                 return transport.acquireWebdavRemoteMutationFence?.() ?? null;
             }
@@ -312,16 +257,14 @@ export function createSyncBackendIO(
         ),
         adoptRemoteFingerprintForWrite: (fingerprint) => {
             if (ctx.backend === 'webdav') {
-                // The legacy plaintext mode exists for providers with no
-                // conditional-write primitive at all; its write path deliberately
-                // rereads and byte-compares instead, which is the read this path
-                // is skipping. Never adopt there.
+
+
                 if (ctx.allowLegacyWebdavPlaintext) return false;
                 const strongEtag = strongEtagFromWebdavFingerprint(fingerprint);
                 if (!strongEtag) return false;
                 webdavDocumentVersion = { exists: true, strongEtag };
-                // No document was read, so there is no snapshot to compare; leaving
-                // it null keeps the legacy reread branch in `writeRemote` unreachable.
+
+
                 webdavDocumentSnapshot = null;
                 return true;
             }
@@ -329,14 +272,13 @@ export function createSyncBackendIO(
                 if (!fingerprint.startsWith(DROPBOX_REV_FINGERPRINT_PREFIX)) return false;
                 const rev = fingerprint.slice(DROPBOX_REV_FINGERPRINT_PREFIX.length);
                 if (!rev) return false;
-                // `dropboxUpload` sends this as the expected rev; a peer write
-                // since it was read fails the upload with a 409.
+
+
                 ctx.dropboxRev = rev;
                 return true;
             }
-            // Self-hosted cloud PUTs are unconditional (the server merges instead),
-            // the file backend guards on a fingerprint only the read produces, and
-            // CloudKit has no fingerprint at all.
+
+
             return false;
         },
         readRemote: async () => {
@@ -352,15 +294,8 @@ export function createSyncBackendIO(
                     const remote = await readWebdavDocument();
                     webdavDocumentVersion = { exists: remote.exists, strongEtag: remote.strongEtag };
                     webdavDocumentSnapshot = traceSection('sync:readSnapshot', () => snapshotWebdavRead(remote));
-                    // A plaintext endpoint that answered this read without a strong ETag cannot
-                    // support the conditional write the cycle would otherwise demand — whatever
-                    // the capability probe concluded earlier (#1113's observational posture, and
-                    // a server/proxy can drop the validator on one response). With encryption off
-                    // the pre-1.2.5 posture applies: degrade THIS cycle to the bounded legacy
-                    // plaintext write instead of failing it. The legacy write still rereads and
-                    // byte-compares first, and prefers a conditional write when the ETag is back,
-                    // so a transient blip costs nothing and nothing is demoted beyond this cycle.
-                    // Encryption-on cycles never reach here: their read seams fail closed first.
+
+
                     if (
                         ctx.syncEncryptionOff
                         && !ctx.allowLegacyWebdavPlaintext
@@ -371,8 +306,8 @@ export function createSyncBackendIO(
                     }
                     return remote.data;
                 } catch (error) {
-                    // Invalid JSON still enters the shared repair path. Preserve the GET
-                    // validator carried by that error so the repair is conditional too.
+
+
                     webdavDocumentVersion = getWebdavDocumentVersionFromError(error);
                     webdavDocumentSnapshot = null;
                     throw error;
@@ -429,10 +364,8 @@ export function createSyncBackendIO(
                         if (!webdavDocumentSnapshot || !transport.webdavPutLegacyPlaintext) {
                             throw new Error('WebDAV legacy plaintext write is unavailable; refusing an unconditional write');
                         }
-                        // A legacy provider has no atomic compare-and-swap primitive. Bound
-                        // the unavoidable race window with a fresh semantic snapshot
-                        // immediately before one non-retried plaintext PUT. Current-version
-                        // cycles remain locally serialized, but peer races are unavoidable.
+
+
                         await assertRemoteMutationFenceHeld?.();
                         const confirmed = await readWebdavDocument();
                         if (snapshotWebdavRead(confirmed) !== webdavDocumentSnapshot) {
@@ -459,9 +392,8 @@ export function createSyncBackendIO(
                     return normalizeRemoteWriteResult('webdav', result);
                 } catch (error) {
                     if (isWebdavRemoteWriteConflictError(error)) {
-                        // The native error message carries the rejecting HTTP
-                        // status ("… before replacement (412)"); keep it so the
-                        // requeue log can show why the server refused the write.
+
+
                         throw new SyncRemoteWriteConflict(
                             error instanceof Error ? error.message : String(error),
                         );

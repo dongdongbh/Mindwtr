@@ -157,8 +157,7 @@ vi.mock('react-native-draggable-flatlist', async () => {
   };
 });
 
-// The shared React Native test shim renders every SectionList row. For this
-// perf guard, keep the render path closer to native virtualization.
+
 vi.mock('react-native', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-native')>();
   const react = await import('react');
@@ -247,10 +246,7 @@ vi.mock('../contexts/language-context', () => ({
   }),
 }));
 
-// ToastProvider hands out one stable showToast/dismissToast pair (useCallback with no deps,
-// behind a memoized context value). Returning fresh spies per render would instead churn every
-// handler that closes over them, which is exactly what the render-count assertions below watch
-// for — the mock has to keep production's identity guarantee to measure anything real.
+
 const toastControls = vi.hoisted(() => ({
   showToast: vi.fn(),
   dismissToast: vi.fn(),
@@ -266,11 +262,7 @@ vi.mock('@/lib/sync-service', () => ({
   performMobileSync: vi.fn().mockResolvedValue({ success: true }),
 }));
 
-// resolveThemeTokens caches its result, so the real useThemeColors hands out the SAME
-// object until the theme actually changes, and every memo boundary taking `tc` compares
-// it by identity. Returning a fresh literal per call would switch those boundaries off
-// and measure an app that re-renders more than the real one. Keep one hoisted object so
-// the mock matches production's identity guarantee; do not inline it back.
+
 const themeColors = vi.hoisted(() => ({
   bg: '#0f172a',
   cardBg: '#111827',
@@ -315,11 +307,7 @@ vi.mock('../components/task-edit/TaskEditFormTab', () => ({
   }),
 }));
 
-// Production wraps the row in React.memo(_, areRowPropsEqual) (#766), and that
-// comparator is exactly React's default: same key count, every prop compared by
-// Object.is. A bare function stub would switch the boundary off and measure an
-// app that re-renders far more than the real one — the same trap the theme-mock
-// note above describes. Keep the memo; do not unwrap it.
+
 vi.mock('../components/swipeable-task-item', () => ({
   readTaskRowRenderCount: () => 0,
   SwipeableTaskItem: React.memo(function SwipeableTaskItemMock(props: Record<string, unknown>) {
@@ -331,7 +319,7 @@ vi.mock('../components/pomodoro-panel', () => ({
   PomodoroPanel: (props: Record<string, unknown>) => React.createElement('PomodoroPanel', props),
 }));
 
-// This closed overlay is outside the list render path under measurement.
+
 vi.mock('../components/task-list/TaskListTagModal', () => ({
   TaskListTagModal: () => null,
 }));
@@ -341,7 +329,7 @@ vi.mock('lucide-react-native', () => {
   return {
     Archive: Icon,
     AlertTriangle: Icon,
-    // lib/task-status-icons (#1256) and the vector check marks that replaced text glyphs.
+
     ArrowUpCircle: Icon,
     Book: Icon,
     CalendarClock: Icon,
@@ -1108,8 +1096,8 @@ describePerf('large-store mobile interaction performance', () => {
     const projectsData = createLargeStoreData();
     loadLargeStore(projectsData);
     const projectAreaById = buildMap(projectsData.areas);
-    // Core's real computeTaskDerivedState output (#927) — the same summary the
-    // screen reads via getDerivedState(), not a test-local reimplementation.
+
+
     const projectTaskSummaryById = useTaskStore.getState().getDerivedState().projectTaskSummaryById;
     const projectRows = buildProjectListRows({
       areaById: projectAreaById,

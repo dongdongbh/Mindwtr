@@ -67,7 +67,7 @@ type Witness = {
     recurrenceProjection: RecurrenceProjection | null;
     calendarTimeZone?: string;
     ids: string[];
-    /** Undefined top-level direct update fields are explicit clears. */
+
     directClears: string[];
     direct: Partial<Task>;
     focusCount: number;
@@ -407,7 +407,7 @@ const validHistoryRowSource = (task: Task, request: NativeChecklistWriteRequest)
 export const canCompleteNativeTask = (task: Task, projects: readonly Project[], readOnly = false): boolean =>
     !readOnly && !task.deletedAt && !task.purgedAt && isTaskActionable(task)
     && !isProjectedRecurringTaskId(task.id) && !isStatusListTaskReadOnly(task, projects);
-/** Scoped Board authority, including a Section-only parent; no new journal field. */
+
 const boardCompletionContainer = (task: Task, lists: { projects: readonly Project[]; sections: readonly Section[] }) => {
     const id = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 500;
     if (task.projectId != null && !id(task.projectId) || task.sectionId != null && !id(task.sectionId)) return null;
@@ -437,8 +437,8 @@ const boardUndoContainerMatches = (completion: NativeTaskCompletionEnvelope, sou
     const after = completion.prepared.checklist.effect.tasks.find(row => row.after.id === completion.request.id)?.after;
     if (!after || (source.projectId ?? null) !== (after.projectId ?? null) || (source.sectionId ?? null) !== (after.sectionId ?? null)
         || !boardCompletionContainer(source, lists)) return false;
-    // RN normalization can detach a Section-only source. Its original context
-    // still owns this Undo, while current parent status is evaluated as policy.
+
+
     const original = completion.prepared.checklist.witness;
     if (!boardCompletionContainer(original.source, lists)) return false;
     const originalSection = original.lists.sections.find(row => row.id === original.source.sectionId);
@@ -471,9 +471,8 @@ const readRequest = (value: unknown, validateField: (field: TaskDraftField, valu
     const bare = { id: input.id, base: input.base, patch: input.patch, scheduleBase: input.scheduleBase,
         ...(own(input, 'recurrenceBase') ? { recurrenceBase: input.recurrenceBase } : {}),
         ...(own(input, 'attachments') ? { attachments: input.attachments } : {}) };
-    // This row action uses shared canonical instant validation, independently
-    // of the general editor date format. Only its prior string baseline may be
-    // invalid; the outer wrapper binds the complete source and new instant.
+
+
     const fields = (input.intent === 'doneCompletedAt' || input.intent === 'archiveCompletedAt' || input.intent === 'referenceBackdate')
         ? (field: TaskDraftField, value: unknown) => field === 'completedAt'
             ? typeof value === 'string' && value.length <= 200
@@ -512,7 +511,7 @@ const readRequest = (value: unknown, validateField: (field: TaskDraftField, valu
         ...(input.intent === 'cancel' || input.intent === 'skip' || input.intent === 'doneStatus' || input.intent === 'referenceNext' || input.intent === 'referenceStatus' || input.intent === 'referenceComplete' || input.intent === 'referenceBackdate' || input.intent === 'referenceDestination' || input.intent === 'doneCompletedAt' || input.intent === 'archiveCompletedAt' ? { intent: input.intent } : {}) };
 };
 
-// This selection is closed by the internal factory, never by a request flag.
+
 type ChecklistSelection = {
     readRequest: typeof readRequest; mergeAttachments: typeof mergeNativeTaskLinkHalf;
 };
@@ -564,14 +563,14 @@ const directSaveUpdates = (source: Task, request: NativeChecklistSaveRequest, pr
     };
     if (request.intent === 'referenceBackdate') return { status: 'done', completedAt: request.patch.completedAt,
         ...(own(request.patch, 'timeSpentMinutes') ? { timeSpentMinutes: request.patch.timeSpentMinutes ?? undefined } : {}) };
-    // Done metadata actions use the exact RN row patch, without editor cleanup.
+
     if (request.intent === 'doneStatus' || request.intent === 'referenceNext' || isReferenceMenuRequest(request)) return { status: request.patch.status };
     if (request.intent === 'doneCompletedAt' || request.intent === 'archiveCompletedAt') return { completedAt: request.patch.completedAt };
     const attachments = request.attachments
         ? (selection?.mergeAttachments ?? mergeNativeTaskLinkHalf)(source.attachments ?? [], request.attachments) : source.attachments;
     if (attachments === null) return null;
     const draft = applyTaskDraftPatch(createTaskDraft(source), nativeTaskDraftPatchValues(draftRequest(request)));
-    // Swift's sorted JSON keys must not turn an unchanged checklist into a draft edit.
+
     const editSource = { ...source, checklist: toChecklist(source.checklist) };
     const updates = buildTaskEditUpdatePatch({ draft, checklist: toChecklist(request.checklist.value),
         attachments }, editSource);
@@ -594,8 +593,8 @@ const directIsBound = (source: Task, request: NativeChecklistSaveRequest, witnes
     const names = new Set([...Object.keys(expected), ...Object.keys(frozen)]);
     for (const name of names) {
         if (temporal.has(name)) {
-            // Date/link projections can depend on the preparing process's zone.
-            // Only fields actually requested (and their linked start) may vary.
+
+
             if (!own(request.patch, name)
                 && !(name === 'startTime' && (own(request.patch, 'dueDate') || own(request.patch, 'relativeStartOffset')))
                 && !same(expected[name as keyof Task], frozen[name as keyof Task])) return false;
@@ -672,8 +671,8 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
             if (!id) throw new Error('Missing frozen checklist child ID');
             return id;
         };
-        // A clean Skip has one lifecycle transition. A dirty Skip first resolves
-        // the ordinary Save, then archives that row in the same atomic effect.
+
+
         const hasDraftUpdate = selection && !skip ? Object.keys(direct).some((field) => !same(source[field as keyof Task], direct[field as keyof Task]))
             : !skip || Object.keys(direct).length > 0;
         const effects = hasDraftUpdate ? planTaskUpdateEffects({ task: source, preparedUpdates: prepared.updates,
@@ -744,7 +743,7 @@ const plan = (kind: 'save' | 'reset', request: NativeChecklistWriteRequest, witn
     return { effect, result: undo || unchanged ? { id: source.id } : effectResult(kind, effect, request, witness) };
 };
 
-/** Keep only rows the deterministic planner reads; never journal the library. */
+
 const reduceWitness = (witness: Witness, effect: PreparedChecklistEffect, state: Pick<TaskStore, '_allTasks' | '_allProjects' | '_allSections' | '_allAreas'>, reference = false, retainedContext?: Task): void => {
     const tasks = new Set<string>([
         witness.source.id,
@@ -881,7 +880,7 @@ const readChecklistPrepared = (
 const readPrepared = (input: unknown, validateField: (field: TaskDraftField, value: unknown) => boolean, boardCompletion = false): NativePreparedChecklistWrite | null =>
     readChecklistPrepared(input, validateField, undefined, boardCompletion) as NativePreparedChecklistWrite | null;
 
-/** The actual SQLite display codec followed by the normal load projection. */
+
 export const historyRowLoadProjection = (task: Task, preparedAt: string, temporal?: TaskLoadTemporalContext): Task => {
     const values = taskToSqliteRow(task);
     const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, values[index]]));
@@ -891,13 +890,13 @@ const validReferenceRawTask = (task: unknown, id: string): task is Task => isRec
     && validRawTask({ ...task, tags: task.tags ?? [], contexts: task.contexts ?? [] }, id);
 const sameRawHistoryRowTask = (left: Task, right: Task): boolean =>
     sameTaskSqliteRow(left, right) && sameSectionDeleteJson(left, right);
-// Owned guards recover exact JSON members from durable-read provenance.
+
 const sameOwnedRawTask = (left: Task, right: Task): boolean => {
     const before = rawReadTaskSnapshot(left), after = rawReadTaskSnapshot(right);
     return before !== null && after !== null && sameRawHistoryRowTask(before, after);
 };
-// Owned AFTER uses the writer's exact encoding (empty checklist -> NULL).
-// BEFORE stays raw; historical envelopes retain their existing comparator.
+
+
 const sameOwnedTaskAfter = (current: Task, expected: Task): boolean => {
     const values = taskToSqliteRow(expected);
     const row = Object.fromEntries(TASK_SQLITE_COLUMNS.map((column, index) => [column, values[index]]));
@@ -905,7 +904,7 @@ const sameOwnedTaskAfter = (current: Task, expected: Task): boolean => {
     rememberRawReadRow(stored, row, TASK_SQLITE_COLUMNS, taskToSqliteRow(stored));
     return sameOwnedRawTask(current, stored);
 };
-// Only the single source update can enter the existing raw Task overlay.
+
 const validHistoryRowEffect = (checklist: NativePreparedChecklistWrite, id: string): boolean => {
     const { effect } = checklist;
     const reference = isReferenceOperation(checklist.request);
@@ -1155,8 +1154,8 @@ const completionUndoDirect = (completion: NativeTaskCompletionEnvelope, witness:
 const planCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: Witness): PreparedChecklistEffect => {
     const planned = plan('save', completion.prepared.checklist.request, witness, false, true);
     const child = ownedCompletionChild(completion);
-    // A prior Today star makes even a no-star Undo result a cap-dependent
-    // decision. Freeze and compare the count/limit at the atomic write boundary.
+
+
     const effect: PreparedChecklistEffect = completion.prepared.checklist.witness.source.isFocusedToday === true
         ? { ...planned.effect, guards: { ...planned.effect.guards,
             focusCount: witness.focusCount, focusLimit: witness.focusLimit,
@@ -1170,7 +1169,7 @@ const planCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: W
         rev: nextRevision(child.rev), revBy: deviceId(witness) };
     return { ...effect, tasks: [...effect.tasks, { before: child, after: tombstone }] };
 };
-/** Exactly RN's delete-follow-up, moveTask, then conditional Focus update. */
+
 const planRawCompletionUndo = (completion: NativeTaskCompletionEnvelope, witness: Witness): PreparedChecklistEffect => {
     const board = completion.prepared.kind === 'boardComplete';
     const child = ownedCompletionChild(completion);
@@ -1359,7 +1358,7 @@ export type NativeTaskChecklistSaveDependencies = {
 };
 function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencies) {
     const historyRowSaves = createAreaSaveGuard(deps.save);
-    // A failed save gates fresh writes, so only one owned raw overlay is retained.
+
     let pendingHistoryRow: { envelope: NativeRawWriteEnvelope;
         adapter: ReturnType<typeof getStorageAdapter>;
         boundary: PreparedNativeSaveBoundary | undefined } | null = null;
@@ -1380,8 +1379,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         if (prepared.kind === 'referenceDestination') {
             if (!referenceDestinationAvailable(prepared.request.destination, { projects: data.projects, areas: data.areas ?? [] }))
                 return fail('STALE_REVISION', 'Reference destination is no longer available');
-            // This filing action binds only its source/retained Section, never
-            // unrelated Sections. Its identity and parent must survive retries.
+
+
             const sectionId = witness.source.sectionId;
             if (sectionId && !same(witness.lists.sections.find((row) => row.id === sectionId),
                 (data.sections ?? []).find((row) => row.id === sectionId)))
@@ -1423,8 +1422,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             || !task || (!isArchiveCompletedAtRequest(prepared.checklist.request)
                 && (deps.isReadOnly(task) || isStatusListTaskReadOnly(current, data.projects))))
             return fail('STALE_REVISION', `Saved ${reference ? 'Reference' : 'Done'} task is no longer the prepared writable source`);
-        // Replan against current normalized lists at the frozen clock, retaining
-        // membership, order, settings, selected container and assignment guards.
+
+
         try {
             const witness = prepared.checklist.witness;
             const currentWitness: Witness = { ...witness,
@@ -1434,9 +1433,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                     sections: data.sections ?? [], areas: data.areas ?? [] },
                 settings: data.settings, deviceIdBefore: data.settings.deviceId ?? null };
             if (isReferenceOperation(prepared.checklist.request)) {
-                // The hidden Reference star can become a counted Next slot.
-                // Recompute from the complete durable task state, including on
-                // an owned save retry; page/filter state is never authority.
+
+
                 currentWitness.focusCount = countFocusedTasksBeforeBoundary(currentWitness.lists.tasks, witness.futureBoundary);
                 currentWitness.focusLimit = normalizeFocusTaskLimit(data.settings.gtd?.focusTaskLimit);
                 const guards = prepared.checklist.effect.guards;
@@ -1479,8 +1477,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                 return fail('STALE_REVISION', applied.error ?? `${action} raw retry was superseded`);
             pending.boundary = read.value.authority.saveBoundary;
         }
-        // The receipt engine has registered this exact reply before this flush.
-        // Flush its raw effect directly; generic retryPersistence projects memory.
+
+
         const saved = await historyRowSaves.finish(pending.envelope, pending.adapter, false, pending.boundary);
         if (saved.ok) pendingHistoryRow = null;
         return saved;
@@ -1513,16 +1511,16 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         const alreadySaved = historyRowReceipts.saved<T>(envelope.request.requestId, payload);
         if (alreadySaved) return alreadySaved.ok && !same(alreadySaved.value, envelope.prepared.result)
             ? fail('INVALID_INPUT', `Saved ${action} result does not match its journal`) : alreadySaved;
-        // Development v1 journals never bound the raw source. Saved v1
-        // receipts remain authoritative; an uncommitted v1 cannot infer it.
+
+
         if (envelope.prepared.version !== 2)
             return fail('SAVE_FAILED', 'Uncommitted Done status journal has no raw source binding');
         const bound = envelope as NonNullable<typeof pendingHistoryRow>['envelope'];
         let prewriteFailure: { ok: false; error: { code: 'SAVE_FAILED'; message: string } } | null = null;
         const notLanded = (message: string): NativeHostResult<never> => {
             prewriteFailure = { ok: false, error: { code: 'SAVE_FAILED', message } };
-            // SAVE_FAILED means landed to the receipt engine. A read failure
-            // must delete its reservation, then keep the public error code.
+
+
             return { ok: false, error: { code: 'ACTION_FAILED', message } };
         };
         const confirmed = await historyRowReceipts.run(envelope.request.requestId, payload, async () => {
@@ -1571,7 +1569,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
                                 ? 'v1.3.4/ios-done-completion-time' : 'v1.3.4/ios-archive-completion-time', outcome: 'confirmed' } });
                 }
             }
-            catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+            catch {                                                               }
         }
         return confirmed;
     };
@@ -2142,8 +2140,8 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
             return { ok: true, value: { title: resolveI18nText(t, 'task.completedAtPromptTitle'),
                 saveLabel: resolveI18nText(t, 'common.save'), cancelLabel: resolveI18nText(t, 'common.cancel'),
                 taskId: source.value.id, taskRevision: input.taskRevision,
-                // RN's row complete picker has no initialValue, including when
-                // a Reference task carries an unrelated old completion stamp.
+
+
                 initialValue: null, initialEpochMilliseconds: null,
                 showTimeSpent: isTaskEditorTimeSpentEnabled(state.settings),
                 initialTimeSpentMinutes: normalizeTimeSpentMinutes(source.value.timeSpentMinutes) ?? null,
@@ -2429,7 +2427,7 @@ function createTaskChecklistSaveFactory(deps: NativeTaskChecklistSaveDependencie
         prepareTaskChecklistSave: (request: NativeChecklistSaveRequest): NativeHostResult<NativeChecklistPreparation> =>
             isHistoryRowRequest(request) ? fail('INVALID_INPUT', 'Done status requires its row request') : prepare('save', request),
         prepareTaskChecklistReset: (request: NativeChecklistResetRequest): NativeHostResult<NativeChecklistPreparation> => prepare('reset', request),
-        /** Pure journal authority check, valid before storage activation and terminal cleanup. */
+
         validatePreparedTaskChecklistWrite(input: { request: NativeChecklistWriteRequest; prepared: NativePreparedChecklistWrite }): NativeHostResult<NativeChecklistResult> {
             const prepared = readPrepared(input, deps.validateField);
             return prepared && !isHistoryRowRequest(prepared.request) ? { ok: true, value: prepared.result }
@@ -2466,7 +2464,7 @@ export function createTaskChecklistSaveMethods(deps: NativeTaskChecklistSaveDepe
     return createTaskChecklistSaveFactory(deps).publicMethods;
 }
 
-/** Internal complete-owned factory; ordinary methods cannot select file authority. */
+
 export function createOwnedCompleteTaskChecklistSaveAuthority(deps: NativeTaskChecklistSaveDependencies) {
     return createTaskChecklistSaveFactory(deps).ownedAuthority;
 }

@@ -74,8 +74,7 @@ final class NativePhotoEncodingTests: XCTestCase {
         return data as Data
     }
 
-    // Literal Expo no-edit GIF oracle: copy source properties and each frame,
-    // adding quality0.9. Independent frame/property assertions follow below.
+
     private func rnGIF(_ data: Data) throws -> Data {
         let input = try source(data)
         let output = NSMutableData()
@@ -99,8 +98,7 @@ final class NativePhotoEncodingTests: XCTestCase {
         }
     }
 
-    // Encode one actual1M-pixel solid frame (4MB temporary storage), then repeat
-    // its valid compressed GIF blocks. No129M-pixel raster is constructed.
+
     private func gifWithRepeatedSolidFrame(frames: Int) throws -> Data {
         let pixels = Data(repeating: 0x70, count: 1_000 * 1_000 * 4)
         let provider = try XCTUnwrap(CGDataProvider(data: pixels as CFData))
@@ -200,8 +198,8 @@ final class NativePhotoEncodingTests: XCTestCase {
         let input = try fixture(UTType.png.identifier, transparent: true)
         let uiImage = try XCTUnwrap(UIImage(data: input))
         let jpeg = try XCTUnwrap(uiImage.jpegData(compressionQuality: 0.9))
-        // Expo loads the first image-conforming identifier but switches on the
-        // first registered identifier. This intentionally does not repair it.
+
+
         for preferred in [nil, "public.data", "org.example.unknown-image", UTType.jpeg.identifier] {
             let encoded = try NativeAttachmentPhotoEncoder.encode(input, selection: selection(preferred), checkCancellation: {})
             XCTAssertEqual(encoded.bytes, jpeg)
@@ -210,8 +208,8 @@ final class NativePhotoEncodingTests: XCTestCase {
         let branches = [(UTType.bmp.identifier, "bmp"), (UTType.webP.identifier, "webp"),
                         (UTType.heic.identifier, "heic"), (UTType.tiff.identifier, "tiff"), ("public.avif", "avif")]
         for (preferred, ext) in branches {
-            // The loaded representation is a valid PNG; its preferred first
-            // identifier selects RN's literal raw branch and extension.
+
+
             let encoded = try NativeAttachmentPhotoEncoder.encode(input, selection: selection(preferred), checkCancellation: {})
             XCTAssertEqual(encoded.bytes, input)
             XCTAssertEqual(encoded.fileExtension, ext)
@@ -248,8 +246,8 @@ final class NativePhotoEncodingTests: XCTestCase {
         }
         let animated = try gif(frames: 3)
         var checks = 0
-        // Admission + three bounded frame inspections + UIImage admission precede
-        // the first encode frame; check7 cancels before the second encode frame.
+
+
         XCTAssertThrowsError(try NativeAttachmentPhotoEncoder.encode(animated, selection: selection(UTType.gif.identifier)) {
             checks += 1
             if checks == 7 { throw Cancelled.stopped }

@@ -101,9 +101,8 @@ export function useTaskSelection(
     const activeActionRef = useRef<TaskSelectionAction | null>(null);
 
     const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIds]);
-    // Derive action inputs from the current selectable collection immediately.
-    // The effect below also prunes state, but it runs after render; intersecting
-    // here closes the window where a newly read-only row could reach a bulk write.
+
+
     const selectedIdsArray = useMemo(
         () => Array.from(multiSelectedIds).filter((id) => visibleIdSet.has(id)),
         [multiSelectedIds, visibleIdSet],
@@ -303,7 +302,7 @@ export function useTaskSelection(
         }
         const updates = buildBulkOrganizeTaskUpdates(selectedIdsArray, tasksById, input);
         if (updates.length === 0) return Promise.resolve(false);
-        // Merge tags/contexts into each task's latest row, so a token a sync save added meanwhile is kept.
+
         return runSelectedTaskAction(
             'organize',
             (taskIds) => batchUpdateTasksFromLatest(taskIds, (task) => {
@@ -333,7 +332,7 @@ export function useTaskSelection(
             return Promise.resolve(false);
         }
         if (!batchUpdateTasks) return Promise.resolve(false);
-        // Add or remove the token on each task's latest row, so a token a sync save added meanwhile is kept.
+
         return runSelectedTaskAction(
             'update',
             (taskIds) => batchUpdateTasksFromLatest(taskIds, (task) => (

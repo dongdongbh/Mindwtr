@@ -6,10 +6,7 @@ enum AppleClarificationReservation<Value> {
     case cancelledBeforeReservation
 }
 
-/// Small identity-checked registry for native inference tasks. Duplicate request
-/// IDs are rejected, and an older task's defer cannot remove a newer entry.
-/// Cancellation can arrive through the Expo bridge before registration; a
-/// bounded, one-shot tombstone makes that ordering cancel the later reservation.
+
 final class AppleClarificationRequestRegistry<Value>: @unchecked Sendable {
     private struct Entry {
         let token: UUID
@@ -26,9 +23,7 @@ final class AppleClarificationRequestRegistry<Value>: @unchecked Sendable {
         self.maxPendingCancellationCount = max(1, maxPendingCancellationCount)
     }
 
-    /// The factory runs under the registry lock only after the request ID has
-    /// passed duplicate and pending-cancellation checks. This ensures rejected
-    /// requests cannot begin inference before their reservation result is known.
+
     func reserve(
         for requestId: String,
         createValue: () -> Value
@@ -54,8 +49,7 @@ final class AppleClarificationRequestRegistry<Value>: @unchecked Sendable {
         return entries[requestId]?.value
     }
 
-    /// Returns an active value for immediate cancellation. If registration has
-    /// not happened yet, records a bounded one-shot cancellation tombstone.
+
     func cancel(_ requestId: String) -> Value? {
         lock.lock()
         defer { lock.unlock() }

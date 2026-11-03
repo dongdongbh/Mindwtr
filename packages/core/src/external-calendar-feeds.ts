@@ -1,25 +1,6 @@
-/**
- * External calendars on a phone: the ICS subscriptions (URLs and local .ics
- * files) and the device calendars, fetched for a window and merged through
- * external-calendar-ingestion.ts. Moved from React Native's
- * `apps/mobile/lib/external-calendar.ts` (now a binding) so the native apps run
- * the same rules; each host binds its device through `ExternalCalendarFeedsHost`.
- *
- * Fetching: each enabled feed is read with a 15 s timeout, and a feed that fails
- * drops out of the result without failing the others (`onFeedError` names it). The caller's `signal`
- * cancels every read, and `timeoutMs` bounds the whole fetch. The device
- * calendars are read only while they are on and access is granted; the calendar
- * the app pushes tasks to (a "Mindwtr" calendar) and every event it pushed are
- * left out, so a task never shows twice. The same event from two sources keeps
- * one copy (mergeExternalCalendarSources).
- *
- * Device keys (React Native's AsyncStorage names): the subscriptions under
- * EXTERNAL_CALENDARS_KEY (a device copy of the synced `settings.externalCalendars`),
- * the device calendar choices under SYSTEM_CALENDAR_SETTINGS_KEY (device-only:
- * calendar IDs mean nothing on another device). The sandbox reads and writes none.
- *
- * Logs carry counts only: never an event title or a feed URL.
- */
+
+
+
 import { hasCalendarPushTaskMarker } from './calendar-scheduling';
 import { normalizeExternalCalendarColor } from './external-calendar-colors';
 import { readResponseText, ResponseTooLargeError } from './http-utils';
@@ -32,14 +13,14 @@ export const EXTERNAL_CALENDARS_KEY = 'mindwtr-external-calendars';
 export const SYSTEM_CALENDAR_SETTINGS_KEY = 'mindwtr-system-calendar-settings';
 
 const SYSTEM_CALENDAR_SOURCE_PREFIX = 'system';
-/** Each feed's read, as React Native has always bounded it. */
+
 export const EXTERNAL_CALENDAR_FEED_TIMEOUT_MS = 15_000;
-/** Largest feed (raw or after gunzip) a refresh reads; a bigger one fails on its own. */
+
 export const EXTERNAL_CALENDAR_FEED_MAX_BYTES = 20 * 1024 * 1024;
-/** The Calendar screen reloads its external calendars on focus and on return to the app, at most once a second. */
+
 export const EXTERNAL_CALENDAR_REFRESH_THROTTLE_MS = 1_000;
 
-/** A return to the app (from the background or inactive) reloads the Calendar screen's external calendars. */
+
 export function shouldRefreshExternalCalendarOnAppStateChange(
     previousAppState: string,
     nextAppState: string,
@@ -66,13 +47,13 @@ export interface SystemCalendarInfo {
 export type ExternalCalendarFetchOptions = {
     signal?: AbortSignal;
     timeoutMs?: number;
-    /** Called for each enabled subscription that could not be read or parsed (it drops out of the result). */
+
     onFeedError?: (calendarId: string) => void;
-    /** A native read's admitted sources; omission retains RN's device getters. */
+
     sources?: { subscriptions: ExternalCalendarSubscription[]; systemSettings: SystemCalendarSettings };
 };
 
-/** A device calendar as expo-calendar describes it (Android: a CalendarContract.Calendars row). */
+
 export type DeviceCalendar = {
     id: string;
     title?: string;
@@ -85,10 +66,7 @@ export type DeviceCalendar = {
     source?: { id?: string; name?: string; type?: string; isLocalAccount?: boolean };
 };
 
-/**
- * An event instance as expo-calendar returns it. On Android an all-day event's
- * bounds are the provider's UTC midnights; core turns them into local dates.
- */
+
 export type DeviceCalendarEvent = {
     id?: string;
     calendarId?: string;
@@ -100,37 +78,34 @@ export type DeviceCalendarEvent = {
     location?: string | null;
 };
 
-/** The device calendar reads (expo-calendar on React Native). */
+
 export type DeviceCalendarReader = {
-    /** The permission as the OS reports it ({ status: 'granted' | 'denied' | 'undetermined' }). */
+
     getPermissions(): Promise<{ status: unknown }>;
-    /** Shows the OS prompt. */
+
     requestPermissions(): Promise<{ status: unknown }>;
-    /** Every event calendar on the device. */
+
     getCalendars(): Promise<DeviceCalendar[]>;
-    /** The instances in these calendars from `start` to `end` (Android's provider: only those contained in it). */
+
     getEvents(calendarIds: string[], start: Date, end: Date): Promise<DeviceCalendarEvent[]>;
 };
 
 export type CalendarLogContext = { scope: string; extra: Record<string, string> };
 
 export type ExternalCalendarFeedsHost = {
-    /** 'android', 'ios' or 'web', read on each call. */
+
     platform(): string;
-    /** The device key-value store (React Native's AsyncStorage keys). */
+
     storage: { getItem(key: string): Promise<string | null>; setItem(key: string, value: string): Promise<void> };
     fetch: typeof fetch;
-    /** Reads a local feed: a `file://` or a `content://` URL. */
+
     readLocalFile(url: string, signal?: AbortSignal): Promise<string>;
     calendars: DeviceCalendarReader;
-    /** This device's pushed-event map (the calendar_sync table) for `platform`. */
+
     getAllCalendarSyncEntries(platform: string): Promise<Array<{ calendarId?: unknown; calendarEventId?: unknown }>>;
     logInfo(message: string, context: CalendarLogContext): unknown;
-    /**
-     * The synced `settings.externalCalendars`, which the reads follow when it is a list (the Settings screen's rule,
-     * resolveCalendarFeedsOnLoad): a subscription added or removed on another device counts before this device's copy
-     * catches up. Absent or not a list: the device copy.
-     */
+
+
     syncedSubscriptions?(): ExternalCalendarSubscription[] | undefined;
 };
 
@@ -199,7 +174,7 @@ export function normalizeSystemCalendarSettings(raw: Partial<SystemCalendarSetti
         ? Array.from(
             new Set(
                 raw.selectedCalendarIds
-                    // Provider identifiers are opaque; trim only to reject blank entries.
+
                     .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
             )
         )
@@ -215,7 +190,7 @@ export function normalizeSystemCalendarSettings(raw: Partial<SystemCalendarSetti
     };
 }
 
-/** Decode the device-local cell with the same legacy defaults as the RN binding. */
+
 export function decodeSystemCalendarSettings(raw: string | null): SystemCalendarSettings {
     return normalizeSystemCalendarSettings(safeJsonParse<Partial<SystemCalendarSettings> | null>(raw, null));
 }
@@ -250,7 +225,7 @@ function getSystemCalendarSourceId(calendarId: string): string {
     return `${SYSTEM_CALENDAR_SOURCE_PREFIX}:${calendarId}`;
 }
 
-/** Whether the calendar app can open this event: a device calendar's event, outside the sandbox and the web. */
+
 export function canOpenExternalCalendarEvent(event: ExternalCalendarEvent, platform: string): boolean {
     return !isSandboxMode()
         && platform !== 'web'
@@ -284,7 +259,7 @@ export function normalizeExternalCalendarSubscriptions(calendars: readonly Exter
         .filter((c) => c.url.length > 0);
 }
 
-/** Decode a legacy device copy with the same defaults as the RN reader. */
+
 export function decodeExternalCalendarSubscriptions(raw: string | null): ExternalCalendarSubscription[] {
     return normalizeExternalCalendarSubscriptions(safeJsonParse<ExternalCalendarSubscription[]>(raw, []));
 }
@@ -447,7 +422,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
             throwIfAborted(signal);
             const text = await host.readLocalFile(url, signal);
             throwIfAborted(signal);
-            // ponytail: the host reads the whole file first; this only keeps the parser bounded.
+
             if (text.length > EXTERNAL_CALENDAR_FEED_MAX_BYTES) throw new ResponseTooLargeError(EXTERNAL_CALENDAR_FEED_MAX_BYTES);
             return text;
         }
@@ -503,12 +478,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
             })
         );
 
-        // A feed split by CATEGORIES is represented by its category calendars, so
-        // the subscription itself drops out of the visible list once nothing is
-        // left on it. `contributed` also carries the parent's `feedColor` when
-        // the feed wasn't split — it must win over the raw persisted entry
-        // (which never carries `feedColor`), so it's merged in as a later
-        // source rather than dropped, the same way desktop does it.
+
         const splitCalendarIds = new Set<string>();
         const icsSources: ExternalCalendarSourceResult[] = [];
         for (const [index, result] of results.entries()) {
@@ -579,14 +549,8 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         }
 
         const selectedIds = selectedCalendars.map((calendar) => calendar.id);
-        // expo-calendar's Android query selects `Instances.BEGIN >= start AND Instances.END <= end`
-        // (expo-calendar/android/.../CalendarModule.kt `findEvents`), i.e. only events *contained* in
-        // the window. A multi-day event that crosses either edge — the classic one spanning a month
-        // boundary — is dropped by the provider before we ever see it (#1134). iOS uses
-        // `predicateForEvents`, which already matches on overlap. So widen the Android query and clip
-        // to the requested window below, the same overlap rule the .ics path uses (core `ics.ts`).
-        // ponytail: fixed 92-day pad; an event hanging more than a quarter past an edge is still
-        // missed. Proper fix is our own CalendarContract.Instances query in native code.
+
+
         const queryPadMs = platform === 'android' ? 92 * 24 * 60 * 60 * 1000 : 0;
         const rawEvents = await withAbortSignal(
             host.calendars.getEvents(
@@ -598,8 +562,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
         );
         throwIfAborted(signal);
 
-        // Older exports did not carry a notes marker. Match only this device's
-        // persisted (calendar, native event) pair; a same-title event is unrelated.
+
         let mappedEventIdsByCalendar = new Map<string, Set<string>>();
         try {
             const entries = await withAbortSignal(host.getAllCalendarSyncEntries(platform), signal);
@@ -611,8 +574,8 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
                 mappedEventIdsByCalendar.set(entry.calendarId, ids);
             }
         } catch {
-            // Optional local mapping storage may be unavailable during startup.
-            // Calendar reading must still work, including ordinary events.
+
+
             throwIfAborted(signal);
             mappedEventIdsByCalendar = new Map();
         }
@@ -623,8 +586,8 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
             url: `system://${encodeURIComponent(calendar.id)}`,
             enabled: true,
             areaIds: settings.areaIdsByCalendar?.[calendar.id],
-            // The OS calendar's own color, resolved as a feed hint (#974) — never
-            // an explicit pick, so it never gets written into synced settings.
+
+
             feedColor: typeof calendar.color === 'string' && calendar.color.trim().length > 0 ? calendar.color : undefined,
         }));
 
@@ -653,18 +616,12 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
                 ? endCandidate
                 : new Date(rawStart.getTime() + (event.allDay ? 24 * 60 * 60 * 1000 : 60 * 60 * 1000));
 
-            // An all-day event's bounds are calendar dates, not instants. Android's provider stores
-            // them as UTC midnight (CalendarContract requires it) and expo-calendar formats them with a
-            // GMT formatter, so east of UTC they read back as mid-day and paint an extra day, west of
-            // UTC they slide a day earlier (#1133). Re-read the date parts in UTC and rebuild local
-            // midnights — the exact shape the .ics path produces (core `ics.ts` parses a DATE value as
-            // local midnight, with DTEND left exclusive), so day projection needs no platform knowledge.
-            // iOS already hands back local all-day bounds, so it must not be shifted.
+
             const allDayDates = platform === 'android' && event.allDay === true;
             const start = allDayDates ? toLocalMidnightOfUtcDate(rawStart) : rawStart;
             const end = allDayDates ? toLocalMidnightOfUtcDate(rawEnd) : rawEnd;
-            // Overlap, not containment: an event that starts before the window or ends after it still
-            // belongs to it. Never stricter than the native query, so nothing that loaded before drops.
+
+
             if (end.getTime() <= rangeStart.getTime() || start.getTime() >= rangeEnd.getTime()) continue;
             const startIso = start.toISOString();
             const endIso = end.toISOString();
@@ -696,8 +653,7 @@ export function createExternalCalendarFeeds(host: ExternalCalendarFeedsHost) {
             });
         }
 
-        // #1133/#1134 proof: `spanning` counts the events that cross a window edge — the ones
-        // Android's containment query used to drop before the app ever saw them.
+
         const dayMs = 24 * 60 * 60 * 1000;
         let multiDay = 0;
         let allDay = 0;

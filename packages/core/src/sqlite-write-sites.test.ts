@@ -3,18 +3,12 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-// readRowBaseline reuses its last rows while no write transaction started since (SqliteAdapter.generation): a same-connection
-// write outside the adapter is invisible to PRAGMA data_version. So every SQL write in core and the native Android and iOS bundles is
-// listed here by its enclosing method, with why it is safe. A new raw run/exec, or a get/all of INSERT/UPDATE/DELETE, fails
-// this test until it is listed (and goes through noteWrite, withConnection(write: true), withHostConnection, or
-// invalidateWriteBaselineAfterDirectSQL). Not caught here: SQL passed as a variable to get/all (an INSERT ... RETURNING in a
-// variable); for that and any write this scan misses, readRowBaseline compares total_changes() before a reuse.
 
 const srcDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(srcDir, '..', '..', '..');
 const bundleDir = join(repoRoot, 'apps', 'android-native', 'bundle');
-// iOS runs the same host-entry.ts; its own bundle files are scanned too. Its Swift bridge writes only calendar_sync on the
-// connection (SQLiteBridge.compareAndSetCalendarPushMapping), which readRowBaseline does not read and total_changes() still counts.
+
+
 const iosBundleDir = join(repoRoot, 'apps', 'ios-native', 'bundle');
 
 const WRITE = /\b(?:this\.client|this\.receiptClient|client|receiptClient|sqlite|db)\.(?:run|exec!?)\(|\.(?:get|all)\s*(?:<[^>]*>)?\(\s*[`'"]\s*(?:INSERT|UPDATE|DELETE|REPLACE)/g;
@@ -24,28 +18,28 @@ const NOT_METHODS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return'])
 
 const ALLOWED: Record<string, Record<string, number>> = {
     'packages/core/src/sqlite-adapter.ts': {
-        // Schema, FTS tables and the FTS lock row: no entity, settings or saved-filter row (readRowBaseline reads none of them).
+
         'SqliteAdapter.acquireFtsLock': 2, 'SqliteAdapter.releaseFtsLock': 1, 'SqliteAdapter.refreshFtsLock': 1,
         'SqliteAdapter.ensureSchemaInternal': 6, 'SqliteAdapter.ensureFtsSchema': 5, 'SqliteAdapter.ensureFtsTriggers': 7,
         'SqliteAdapter.ensureTaskColumns': 2, 'SqliteAdapter.ensureProjectColumns': 5, 'SqliteAdapter.ensureSectionColumns': 3,
         'SqliteAdapter.ensureAreaColumns': 2, 'SqliteAdapter.ensurePeopleTable': 3, 'SqliteAdapter.ensureSavedFilterTable': 4,
         'SqliteAdapter.ensureFtsPopulated': 7,
-        // Write transactions that call noteWrite.
+
         'SqliteAdapter.saveTaskNow': 4, 'SqliteAdapter.saveDataNow': 4,
         'SqliteAdapter.upsertCalendarSyncEntryNow': 1, 'SqliteAdapter.deleteCalendarSyncEntryNow': 1,
     },
     'packages/core/src/native-request-receipts.ts': {
-        // Called by the bundle only inside withConnection(write: true) or withHostConnection (checked below).
+
         'loadNativeRequestReceipts.?': 2, 'pruneNativeRequestReceipts.?': 2,
-        // The receipt client's delegation to the adapter's own client.
+
         'NativeReceiptSqliteAdapter.constructor': 2,
-        // noteWrite, and invalidateWriteBaselineAfterDirectSQL when its outcome is unknown.
+
         'NativeReceiptSqliteAdapter.savePomodoroTransitionWithReceipt': 7,
-        // BEGIN DEFERRED and ROLLBACK around a read.
+
         'NativeReceiptSqliteAdapter.readDurableReceipt': 3,
-        // Inside saveTask/saveData's transaction (noteWrite).
+
         'NativeReceiptSqliteAdapter.beforeCommit': 3,
-        // noteWrite.
+
         'NativeReceiptSqliteAdapter.commitReceiptOnlyNow': 4,
     },
 };

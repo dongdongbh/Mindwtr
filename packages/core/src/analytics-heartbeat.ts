@@ -11,7 +11,7 @@ export type AnalyticsHeartbeatEvent = 'heartbeat' | 'opt_out';
 type SendHeartbeatRequestOptions = {
     endpointUrl?: string | null;
     distinctId?: string | null;
-    /** settings.analyticsProfileId: one id per synced dataset, so several installs count as one profile. */
+
     profileId?: string | null;
     platform?: string | null;
     channel?: string | null;
@@ -69,7 +69,7 @@ const buildHeartbeatPayload = (
         platform,
         channel,
         app_version: appVersion,
-        // Compatibility for servers that still expect `version`.
+
         version: appVersion,
     };
     if (event !== 'heartbeat') {
@@ -185,9 +185,7 @@ export async function resetHeartbeatOptOutMarker(
     }
 }
 
-// ---- The mobile apps' heartbeat (React Native's and the native hosts'): their ids, channel, device fields and gates ----
 
-/** The install's anonymous id: a UUID made on the first heartbeat, kept under RN's AsyncStorage key. */
 export const ANALYTICS_DISTINCT_ID_KEY = 'mindwtr-analytics-distinct-id';
 
 export type MobileAnalyticsHeartbeatConfig = {
@@ -198,17 +196,17 @@ export type MobileAnalyticsHeartbeatConfig = {
     isFossBuild: boolean;
 };
 
-/** The device a mobile heartbeat describes, and its storage and fetch. */
+
 export type MobileHeartbeatDevice = {
-    /** RN's Platform.OS. */
+
     platform: string;
-    /** RN's Platform.Version. */
+
     platformVersion?: string | number | null;
-    /** Android's release name (RN's Platform.constants.Release). */
+
     osRelease?: string | null;
     isPad?: boolean;
     locale: string;
-    /** A development build (RN's __DEV__) never sends. */
+
     isDev: boolean;
     storage: StorageLike;
     fetcher: HeartbeatFetch;
@@ -242,10 +240,8 @@ export function getMobileAnalyticsChannel(
     if (channel) return channel;
     if (platform === 'ios') return 'app-store';
     if (platform !== 'android') return platform || 'mobile';
-    // Release builds bake ANALYTICS_HEARTBEAT_CHANNEL (play-store, android-internal-test,
-    // android-direct), so this fallback only fires for builds without one. The old
-    // install-referrer probe is gone: testing-track installs carry no referrer and the
-    // API can reject, which misfiled Play testers as android-sideload/android-unknown.
+
+
     return isFossBuild ? 'fdroid' : 'play-store';
 }
 
@@ -301,13 +297,13 @@ async function buildMobileHeartbeatOptions(config: MobileAnalyticsHeartbeatConfi
     };
 }
 
-/** The one opt-out event, when the user turns the heartbeat off. */
+
 export async function sendMobileAnalyticsOptOut(config: MobileAnalyticsHeartbeatConfig, device: MobileHeartbeatDevice): Promise<boolean> {
     if (!canSendMobileAnalyticsHeartbeat(config, device)) return false;
     return sendHeartbeatOptOut(await buildMobileHeartbeatOptions(config, device));
 }
 
-/** The day's heartbeat at startup, unless the user turned it off (settings.analytics.heartbeatEnabled). */
+
 export async function sendMobileDailyHeartbeat(
     config: MobileAnalyticsHeartbeatConfig,
     settings: { analytics?: { heartbeatEnabled?: boolean }; analyticsProfileId?: string | null },

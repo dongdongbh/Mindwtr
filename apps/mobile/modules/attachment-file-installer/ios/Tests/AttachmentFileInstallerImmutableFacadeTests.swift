@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 import AttachmentFileInstallerEngine
 
-// Ordinary package consumer: no @testable access, engine or fault injector.
+
 final class AttachmentFileInstallerImmutableFacadeTests: XCTestCase {
   private let bytes = Data([0, 255, 10, 17, 128, 42])
   private let operationId = String(repeating: "1", count: 32)
@@ -40,7 +40,7 @@ final class AttachmentFileInstallerImmutableFacadeTests: XCTestCase {
     try withFixture { fixture in
       let target = fixture.target("recreated.bin")
       let prepared = try fixture.facade().prepareImmutableStage(targetInput: target, operationId: operationId)
-      // Atomic write creates a new inode while the original empty stage exists.
+
       try bytes.write(to: prepared.stagedUrl, options: .atomic)
       let identity = try fixture.facade().snapshotImmutableStage(stagedInput: prepared.stagedUrl,
         targetInput: target, expectedStagedSha256: digest(bytes))
@@ -59,8 +59,7 @@ final class AttachmentFileInstallerImmutableFacadeTests: XCTestCase {
       XCTAssertEqual(try Data(contentsOf: prepared.stagedUrl), bytes)
       XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
 
-      // These are the persisted values a recreated consumer supplies, without
-      // constructing internal proof types or retaining the original facade.
+
       let savedStageIdentity = identity.stagedIdentity
       let savedDirectoryIdentity = identity.directoryIdentity
       let savedPrivateIdentity = prepared.privateDirectoryIdentity
@@ -178,8 +177,8 @@ final class AttachmentFileInstallerImmutableFacadeTests: XCTestCase {
     try withFixture { fixture in
       let target = fixture.target("partial.bin")
       let prepared = try fixture.facade().prepareImmutableStage(targetInput: target, operationId: operationId)
-      // Fill in place to retain the reserved inode; private cleanup intentionally
-      // relies on ownership tokens, even when the intended full digest differs.
+
+
       let handle = try FileHandle(forWritingTo: prepared.stagedUrl)
       try handle.write(contentsOf: Data("partial".utf8))
       try handle.close()

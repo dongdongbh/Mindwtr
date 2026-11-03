@@ -1,10 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initializeSandboxRuntime } from '@mindwtr/core';
 
-// The sandbox workspace must never reach the notification platform. Every export
-// of notification-service.ts delegates to notification-service-local.ts, which is
-// the module that talks to expo-notifications and the native alarm bridge, so a
-// call recorded here is a side effect that escaped the sandbox.
+
 const localModule = vi.hoisted(() => ({
   getLocalNotificationPermissionStatus: vi.fn(async () => ({ granted: true, canAskAgain: true })),
   cancelLocalPomodoroCompletionNotification: vi.fn(async () => undefined),

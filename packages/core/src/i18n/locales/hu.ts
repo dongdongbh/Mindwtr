@@ -1,7 +1,8 @@
-// Full-parity Hungarian translation. Split from i18n-translations.ts to make community
-// translation contributions easier. Every English key is translated here (mode: overrides,
-// floor: all), so new English UI copy cannot silently fall back in Hungarian.
+
+
+
 export const huOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Kezdés előtt",
     "taskEdit.advanceReminderLabel": "Előzetes emlékeztető",
     "taskEdit.advanceReminderMinutes": "{count} perccel előtte",
     "taskEdit.advanceReminderHour": "1 órával előtte",
@@ -1152,6 +1153,7 @@ export const huOverrides: Record<string, string> = {
     'review.projectsStepDesc': 'Győződjön meg róla, hogy minden aktív projekthez tartozik következő teendő.',
     'review.projectsHint': 'Tekintse át az egyes projekteket. Van legalább egy konkrét következő teendőjük? Ha nincs, adjon hozzá most egyet. Jelölje késznek a befejezett projekteket.',
     'review.hasNextAction': 'Van következő teendője',
+    'review.projectDeferred': 'Ütemezve',
     'review.needsAction': 'Teendőre van szükség',
     'review.noActiveTasks': 'Nincs aktív feladat',
     'review.somedayStep': 'Ötlettár',

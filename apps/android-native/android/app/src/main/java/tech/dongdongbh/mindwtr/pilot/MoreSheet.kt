@@ -60,10 +60,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/**
- * RN's Menu tab (the last tab): the lucide Menu glyph and core's `tab.menu`, in the tint while the More sheet is open.
- * A tap opens the sheet or closes it, as RN's tab does.
- */
+
 @Composable
 fun RowScope.MenuTab(model: InboxViewModel) {
     val c = LocalTheme.current.colors
@@ -75,8 +72,8 @@ fun RowScope.MenuTab(model: InboxViewModel) {
     ) {
         Box {
             Icon(Lucide.Menu, null, tint = color, modifier = Modifier.size(if (open) 26.dp else 24.dp).fade(if (open) 1f else RN_TAB_ICON_IDLE))
-            // RN's menuSyncDot: the sync badge's color, top right of the glyph; hidden from TalkBack, as RN's is. Its opacity goes
-            // after the offset: a layer placed before it drew nothing on the phone.
+
+
             coreColorOrNull(model.syncBadge.color)?.let { dot ->
                 Box(Modifier.align(Alignment.TopEnd).offset(x = 7.dp, y = (-2).dp).size(7.dp).fade(0.85f).clip(CircleShape).background(dot)
                     .rnBorder(1.5.dp, c.cardBg, CircleShape).clearAndSetSemantics { }.testTag("menu-sync-dot"))
@@ -87,15 +84,10 @@ fun RowScope.MenuTab(model: InboxViewModel) {
     }
 }
 
-/** A sheet destination this app opens (core's `route` names a screen built here), or RN's look drawn disabled. */
+
 private fun JSONObject.icon(): ImageVector? = Ionicons.bySymbol[getString("icon")]
 
-/**
- * RN's More sheet (MoreNavigationSheet), over the list and above the tab bar: a dimmed backdrop that closes it, and a
- * card from the bottom with RN's handle, core's utilities row (Trash, Board, History, Settings), core's saved searches,
- * a divider, and core's tiles, three to a row. A destination this app builds opens it; the others keep RN's look but are
- * drawn dimmed and disabled (TalkBack hears "disabled"), never a dead tap. It slides up; a drag down past 72 closes it.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MoreSheet(model: InboxViewModel) = with(model.menu) {
@@ -159,7 +151,7 @@ fun MoreSheet(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's MoreSheetTile: a bordered card, core's icon in its color on a 44 square, and core's display label. */
+
 @Composable
 private fun Tile(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
     val c = LocalTheme.current.colors
@@ -170,8 +162,8 @@ private fun Tile(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
     val label = item.getString("label")
     Column(
         modifier.fade(if (enabled) 1f else 0.45f).heightIn(min = 104.dp).clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)
-            // One accessibility node holds the label, the role and the state (a separate semantics node kept
-            // "enabled" on the labelled node, so TalkBack read a missing screen as a working button).
+
+
             .clearAndSetSemantics {
                 contentDescription = label; role = Role.Button
                 if (enabled) onClick { model.menu.openTile(id); true } else disabled()
@@ -188,7 +180,7 @@ private fun Tile(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
     }
 }
 
-/** RN's MoreSheetCompactItem: core's icon (18, at 64%) over its display label, 10/700 in the secondary text color. */
+
 @Composable
 private fun CompactItem(model: InboxViewModel, item: JSONObject, modifier: Modifier) {
     val c = LocalTheme.current.colors
@@ -198,8 +190,8 @@ private fun CompactItem(model: InboxViewModel, item: JSONObject, modifier: Modif
     val label = item.getString("label")
     Column(
         modifier.heightIn(min = 58.dp).clip(RoundedCornerShape(8.dp))
-            // One accessibility node holds the label, the role and the state (a separate semantics node kept
-            // "enabled" on the labelled node, so TalkBack read a missing screen as a working button).
+
+
             .clearAndSetSemantics {
                 contentDescription = label; role = Role.Button
                 if (enabled) onClick { model.menu.openTile(id); true } else disabled()

@@ -84,7 +84,7 @@ export function subscribeAndroidWindowLayout(
       try {
         subscription?.remove();
       } catch {
-        // The capability is optional, including during native teardown.
+
       }
     };
   } catch {

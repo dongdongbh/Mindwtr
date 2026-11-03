@@ -356,7 +356,7 @@ describe('prepared device-calendar settings over atomic cells and real SQLite re
         const markerSized = fillRequest(request(), MAX);
         expect(Buffer.byteLength(JSON.stringify(markerSized))).toBe(MAX);
         env.replace([null, null]);
-        // Full request identity is retained in the marker; it must fit independently.
+
         const markerBytes = Buffer.byteLength(canonical({ version: 1, request: markerSized, result: expected }));
         expect(markerBytes).toBeGreaterThan(MAX);
         const reads = vi.mocked(env.port.read).mock.calls.length;

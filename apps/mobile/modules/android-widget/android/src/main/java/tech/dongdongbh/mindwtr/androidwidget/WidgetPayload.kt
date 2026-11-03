@@ -16,12 +16,7 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 
-/**
- * The widget payload the React Native side publishes (widget-service.ts,
- * `AndroidTasksWidgetPayload`), shared by every widget kind. Every string the
- * widgets or the quick-capture dialog show is localized in TypeScript; Kotlin
- * refreshes Upcoming dates in the current locale/timezone. Unknown keys are ignored.
- */
+
 data class WidgetPayload(
   val headerTitle: String,
   val dateLabel: String,
@@ -58,7 +53,7 @@ data class WidgetPayload(
     val contextLabel: String?,
     val identityColor: Int?,
     val dueTone: DueTone,
-    // Only the task sheet reads the rest; absent on rows that carry none.
+
     val description: String?,
     val contexts: List<String>,
     val tags: List<String>,
@@ -72,10 +67,10 @@ data class WidgetPayload(
 
   enum class DueTone { OVERDUE, TODAY, NORMAL }
 
-  /** A Focus screen section (#1173): title plus its rows, in screen order. */
+
   data class Section(val title: String, val detail: String?, val items: List<Item>, val key: String? = null)
 
-  /** One list a placed Tasks widget can show (#1173). */
+
   data class ListPayload(
     val title: String,
     val dateLabel: String?,
@@ -99,7 +94,7 @@ data class WidgetPayload(
 
   data class SavedFilterOption(val id: String, val name: String)
 
-  /** Core's relative-day words (#1455); weekdays are short names, Sunday first. */
+
   data class UpcomingDays(val today: String, val tomorrow: String, val weekdays: List<String>, val dayFirst: Boolean)
 
   data class Palette(
@@ -141,7 +136,7 @@ data class WidgetPayload(
     val queued: String = "Saved. Your task will be added when Mindwtr opens.",
   )
 
-  /** True when the launcher's own day/night resources should color the widget. */
+
   val usesSystemColors: Boolean get() = palette == null || themeMode == "system"
 
   fun resolvedPalette(context: Context): Palette? = when {
@@ -152,7 +147,7 @@ data class WidgetPayload(
     else -> palette
   }
 
-  /** Every task id the payload can draw, across the flat list, the sections and every named list. */
+
   fun allTaskIds(): Set<String> {
     val ids = HashSet<String>()
     items.forEach { ids.add(it.id) }
@@ -165,11 +160,7 @@ data class WidgetPayload(
     return ids
   }
 
-  /**
-   * Builds the launcher-facing snapshot without mutating the app-published
-   * payload. [sourceTaskIds] deliberately comes from the unfiltered payload so
-   * committed check-offs can still be reconciled after the app ingests them.
-   */
+
   fun displaySnapshot(hiddenTaskIds: Set<String>, timeZone: TimeZone = TimeZone.getDefault(), now: Date = Date()): DisplaySnapshot {
     if (hiddenTaskIds.isEmpty() && lists.keys.none { WidgetListStore.baseListId(it) == UPCOMING_LIST_ID }) return DisplaySnapshot(allTaskIds(), this)
     fun visible(items: List<Item>): List<Item> = items.filterNot { it.id in hiddenTaskIds }
@@ -206,11 +197,11 @@ data class WidgetPayload(
   }
 
   private fun ListPayload.upcomingSnapshot(timeZone: TimeZone, now: Date): ListPayload {
-    // Keep membership with the published Focus generation until core rebuilds both lists.
+
     fun preview(items: List<Item>): List<Item> = items.map { item ->
       val raw = item.upcomingDate ?: return@map item
       val date = parseUpcomingDate(raw, timeZone) ?: return@map item
-      // A payload cached before the day words existed keeps its published label.
+
       val day = upcomingDays?.let { upcomingDayLabel(date, !DATE_ONLY.matches(raw), it, now, timeZone) }
       item.copy(
         dueLabel = if (day != null && item.upcomingLabel != null) "${item.upcomingLabel} $day" else item.dueLabel,
@@ -228,7 +219,7 @@ data class WidgetPayload(
     )
   }
 
-  /** The row a tap names, wherever the payload carries it; null when the payload has moved on. */
+
   fun itemFor(taskId: String): Item? {
     if (taskId.isEmpty()) return null
     items.firstOrNull { it.id == taskId }?.let { return it }
@@ -240,7 +231,7 @@ data class WidgetPayload(
     return null
   }
 
-  /** A list the chooser offers, named even before the app has built its rows. */
+
   fun titleFor(listId: String): String? =
     lists[listId]?.title
       ?: WidgetListStore.grouping(listId)?.second?.let(::titleFor)
@@ -250,33 +241,28 @@ data class WidgetPayload(
       ?: listId.substringAfter(":").takeIf { WidgetListStore.isTokenList(listId) && navigableListIdOrNull(listId) != null }
       ?: "Upcoming".takeIf { listId == UPCOMING_LIST_ID }
 
-  /** Unknown/retired selections draw and navigate as Focus; known legacy project payloads remain usable. */
+
   fun resolvedListId(listId: String): String =
     navigableListIdOrNull(listId)?.takeIf {
       !WidgetListStore.baseListId(it).startsWith(WidgetListStore.PROJECT_PREFIX) || titleFor(it) != null
     }
       ?: WidgetListStore.DEFAULT_LIST
 
-  /**
-   * The list a widget should draw. A selection the app has not published yet
-   * (a project just picked in the chooser) draws under its own name and empty,
-   * never as the Focus rows wearing another list's title; an id we cannot name
-   * at all falls back to Focus.
-   */
+
   fun listFor(listId: String): ListPayload =
     lists[listId]
       ?: (if (listId == WidgetListStore.DEFAULT_LIST) null else titleFor(listId)?.let { ListPayload(it, null, emptyList(), emptyList()) })
       ?: lists[WidgetListStore.DEFAULT_LIST]
       ?: ListPayload(headerTitle, dateLabel, sections, items)
 
-  /** Compact shows Next Actions only when Focus has no flat or section rows. */
+
   fun compactListId(): String {
     val focus = listFor(WidgetListStore.DEFAULT_LIST)
     val next = lists[NEXT_LIST_ID]
     return if (!focus.hasRows() && next?.hasRows() == true) NEXT_LIST_ID else WidgetListStore.DEFAULT_LIST
   }
 
-  /** Safe app destination for a selected list; unknown legacy ids return Focus. */
+
   fun openUriFor(listId: String): String {
     val safeFocusUri = listAppUriOrNull(focusUri, WidgetListStore.DEFAULT_LIST) ?: DEFAULT_FOCUS_URI
     val validListId = resolvedListId(listId)
@@ -308,7 +294,7 @@ data class WidgetPayload(
       accent = 0xFF4F9DFF.toInt(), onAccent = 0xFF000000.toInt(),
       border = 0xFF1F2937.toInt(), warning = 0xFFFBBF24.toInt(),
     )
-    // res/values(-night)/colors.xml, i.e. core's light and dark palettes: a transparent widget's fixed text colors.
+
     internal val LIGHT_THEME_PALETTE = Palette(
       background = 0xFFF8FAFC.toInt(), card = 0xFFFFFFFF.toInt(),
       text = 0xFF0F172A.toInt(), mutedText = 0xFF475569.toInt(),
@@ -334,7 +320,7 @@ data class WidgetPayload(
 
     private const val DAY_MS = 24L * 60 * 60 * 1000
 
-    /** Core's formatRelativeDayLabel at render time, so the label rolls over at local midnight. */
+
     fun upcomingDayLabel(
       date: Date,
       hasTime: Boolean,
@@ -352,7 +338,7 @@ data class WidgetPayload(
       val label = when {
         ahead == 0L -> days.today
         ahead == 1L -> days.tomorrow
-        ahead in 2..6 -> days.weekdays[Math.floorMod(day + 4, 7L).toInt()] // 1970-01-01 was a Thursday.
+        ahead in 2..6 -> days.weekdays[Math.floorMod(day + 4, 7L).toInt()]
         days.dayFirst -> "$dayOfMonth/$month"
         else -> "$month/$dayOfMonth"
       }
@@ -379,7 +365,7 @@ data class WidgetPayload(
           (if (raw.endsWith('Z') || raw.drop(10).contains('+') || raw.drop(10).contains('-')) "XXX" else "")
         else -> return null
       }
-      // Noon compares calendar days even where a DST transition skips local midnight.
+
       val normalized = if (DATE_ONLY.matches(raw)) "${raw}T12:00"
       else raw.replace(Regex("""\.(\d{1,3})(?=Z|[+-]|$)""")) { ".${it.groupValues[1].padEnd(3, '0')}" }
       val parser = SimpleDateFormat(pattern, Locale.ROOT).apply {
@@ -467,12 +453,12 @@ data class WidgetPayload(
           savedFilters.add(SavedFilterOption(id, name))
         }
       }
-      // Only the app's own routes may be launched from a tap.
+
       val focusUri = appUriOrNull(root.optString("focusUri")) ?: DEFAULT_FOCUS_URI
       val labels = root.optJSONObject("quickCapture")
       val quickCapture = QuickCaptureLabels(
         title = labels.stringOr("title", defaults.quickCapture.title),
-        // Pre-status cached payloads still say "Add task to inbox".
+
         placeholder = if (labels?.optJSONObject("statusLabels") != null) labels.stringOr("placeholder", defaults.quickCapture.placeholder)
           else defaults.quickCapture.placeholder,
         statusLabel = labels.stringOr("statusLabel", defaults.quickCapture.statusLabel),
@@ -509,8 +495,8 @@ data class WidgetPayload(
         dateLabel = root.stringOr("dateLabel", defaults.dateLabel),
         inboxLabel = inboxLabel,
         inboxCount = inboxCount,
-        // Payloads written before #1173 had no subtitle; keep their exact
-        // Inbox count rather than showing a blank header chip.
+
+
         subtitle = root.stringOr("subtitle", "$inboxLabel: $inboxCount"),
         items = items,
         sections = sections,
@@ -612,7 +598,7 @@ data class WidgetPayload(
 
     fun appUriOrNull(value: String?): String? = value?.takeIf { it.startsWith("mindwtr:") }
 
-    /** List navigation accepts only hostless, hierarchical routes owned by this app. */
+
     private fun listAppUriOrNull(value: String?, listId: String): String? {
       val validListId = navigableListIdOrNull(listId)?.let(WidgetListStore::baseListId) ?: return null
       val candidate = value?.trim()?.takeIf { it.length in 1..MAX_LIST_URI_LENGTH } ?: return null
@@ -644,10 +630,7 @@ data class WidgetPayload(
       return candidate.takeIf { routedListId == validListId }
     }
 
-    /**
-     * `#RRGGBB` or `#RRGGBBAA` (CSS order, what core's getAccentTint writes) to
-     * an ARGB int; android.graphics.Color is a stub on the JVM.
-     */
+
     fun parseHexColor(value: String?): Int? {
       val hex = value?.trim()?.removePrefix("#") ?: return null
       val digits = when (hex.length) {
@@ -696,7 +679,7 @@ data class WidgetPayload(
   }
 }
 
-/** The one place the payload JSON lives natively: SharedPreferences `mindwtr_widget` / `payload`. */
+
 object WidgetPayloadStore {
   const val PREFS_NAME = "mindwtr_widget"
   const val KEY_PAYLOAD = "payload"
@@ -707,13 +690,13 @@ object WidgetPayloadStore {
   fun read(context: Context): WidgetPayload =
     readRaw(context)?.let { WidgetPayload.parse(it) } ?: WidgetPayload.EMPTY
 
-  /** False when the payload did not reach the disk: the caller publishes it again. */
+
   fun write(context: Context, json: String): Boolean =
-    // commit(), not apply(): the widget provider and the dialog read this from
-    // other components right after the write.
+
+
     context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().putString(KEY_PAYLOAD, json).commit()
 
-  /** The quick-capture dialog saved one Inbox item; show it before the app next publishes. */
+
   fun incrementInboxCount(context: Context) {
     val raw = readRaw(context) ?: return
     val next = incrementInboxCount(raw) ?: return
@@ -736,9 +719,8 @@ object WidgetPayloadStore {
       ?.removePrefix(previousPrefix)
       .orEmpty()
     root.put("inboxCount", nextCount)
-    // Keep the RN-published curated hidden count while advancing the Inbox
-    // count immediately after native quick capture. A legacy or malformed
-    // subtitle safely falls back to Inbox only.
+
+
     root.put("subtitle", "$inboxLabel: $nextCount$curatedSuffix")
     return root.toString()
   }

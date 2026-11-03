@@ -44,7 +44,7 @@ const colorUpdate = (request: NativeProjectAreaRequest): Pick<Project, 'colorOve
 const result = (project: Project, request: NativeProjectAreaRequest): NativeProjectAreaResult => ({ id: project.id,
     areaId: project.areaId ?? null, areaTitle: project.areaTitle ?? null, order: project.order,
     ...(colorUpdate(request) ? { colorOverride: project.colorOverride ?? null } : {}) });
-/** Native No Area treats nullable SQLite metadata as already clear without rewriting it. */
+
 const nativeNoop = (project: Project, request: NativeProjectAreaRequest): boolean =>
     (project.areaId ?? null) === request.areaId
     && (project.areaTitle ?? null) === (request.selectedArea?.name.trim() || null)
@@ -53,7 +53,7 @@ const nativeNoop = (project: Project, request: NativeProjectAreaRequest): boolea
 
 const validAreaProject = (value: unknown, projectId: string): value is Project => {
     if (!record(value)) return false;
-    // SQLite may hydrate nullable optional columns as null; preserve the raw frozen row.
+
     const normalized = { ...value, areaId: value.areaId ?? undefined, areaTitle: value.areaTitle ?? undefined,
         startDate: value.startDate ?? undefined, dueDate: value.dueDate ?? undefined,
         reviewAt: value.reviewAt ?? undefined, supportNotes: value.supportNotes ?? undefined,
@@ -83,7 +83,7 @@ const readRequest = (value: unknown): NativeProjectAreaRequest | null => {
         ? input as NativeProjectAreaRequest : null;
 };
 
-/** Pure cold-journal validation before a mutable store or SQL check. */
+
 const readPrepared = (value: unknown): NativePreparedProjectArea | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

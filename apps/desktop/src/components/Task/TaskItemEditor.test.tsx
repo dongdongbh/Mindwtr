@@ -7,8 +7,7 @@ import { LanguageProvider } from '../../contexts/language-context';
 
 type EditorAi = Parameters<typeof TaskItemEditor>[0]['ai'];
 
-// The editor takes the AI hook's result whole, so a panel test is a small
-// object literal instead of two dozen props.
+
 const createAi = (overrides: Partial<EditorAi> = {}): EditorAi => ({
     aiEnabled: true,
     isAIWorking: false,
@@ -99,8 +98,7 @@ const translations: Record<string, string> = {
 
 const t = (key: string) => translations[key] ?? key;
 
-// jsdom has no scrollIntoView; the reveal effect calls it after expanding
-// the section holding Attachments.
+
 Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
     configurable: true,
     value: vi.fn(),
@@ -427,7 +425,7 @@ describe('TaskItemEditor', () => {
         expect(getAllByRole('option').map((option) => option.textContent))
             .toEqual(['None', 'Zebra', 'Apple', 'Azure', 'Alpha unset', 'Zed unset']);
 
-        // While searching, the create rows and None follow the matches (#1461); read the area matches alone.
+
         const areaMatches = () => within(getByRole('group', { name: 'areas.manage' })).getAllByRole('option')
             .map((option) => option.textContent);
         fireEvent.change(getByRole('textbox', { name: 'Search' }), { target: { value: 'a' } });
@@ -572,7 +570,7 @@ describe('TaskItemEditor AI panels', () => {
 
         expect(getByRole('button', { name: '15min' })).toBeInTheDocument();
         expect(queryByRole('button', { name: '@phone' })).not.toBeInTheDocument();
-        // A lone remaining part needs no "apply all".
+
         expect(queryByRole('button', { name: 'Apply all' })).not.toBeInTheDocument();
         expect(getByText(/Applied:/)).toHaveTextContent('@phone');
     });

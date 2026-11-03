@@ -24,7 +24,7 @@ const logStartupLine = (line: string): void => {
       (maybeHook as (message: string, level: number) => void)(line, 1);
       return;
     } catch {
-      // Fall back to console logging.
+
     }
   }
   console.info(line);

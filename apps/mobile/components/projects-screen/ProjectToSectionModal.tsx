@@ -43,7 +43,7 @@ export function ProjectToSectionModal({ visible, source, projects, onClose, onSu
         setRetryOnly(false);
         setError(null);
     }, [visible, source?.id, source?.title]);
-    // Typing the section name re-renders; rebuild the destination list only when its inputs change.
+
     const { _allProjects, _allSections, _allTasks } = useTaskStore.getState();
     const sourceId = source?.id;
     const previewDestination = React.useMemo(() => sourceId

@@ -13,7 +13,7 @@ export function summarize(values) {
   };
 }
 
-// These identities must match. Revisions and APK hashes deliberately differ in A/B runs.
+
 export const COMPARISON_FIELDS = ['platform', 'runtime', 'device', 'os', 'buildType', 'dataset', 'network', 'scenario'];
 export function compareReports(baseline, candidate, { relative = 0.15, absoluteMs = 20, minSamples = 30 } = {}) {
   if (!baseline || !candidate || typeof baseline !== 'object' || typeof candidate !== 'object') {
@@ -39,7 +39,7 @@ export function compareReports(baseline, candidate, { relative = 0.15, absoluteM
     const after = candidate.metrics?.[name];
     if (!before || !after || !Number.isInteger(before.count) || !Number.isInteger(after.count) || before.count < minSamples || after.count < minSamples) { errors.push(`Insufficient samples: ${name}`); continue; }
     for (const statistic of ['medianMs', 'p95Ms']) {
-      // Tail gates need enough observations; never sell a ten-launch p95 as reliable.
+
       if (statistic === 'p95Ms' && Math.min(before.count, after.count) < 100) continue;
       const a = before[statistic]; const b = after[statistic];
       if (!Number.isFinite(a) || !Number.isFinite(b)) { errors.push(`Invalid metric: ${name}.${statistic}`); continue; }

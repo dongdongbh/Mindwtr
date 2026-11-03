@@ -18,15 +18,7 @@ import type { AppSettings, Area, Person, Project, Task } from './types';
 import { generateUUID } from './uuid';
 import { getSavedTaxonomyTokens } from './taxonomy-catalog';
 
-/**
- * The frozen React Native Settings screens (settings-screens-parity.fixtures.json,
- * captured by apps/mobile/components/settings/settings.parity.test.tsx), replayed
- * through the native host contract. The replay plays the native screen: it keeps
- * the screen's own state (search text, open picker, editor fields, pending
- * confirmation), reads the views, sends the commands, stores what the contract
- * says to store on the device, and lays the text out in the order React Native
- * draws it.
- */
+
 type Device = {
     language?: string;
     systemLocale?: string;
@@ -65,8 +57,6 @@ const value = <T,>(result: NativeHostResult<T>): T => {
 };
 const normalize = (entry: unknown): unknown => JSON.parse(JSON.stringify(entry, (_key, item) => (item === undefined ? '<undefined>' : item)));
 
-// ---------------------------------------------------------------------------
-// The store: the fixture's data, with the writes recorded as the harness records them.
 
 const RECORDED = [
     'updateSettings', 'addArea', 'updateArea', 'deleteArea', 'addPerson', 'updatePerson', 'renamePerson', 'deletePerson',
@@ -74,10 +64,8 @@ const RECORDED = [
 ] as const;
 const writes: unknown[][] = [];
 let realActions: Record<string, (...args: unknown[]) => Promise<unknown>> | null = null;
-/**
- * The host names a new area or person by its request UUID, so a replay finds it; React
- * Native lets the store name it. The record leaves that ID out.
- */
+
+
 const recorded = (name: string, args: unknown[]): unknown[] => {
     const props = args[1] as Record<string, unknown> | undefined;
     if ((name !== 'addArea' && name !== 'addPerson') || !props || !('id' in props)) return args;
@@ -120,8 +108,6 @@ async function openHost(device: Device = {}): Promise<Host> {
     return host;
 }
 
-// ---------------------------------------------------------------------------
-// The native screens.
 
 type Log = { device: unknown[][]; alerts: unknown[][]; navigations: unknown[]; links: string[]; writes: number };
 
@@ -206,7 +192,7 @@ function generalDriver(host: Host, scenario: Scenario) {
         } as Record<string, { pickerTitle: string; options: { label: string; selected: boolean; edit: GeneralSettingsEdit }[] }>;
         return { title: controls[control].pickerTitle, groups: [controls[control].options] };
     };
-    /** Sends an edit and stores what the contract says to store on the device. */
+
     const send = async (edit: GeneralSettingsEdit) => {
         const result = value(await host.setGeneralSetting({ requestId: generateUUID(), edit }));
         for (const write of result.deviceWrites) {
@@ -219,12 +205,12 @@ function generalDriver(host: Host, scenario: Scenario) {
                 log.device.push(['setLanguage', write.value]);
                 value(await host.setLanguage({ storedLanguage: write.value, systemLocale: device.systemLocale ?? 'en-US' }));
             } else if (write.key === 'mindwtr:appSearchWipeOwed') {
-                // RN's writeAppSearchIndexingEnabled(false) stores it first, inside the same call (pass O2c).
+
                 expect(write.value).toBe('true');
             } else if (write.key === 'mindwtr:appSearchIndexingEnabled') {
                 const enabled = write.value === 'true';
                 log.device.push(['writeAppSearchIndexingEnabled', enabled]);
-                // Platform wiring: index when turned on, wipe when turned off.
+
                 log.device.push([enabled ? 'enableAppSearchIndexing' : 'wipeAppSearchIndex']);
                 appSearch = { ...appSearch, enabled };
             } else {
@@ -284,7 +270,7 @@ function generalDriver(host: Host, scenario: Scenario) {
                     const option = pickerOf(model, picker!).groups.flat()[target as number];
                     const before = writes.length;
                     const result = await send(option.edit);
-                    // Re-picking the stored value writes nothing, on React Native and here.
+
                     expect(result.changed).toBe(writes.length > before);
                     picker = null;
                     return;
@@ -298,7 +284,7 @@ function generalDriver(host: Host, scenario: Scenario) {
                         appLockError = null;
                         const edit = model.privacy.appLock.edit;
                         if (edit.value === true) {
-                            // The host asks the device lock first; only a success sends the edit.
+
                             log.device.push(['authenticate', model.privacy.appLock.enablePrompt]);
                             const outcome = outcomes.shift();
                             if (outcome === 'success') await send(edit);
@@ -328,14 +314,14 @@ function manageDriver(host: Host, scenario: Scenario) {
     let restored = false;
     const strings = value(host.getStrings({ keys: ['common.back', 'common.edit', 'common.delete'] })).strings;
     const back = strings['common.back'];
-    // A row's pencil and trash name the item they act on, as React Native's do.
+
     const named = (key: 'common.edit' | 'common.delete', name: string): unknown[] => [`${strings[key]}: ${name}`, false];
     const rowButtons = (name: string) => [named('common.edit', name), named('common.delete', name)];
     const read = (): NativeManageSettings => {
         const view = value(host.getManageSettings({ openSections: raw }));
         if (!restored) {
             restored = true;
-            // React Native writes a stored value back, normalized, when the screen opens.
+
             if (view.openSectionsRestore) {
                 log.device.push(['setItem', view.openSectionsRestore.key, view.openSectionsRestore.value]);
                 raw = view.openSectionsRestore.value;
@@ -446,7 +432,7 @@ function manageDriver(host: Host, scenario: Scenario) {
                 case 'personLink': {
                     const link = person().referenceLink!;
                     log.links.push(link);
-                    // The harness's device cannot open this one: the host says so.
+
                     if (link.includes('/fail')) log.alerts.push([view.people.text.openReference, view.people.text.openReferenceFailed, []]);
                     return;
                 }
@@ -512,14 +498,14 @@ describe('native host contract: Settings', () => {
     };
 
     type ManageKind = 'area' | 'person' | 'context' | 'tag';
-    /** A Manage row's `edit.target` and `delete`, as the view shows them now. */
+
     const shown = (host: Host, type: ManageKind, key: string): { edit: NativeManageEditorTarget; delete: NativeManageDeleteTarget } => {
         const view = value(host.getManageSettings());
         const rows = type === 'area' ? view.areas.rows.items : type === 'person' ? view.people.rows.items : (type === 'context' ? view.contexts : view.tags).rows.items;
         const row = rows.find((entry) => ('id' in entry ? entry.id : entry.value) === key)!;
         return { edit: row.edit.target, delete: row.delete };
     };
-    /** A target as a host sends it back: the row's own, for a row the view shows. */
+
     const asShown = (host: Host, target: { type: string; id?: string; name?: string }, which: 'edit' | 'delete' = 'edit') => (
         ['area', 'person', 'context', 'tag'].includes(target.type) ? shown(host, target.type as ManageKind, (target.id ?? target.name)!)[which] : target
     );
@@ -630,7 +616,7 @@ describe('native host contract: Settings', () => {
         const after = value(host.getManageSettings());
         expect(after.revision).not.toBe(first.revision);
         expect(host.getManageSettingsList({ list: 'contexts', offset: 0, limit: 2, revision: first.revision })).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
-        // A settings edit changes the General and Manage revisions too.
+
         const general = value(host.getGeneralSettings()).revision;
         value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'timeFormat', value: '12h' } }));
         expect(value(host.getGeneralSettings()).revision).not.toBe(general);
@@ -649,7 +635,7 @@ describe('native host contract: Settings', () => {
         expect({ ...after, appearance: before.appearance, syncPreferencesUpdatedAt: before.syncPreferencesUpdatedAt }).toEqual(before);
         expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'appSearch', value: true } })))
             .toEqual({ changed: false, deviceWrites: [{ key: 'mindwtr:appSearchIndexingEnabled', value: 'true' }] });
-        // Off: the owed wipe is stored before the switch goes, so a start finishes a wipe that never landed (pass O2c).
+
         expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'appSearch', value: false } })))
             .toEqual({ changed: false, deviceWrites: [{ key: 'mindwtr:appSearchWipeOwed', value: 'true' }, { key: 'mindwtr:appSearchIndexingEnabled', value: null }] });
         expect(value(await host.setGeneralSetting({ requestId: generateUUID(), edit: { type: 'theme', value: 'material3-dark' } })).deviceWrites)
@@ -678,7 +664,7 @@ describe('native host contract: Settings', () => {
         const host = await openHost();
         const { areas } = useTaskStore.getState();
         const text = value(host.getManageSettings()).editor.text;
-        // The rows' own targets (with their revisions), and the same without one.
+
         const targets = [
             { type: 'newArea' }, shown(host, 'area', 'a-work').edit, { type: 'area', id: 'a-work' }, { type: 'unassignedArea' }, { type: 'newPerson' }, { type: 'newContext' }, { type: 'newTag' },
             shown(host, 'person', 'pe-alex').edit, shown(host, 'context', '@home').edit, { type: 'tag', name: '#web' }, shown(host, 'tag', '#web').edit,
@@ -695,7 +681,7 @@ describe('native host contract: Settings', () => {
         }
         expect(value(host.checkManageEditor({ target: { type: 'newArea' }, name: ' home ' })))
             .toEqual({ nameTaken: true, saveDisabled: true, message: 'An area with this name already exists.' });
-        // A deleted area's name is free; the unassigned color needs no name.
+
         expect(value(host.checkManageEditor({ target: { type: 'newArea' }, name: 'Gone' })))
             .toEqual({ nameTaken: false, saveDisabled: false, message: null });
         expect(value(host.checkManageEditor({ target: { type: 'unassignedArea' }, name: '' })))
@@ -707,7 +693,7 @@ describe('native host contract: Settings', () => {
         freezeClock();
         await seed({ data: 'manage', settings: 'manage' });
         const host = await openHost();
-        // Each target as the row showed it when the first run sent it; the second run sends those again.
+
         const targets = new Map<string, NativeManageEditorTarget | NativeManageDeleteTarget>();
         const at = (target: Host, type: ManageKind, key: string, which: 'edit' | 'delete' = 'edit') => {
             if (!targets.has(`${which}:${key}`)) targets.set(`${which}:${key}`, shown(target, type, key)[which]);
@@ -734,10 +720,10 @@ describe('native host contract: Settings', () => {
         const written = writes.length;
         expect(written).toBeGreaterThanOrEqual(12);
         const snapshot = JSON.stringify([useTaskStore.getState()._allTasks, useTaskStore.getState()._allAreas, useTaskStore.getState()._allPeople, useTaskStore.getState()._allProjects]);
-        // New request IDs on a new host: every write finds its target already stored.
+
         const restarted = await openHost();
         await run(restarted);
-        // Adding a person who exists asks the store, which writes nothing.
+
         expect(writes.slice(written)).toEqual([['addPerson', 'Eve', { note: 'Designer' }]]);
         expect(JSON.stringify([useTaskStore.getState()._allTasks, useTaskStore.getState()._allAreas, useTaskStore.getState()._allPeople, useTaskStore.getState()._allProjects])).toBe(snapshot);
     });
@@ -761,7 +747,7 @@ describe('native host contract: Settings', () => {
             expect(retried).toMatchObject({ ok: true, value: { changed: true } });
             expect(writes).toHaveLength(count);
             check(saveData.mock.lastCall?.[0]);
-            // A lost reply repeats the request: no write, no save.
+
             const saves = saveData.mock.calls.length;
             expect(await run(host, requestId)).toEqual(retried);
             expect(saveData).toHaveBeenCalledTimes(saves);
@@ -778,7 +764,7 @@ describe('native host contract: Settings', () => {
             await retry(run, check as never);
         });
 
-        // A device-only edit writes nothing to the store, so a failing disk cannot fail it.
+
         it('setGeneralSetting: Android system search (device only)', async () => {
             freezeClock();
             const saveData = vi.fn().mockResolvedValue(undefined);
@@ -790,7 +776,7 @@ describe('native host contract: Settings', () => {
             const answer = { ok: true, value: { changed: false, deviceWrites: [{ key: 'mindwtr:appSearchIndexingEnabled', value: 'true' }] } };
             const run = () => host.setGeneralSetting({ requestId, edit: { type: 'appSearch', value: true } });
             expect(await run()).toEqual(answer);
-            // A lost reply repeats the request: the same answer, no write, no save.
+
             expect(await run()).toEqual(answer);
             expect(writes).toEqual([]);
             expect(saveData).not.toHaveBeenCalled();
@@ -823,7 +809,7 @@ describe('native host contract: Settings', () => {
                     expect(saved.projects.find((project) => project.id === 'p-site')?.tagIds).toEqual(['#site']);
                 }],
         ] as const)('%s', async (_name, input, check) => {
-            // The row's target as the view showed it once, sent again by the retries.
+
             let target: unknown;
             await retry((host, requestId) => host.saveManageEditor({ requestId, ...input, target: target ??= asShown(host, input.target) } as never), check as never);
         });
@@ -915,12 +901,7 @@ describe('native host contract: Settings', () => {
             expect(area(input.requestId.toLowerCase())).toBeUndefined();
         });
 
-        // Fails with in-memory receipts only: the replay finds no row under its request UUID and
-        // no live "Gone", so the store's addArea restores a-gone again (changed: true). Nothing in
-        // the data tells "landed, then deleted" from "never landed". Durable request receipts close
-        // it: the lead's durable-receipt test replays this request from its stored first reply
-        // ("durable receipts: a Manage restore of a same-named deleted area, replayed after it was
-        // deleted again and a restart, answers its first reply").
+
         it.fails('saveManageEditor, new area named like a deleted one: a replay after the restored area was deleted again keeps it deleted', async () => {
             const host = await open();
             const input = { requestId: generateUUID(), target: { type: 'newArea' as const }, name: 'Gone', color: '#14b8a6' };
@@ -1015,7 +996,7 @@ describe('native host contract: Settings', () => {
             const host = await open();
             const input = { requestId: generateUUID(), target: shown(host, 'context', '@town').delete };
             expect(value(await host.deleteManageItem(input))).toEqual({ changed: true });
-            // A landed delete answers changed: false.
+
             expect(await replayAfterRestart((restarted) => restarted.deleteManageItem(input))).toEqual({ result: unchanged, wrote: false });
             await useTaskStore.getState().updateTask('t-call', { contexts: ['@phone', '@town'] });
             const { result, wrote } = await replayAfterRestart((restarted) => restarted.deleteManageItem(input));
@@ -1037,7 +1018,7 @@ describe('native host contract: Settings', () => {
 
         it('saveManageEditor, tag: never renames the tag of a task synced to a revision the old 32-bit token could not tell apart', async () => {
             const host = await open();
-            // Two revisions of t-call, #urgent's only carrier, whose old token (the count and a 32-bit FNV hash) was the same.
+
             const first = { rev: 1, revBy: 'd', updatedAt: '2026-09-24T00:02:43.758Z' };
             const second = { rev: 2, revBy: 'd', updatedAt: '2026-09-24T00:07:22.393Z' };
             expect(paramsKey([`t-call@${revisionOf(first)}`])).toBe(paramsKey([`t-call@${revisionOf(second)}`]));
@@ -1046,7 +1027,7 @@ describe('native host contract: Settings', () => {
             });
             sync(first);
             const input = { requestId: generateUUID(), target: shown(host, 'tag', '#urgent').edit, name: 'later' };
-            // Another device's version of the task arrives before the rename runs.
+
             sync(second);
             expect(await host.saveManageEditor(input)).toMatchObject(stale);
             expect(taskOf('t-call').tags).toEqual(['#urgent']);
@@ -1077,14 +1058,14 @@ describe('native host contract: Settings', () => {
         expect(await host.setGeneralSetting({ requestId: id(), edit: { type: 'theme', value: 'neon' } as never })).toMatchObject(invalid);
         expect(await host.setGeneralSetting({ requestId: id(), edit: { type: 'weekStart', value: 'friday' } as never })).toMatchObject(invalid);
         expect(await host.setGeneralSetting({ requestId: id(), edit: { type: 'language', value: 'xx' } as never })).toMatchObject(invalid);
-        // The calendar system is offered only for a Persian language or locale.
+
         expect(await host.setGeneralSetting({ requestId: id(), edit: { type: 'calendarSystem', value: 'jalali' } })).toMatchObject(invalid);
         expect(await host.setGeneralSetting({ requestId: id(), edit: { type: 'showTaskAge', value: 'on' } as never })).toMatchObject(invalid);
         expect(await host.setGeneralSetting({ requestId: 'not-a-uuid', edit: { type: 'showTaskAge', value: true } })).toMatchObject(invalid);
         expect(await host.saveManageEditor({ requestId: id(), target: { type: 'newArea' }, name: '   ' })).toMatchObject(invalid);
         expect(await host.saveManageEditor({ requestId: id(), target: { type: 'newArea' }, name: 'Garden', color: '#123456' })).toMatchObject(invalid);
         expect(await host.saveManageEditor({ requestId: id(), target: { type: 'area', id: 'a-gone', revision: '1' }, name: 'Back' })).toMatchObject(invalid);
-        // A write to an area, person, context or tag carries the revision its row showed.
+
         const work = shown(host, 'area', 'a-work');
         for (const target of [{ type: 'area', id: 'a-work' }, { type: 'person', id: 'pe-cy', revision: '' }, { type: 'context', name: '@phone' }, { type: 'tag', name: '#web', revision: 5 }]) {
             expect(await host.saveManageEditor({ requestId: id(), target: target as never, name: 'x' })).toMatchObject(invalid);

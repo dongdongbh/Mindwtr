@@ -63,7 +63,7 @@ beforeEach(async () => {
             createdAt: '2026-10-20T12:00:00Z', updatedAt: '2026-10-20T12:00:00Z' }],
         projects: [], sections: [], areas: [], people: [], settings: { deviceId: 'reminder-test' },
     };
-    // The host already displays Inbox before the app process exits.
+
     await updateMobileWidgetFromData(persisted); h.order = [];
     setStorageAdapter(noopStorage);
 });

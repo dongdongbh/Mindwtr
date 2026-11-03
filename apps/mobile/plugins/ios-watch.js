@@ -14,9 +14,8 @@ const WATCH_SOURCE_FOLDER = path.join('targets', 'watch');
 const WATCH_GENERATED_FOLDER = WATCH_TARGET_NAME;
 const WIDGET_GENERATED_FOLDER = WIDGET_TARGET_NAME;
 const WATCH_DEPLOYMENT_TARGET = '10.0';
-// Xcode 14+ single-target SwiftUI Watch apps are ordinary application
-// products with WKApplication in Info.plist. watchapp2 is the legacy split
-// WatchKit app + extension product type and fails modern watchOS validation.
+
+
 const WATCH_PRODUCT_TYPE = 'com.apple.product-type.application';
 const WIDGET_PRODUCT_TYPE = 'com.apple.product-type.app-extension';
 const COMMENT_SUFFIX = '_comment';
@@ -215,13 +214,8 @@ const addTargetGroup = (project, name, files) => {
   const groupSection = ensureSection(project, 'PBXGroup');
 
   for (const fileName of files) {
-    // xcode's addPbxGroup and addBuildPhase helpers de-duplicate by path across
-    // the whole project. The Watch app and widget intentionally have shared
-    // filenames, so each target needs its own file reference beneath its own
-    // group instead of reusing the other target's object.
-    // Later plugins (notably the Share Extension) also use addBuildPhase's
-    // global path lookup. Namespace paths from SOURCE_ROOT so their bare
-    // PrivacyInfo.xcprivacy cannot reuse a Watch resource build file.
+
+
     const file = new PbxFile(path.posix.join(name, fileName));
     file.sourceTree = 'SOURCE_ROOT';
     file.fileRef = project.generateUuid();
@@ -244,8 +238,8 @@ const addTargetGroup = (project, name, files) => {
 const addTargetFileBuildPhase = (project, targetUuid, phaseType, phaseName, files) => {
   const phase = project.addBuildPhase([], phaseType, phaseName, targetUuid, undefined, '""');
   for (const file of files) {
-    // A PBXBuildFile belongs to exactly one build phase. Reusing it between
-    // Sources phases makes Ruby xcodeproj reject the graph during CocoaPods.
+
+
     const buildFile = {
       uuid: project.generateUuid(),
       fileRef: file.fileRef,
@@ -419,8 +413,7 @@ const removeWatchTargetsFromProject = (project) => {
   deleteKeys(configurationLists, configurationListUuids);
   deleteKeys(nativeTargets, removedTargetUuids);
 
-  // The plugin owns the Watch embed phase. Remove it after its product is gone,
-  // while leaving any unrelated copy phase intact.
+
   const copyPhases = ensureSection(project, 'PBXCopyFilesBuildPhase');
   const emptyWatchEmbedPhases = new Set();
   for (const [uuid, phase] of Object.entries(copyPhases)) {
@@ -488,8 +481,8 @@ const addWatchTargetsToProject = (project, options) => {
     destination: '"$(CONTENTS_FOLDER_PATH)/Watch"',
   });
   addProductEmbedPhase(project, watch.target.uuid, widget.productFile, {
-    // xcode.buildPhaseObject falls back to a global name lookup if the host
-    // has no matching phase yet. Keep this distinct from iPhone extensions.
+
+
     name: 'Embed Watch Extensions',
     targetType: 'app_extension',
     destination: '""',

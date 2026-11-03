@@ -69,7 +69,7 @@ describe('prepared native Convert to section', () => {
             [requestRowId(requestId, 'task-to-section:1'), 'Empty the fridge', 'next', 7],
         ]);
         expect(saved().tasks.find((row) => row.id === 'source')?.deletedAt).toBe(prepared.preparedAt);
-        // A replay of the landed request (the journal after a restart) answers the same and writes nothing.
+
         const count = saves();
         expect(unwrap(await host.commitPreparedTaskToSection({ request: input, prepared }))).toEqual(prepared.result);
         const cold = await open({ tasks: saved().tasks, sections: saved().sections });
@@ -84,7 +84,7 @@ describe('prepared native Convert to section', () => {
         const { host, saves } = await open();
         const input = request({ taskRevision: '0:old:2026-01-01T00:00:00.000Z' });
         expect(host.prepareTaskToSection(input)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
-        // A change between preparation and commit: nothing is written.
+
         const fresh = request();
         const { prepared } = unwrap(host.prepareTaskToSection(fresh));
         await useTaskStore.getState().updateTask('source', { title: 'Synced title' });

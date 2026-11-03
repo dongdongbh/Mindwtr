@@ -31,15 +31,11 @@ type Props = {
   aiWorkingText: string;
   notesOpen: boolean;
   setNotesOpen: (v: boolean) => void;
-  /** This item reached the pass from Someday, not the Inbox (#1089). */
+
   isReturningItem: boolean;
 };
 
-/**
- * The item, anchored above every processing step. Clarifying a capture is part
- * of processing it, so the title is editable in place at all times; the note
- * and AI clarify sit one explicit tap away instead of crowding every step.
- */
+
 export function InboxCaptureCard({
   t,
   tc,

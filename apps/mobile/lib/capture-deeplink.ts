@@ -1,4 +1,4 @@
-// Moved to core (packages/core/src/capture-deeplink.ts) so the native Android app parses the same links.
+
 export {
     isEntityOpenUrl,
     isOpenFeatureUrl,

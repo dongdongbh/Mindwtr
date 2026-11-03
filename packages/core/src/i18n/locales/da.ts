@@ -1,5 +1,6 @@
-// Danish translation. Keep at full key parity with en.ts.
+
 export const daOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Før start",
     "taskEdit.advanceReminderLabel": "Forhåndspåmindelse",
     "taskEdit.advanceReminderMinutes": "{count} min før",
     "taskEdit.advanceReminderHour": "1 time før",
@@ -1183,6 +1184,7 @@ export const daOverrides: Record<string, string> = {
     'review.projectsHint':
         'Gennemgå hvert projekt. Har det mindst én konkret næste handling? Hvis ikke, så tilføj en nu. Markér afsluttede projekter som færdige.',
     'review.hasNextAction': 'Har næste handling',
+    'review.projectDeferred': 'Planlagt',
     'review.needsAction': 'Kræver handling',
     'review.noActiveTasks': 'Ingen aktive opgaver',
     'review.somedayStep': 'Engang/Måske',

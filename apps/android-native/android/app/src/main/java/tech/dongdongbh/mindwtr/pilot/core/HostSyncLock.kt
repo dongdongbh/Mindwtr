@@ -5,12 +5,7 @@ import android.util.Log
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.syncfilelock.SyncFileLockCore
 
-/**
- * File Sync's folder lock (core's SyncFileLockNativePort, bundle/host-sync.ts): React Native's SyncFileLockCore.kt, compiled as
- * it is, with its JNI library built from RN's C++ (the app's CMake build). [call] takes `{ op: "acquire", uri }` and answers
- * the lease's token, or `{ op: "revalidate" | "release", token }`. Refusals carry the lock's coded text, as RN's module does.
- * [close] releases every lease the process still holds (the host is closing).
- */
+
 class HostSyncLock internal constructor(private val core: SyncFileLockCore) : AutoCloseable {
     constructor(context: Context) : this(SyncFileLockCore { context })
 

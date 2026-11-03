@@ -27,13 +27,7 @@ const DEFAULT_BLOCKED_MIME_TYPES = [
 
 const normalizeMimeType = (value?: string): string => (value || '').trim().toLowerCase();
 
-/**
- * A remote "not found" for an attachment's file. Only an activation probe's trial copy is marked
- * unrecoverable: its proof reads that tombstone, and the trial is never published. Anywhere else
- * the row stays live and keyed and the caller backs off: a tombstone would sync to every device,
- * the location that still holds the file would then delete it, and another device may still
- * upload it here. Answers whether the attachment changed.
- */
+
 export const handleRemoteAttachmentNotFound = (attachment: Attachment, activationProbe: boolean): boolean => (
     activationProbe ? markAttachmentUnrecoverable(attachment) : false
 );
@@ -64,9 +58,7 @@ export const markAttachmentUnrecoverable = (attachment: Attachment): boolean => 
     return mutated;
 };
 
-/** A refused replacement must retain both byte generations: `cloudKey` still names the
- * proven remote bytes, while the durable pending marker protects the edited local bytes and
- * keeps their unproven hash/revision out of the remote document. */
+
 export const preserveRefusedAttachmentContentUpload = (attachment: Attachment): boolean => (
     attachment.pendingContentUpload === true && attachment.cloudKey !== undefined
 );

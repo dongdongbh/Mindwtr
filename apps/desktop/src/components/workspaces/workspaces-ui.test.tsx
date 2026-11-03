@@ -65,7 +65,7 @@ describe('SidebarWorkspaceSwitcher', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Switch now' }));
         await waitFor(() => expect(switchMock).toHaveBeenCalledTimes(1));
         expect(switchMock.mock.calls[0][0]).toBe(WORK);
-        // The pending-save flush is handed over, so it runs before the native switch.
+
         expect(typeof switchMock.mock.calls[0][1]).toBe('function');
     });
 });

@@ -10,8 +10,6 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 
-// The installer's Android file operations, plain Android with no Expo type, so the native app compiles this file and
-// AttachmentFileInstallerCore.kt as they are (apps/android-native's rnAttachmentInstaller task).
 
 private object ExactAttachmentPublisherNative {
   init {
@@ -41,14 +39,7 @@ private object ExactAttachmentPublisherNative {
   ): Int
 }
 
-/**
- * Outcome of attempting the primary hard-link publish. Kept as a typed
- * result (rather than letting callers catch [ErrnoException] themselves) so
- * [AndroidAttachmentInstallerFileOps.linkFile] can be swapped for a fake in
- * JVM unit tests: android.system.Os is unusable on the host JVM (every call
- * throws "not mocked" and every OsConstants errno collapses to 0), so tests
- * inject an already-classified outcome instead of a real link failure.
- */
+
 internal sealed class LinkAttemptOutcome {
   data object Linked : LinkAttemptOutcome()
   data object AlreadyExists : LinkAttemptOutcome()
@@ -56,7 +47,7 @@ internal sealed class LinkAttemptOutcome {
   data class Failed(val errno: Int, val cause: ErrnoException) : LinkAttemptOutcome()
 }
 
-/** Outcome of the exclusive-create copy fallback engaged when the hard link is refused. */
+
 internal sealed class CopyExclusiveOutcome {
   data object Published : CopyExclusiveOutcome()
   data object AlreadyExists : CopyExclusiveOutcome()
@@ -200,9 +191,7 @@ internal class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
     return digest.digest().joinToString(separator = "") { byte -> "%02x".format(byte.toInt() and 0xff) }
   }
 
-  /** Seam: real hard-link attempt, classified. Tests replace this to inject
-   * an already-classified [LinkAttemptOutcome] instead of a real link failure
-   * (android.system.Os is unusable on the host JVM). */
+
   internal var linkFile: (source: File, destination: File) -> LinkAttemptOutcome = ::realLinkFile
 
   private fun realLinkFile(source: File, destination: File): LinkAttemptOutcome {
@@ -219,9 +208,7 @@ internal class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
     }
   }
 
-  /** Seam: the exclusive-create copy fallback engaged when the link is
-   * refused. Same rationale as [linkFile]: tests replace this rather than
-   * driving real cross-device/permission conditions. */
+
   internal var copyExclusive: (source: File, destination: File) -> CopyExclusiveOutcome = ::realCopyExclusive
 
   private fun realCopyExclusive(source: File, destination: File): CopyExclusiveOutcome {
@@ -256,15 +243,13 @@ internal class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
     try {
       Os.remove(source.path)
     } catch (_: Throwable) {
-      // Tolerate a lingering source, same as the hard-link path: the durable
-      // journal lets the next invocation prove which generation each path
-      // holds.
+
+
     }
     return CopyExclusiveOutcome.Published
   }
 
-  /** Seam: errno-to-name lookup. Tests replace this because
-   * [OsConstants.errnoName] throws "not mocked" on the host JVM. */
+
   internal var errnoName: (Int) -> String? = OsConstants::errnoName
 
   private fun describeErrno(errno: Int): String = errnoName(errno) ?: "errno $errno"
@@ -276,8 +261,8 @@ internal class AndroidAttachmentInstallerFileOps : AttachmentInstallerFileOps {
         try {
           Os.remove(source.path)
         } catch (error: Throwable) {
-          // Both hard links intentionally remain. The durable journal lets
-          // the next invocation prove which generation each path contains.
+
+
           throw AttachmentInstallerFailure("Published attachment generation could not release its old path", error)
         }
         true

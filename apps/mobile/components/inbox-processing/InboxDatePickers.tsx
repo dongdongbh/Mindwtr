@@ -5,7 +5,7 @@ import { normalizeProcessInboxPickedDate } from '@mindwtr/core';
 
 export type DatePickerConfig = {
   show: boolean;
-  /** 'time' picks a clock time; the date picker keeps only the day. */
+
   mode?: 'date' | 'time';
   value: Date | null;
   onClose: () => void;

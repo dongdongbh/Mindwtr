@@ -13,8 +13,7 @@ enum NativeBackupImportFileError: LocalizedError, Equatable {
     }
 }
 
-/// A reference to native-owned bytes, never a provider URL. The library's exclusive
-/// CoreHost lock owns all calls. Accepted references must outlive pending journals.
+
 struct NativeBackupImportReference: Codable, Equatable, Sendable {
     let id: String
     let sha256: String
@@ -27,11 +26,9 @@ struct NativeBackupImportSelection: Sendable {
     let modifiedAtMilliseconds: Double
 }
 
-/// Copies the selected provider file once, before shared-core inspection. It never
-/// parses JSON or writes domain data. Cancellation may discard an unaccepted copy;
-/// startup must not sweep files that an unresolved command can still reference.
+
 final class NativeBackupImportFile {
-    static let maximumBytes = 128 * 1024 * 1024 // RN backup-transfer.ts byte limit
+    static let maximumBytes = 128 * 1024 * 1024
     private let root: URL
     #if DEBUG
     var afterSourceOpened: (() throws -> Void)?
@@ -72,8 +69,7 @@ final class NativeBackupImportFile {
         return bytes
     }
 
-    /// Only the native owner may call this once cancellation or a terminal journal
-    /// result proves the copy is no longer needed. No recursive cleanup is used.
+
     func discard(_ reference: NativeBackupImportReference) throws {
         _ = try read(reference)
         let directory = try openDirectory()
@@ -82,9 +78,7 @@ final class NativeBackupImportFile {
               Darwin.fsync(directory) == 0 else { throw failure() }
     }
 
-    /// Startup only, after the exclusive library lock and successful journal
-    /// validation. The caller supplies every still-needed accepted source UUID.
-    /// If journal ownership is uncertain, it must not call cleanup at all.
+
     func discardUnreferencedCopies(retaining ids: Set<String>) throws {
         guard ids.allSatisfy({ UUID(uuidString: $0)?.uuidString.lowercased() == $0 }) else { throw failure() }
         let directory = try openDirectory()
@@ -165,8 +159,8 @@ final class NativeBackupImportFile {
         #if DEBUG
         try beforePromote?()
         #endif
-        // UUID destination is native-owned; exclusive rename also refuses an
-        // unexpected existing destination rather than replacing it.
+
+
         guard Darwin.renameatx_np(directory, pending, directory, finalName, UInt32(RENAME_EXCL)) == 0 else { throw failure() }
         promoted = true
         guard Darwin.fsync(directory) == 0 else { throw failure() }

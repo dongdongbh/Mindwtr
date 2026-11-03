@@ -1,25 +1,6 @@
-// Capture popup check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-capture-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays) and checks RN's capture popup
-// (the tab bar's +) against core's own quick capture on a copy of the app's database: (0) on an empty draft Save is dimmed to
-// half, the whole pill (read from screenshots), and inert, as RN's; (a) a capture with a
-// context and a tag stores exactly what core's submitQuickCapture stores for the same draft; (b) "Add another"
-// keeps the popup open for a second capture, then goes off again; (c) a project picked in More's picker (created
-// through the picker's own Create row on the first run) is stored; (d) two lines ask core's question, write core's
-// recovery snapshot (it parses and holds the tasks the data had before the batch), and store one task per line in one
-// write; (e) an unreadable date command shows core's notice and stores nothing; (f) a failed commit keeps its
-// exact retry, and Try again stores it once; (g) Save & edit on a task with no project opens its editor over Focus, as RN's
-// openTaskScreen does; (h) the keyboard's own Done key saves the popup, as Save does (RN's b13f04019), with no line added;
-// (i) More with the keyboard up waits for the keyboard to go, so the field stays on screen above the panel (RN's #1120,
-// d73c7f2c1); (j) a hardware Enter saves the popup too, its title without a line, as RN's field does (submitBehavior
-// blurAndSubmit: an adb KEYCODE_ENTER in Mindwtr Dev's popup saved it, 10-25); (k) with d/m/y stored as the date format,
-// `/due:10/8` stores 10 August, as core reads it (#1006; the app applies the setting to quick add at boot and on every change).
-// It touches only the development package (it refuses any other
-// APK), never launches over another app, clears its debug properties and leaves "Add another" off on exit.
-// Leave the device on its home screen before running. It needs host `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -50,9 +31,9 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/capture-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits for titles and tokens: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
-// The picker's project: one fixed name, created once through the picker, then picked, so runs add no projects.
+
 const PROJECT = '5600';
 const titles = { a: `53${run}`, b1: `54${run}`, b2: `55${run}`, c: `56${run}`, d1: `57${run}1`, d2: `57${run}2`, e: `58${run}`, f: `59${run}`, g: `56${run}1`,
     h: `56${run}2`, i: `56${run}3`, j: `56${run}4`, k: `56${run}5` };
@@ -64,7 +45,7 @@ const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${val
 const commands = (operation, outcome) => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = () => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -73,11 +54,8 @@ const pullDatabase = () => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/**
- * On a copy: the stored tasks titled [titles], and, for [text], what core's own popup stores (a fresh open,
- * then submitQuickCapture with a new ID on the copy), the id of the project titled PROJECT, and how many tasks
- * (tombstones too, as a backup holds them) the data has.
- */
+
+
 const core = (text = '', ...names) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, flushPendingSave, generateUUID, getStorageAdapter, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -108,10 +86,8 @@ const core = (text = '', ...names) => JSON.parse(execFileSync('bun', ['-e', `
     console.log(JSON.stringify({ stored, expected, project, dataTasks }));
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase(), CHECK_TEXT: text, CHECK_TITLES: JSON.stringify(names) } }).trim().split('\n').pop());
-/**
- * The stored date format set to [format] (null: unset) through core's updateSettings on a copy, with the app stopped; the copy goes
- * back and the app starts on it, so the boot applies the setting. Returns the format stored before.
- */
+
+
 const setDateFormat = async (format) => {
     await device.stopApp();
     const db = pullDatabase();
@@ -145,12 +121,12 @@ const setDateFormat = async (format) => {
 let restoreDateFormat = null;
 const snapshots = () => { try { return sh(`run-as ${PKG} ls files/snapshots`).split(/\s+/).filter((name) => name.endsWith('.snapshot.json')); } catch { return []; } };
 
-// ---- UI (core's English) ----
+
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
 const onInbox = (nodes) => !inPopup(nodes) && Number.isFinite(inboxCount(nodes));
 const hasError = (nodes) => nodes.some((node) => node.text?.includes('Injected commit failure'));
 const title = (nodes) => tagged(nodes, 'capture-title')?.text ?? '';
-/** Opens the popup from + and types [text] ('%s' is a space for `input text`) at the field's end. */
+
 const typeCapture = async (text, expected) => {
     let nodes = await screen();
     if (!inPopup(nodes)) nodes = await device.openCapture();
@@ -161,13 +137,12 @@ const typeCapture = async (text, expected) => {
 };
 const save = async (expected, description) => tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), expected, description);
 const close = async () => {
-    // Settle first: Close moves while the sheet slides with the keyboard.
+
     const nodes = await device.settle();
     if (inPopup(nodes)) await tapExpecting(withDescription(nodes, en['common.close']) ?? fail('no Close'), onInbox, 'the popup to close');
 };
-/** The picker's search field (core's picker title is its label while it is empty). */
-// The picker's search field. Android puts its label either on the EditText or on a child node inside it
-// (run 31: the child [108,1045][972,1142] says "Project", the EditText says nothing).
+
+
 const pickerField = (nodes) => {
     const within = (inner, outer) => { const [l, t, r, b] = box(outer); const [x1, y1, x2, y2] = box(inner); return l <= x1 && t <= y1 && r >= x2 && b >= y2; };
     const labels = nodes.filter((node) => node['content-desc'] === en['taskEdit.projectLabel']);
@@ -175,11 +150,8 @@ const pickerField = (nodes) => {
 };
 const addAnother = (nodes) => withDescription(nodes, en['quickAdd.addAnother']);
 const keyboardShown = () => /mInputShown=true/.test(sh('dumpsys input_method'));
-/**
- * The keyboard's own Done key. The field asks for it (imeOptions IME_ACTION_DONE without IME_FLAG_NO_ENTER_ACTION), and the
- * check's keyboard (Samsung Keyboard, en_US, requireEnglishKeyboard) draws it at the bottom right of its keys: 91% across,
- * 77% down the keyboard window below its top inset. A miss leaves the popup open, so the step fails rather than passes.
- */
+
+
 const tapKeyboardDone = () => {
     const ime = sh('dumpsys input_method');
     const options = [...ime.matchAll(/imeOptions=0x([0-9a-f]+)/g)].map((match) => parseInt(match[1], 16)).filter((value) => value !== 0).pop() ?? 0;
@@ -189,10 +161,8 @@ const tapKeyboardDone = () => {
     const [width, height] = sh('wm size').match(/(\d+)x(\d+)/).slice(1).map(Number);
     sh(`input tap ${Math.round(width * 0.913)} ${Math.round(top + (height - top) * 0.772)}`);
 };
-/**
- * The Save pill's fill beside its label (inside its 16dp padding) and the sheet's own color at the same height, read from a
- * screenshot with ImageMagick.
- */
+
+
 const savePill = (nodes, name) => {
     const label = nodes.find((node) => node.text === en['common.save'] && node.class === 'android.widget.TextView') ?? fail('no Save label');
     const [left, top, , bottom] = box(label);
@@ -208,22 +178,22 @@ const addAnotherOn = (nodes) => switchOn(nodes, en['quickAdd.addAnother']);
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
     if (restoreDateFormat) {
         try { await restoreDateFormat(); } catch (error) { console.error(`RESTORE FAILED: the date format: ${error.message}; put it back in Settings › General`); }
     }
     try {
         if (front().includes(`${PKG}/`)) {
-            // "Add another" is RN's device preference: leave it off, as a fresh install has it.
+
             const nodes = await screen();
             if (inPopup(nodes) && addAnotherOn(nodes)) await tapExpecting(addAnother(nodes), (current) => !addAnotherOn(current), 'Add another off', 10_000);
             await close();
         }
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 try {
@@ -240,7 +210,7 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onInbox, 60_000);
 
-    // (0) An empty draft: Save is dimmed to half, the whole pill, and inert, as RN's (opacity 0.5, disabled while the text is blank).
+
     let nodes = await device.settle(await device.openCapture());
     const empty = savePill(nodes, 'empty');
     const saves = commands('quickCapture', 'saved');
@@ -249,7 +219,7 @@ try {
     nodes = await screen();
     check(inPopup(nodes) && title(nodes) === '' && commands('quickCapture', 'saved') === saves, '(0) a tap on the empty draft\'s Save does nothing');
 
-    // (a) A context and a tag: core's preview shows them, and the stored task is exactly what core stores for this draft.
+
     const textA = `${titles.a} @c${run} #t${run}`;
     nodes = await typeCapture(textA.replace(/ /g, '%s'), textA);
     const full = savePill(await device.settle(nodes), 'typed');
@@ -262,11 +232,11 @@ try {
     check(seen.stored[titles.a].length === 1 && JSON.stringify(seen.stored[titles.a][0]) === JSON.stringify(seen.expected),
         `(a) stored once, exactly as core's popup stores it: ${JSON.stringify(seen.stored[titles.a][0])}`);
 
-    // (b) Add another: the popup stays for the next capture, then the switch goes off again.
+
     nodes = await device.openCapture();
     await tapExpecting(addAnother(nodes) ?? fail('no Add another switch'), addAnotherOn, 'Add another on');
     await typeCapture(titles.b1, titles.b1);
-    // RN keeps the field focused (and the keyboard up) for the next capture.
+
     const nextCapture = (current) => inPopup(current) && title(current) === '' && tagged(current, 'capture-title')?.focused === 'true';
     await save(nextCapture, 'the popup to stay, empty, the field focused');
     await typeCapture(titles.b2, titles.b2);
@@ -277,8 +247,7 @@ try {
     seen = core('', titles.b1, titles.b2);
     check(seen.stored[titles.b1].length === 1 && seen.stored[titles.b2].length === 1, '(b) Add another: two captures, each stored once, and the popup stayed between them');
 
-    // (c) More's project picker: search PROJECT; pick it, or create it through the picker's Create row (first run).
-    // The stored capture carries that project.
+
     await typeCapture(titles.c, titles.c);
     const projectChip = `${en['taskEdit.projectLabel']}: ${en['taskEdit.projectLabel']}`;
     nodes = await tapExpecting(withDescription(await screen(), en['common.more']) ?? fail('no More'), (current) => Boolean(withDescription(current, projectChip)), 'More open');
@@ -296,13 +265,12 @@ try {
     check(seen.project && seen.stored[titles.c].length === 1 && seen.stored[titles.c][0].projectId === seen.project,
         `(c) the project ${PROJECT} (${created ? 'created by the picker' : 'picked'}) is stored with the capture`);
 
-    // (d) Two lines: core's question, core's recovery snapshot on disk, one task per line in one write.
+
     const snapshotsBefore = snapshots();
     const tasksBefore = core('').dataTasks;
     const linesBefore = commands('quickCaptureLines', 'saved');
-    // Several lines reach RN's popup only by paste (Enter saves). The debug build puts the check's two lines on the
-    // clipboard when the popup opens; the paste key (KEYCODE_PASTE) on the focused field runs the real paste path.
-    // (The long-press Paste menu is a floating window uiautomator does not dump; run 35.)
+
+
     setProp('clipboard', `${titles.d1}\\n${titles.d2}`);
     nodes = await device.openCapture();
     await sleep(500);
@@ -313,9 +281,9 @@ try {
     await waitFor('two lines in the field', (current) => title(current) === `${titles.d1}\n${titles.d2}`, 10_000);
     const confirmTitle = en['quickAdd.bulkConfirmTitle'].replace('{{count}}', '2');
     nodes = await save((current) => current.some((node) => node.text === confirmTitle), 'core\'s several-lines question');
-    // Back leaves the question first (RN's 90a0e079e): the popup stays with both lines, and nothing is written.
+
     requireAppFront();
-    // An open keyboard takes the first Back.
+
     if (keyboardShown()) { sh('input keyevent KEYCODE_BACK'); for (let wait = 0; wait < 15 && keyboardShown(); wait += 1) await sleep(200); }
     sh('input keyevent KEYCODE_BACK');
     nodes = await waitFor('the question to close on Back', (current) => !current.some((node) => node.text === confirmTitle) && inPopup(current), 10_000);
@@ -331,14 +299,14 @@ try {
     check(seen.stored[titles.d1].length === 1 && seen.stored[titles.d2].length === 1 && commands('quickCaptureLines', 'saved') === linesBefore + 1,
         '(d) one task per line, in one write');
 
-    // (e) An unreadable date command: core's notice, nothing stored, the draft stays.
+
     const textE = `${titles.e} /due:${run}x`;
     await typeCapture(textE.replace(/ /g, '%s'), textE);
     nodes = await save((current) => current.some((node) => node.text?.startsWith(en['quickAdd.invalidDateCommand'])), 'core\'s invalid date notice');
     check(title(nodes) === textE && core('', titles.e).stored[titles.e].length === 0, '(e) the notice shows, nothing is stored, and the draft stays');
     await close();
 
-    // (f) A failed commit keeps its exact retry; Try again stores it once.
+
     setProp('fail_commit', '1');
     await typeCapture(titles.f, titles.f);
     nodes = await save(hasError, 'the injected failure');
@@ -348,7 +316,7 @@ try {
     await tapExpecting(owedRetry(await screen()), (current) => !hasError(current) && onInbox(current), 'the retry from Try again');
     check(core('', titles.f).stored[titles.f].length === 1 && commands('quickCapture', 'failed') >= 1, '(f) Try again stored the capture once');
 
-    // (g) Save & edit goes where RN's openTaskScreen goes: a task with no project to Focus, with its editor open there.
+
     await typeCapture(titles.g, titles.g);
     nodes = await tapExpecting(button(await screen(), en['quickAdd.saveAndEdit']) ?? fail('no Save & edit'), (current) => inEditor(current), 'the saved task\'s editor');
     nodes = await tapExpecting(withDescription(nodes, en['common.close']) ?? fail('no Close in the editor'),
@@ -356,7 +324,7 @@ try {
     check(core('', titles.g).stored[titles.g].length === 1, '(g) Save & edit stored the capture once and opened its editor over Focus');
     await tapExpecting(tab(nodes, en['tab.inbox']) ?? fail('no Inbox tab'), onInbox, 'the Inbox again');
 
-    // (h) The keyboard's Done key saves the popup, as Save does: the popup closes and the title is stored once, with no line.
+
     await typeCapture(titles.h, titles.h);
     for (let wait = 0; wait < 15 && !keyboardShown(); wait += 1) await sleep(200);
     check(keyboardShown(), '(h) the keyboard is up for the typed capture');
@@ -364,7 +332,7 @@ try {
     await waitFor('the popup to close on the keyboard\'s Done', onInbox, 15_000);
     check(core('', titles.h).stored[titles.h].length === 1, '(h) the keyboard\'s Done key stored the capture once, its title without a line');
 
-    // (i) More with the keyboard up: the keyboard goes first, then the panel opens with the field still on screen above it.
+
     await typeCapture(titles.i, titles.i);
     for (let wait = 0; wait < 15 && !keyboardShown(); wait += 1) await sleep(200);
     check(keyboardShown(), '(i) the keyboard is up before More');
@@ -379,13 +347,13 @@ try {
     await save(onInbox, 'the capture to close the popup');
     check(core('', titles.i).stored[titles.i].length === 1, '(i) the capture typed before More is stored once');
 
-    // (j) A hardware Enter saves the popup as Save does: it closes and the title is stored once, with no line.
+
     await typeCapture(titles.j, titles.j);
     sh('input keyevent KEYCODE_ENTER');
     await waitFor('the popup to close on a hardware Enter', onInbox, 15_000);
     check(core('', titles.j).stored[titles.j].length === 1, '(j) a hardware Enter stored the capture once, its title without a line');
 
-    // (k) A d/m/y date format reads a typed slash date day first, as core does (#1006).
+
     const formatBefore = await setDateFormat('dmy');
     restoreDateFormat = async () => { await setDateFormat(formatBefore); restoreDateFormat = null; };
     const textK = `${titles.k} /due:10/8`;

@@ -84,9 +84,8 @@ export const styles = StyleSheet.create({
     },
     settingRow: {
         flexDirection: 'row',
-        // Let the value/action drop below the label when both cannot fit
-        // side by side (large font scales) instead of squeezing each into a
-        // narrow column that wraps mid-word (#632).
+
+
         flexWrap: 'wrap',
         alignItems: 'flex-start',
         justifyContent: 'space-between',

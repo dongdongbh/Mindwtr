@@ -155,16 +155,13 @@ function renderQr(label: string): string {
     return `<g data-share-card-qr="${SHARE_CARD_DOWNLOAD_URL}" data-qr-modules="${qr.size}" data-qr-module-size="${moduleSize}" transform="translate(${x} ${y})"><title>${escapeXml(label)}</title><rect width="${size}" height="${size}" rx="4" fill="#ffffff"/><path d="${path}" fill="#14365f"/></g>`;
 }
 
-/**
- * Local-only review artwork. Only the explicit date and optional note enter the
- * image; no task store or review statistics are read here.
- */
+
 export function renderShareCardSvg(
     input: ShareCardInput,
     t: Translate,
     options: { textLayout?: 'svg' | 'native' } = {},
 ): string {
-    // Native SVG text anchors are physical; browser SVG anchors follow direction.
+
     const renderLines = (lines: readonly string[], x: number, y: number, lineHeight: number, attributes: string, rightEdge = 972) =>
         renderTextLines(lines, x, y, lineHeight, attributes, rightEdge, options.textLayout === 'native');
     const title = `${translated(t, REVIEW_COPY.titleKey, REVIEW_COPY.title)} ✓`;

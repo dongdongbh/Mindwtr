@@ -103,7 +103,7 @@ const validProject = (value: unknown, areaId: string): value is Project => {
     catch { return false; }
 };
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedAreaDelete | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

@@ -12,12 +12,12 @@ class UpNoteLinkTest {
         val keys = listOf("common.error", "markdown.openLinkFailed", "markdown.copyLink", "markdown.copyLinkFailed")
         for (language in listOf("fr", "de")) {
             val translated = keys.associateWith { "$language:$it translated" }
-            // This is the same request/response boundary as boot: core replies only to LABEL_KEYS.
+
             val response = JSONObject().put("language", language).put("missing", JSONArray())
                 .put("strings", JSONObject(translated.filterKeys { LABEL_KEYS.contains(it) }))
             Labels.load(response, reportLoaded = {})
             for (key in keys) {
-                // A missing label logs through android.util.Log (a stub in JVM tests), then the UI's fallback is the raw key.
+
                 val displayed = runCatching { t(key) }.getOrElse { key }
                 assertEquals(translated.getValue(key), displayed)
             }
@@ -44,8 +44,7 @@ class UpNoteLinkTest {
         }
     }
 
-    // RN's openExternalLink (c2e30c2e5): every external link a description or project notes holds, any scheme, is opened once
-    // as typed; when nothing opens it, the exact link is offered for Copy link. Only UpNote's handoff is logged.
+
     @Test fun anyExternalLinkThatNothingOpensOffersItsExactTextForCopy() {
         for (href in listOf("https://example.org/a?b=1#c", "mailto:a@example.org", "obsidian://open?vault=Notes&file=A%20B", original)) {
             val failed = mutableListOf<String>()
@@ -59,7 +58,7 @@ class UpNoteLinkTest {
         }
     }
 
-    // A failed attachment link is logged by its failure's type (Attachments.kt), then offered for Copy link like any other.
+
     @Test fun aFailedOpenReportsItsFailureBeforeOfferingCopy() {
         val events = mutableListOf<String>()
         val missing = android.content.ActivityNotFoundException()

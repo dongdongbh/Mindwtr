@@ -25,7 +25,7 @@ describe('saved search sort (#1453)', () => {
     it('a saved search sort wins over the global sort', () => {
         expect(resolveSavedSearchSortBy({ id: 's', name: 'S', query: 'x', sort: 'start' }, settings)).toBe('start');
         expect(getSavedSearchOwnSortBy({ id: 's', name: 'S', query: 'x', sort: 'start' }, settings)).toBe('start');
-        // 'default' is the app's comparator, not "follow the global sort".
+
         expect(resolveSavedSearchSortBy({ id: 's', name: 'S', query: 'x', sort: 'default' }, settings)).toBe('default');
     });
 
@@ -90,7 +90,7 @@ describe('saved search sort (#1453)', () => {
         expect(stored[0]).toEqual({ id: 'one', name: 'One', query: 'status:next', groupBy: 'project' });
         expect('sort' in stored[0]).toBe(false);
         expect(await setSavedSearchSortById('one', null)).toBe(false);
-        // The unknown value on the other search was never erased.
+
         expect(useTaskStore.getState().settings.savedSearches![1].sort).toBe('mystery');
     });
 });

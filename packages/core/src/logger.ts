@@ -6,9 +6,8 @@ export type LogMeta = {
     category?: LogCategory;
     context?: Record<string, unknown>;
     error?: unknown;
-    /** Write the line even while diagnostics logging is off. For a line that
-     *  runs inside the load that reads the logging setting: without this the
-     *  app sinks drop it every time. */
+
+
     force?: boolean;
 };
 

@@ -53,7 +53,7 @@ vi.mock('@/contexts/theme-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: rows compare `tc` by identity (#766).
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -117,8 +117,8 @@ vi.mock('react-native', async (importOriginal) => {
 import SavedSearchScreen from './[id]';
 
 describe('SavedSearchScreen', () => {
-  // Rows carry the #766 memo boundary, which only holds while the screen hands
-  // untouched rows the same references back.
+
+
   it('hands rows stable prop references across a re-render', async () => {
     storeState.tasks = [makeTask('task-1', 'loose one'), makeTask('task-2', 'loose two')];
 
@@ -158,8 +158,7 @@ describe('SavedSearchScreen', () => {
     expect(deleteButton.props.accessibilityLabel).toBeTruthy();
   });
 
-  // The confirmation may stay open while another device or screen changes the
-  // saved searches: Delete removes this one from the list as it is then.
+
   it('deletes against the current saved searches, not the list from render', async () => {
     const core = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
     const added = { id: 'search-2', name: 'Added meanwhile', query: 'meanwhile' };
@@ -185,7 +184,7 @@ describe('SavedSearchScreen', () => {
     expect(updateSettings).toHaveBeenCalledWith({ savedSearches: [added] });
   });
 
-  // #1453: a saved search keeps its own sort; "Use global setting" clears it.
+
   it('sorts by the saved search sort and writes only a user choice', async () => {
     const core = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
     const own = { id: 'search-1', name: 'Loose ends', query: 'loose', sort: 'title' };
@@ -204,7 +203,7 @@ describe('SavedSearchScreen', () => {
       .findAll((node) => (node.type as unknown) === 'SwipeableTaskItem')
       .map((node) => node.props.task.id);
     expect(rowIds()).toEqual(['task-a', 'task-b']);
-    // Opening the screen writes nothing.
+
     expect(updateSettings).not.toHaveBeenCalled();
 
     const option = (testID: string) => tree.root.find((node) => node.props.testID === testID && node.props.onPress);

@@ -74,8 +74,8 @@ class SafDocumentsCoreTest {
 
     @Test
     fun aLookupWithNoCursorIsAnErrorEvenFromAReachableProvider() {
-        // No cursor proves nothing: DocumentsProvider.query answers null for a vanished document and for a provider that
-        // failed the query alike, so only an empty cursor means "absent".
+
+
         val provider = FakeProvider().apply { document = SafDocumentQuery.NoCursor }
         assertUnavailable { SafDocumentsCore(provider).stat("content://p/tree/t/document/x") }
         provider.reachable = false
@@ -90,7 +90,7 @@ class SafDocumentsCoreTest {
 
     @Test
     fun aWriteGoesStraightToTheOutputStreamWithNoFlagCheck() {
-        // FLAG_SUPPORTS_WRITE (2) is absent from the row, as RSAF reports it.
+
         val provider = FakeProvider().apply { document = SafDocumentQuery.Found(row("x").copy(flags = 0)) }
         SafDocumentsCore(provider).writeBytes("content://p/tree/t/document/x", byteArrayOf(1, 2, 3))
         assertEquals(listOf<Byte>(1, 2, 3), provider.written!!.toByteArray().toList())
@@ -176,7 +176,7 @@ class SafDocumentsCoreReadTest {
 
     @Test
     fun sizesThatStayInconsistentAreRefusedAfterTheBoundedWait() {
-        // COLUMN_SIZE 113, a truncated 32-byte descriptor, 32 bytes then EOF.
+
         assertIncomplete("the provider reports inconsistent sizes") {
             core(Provider(document.copyOf(32), mutableListOf(113L), mutableListOf(32L))).readBytes(uri, 1_000)
         }
@@ -185,7 +185,7 @@ class SafDocumentsCoreReadTest {
 
     @Test
     fun aDownloadsSizeThatCatchesUpIsAccepted() {
-        // The Downloads provider: metadata 0 while the descriptor already holds 113 bytes, then 113.
+
         val read = core(Provider(document, mutableListOf(0L, 113L), mutableListOf(113L))).readBytes(uri, 1_000)
         assertTrue(read.lengthVerified)
         assertEquals(listOf(250L), waits)

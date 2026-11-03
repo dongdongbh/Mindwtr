@@ -9,20 +9,12 @@ import type {
     TimeEstimate,
 } from './types';
 
-/**
- * Filter selections ⇄ criteria as one module: every filtering surface keeps
- * its picker state as FilterSelections and converts through here, so the
- * token @/# split, the contextMatchMode rule, saved-filter validation, and
- * the active-filter count live in one place instead of one copy per view.
- *
- * Interface: criteriaFromSelections · selectionsFromCriteria ·
- * countActiveFilterCriteria. Everything else is implementation.
- */
+
 export type FilterSelections = {
     anyDateRange?: DateRange;
-    /** Mixed @context / #tag tokens, as shown in one token picker. */
+
     tokens: string[];
-    /** Mixed @context / #tag tokens whose presence excludes a task. */
+
     excludedTokens: string[];
     projects: string[];
     excludedProjects?: string[];
@@ -50,12 +42,12 @@ export function criteriaFromSelections(selections: Partial<FilterSelections>): F
     return {
         ...(selections.anyDateRange ? { anyDateRange: selections.anyDateRange } : {}),
         ...(contexts.length > 0 ? { contexts } : {}),
-        // The match mode only means something once several contexts compete.
+
         ...(contexts.length > 1 && selections.contextMatchMode
             ? { contextMatchMode: selections.contextMatchMode }
             : {}),
         ...(tags.length > 0 ? { tags } : {}),
-        // The match mode only means something once several tags compete.
+
         ...(tags.length > 1 && selections.tagMatchMode
             ? { tagMatchMode: selections.tagMatchMode }
             : {}),
@@ -71,13 +63,7 @@ export function criteriaFromSelections(selections: Partial<FilterSelections>): F
     };
 }
 
-/**
- * Derive picker selections from criteria (applying a saved filter). Criteria
- * may come from another device or an older version, so they pass through
- * normalizeFilterCriteria: enum values are validated, custom time estimates
- * (no picker option) are dropped, and bare tokens gain their @/# prefix.
- * 'none' is a criteria-only priority; pickers select real priorities.
- */
+
 export function selectionsFromCriteria(criteria: FilterCriteria | undefined): FilterSelections {
     const normalized = normalizeFilterCriteria(criteria ?? {});
     return {
@@ -96,7 +82,7 @@ export function selectionsFromCriteria(criteria: FilterCriteria | undefined): Fi
     };
 }
 
-/** Chip-count of active criteria: one per selected value, one per range/flag. */
+
 export function countActiveFilterCriteria(criteria: FilterCriteria | undefined): number {
     if (!criteria) return 0;
     const normalized = normalizeFilterCriteria(criteria);

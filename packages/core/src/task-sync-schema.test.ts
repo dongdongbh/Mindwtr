@@ -169,7 +169,7 @@ describe('Task sync schema contract', () => {
         const readBack = mapSqliteTaskRow(record);
         expect('completedAtBeforeProjectArchive' in readBack && readBack.completedAtBeforeProjectArchive !== undefined).toBe(false);
         expect(readBack.isFocusedTodayBeforeProjectArchive).toBeUndefined();
-        // A document an older client uploaded with explicit nulls converges to the same bytes.
+
         const legacy = normalizeTaskForSyncMerge({ ...task, completedAtBeforeProjectArchive: null, isFocusedTodayBeforeProjectArchive: null }, task.updatedAt);
         expect(JSON.stringify(legacy)).toBe(JSON.stringify(normalizeTaskForSyncMerge(task, task.updatedAt)));
         expect(JSON.stringify(legacy)).not.toContain('"completedAtBeforeProjectArchive":null');

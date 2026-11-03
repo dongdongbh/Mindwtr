@@ -35,14 +35,14 @@ const encryptionMocks = vi.hoisted(() => ({
 vi.mock('@/lib/sync-encryption-service', () => encryptionMocks);
 vi.mock('@/lib/sync-crypto-native', () => ({
   mobileSyncCryptoPrimitives: {
-    // Deterministic so the generated phrase is assertable; the real provider is
-    // quick-crypto's OpenSSL RAND_bytes.
+
+
     randomBytes: (n: number) => new Uint8Array(n).fill(1),
   },
 }));
 vi.mock('@/lib/settings-utils', () => ({ logSettingsError: vi.fn() }));
-// settings.shell (SettingsGuideLink) pulls in router/icon/inset modules the
-// card itself never needs; mock them the way settings.shell.test does.
+
+
 vi.mock('expo-router', () => ({
   useRouter: () => ({ back: vi.fn(), canGoBack: () => false }),
 }));
@@ -228,7 +228,7 @@ describe('SyncEncryptionCard', () => {
     expect(encryptionMocks.enableSyncEncryption).toHaveBeenCalledTimes(1);
     const [passphrase, options] = encryptionMocks.enableSyncEncryption.mock.calls[0];
     expect(passphrase).toBe('first swimmer bagpipe');
-    // Without appData the transition silently leaves every attachment in plaintext.
+
     expect(options?.appData).toBe(appData);
   });
 
@@ -393,11 +393,10 @@ describe('SyncEncryptionCard', () => {
     const error = findText(tree, 'settings.syncEncryptionErrorWrongPassphrase');
     expect(error?.props.accessibilityRole).toBe('alert');
     expect(error?.props.accessibilityLiveRegion).toBe('assertive');
-    // Still open for another attempt, and nothing suggests the data is damaged.
+
     expect(inputLabels(tree)).toContain('settings.syncEncryptionPassphrase');
-    // The 2026-09-02 Dropbox device test saw no feedback at all, because the message
-    // used to be appended after the action rows and fell below the phone's viewport.
-    // It belongs between the field and the buttons the user just pressed.
+
+
     const order = texts(tree);
     expect(order.indexOf('settings.syncEncryptionErrorWrongPassphrase'))
       .toBeGreaterThan(order.indexOf('settings.syncEncryptionPassphrase'));
@@ -424,7 +423,7 @@ describe('SyncEncryptionCard', () => {
     const tree = await renderCard();
 
     expect(texts(tree)).toContain('settings.syncEncryptionRemotePlaintextDesc');
-    // Rotating a passphrase against a location that no longer holds ciphertext is not a remedy.
+
     expect(texts(tree)).not.toContain('settings.syncEncryptionChange');
 
     await press(tree, 'settings.syncEncryptionDisable');
@@ -433,7 +432,7 @@ describe('SyncEncryptionCard', () => {
   });
 
   it('renders nothing until the first status read resolves', () => {
-    // Never resolves: the card must not guess a state it has not read.
+
     encryptionMocks.getSyncEncryptionStatus.mockReturnValue(new Promise(() => undefined));
     let tree!: renderer.ReactTestRenderer;
     act(() => {
@@ -446,8 +445,8 @@ describe('SyncEncryptionCard', () => {
   });
 
   it('shows recovery and retries when the status read fails without claiming encryption is off', async () => {
-    // 'off' offers "Enable encryption" — for a location that may already be
-    // encrypted, that is the one answer a failed read must not give.
+
+
     encryptionMocks.getSyncEncryptionStatus
       .mockRejectedValueOnce(new Error('keyring unavailable'))
       .mockResolvedValue({ state: 'off' });
@@ -472,7 +471,7 @@ describe('SyncEncryptionCard', () => {
     await press(tree, 'settings.syncEncryptionEnable');
     const error = findText(tree, 'settings.syncEncryptionErrorMismatch');
     expect(flatStyle(error?.props.style).color).toBe(tc.danger);
-    // Errors arrive without focus moving, so they have to be announced.
+
     expect(error?.props.accessibilityRole).toBe('alert');
     expect(error?.props.accessibilityLiveRegion).toBe('assertive');
   });
@@ -484,7 +483,7 @@ describe('SyncEncryptionCard', () => {
       .findAllByType(TouchableOpacity)
       .find((node) => node.findAllByType(Text)
         .some((child) => child.props.children === 'settings.syncEncryptionShowPassphrase'));
-    // accessibilityState.checked is only announced for switch/checkbox roles.
+
     expect(toggle?.props.accessibilityRole).toBe('switch');
     expect(toggle?.props.accessibilityState).toEqual({ checked: false });
   });
@@ -504,9 +503,7 @@ describe('SyncEncryptionCard transport refresh (#1001)', () => {
     });
     expect(texts(tree)).not.toContain('settings.syncEncryptionLockedTitle');
 
-    // The activation probe discovered an encrypted folder and persisted the
-    // no-key state; when the action ends, the card must flip to the unlock UI
-    // without the user first failing an enable.
+
     encryptionMocks.getSyncEncryptionStatus.mockResolvedValue({ state: 'remote-encrypted-no-key' });
     await act(async () => {
       tree.update(<SyncEncryptionCard appData={appData} t={t} tc={tc} transportBusy={false} />);

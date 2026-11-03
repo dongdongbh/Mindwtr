@@ -1,10 +1,6 @@
 import { getProjectAccentColor } from './task-accent-color';
-/**
- * The React Native Inbox, Waiting, Someday, Reference and Done screens as data: which
- * tasks each lists, their order and groups, the counts, the empty states, and
- * the filters, sorts and groupings it offers. Mobile's screens call this and
- * keep only React state and wiring; the native host serves the same result.
- */
+
+
 import {
     isTaskVisibleInInbox,
     projectMatchesAreaFilterSelection,
@@ -43,13 +39,7 @@ import {
 
 type Translate = (key: string) => string;
 
-// ---------------------------------------------------------------------------
-// Shared pieces
 
-/**
- * The Waiting For screen's default order, shared with the widget lists (#1173):
- * dated tasks first by due date, then newest first.
- */
 export function compareWaitingTasks(a: Task, b: Task): number {
     if (a.dueDate && !b.dueDate) return -1;
     if (!a.dueDate && b.dueDate) return 1;
@@ -61,7 +51,7 @@ export function compareWaitingTasks(a: Task, b: Task): number {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 }
 
-/** The Someday/Maybe screen's default order: newest first. */
+
 export function compareSomedayTasks(a: Task, b: Task): number {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
 }
@@ -73,10 +63,7 @@ const byOrderThenTitle = (a: Project, b: Project) => {
     return a.title.localeCompare(b.title);
 };
 
-/**
- * Projects parked in the same bucket as the screen's tasks: Someday and Waiting
- * are the two GTD buckets a whole project can sit in.
- */
+
 export function selectDeferredProjects(
     projects: readonly Project[],
     status: 'someday' | 'waiting',
@@ -93,14 +80,14 @@ export function selectDeferredProjects(
 }
 
 export type DeferredProjectsSection = {
-    /** "Projects (2)"; also the header's accessibility label. */
+
     title: string;
-    /** The swipe action that makes a project active again. */
+
     activateLabel: string;
     rows: { id: string; title: string; areaName: string | null; color: string | null }[];
 };
 
-/** The collapsible header both screens show above their tasks; null when nothing is parked. */
+
 export function buildDeferredProjectsSection(
     projects: readonly Project[],
     areaById: Map<string, Area>,
@@ -114,7 +101,7 @@ export function buildDeferredProjectsSection(
             id: project.id,
             title: project.title,
             areaName: (project.areaId ? areaById.get(project.areaId)?.name : undefined) ?? null,
-            // Mobile draws the stored color, else its secondary text color.
+
             color: getProjectAccentColor(project, areaById) ?? null,
         })),
     };
@@ -141,33 +128,31 @@ const projectFilterLabel = (projects: readonly Project[], t: Translate) => {
 
 export type ListFilterOptions = {
     tokens: string[];
-    /** Null where the screen offers no project filter. */
+
     projects: { id: string; title: string }[] | null;
     timeEstimates: TimeEstimate[];
     visibility: TaskMetadataFilterVisibility;
-    /** What the filter picker keeps: selections outside these are dropped. */
+
     retainTokens?: string[];
     retainProjects?: string[];
     getProjectLabel?: (projectId: string) => string | undefined;
 };
 
-// ---------------------------------------------------------------------------
-// Waiting For
 
 export type WaitingViewModel = {
-    /** The rows, filtered by the person and ordered. */
+
     tasks: Task[];
-    /** Distinct people, first spelling seen, in collation order. */
+
     people: string[];
-    /** False when the person asked for is no longer offered; mobile then clears it. */
+
     personOffered: boolean;
-    /** A removed person falls back to All before rows are rendered. */
+
     person: string;
     count: number;
     withDeadlineCount: number;
     deferredProjects: Project[];
     deferred: DeferredProjectsSection | null;
-    /** The list has no rows and no parked projects. */
+
     showEmptyState: boolean;
     labels: {
         count: string;
@@ -181,12 +166,12 @@ export type WaitingViewModel = {
 };
 
 export function buildWaitingViewModel(input: {
-    /** Store tasks visible in the selected areas (isTaskVisibleInArea). */
+
     tasks: readonly Task[];
     projects: readonly Project[];
     resolvedAreaFilter: AreaFilterSelection;
     areaById: Map<string, Area>;
-    /** The chosen person, '' for All; matched without case. */
+
     person: string;
     t: Translate;
 }): WaitingViewModel {
@@ -231,8 +216,6 @@ export function buildWaitingViewModel(input: {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Someday/Maybe
 
 export const SOMEDAY_GROUP_OPTIONS = ['viewSection', 'none', 'project', 'area'] as const;
 export type SomedayGroupBy = typeof SOMEDAY_GROUP_OPTIONS[number];
@@ -252,7 +235,7 @@ function getSomedayGroupByLabel(groupBy: SomedayGroupBy, t: Translate): string {
     }
 }
 
-/** The Someday section a group id adds to: undefined for "No section", null for a group that is not a section. */
+
 export function getSomedayGroupSectionId(groupId: string): string | undefined | null {
     if (groupId === SOMEDAY_NO_SECTION_GROUP_ID) return undefined;
     return groupId.startsWith(SOMEDAY_SECTION_GROUP_PREFIX) ? groupId.slice(SOMEDAY_SECTION_GROUP_PREFIX.length) : null;
@@ -263,7 +246,7 @@ export function selectSomedayTasks(visibleTasks: readonly Task[]): Task[] {
 }
 
 export function buildSomedayFilterOptions(input: {
-    /** The screen's Someday tasks before filters (selectSomedayTasks). */
+
     tasks: readonly Task[];
     projects: readonly Project[];
     settings: AppSettings | undefined;
@@ -289,7 +272,7 @@ export function buildSomedayFilterOptions(input: {
     };
 }
 
-/** Someday offers the task-list sorts, without Time estimate or Priority while that feature is off. */
+
 function getSomedaySortOptions(settings: AppSettings | undefined): TaskSortBy[] {
     return getVisibleTaskSortOptions(TASK_LIST_SORT_OPTIONS, settings);
 }
@@ -309,9 +292,9 @@ const toTaskListViewGroups = (items: readonly TaskGroupItem[]): ViewSectionTaskG
 };
 
 export type SomedayViewModel = {
-    /** Filtered and ordered, before grouping. */
+
     tasks: Task[];
-    /** Headings with their rows; undefined shows the tasks ungrouped. */
+
     groups: ViewSectionTaskGroup[] | undefined;
     effectiveSortBy: TaskSortBy;
     sortOptions: TaskSortBy[];
@@ -319,9 +302,9 @@ export type SomedayViewModel = {
     ideasCount: number;
     inProjectsCount: number;
     deferredProjects: Project[];
-    /** The block above the list; null when parked projects are drawn inside section groups instead. */
+
     deferred: DeferredProjectsSection | null;
-    /** Headings let a row be added to a section only in section grouping. */
+
     canAddTaskToGroup: boolean;
     showEmptyState: boolean;
     empty: { message: string; hint: string; actionLabel: string | null };
@@ -342,7 +325,7 @@ export type SomedayViewModel = {
         moveToSection: string;
         addTask: string;
     };
-    /** The overflow menu's current values and choices, as mobile draws them. */
+
     menu: {
         sortValue: string;
         sortOptions: { value: TaskSortBy; label: string; selected: boolean }[];
@@ -352,10 +335,10 @@ export type SomedayViewModel = {
 };
 
 export function buildSomedayViewModel(input: {
-    /** The screen's Someday tasks before filters (selectSomedayTasks). */
+
     tasks: readonly Task[];
     projects: readonly Project[];
-    /** Visible areas in display order. */
+
     areaById: Map<string, Area>;
     resolvedAreaFilter: AreaFilterSelection;
     settings: AppSettings | undefined;
@@ -400,7 +383,7 @@ export function buildSomedayViewModel(input: {
         const noSectionTitle = tFallback(t, 'viewSections.noSection', 'No section');
         const grouped = groupTasksByViewSection(tasks, 'someday', sections, noSectionTitle);
         const byId = new Map(grouped.map((group) => [group.id, group]));
-        // Parked projects sit in their section, before its tasks (#1319).
+
         const projectsById = groupProjectsByViewSection(deferredProjects, 'someday', sections);
         const withProjects = (group: ViewSectionTaskGroup): ViewSectionTaskGroup => {
             const projects = projectsById.get(group.id);
@@ -410,7 +393,7 @@ export function buildSomedayViewModel(input: {
             ?? (projectsById.has(SOMEDAY_NO_SECTION_GROUP_ID)
                 ? { id: SOMEDAY_NO_SECTION_GROUP_ID, title: noSectionTitle, tasks: [], muted: true }
                 : undefined);
-        // This grouping is actionable: empty definitions still offer Add task.
+
         groups = [
             ...sections.map((section) => withProjects(byId.get(`${SOMEDAY_SECTION_GROUP_PREFIX}${section.id}`)
                 ?? { id: `${SOMEDAY_SECTION_GROUP_PREFIX}${section.id}`, title: section.title, tasks: [] })),
@@ -465,23 +448,18 @@ export function buildSomedayViewModel(input: {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Inbox, Reference and Done (mobile's TaskList for one status)
 
 export type StatusListKind = 'inbox' | 'reference' | 'done';
 export const TASK_LIST_GROUP_OPTIONS = ['none', 'context', 'area', 'project', 'tag'] as const satisfies readonly TaskGroupBy[];
-/** Grouping by completion only says something in a list of finished work (#945). */
+
 export const DONE_LIST_GROUP_OPTIONS = ['none', 'completedDate', 'context', 'area', 'project', 'tag'] as const satisfies readonly TaskGroupBy[];
 export const REFERENCE_LIST_DEFAULT_GROUP_BY: TaskGroupBy = 'area';
 export const DONE_LIST_DEFAULT_GROUP_BY: TaskGroupBy = 'none';
 
-/** The Inbox's empty state offers voice capture when that is the default capture method. */
+
 const inboxCapturesAudio = (settings: AppSettings | undefined) => settings?.gtd?.defaultCaptureMethod === 'audio';
 
-/**
- * The screen's title and its empty state when nothing is filtered. Only the
- * Inbox's empty state has an action (capture); it reads the capture method.
- */
+
 export function getStatusListScreenText(kind: StatusListKind, t: Translate, settings?: AppSettings): {
     title: string;
     emptyText: string;
@@ -512,21 +490,18 @@ export function getStatusListScreenText(kind: StatusListKind, t: Translate, sett
         };
 }
 
-/**
- * The tasks the list can show before filters: its status, the selected areas, and
- * live projects. The Inbox stays global across area selections.
- */
+
 export function selectStatusListTasks(input: {
     kind: StatusListKind;
-    /** Store tasks (state.tasks). */
+
     tasks: readonly Task[];
-    /** Store projects (state.projects). */
+
     projects: readonly Project[];
-    /** Every project, archived and deleted included (state._allProjects). */
+
     allProjects: readonly Project[];
     resolvedAreaFilter: AreaFilterSelection;
     areaById: Map<string, Area>;
-    /** Reference only: include references filed in archived projects. */
+
     includeArchivedProjects?: boolean;
 }): Task[] {
     const projectById = new Map(input.projects.map((project) => [project.id, project]));
@@ -549,21 +524,21 @@ export function selectStatusListTasks(input: {
 
 export function buildStatusListFilterOptions(input: {
     kind: StatusListKind;
-    /** selectStatusListTasks's result. */
+
     tasks: readonly Task[];
     allProjects: readonly Project[];
     settings: AppSettings | undefined;
     t: Translate;
-    /** Done only: the screen offers time filters (both screens turn them off). The Inbox never does. */
+
     timeEstimateFilters?: boolean;
-    /** False skips the token scan; mobile builds tokens only while its filter sheet is open. */
+
     withTokens?: boolean;
 }): ListFilterOptions {
     const withTokens = input.withTokens !== false;
     if (input.kind === 'reference') {
         const projects = projectFilterOptions(input.tasks, input.allProjects, input.t);
         return {
-            // Reference tags may be stored without a leading #; only the options are normalized.
+
             tokens: withTokens
                 ? getUsedTaskTokens([...input.tasks], (task) => (task.tags ?? []).map((tag) => normalizeBulkTaskTokenInput(tag, 'tags')), { includeAncestors: true })
                 : [],
@@ -599,7 +574,7 @@ export type StatusListModel = {
     sortBy: TaskSortBy;
     sortByLabel: string;
     sortTitle: string;
-    /** The sorts the sort sheet lists, Time estimate only while that feature is on. */
+
     sortOptions: { value: TaskSortBy; label: string; selected: boolean }[];
     groupBy: TaskGroupBy;
     groupByLabel: string;
@@ -609,21 +584,21 @@ export type StatusListModel = {
 
 export function buildStatusListModel(input: {
     kind: StatusListKind;
-    /** selectStatusListTasks's result. */
+
     tasks: readonly Task[];
-    /** Store projects (state.projects) and areas (state.areas). */
+
     projects: readonly Project[];
     areas: readonly Area[];
     settings: AppSettings | undefined;
     groupBy: TaskGroupBy;
-    /** Done only: the device's chosen sort. */
+
     viewSortBy?: TaskSortBy;
     criteria: FilterCriteria;
     searchQuery: string;
     collapsedGroupIds: ReadonlySet<string>;
     t: Translate;
     now?: Date;
-    /** Month titles in the completion-date grouping; see buildTaskGroupSections. */
+
     formatDate?: DateFormatter;
 }): StatusListModel {
     const { kind, settings, t } = input;
@@ -634,7 +609,7 @@ export function buildStatusListModel(input: {
     const sortBy = kind === 'done'
         ? resolveDoneTaskSortBy(settings?.taskSortBy, input.viewSortBy, settings)
         : resolveNonDoneTaskSortBy(settings?.taskSortBy, settings);
-    // Done is a log: its default order is completion date, newest first.
+
     const orderedTasks = kind === 'done' && sortBy === 'default'
         ? sortDoneTasksForListView(filtered)
         : sortTasksBy(filtered, sortBy);
@@ -671,18 +646,14 @@ export function buildStatusListModel(input: {
 
 export type StatusListChip = { id: string; label: string; excluded: boolean };
 
-/**
- * The active filters as the list header and the empty state show them. Reference
- * adds a chip for archived projects; that toggle counts as a filter in the
- * header but not in the empty state's "no match" test.
- */
+
 export function buildStatusListFilterSummary(input: {
     kind: StatusListKind | 'someday';
     chips: readonly StatusListChip[];
     activeCount: number;
     hasActive: boolean;
     includeArchivedProjects: boolean;
-    /** The Inbox's unfiltered empty state reads the capture method. */
+
     settings?: AppSettings;
     t: Translate;
 }): {
@@ -713,14 +684,10 @@ export function buildStatusListFilterSummary(input: {
     };
 }
 
-/**
- * The list header's labels, as mobile's TaskListHeader shows them: the Sort,
- * Group and Filters controls (inline on the Inbox, in the overflow menu
- * elsewhere), the active-filters count, and the chips with their Clear.
- */
+
 export function getTaskListHeaderText(input: {
     sortByLabel: string;
-    /** Undefined when the list offers no grouping. */
+
     groupByLabel?: string;
     hasActiveFilters: boolean;
     filterActiveCount: number;
@@ -741,34 +708,31 @@ export function getTaskListHeaderText(input: {
         more: tFallback(t, 'taskEdit.moreOptions', 'More options'),
         back: tFallback(t, 'common.back', 'Back'),
         close: tFallback(t, 'common.close', 'Close'),
-        /** The chip row's last chip, which clears every filter. */
+
         clear: tFallback(t, 'filters.clear', t('common.clear')),
-        /** The overflow layout's active-filters button. */
+
         activeFilters: `${filters} · ${input.filterActiveCount}`,
         sortAccessibilityLabel: `${sort}: ${input.sortByLabel}`,
         groupValue,
         groupAccessibilityLabel: `${group}: ${groupValue}`,
         filtersAccessibilityLabel: `${filters}: ${input.hasActiveFilters ? input.filterActiveCount : all}`,
-        /** Tapping a chip removes its filter; an excluded token says so. */
+
         chipAccessibilityLabel: (chip: { label: string; excluded?: boolean }) => (chip.excluded
             ? `${removeFilter}: ${chip.label} (${excluded})`
             : `${removeFilter}: ${chip.label}`),
     };
 }
 
-/**
- * The Inbox screen's own parts around its list. `count` is the Inbox before the
- * user's filters (selectStatusListTasks), so filters never change the Process count.
- */
+
 export function buildInboxScreenModel(input: { count: number; settings: AppSettings | undefined; t: Translate }): {
     title: string;
-    /** The line above the rows: the Inbox is global across area selections. */
+
     scopeLabel: string;
-    /** Process Inbox; null while the Inbox is empty. The label caps at 99+, the spoken label does not. */
+
     process: { label: string; accessibilityLabel: string; count: number } | null;
-    /** A pill beside the list controls while there are tasks; the primary action when the Inbox is empty. */
+
     mindSweep: { label: string; placement: 'accessory' | 'primary' };
-    /** The empty state's capture action starts recording when voice is the capture method. */
+
     autoRecord: boolean;
 } {
     const { count, t } = input;
@@ -786,7 +750,7 @@ export function buildInboxScreenModel(input: { count: number; settings: AppSetti
 
 export const REFERENCE_ARCHIVED_CHIP_ID = 'reference:include-archived-projects';
 
-/** Mobile opens a task in an archived or deleted project read-only. */
+
 export function isStatusListTaskReadOnly(task: Task, allProjects: readonly Project[]): boolean {
     if (!task.projectId) return false;
     const project = allProjects.find((candidate) => candidate.id === task.projectId);

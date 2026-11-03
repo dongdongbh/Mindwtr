@@ -108,20 +108,17 @@ export const isDropboxUnauthorizedError = (error: unknown): boolean => {
 export type DropboxDownloadResult = {
     data: AppData | null;
     rev: string | null;
-    /** Set instead of `data` when this call has no key for a remote that is (or looks
-     *  like it is) MWENC1-encrypted. Callers persist this via sync-encryption.ts's
-     *  markRemoteEncryptionDiscovered; never treated as "no data". */
+
+
     encryptedNoKey?: { salt: Uint8Array; params: SyncCryptoKdfParams };
-    /** Set instead of `data` when this call HAS a key, `/data.json.enc` is gone, and a
-     *  plaintext `/data.json` is in its place — a peer disabled encryption at the sync
-     *  location. Callers persist `remote-plaintext` and abort; never treated as "no data". */
+
+
     remotePlaintext?: true;
 };
 
 export type DropboxSyncCrypto = {
-    /** Full key material. Omitting this is the encryption-off path and is byte-for-byte
-     *  identical to calling these functions without it (backward-compat invariant #1):
-     *  same `/data.json` path, same request/body shape, same errors. */
+
+
     material?: SyncKeyMaterial;
     cryptoPrims?: SyncCryptoPrimitives;
 };
@@ -153,9 +150,8 @@ const requireDropboxDownloadOrNotFound = async (
 export async function getDropboxAppDataMetadata(
     accessToken: string,
     fetcher: typeof fetch = fetch,
-    /** Same shape as the download/upload helpers: supplying `material` moves this probe to the
-     *  `.enc` path so an encrypted remote reports a real rev instead of 409-ing to `null` and
-     *  making every cycle look like a fresh remote. Omitting it is the pre-feature behavior. */
+
+
     crypto: DropboxSyncCrypto = {},
     requestOptions: DropboxRequestOptions = {},
 ): Promise<{ rev: string | null }> {
@@ -183,9 +179,7 @@ export async function getDropboxAppDataMetadata(
     });
 }
 
-/** Cheap exact-generation lookup for one attachment. A missing path returns
- * `null`; every other 409 is an error so callers never turn unreadable state
- * into an unsafe create. */
+
 export async function getDropboxFileMetadata(
     accessToken: string,
     path: string,
@@ -219,8 +213,7 @@ export async function getDropboxFileMetadata(
     });
 }
 
-/** Bounded, auth-aware list_folder pagination shared by transition adapters.
- * Every page gets the same timeout/abort contract as Dropbox artifact IO. */
+
 export async function listDropboxFolderFiles(
     accessToken: string,
     path: string,
@@ -295,28 +288,10 @@ export async function listDropboxFolderFiles(
     throw new Error('Dropbox folder inventory exceeded the pagination limit');
 }
 
-/**
- * The attachments folder Dropbox stores blobs in, as `listDropboxFolderFiles` wants it.
- * Derived from the same constant `buildCloudKey` writes into `cloudKey`, so the pass that
- * lists the folder and the code that names the blobs can never drift apart.
- */
+
 export const DROPBOX_ATTACHMENTS_PATH = `/${ATTACHMENTS_DIR_NAME}`;
 
-/**
- * #1119 follow-up: turns one `list_folder` answer into a presence lookup for attachment
- * cloud keys, so a whole pass costs one request instead of one per attachment.
- *
- * Returns `null` — never `false` — for a key that does not name a file directly inside the
- * attachments folder. A cloud key left behind by another provider (a CloudKit record name,
- * a File Sync generation path in a nested folder) says nothing about whether Dropbox holds
- * anything, and a listing of a folder it was never in must not be read as proof of absence.
- *
- * Comparison is case-insensitive because Dropbox itself is: it preserves the display name
- * but treats `A.TXT` and `a.txt` as one path, which is why the API reports `path_lower`.
- * Encryption does not enter into it — sync encryption seals attachment BYTES and leaves
- * their names alone (only the sync document gets an `.enc` name), so a name that is present
- * on an encrypted remote is present on a plaintext one too.
- */
+
 export const createDropboxAttachmentPresenceIndex = (
     entries: DropboxFolderFileEntry[],
 ): ((cloudKey: string) => boolean | null) => {
@@ -364,12 +339,8 @@ export async function downloadDropboxAppData(
 
     if (downloaded.kind === 'not-found') {
         if (!material) {
-            // Nothing at the plain path — the common "first sync" shape. Only when this
-            // device doesn't already have a key do we take one extra look at the `.enc`
-            // path, to catch a peer that already enabled encryption and deleted the
-            // plaintext original (decision #2). A device syncing an existing plaintext
-            // folder never reaches this branch — its plain download succeeds every
-            // cycle — so invariant #1 (no extra requests for an existing install) holds.
+
+
             const probe = await fetchDropboxAndConsume(fetcher, DOWNLOAD_ENDPOINT, {
                 method: 'POST',
                 headers: {
@@ -387,9 +358,8 @@ export async function downloadDropboxAppData(
                 return { data: null, rev: null, encryptedNoKey: { salt: inspected.salt, params: inspected.params } };
             }
         } else {
-            // Mirror of the probe above, in the other direction and gated the same way: this
-            // device HAS a key and its `.enc` path is empty, so one look at the plain path
-            // tells "first sync" apart from "a peer disabled encryption here".
+
+
             const probe = await fetchDropboxAndConsume(fetcher, DOWNLOAD_ENDPOINT, {
                 method: 'POST',
                 headers: {
@@ -411,18 +381,15 @@ export async function downloadDropboxAppData(
     if (downloaded.kind === 'bytes') {
         if (!material) throw new Error('Dropbox encrypted download is missing key material');
         const bodyBytes = downloaded.bytes;
-        // Sealed under another salt = this device's key is for a different encryption
-        // generation; report it as a no-key discovery (which can prompt for the passphrase)
-        // instead of decrypting into a dead-end Auth failure.
+
+
         const foreign = detectForeignSaltArtifact(bodyBytes, material);
         if (foreign) return { data: null, rev: downloaded.rev, encryptedNoKey: foreign };
         const plaintext = await decryptRemoteArtifactOrThrow(bodyBytes, material.key, crypto.cryptoPrims);
         return { data: JSON.parse(new TextDecoder().decode(plaintext)) as AppData, rev: downloaded.rev };
     }
 
-    // Off-state: reads through the response's text-compatible path, exactly as before this feature existed — a fetch
-    // mock (real or test double) that only implements .text() keeps working unchanged
-    // (backward-compat invariant #1).
+
     const text = downloaded.text;
     if (!text.trim()) {
         return { data: null, rev: downloaded.rev };
@@ -432,13 +399,8 @@ export async function downloadDropboxAppData(
     try {
         data = JSON.parse(text) as AppData;
     } catch {
-        // Distinguish "someone already encrypted this remote" from genuine corruption
-        // before falling back to the existing error — ciphertext is never "invalid
-        // JSON" to repair (decision #4). `text` may already be a lossy UTF-8
-        // reconstruction of binary ciphertext, so re-issue the same download request
-        // for raw bytes to inspect (mirrors the 409 branch's re-fetch above) rather than
-        // re-encoding `text`. Best-effort: any problem here (including a bare-bones
-        // fetch double with no arrayBuffer()) just falls through to the original error.
+
+
         let inspected: ReturnType<typeof inspectSyncArtifact> | null = null;
         try {
             inspected = await fetchDropboxAndConsume(fetcher, DOWNLOAD_ENDPOINT, {
@@ -453,7 +415,7 @@ export async function downloadDropboxAppData(
                 return inspectSyncArtifact(bytes);
             });
         } catch {
-            // fall through to the original error below
+
         }
         if (inspected?.kind === 'encrypted') {
             return { data: null, rev: downloaded.rev, encryptedNoKey: { salt: inspected.salt, params: inspected.params } };
@@ -475,9 +437,8 @@ export async function uploadDropboxAppData(
         ? { '.tag': 'update', update: expectedRev }
         : { '.tag': 'add' };
     const path = crypto.material ? syncEncryptedArtifactName(DROPBOX_SYNC_PATH) : DROPBOX_SYNC_PATH;
-    // `.slice()` copies into a fresh, exactly-sized ArrayBuffer — sidesteps the
-    // Uint8Array<ArrayBufferLike> vs BodyInit's Uint8Array<ArrayBuffer> typing mismatch
-    // (same TS 5.9 DOM-lib issue sync-crypto.ts's toArrayBufferView works around).
+
+
     const body: BodyInit = crypto.material
         ? (await encryptSyncArtifact(new TextEncoder().encode(JSON.stringify(data)), crypto.material, crypto.cryptoPrims)).slice().buffer
         : JSON.stringify(data);
@@ -543,8 +504,7 @@ export async function downloadDropboxFile(
     });
 }
 
-/** Versioned byte read for encryption transitions. Dropbox returns the file rev in the
- * same download response's Dropbox-API-Result header, so bytes and generation cannot drift. */
+
 export async function downloadDropboxFileVersionedWithServerTime(
     accessToken: string,
     path: string,
@@ -577,7 +537,7 @@ export async function downloadDropboxFileVersionedWithServerTime(
     });
 }
 
-/** Compatibility shape for transition callers that only need bytes + Dropbox rev. */
+
 export async function downloadDropboxFileVersioned(
     accessToken: string,
     path: string,
@@ -630,8 +590,7 @@ export async function uploadDropboxFile(
     });
 }
 
-/** CAS byte write for encryption transitions. A missing read maps to Dropbox's add mode;
- * an existing read maps to update(rev). No overwrite mode is used. */
+
 export async function uploadDropboxFileVersioned(
     accessToken: string,
     path: string,
@@ -696,8 +655,7 @@ export async function deleteDropboxFile(
     });
 }
 
-/** Revision-conditional Dropbox delete. `parent_rev` is supported for files by delete_v2;
- * every 409 is a generation conflict, including a peer that removed the path first. */
+
 export async function deleteDropboxFileVersioned(
     accessToken: string,
     path: string,

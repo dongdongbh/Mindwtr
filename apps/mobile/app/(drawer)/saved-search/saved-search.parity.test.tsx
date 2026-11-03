@@ -1,18 +1,6 @@
-/**
- * React Native's saved search screen, replayed against the frozen parity fixture
- * (packages/core/src/saved-search-parity.fixtures.json) that core's
- * saved-search-view-model and the native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit every other change first, then run
- *   MINDWTR_CAPTURE_SAVED_SEARCH=1 MINDWTR_CAPTURE_SAVED_SEARCH_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run 'app/(drawer)/saved-search/saved-search.parity.test.tsx'
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code and these parity harnesses. Each scenario renders the
- * real screen with the real core store, uses its header, empty state, rows and
- * editor, and records what a user sees, where it navigates and what the store is
- * asked to write. The rows and the editor are stand-ins that record their props:
- * they are other screens' components.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -217,7 +205,7 @@ const textOf = (node: ReactTestInstance): string => {
 };
 const hostsOf = (root: ReactTestInstance, type: string) => root.findAll((node) => String(node.type) === type);
 const inside = (container: ReactTestInstance, node: ReactTestInstance) => container.findAll((child) => child === node).length > 0;
-// The Sort control and its picker (#1453) came after the frozen capture; saved-search-screen.test.tsx covers them.
+
 const isSortControl = (node: ReactTestInstance) => hostsOf(node, 'Icon:ArrowUpDown').length > 0;
 const sortPickers = (root: ReactTestInstance) => hostsOf(root, 'Modal')
   .filter((modal) => modal.findAll((node) => node.props?.testID === 'sort-option-inherit').length > 0);

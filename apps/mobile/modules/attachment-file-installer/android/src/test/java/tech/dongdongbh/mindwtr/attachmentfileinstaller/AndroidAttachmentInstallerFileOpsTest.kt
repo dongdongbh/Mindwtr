@@ -8,16 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
-/**
- * Covers the [AndroidAttachmentInstallerFileOps.moveExclusive] hard-link
- * fallback (issue #1139). android.system.Os is unusable on the host JVM
- * (every call throws "not mocked" and every OsConstants errno constant
- * collapses to 0 - verified empirically), so these tests drive the
- * [AndroidAttachmentInstallerFileOps.linkFile], [AndroidAttachmentInstallerFileOps.copyExclusive]
- * and [AndroidAttachmentInstallerFileOps.errnoName] seams directly instead of
- * a real cross-device mount, a real permission-denied filesystem, or a real
- * unmocked errno lookup.
- */
+
 class AndroidAttachmentInstallerFileOpsTest {
   private val sentinelExdev = 18
   private val sentinelEio = 5

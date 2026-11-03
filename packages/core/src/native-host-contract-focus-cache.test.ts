@@ -4,8 +4,6 @@ import { createNativeHostContract } from './native-host-contract';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppData, Task } from './types';
 
-// The contract's kept Focus model (focusSections): a host that keeps it answers every Focus read exactly as one that builds it
-// fresh each time, across a timed start, a midnight, a write, a settings change and a clock that went back.
 
 const AT = '2026-01-01T00:00:00.000Z';
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
@@ -49,34 +47,34 @@ describe('native host contract: the kept Focus model', () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 2, 7, 21, 0));
         const open = await seed();
-        // The model is kept per control state, so each pair of hosts reads one: the screen's controls, and a flat read.
+
         const controls = { ...DEFAULT_FOCUS_CONTROL_STATE, sortBy: 'due' as const };
         const pairs = [
             { kept: await open(true), fresh: await open(false), input: { limit: 100, controls } },
             { kept: await open(true), fresh: await open(false), input: { limit: 100 } },
         ];
-        // Each host's revision names its own process; everything else must match.
+
         const read = (host: ReturnType<typeof createNativeHostContract>, input: Parameters<typeof host.getFocus>[0]) => (
             JSON.stringify(host.getFocus(input), (key, value) => (key === 'revision' ? undefined : value))
         );
         const same = () => { for (const { kept, fresh, input } of pairs) expect(read(kept, input)).toBe(read(fresh, input)); };
         same();
-        // Minutes inside one window, then the timed start, the review instant, midnight and the next day.
+
         for (const [hour, minute] of [[21, 10], [21, 29], [21, 30], [21, 31], [22, 15], [23, 59], [24, 0], [24, 1], [25, 0]]) {
             vi.setSystemTime(new Date(2026, 2, 7, hour, minute));
             same();
         }
-        // A write and a settings change rebuild in the same minute.
+
         await useTaskStore.getState().updateTask('n1', { dueDate: '2026-03-08T01:30:00' });
         same();
         await useTaskStore.getState().updateSettings({ gtd: { focusIncludeStartDates: false } });
         same();
-        // The clock went back: rebuild.
+
         vi.setSystemTime(new Date(2026, 2, 7, 20, 0));
         same();
     });
 
-    // A language change keeps the clock and the store: the kept model's titles and labels must follow it at the next read.
+
     it('follows a language change at the next read', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 2, 7, 21, 0));
@@ -88,13 +86,13 @@ describe('native host contract: the kept Focus model', () => {
             (key, value) => (key === 'revision' ? undefined : value));
         const english = read(kept);
         expect(english).toBe(read(fresh));
-        // The same system locale: only the language changes.
+
         for (const host of [kept, fresh]) expect(await host.setLanguage({ storedLanguage: 'de', systemLocale: 'en-US' })).toMatchObject({ ok: true });
         expect(read(kept)).toBe(read(fresh));
         expect(read(kept)).not.toBe(english);
     });
 
-    // A time zone change while the app runs moves the local day: Today must follow at once, not at the old zone's midnight.
+
     it('follows a time zone change at the next read', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date('2026-03-07T15:00:00Z'));
@@ -109,7 +107,7 @@ describe('native host contract: the kept Focus model', () => {
             const read = (host: ReturnType<typeof createNativeHostContract>) => (
                 JSON.stringify(host.getFocus({ limit: 100 }), (key, value) => (key === 'revision' ? undefined : value)));
             expect(read(kept)).toBe(read(fresh));
-            // 10:00 in New York is 00:00 on 03-08 in Tokyo.
+
             process.env.TZ = 'Asia/Tokyo';
             vi.setSystemTime(new Date('2026-03-07T15:30:00Z'));
             expect(read(kept)).toBe(read(fresh));
@@ -119,7 +117,7 @@ describe('native host contract: the kept Focus model', () => {
         }
     });
 
-    // The kept model rebuilds at an instant with seconds (a start at 21:30:30): paging opened before it must be refused.
+
     it('refuses paging opened before a rebuild inside the same minute', async () => {
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(new Date(2026, 2, 7, 21, 30, 10));

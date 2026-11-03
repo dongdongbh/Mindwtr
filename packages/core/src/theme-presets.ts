@@ -1,8 +1,6 @@
 import type { ThemeStatusPreset } from './theme-scheme';
 
-// One palette per theme with a bespoke color identity (theme-scheme.ts's
-// ThemeStatusPreset list). The mobile app draws its screens from it, and the
-// home-screen widget payload (widget-payload.ts) reads its colors from it.
+
 export type ThemePresetColor = `#${string}`;
 
 export type ThemePresetColors = {
@@ -61,8 +59,8 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         tabIconDefault: '#D8DEE9',
         tabIconSelected: '#88C0D0',
     },
-    // Surfaces climb the flavor's own base -> surface0 -> surface1 -> surface2
-    // ladder; mauve is Macchiato's default accent.
+
+
     'catppuccin-macchiato': {
         bg: '#24273A',
         cardBg: '#363A4F',
@@ -81,10 +79,8 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         tabIconDefault: '#A5ADCB',
         tabIconSelected: '#C6A0F6',
     },
-    // background / bgLight / bgLighter / selection from the reference Dracula
-    // theme. secondaryText is `comment` blended halfway to `foreground`:
-    // comment itself is 3:1 on the background, which is fine for the code
-    // comments it was drawn for but not for due dates and project names.
+
+
     dracula: {
         bg: '#282A36',
         cardBg: '#343746',
@@ -103,10 +99,8 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         tabIconDefault: '#ADB5CB',
         tabIconSelected: '#BD93F9',
     },
-    // Gruvbox light, soft contrast: bg0_s ground, bg0 cards, bg1 inputs, bg2
-    // borders; the faded blue is the accent. Warning takes the faded orange
-    // because the faded yellow is 3.0:1 on bg0_s, with its lightness lowered
-    // a little so it clears 4.5:1 on bg1 (the desktop info badge).
+
+
     'gruvbox-light': {
         bg: '#F2E5BC',
         cardBg: '#FBF1C7',
@@ -125,10 +119,8 @@ export const THEME_PRESETS: Record<ThemeStatusPreset, ThemePresetColors> = {
         tabIconDefault: '#7C6F64',
         tabIconSelected: '#076678',
     },
-    // Gruvbox dark, medium contrast: bg0 ground, bg0_s cards, bg1 inputs, bg2
-    // borders; the accent is the bright blue with its lightness raised so it
-    // clears 4.5:1 on its own tint (status chips, the active sidebar row).
-    // secondaryText is fg3 because fg4 drops to 4.2:1 on bg1.
+
+
     'gruvbox-dark': {
         bg: '#282828',
         cardBg: '#32302F',

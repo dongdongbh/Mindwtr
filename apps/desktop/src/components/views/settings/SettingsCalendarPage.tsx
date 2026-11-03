@@ -58,7 +58,7 @@ type SettingsCalendarPageProps = {
     calendarPushTargetCalendarId: string | null;
     calendarPushTargets: SystemCalendarPushTarget[];
     calendarPushLoading: boolean;
-    /** Active theme, for the swatch fills only — picks stay canonical (#974). */
+
     theme?: string;
     onCalendarNameChange: (value: string) => void;
     onCalendarUrlChange: (value: string) => void;
@@ -102,7 +102,7 @@ export function SettingsCalendarPage({
 }: SettingsCalendarPageProps) {
     const language = useDocumentationLanguage();
     const areas = useTaskStore((state) => state.areas).filter((area) => !area.deletedAt);
-    // Toggles the area on the calendar as stored when the write is admitted, so another device's edits stay.
+
     const toggleArea = (calendar: ExternalCalendarSubscription, areaId: string) => {
         void updateSettingsFromLatest((latest) => ({
             externalCalendars: (latest.externalCalendars ?? externalCalendars).map((entry) => {

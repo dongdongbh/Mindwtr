@@ -76,7 +76,7 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
     }
 
     func setChecklist(task: MindwtrWatchFocusTask, item: MindwtrWatchChecklistItem, completed: Bool) {
-        // Monotonic tap ordering also covers rapid taps within one millisecond and a clock adjustment.
+
         let latest = MindwtrWatchOutbox.records().compactMap { MindwtrWatchProtocol.timestamp($0.createdAt) }.max() ?? 0
         let date = Date(timeIntervalSince1970: max(Date().timeIntervalSince1970, latest + 0.002))
         guard let payload = MindwtrWatchProtocol.checklistCommand(task: task, item: item, completed: completed, createdAt: date) else {
@@ -201,7 +201,7 @@ final class MindwtrWatchConnectivityModel: NSObject, ObservableObject {
                 guard let self else { return }
                 self.inFlightCommandIds.remove(record.id)
                 if reply["accepted"] as? Bool == true {
-                    // Native acceptance only means queued on iPhone, not applied to the task store.
+
                     if record.payload["kind"] as? String != "checklist" {
                         MindwtrWatchOutbox.remove(id: record.id, removeAudio: false)
                     }

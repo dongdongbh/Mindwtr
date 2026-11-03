@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Tasks kind: accent header band (date, Inbox chip, "+"), then the Focus
-     sections list. Colours default to the day/night resources and are
-     overridden at render time from the payload palette (WidgetRenderer). -->
+
+
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/mindwtr_widget_root"
     android:layout_width="match_parent"
@@ -41,8 +40,7 @@
                 android:paddingStart="14dp"
                 android:paddingEnd="6dp">
 
-                <!-- The title opens the displayed list. The separate 44dp
-                     chevron target opens the native chooser. -->
+
                 <LinearLayout
                     android:id="@+id/mindwtr_widget_title_target"
                     android:layout_width="0dp"

@@ -25,11 +25,7 @@ export const getTaskTokenUsageTimestamp = (task: Task): number =>
     ?? safeParseDate(task.createdAt)?.getTime()
     ?? 0;
 
-/**
- * Per-task token accumulation, shared so the streaming caller and collectTaskTokenUsage
- * cannot drift on the three things that define the output: skip deleted tasks, dedupe within
- * a task, and keep first-seen insertion order.
- */
+
 export const createTaskTokenUsageAccumulator = (options?: TaskTokenOptions) => {
     const prefix = options?.prefix;
     const usage = new Map<string, TaskTokenUsage>();
@@ -79,8 +75,8 @@ export const getUsedTaskTokens = (
     selector: TaskTokenSelector,
     options?: TaskTokenOptions
 ): string[] => {
-    // Name-only callers (including capture parsing) do not need usage counts or
-    // recency. Avoid parsing every task's timestamps and allocating usage rows.
+
+
     const tokens = new Set<string>();
     tasks.forEach((task) => {
         if (task.deletedAt) return;
@@ -104,7 +100,7 @@ export const getUsedTaskTokensFromUsage = (usage: readonly TaskTokenUsage[]): st
         .map((entry) => entry.token)
         .sort((a, b) => baseTextCollator.compare(a, b));
 
-/** Context labels on retained records, including legacy bare labels, without changing stored data. */
+
 export const getRetainedTaskContexts = (tasks: Task[]): string[] => Array.from(new Set(
     getUsedTaskTokens(tasks, (task) => task.contexts)
         .map((token) => token.replace(/^[@#＠]+/, '').trim())
@@ -112,7 +108,7 @@ export const getRetainedTaskContexts = (tasks: Task[]): string[] => Array.from(n
         .map((label) => `@${label}`),
 )).sort((a, b) => baseTextCollator.compare(a, b));
 
-/** Typed context matches from retained task tokens; an empty query never surfaces history. */
+
 export const getTaskContextMatches = (tokens: readonly string[], query: string, limit: number): string[] => {
     const needle = query.trim().replace(/^@/, '').toLowerCase();
     if (!needle || limit <= 0) return [];

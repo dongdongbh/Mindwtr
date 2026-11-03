@@ -23,11 +23,7 @@ const sandboxStorage: Storage = {
     },
 };
 
-/**
- * UI caches in sandbox live only for the current renderer runtime. Outside it,
- * localStorage is already the open workspace's own view (#1473,
- * workspace-storage-scope.ts).
- */
+
 export function getWorkspaceCache(): Storage | null {
     if (isSandboxMode()) return sandboxStorage;
     if (typeof window === 'undefined') return null;

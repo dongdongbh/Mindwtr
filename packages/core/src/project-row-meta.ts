@@ -1,7 +1,7 @@
 import { tFallback, type TranslateFn } from './i18n';
 import type { Project, Task } from './types';
 
-/** The status line of a React Native project row. */
+
 export function getProjectRowStatus(project: Pick<Project, 'status' | 'cancelledAt'>, t: TranslateFn): {
     cancelled: boolean;
     statusLabel: string;
@@ -20,7 +20,7 @@ export function getProjectRowStatus(project: Pick<Project, 'status' | 'cancelled
 
 export type ProjectTaskSummary = { activeTaskCount: number; nextAction?: Task; hasWaitingAction?: boolean };
 
-/** A Waiting action gives a focused project a tracked next step too. */
+
 export function isFocusedProjectMissingNextAction(project: Project, summary?: ProjectTaskSummary): boolean {
     return project.status === 'active' && project.isFocused === true
         && !project.deletedAt && !project.cancelledAt

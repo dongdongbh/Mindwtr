@@ -1,7 +1,6 @@
 import Foundation
 
-/// Actor-owned registration prevents a queued bridge cancellation from being
-/// lost when it reaches native code before the corresponding analysis call.
+
 actor AppleImageAnalysisCoordinator<Output: Sendable> {
     private var operations: [String: (token: UUID, task: Task<Output, Error>)] = [:]
     private var pendingCancellations: [String] = []
@@ -50,7 +49,7 @@ actor AppleImageAnalysisCoordinator<Output: Sendable> {
     func cancelAll() {
         closed = true
         operations.values.forEach { $0.task.cancel() }
-        // Keep active registrations until they settle so duplicate IDs cannot
-        // replace cancelled tasks while their completion handlers are pending.
+
+
     }
 }

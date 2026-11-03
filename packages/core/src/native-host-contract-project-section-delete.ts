@@ -76,7 +76,7 @@ const readRequest = (value: unknown): NativeProjectSectionDeleteRequest | null =
     return input as NativeProjectSectionDeleteRequest;
 };
 
-/** Pure cold-journal validation before storage or mutable state inspection. */
+
 const readPrepared = (value: unknown): NativePreparedProjectSectionDelete | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

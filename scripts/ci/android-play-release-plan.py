@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Resolve Android Play tracks and build a single-artifact publication plan."""
-
 from __future__ import annotations
+COMMAND_DESCRIPTION = """Resolve Android Play tracks and build a single-artifact publication plan."""
+
 
 import argparse
 import json
@@ -20,7 +20,6 @@ def resolve_rollout(
     rollout_mode: str,
     rollout_percentage: float,
 ) -> tuple[str, float | None]:
-    """Validate the stable production rollout and return its user fraction."""
 
     mode = rollout_mode.strip().lower()
     if mode not in ROLLOUT_MODES:
@@ -45,7 +44,6 @@ def resolve_tracks(
     internal_test_release: bool,
     stable_production_tag: bool,
 ) -> list[str]:
-    """Return ordered, unique Play tracks for one standard release AAB."""
 
     if internal_test_release:
         return ["internal"]
@@ -123,7 +121,6 @@ def build_plan(
     listing_assets_file: str | None = None,
     listings_file: str | None = None,
 ) -> dict[str, Any]:
-    """Build the publisher payload for one artifact and one versionCode."""
 
     normalized_rollout_mode, rollout_fraction = resolve_rollout(
         rollout_mode,
@@ -241,7 +238,7 @@ def _plan_command(args: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=COMMAND_DESCRIPTION)
     commands = parser.add_subparsers(dest="command", required=True)
 
     resolve = commands.add_parser("resolve-tracks")

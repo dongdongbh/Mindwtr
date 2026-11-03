@@ -225,8 +225,8 @@ class QuickCaptureAudioSessionTest {
     session.attach { recreated = it }
     val recreatedPermissionOwner = QuickCapturePermissionOwner().apply {
       restore(session.permissionRequestId)
-      // QuickCaptureActivity calls this before super.onStart(), which is where
-      // ActivityResultRegistry may synchronously redeliver the pending result.
+
+
       onStarting()
     }
     val restoredRequestId = recreatedPermissionOwner.consumeResult()

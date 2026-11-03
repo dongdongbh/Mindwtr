@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { ArrowRight, Check, CheckCircle, ChevronLeft, ClipboardList, Loader2, Sparkles, Trash2, User, X } from 'lucide-react';
 import { INCUBATE_ICON as IncubateIcon, START_LATER_ICON as StartLaterIcon, TASK_STATUS_ICONS } from '../lib/task-status-icons';
 
-// One status, one glyph: these come from the shared map, never picked here (#1256).
+
 const SomedayIcon = TASK_STATUS_ICONS.someday;
 const ReferenceIcon = TASK_STATUS_ICONS.reference;
 const NextIcon = TASK_STATUS_ICONS.next;
@@ -49,7 +49,7 @@ export type InboxProcessingWizardProps = {
     processingMode: 'guided' | 'quick';
     onModeChange: (mode: 'guided' | 'quick') => void;
     processingStep: ProcessingStep;
-    /** The task fields being clarified, and the one write path into them. */
+
     draft: TaskDraft;
     setField: TaskDraftSetter;
     similarTasks: readonly Task[];
@@ -64,7 +64,7 @@ export type InboxProcessingWizardProps = {
     handleLater: () => void;
     handleIncubate: () => void;
     handleActionable: () => void;
-    /** This item reached the pass from Someday, not the Inbox (#1089). */
+
     isReturningItem: boolean;
     showDoneNowShortcut: boolean;
     handleProjectCheckNo: () => void;
@@ -84,7 +84,7 @@ export type InboxProcessingWizardProps = {
     handleConfirmSomeday: () => void;
     onCreatePerson: (name: string) => void | Promise<void>;
     onCreateSomedaySection: (title: string) => Promise<string | null>;
-    /** Adds a section to the chosen project (#1461). */
+
     onCreateSection: (title: string) => Promise<string | null>;
     customContext: string;
     setCustomContext: (value: string) => void;
@@ -113,7 +113,7 @@ export type InboxProcessingWizardProps = {
     showProjectInRefine: boolean;
     scheduleFields: InboxProcessingScheduleFieldsControls;
     visibleScheduleFieldKeys: InboxProcessingScheduleFieldKey[];
-    /** Only for the AI-enabled switch behind the clarify step's assistant. */
+
     settings?: AppData['settings'];
 };
 
@@ -216,8 +216,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         showTagsField,
         showTimeEstimateField,
     } = visibility;
-    // The body keeps its own names for the draft fields: one alias block beats
-    // rewriting every reference (and re-growing the prop list to do it).
+
+
     const processingTitle = draft.title;
     const titleInputRef = useProcessingTitleFocus(processingTask?.id, processingStep);
     const processingDescription = draft.description;
@@ -257,9 +257,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         </div>
     );
 
-    // The same clarify action the task editor offers, on the task being
-    // processed (#1022). Copilot stays off: the wizard makes no background AI
-    // calls, only the one the user asks for.
+
     const ai = useTaskItemAi({
         taskId: processingTask?.id ?? '',
         settings,
@@ -280,8 +278,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
         copilotEnabled: false,
     });
 
-    // After a long step is submitted the view is left scrolled to the bottom;
-    // bring the panel top (title of the next task) back into view on advance.
+
     const panelRef = useRef<HTMLDivElement | null>(null);
     const [actionableChoice, setActionableChoice] = useState<'initial' | 'not-actionable' | 'later' | 'incubate'>('initial');
     const processingTaskId = processingTask?.id;
@@ -314,8 +311,8 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
     const projectHasSections = (projectId: string) => sections.some((section) => (
         section.projectId === projectId && !section.deletedAt
     ));
-    // In the project step a pick files the task at once, unless the project has
-    // sections: then it is selected, so its Section picker can show (#1461).
+
+
     const chooseStepProject = (projectId: string) => {
         if (!projectHasSections(projectId)) {
             handleSetProject(projectId);
@@ -408,7 +405,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
 
     return (
         <div ref={panelRef} className="bg-card border border-border rounded-xl animate-in fade-in overflow-visible">
-            {/* Header */}
+            {            }
             <div className="flex items-center justify-between px-5 py-3.5">
                 <div className="flex items-center gap-2.5">
                     {canGoBack && (
@@ -474,9 +471,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
 
             <div className="h-px bg-border" />
 
-            {/* Body */}
+            {          }
             <div className="px-6 py-5 space-y-5">
-                {/* Step indicator */}
+                {                    }
                 <div className="flex items-center justify-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-primary" />
                     <span className="text-xs font-medium text-primary">{stepLabel[processingStep]}</span>
@@ -493,7 +490,7 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                     </div>
                 )}
 
-                {/* Task title */}
+                {                }
                 <p className="text-center font-medium text-base leading-snug">
                     {processingTitle || processingTask.title}
                 </p>
@@ -656,9 +653,9 @@ export const InboxProcessingWizard = memo(function InboxProcessingWizard({
                                     <CheckCircle className="h-4 w-4" /> {t('process.doneIt')}
                                 </button>
                             )}
-                            {/* Deferring an action you have already decided on is
-                                an actionable outcome, so it sits on this side of
-                                the question rather than under "No" (#1089). */}
+                            {
+
+                                                                               }
                             <button
                                 type="button"
                                 onClick={() => setActionableChoice('later')}

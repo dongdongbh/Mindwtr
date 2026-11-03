@@ -212,7 +212,7 @@ describe('anthropic provider error behavior', () => {
 
         const thinkingBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string);
         expect(thinkingBody.thinking).toEqual({ type: 'enabled', budget_tokens: 2048 });
-        // Extended thinking rejects any temperature other than the default.
+
         expect(thinkingBody.temperature).toBeUndefined();
         expect(thinkingBody.max_tokens).toBeGreaterThan(2048);
     });
@@ -233,7 +233,7 @@ describe('anthropic provider error behavior', () => {
             const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit).body as string);
             expect(body.temperature, model).toBeUndefined();
             expect(body.thinking, model).toBeUndefined();
-            // Adaptive thinking can run by default and spends from max_tokens.
+
             expect(body.max_tokens, model).toBeGreaterThanOrEqual(4096);
         }
     });

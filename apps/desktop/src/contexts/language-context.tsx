@@ -10,17 +10,9 @@ interface LanguageContextType {
 }
 
 
-
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
-/**
- * The UI language outside React — for code that runs in an event handler or
- * a plain module, not during render, so it can't call the useLanguage hook
- * (undo-registry.ts's toast label, mirroring App.tsx's `settingsLanguage ||
- * language` precedence). Same source LanguageProvider's own state reads on
- * mount, without the test short-circuit that exists there only to keep
- * component renders deterministic — this is a one-shot read, not state.
- */
+
 export function getCurrentUiLanguage(): Language {
     if (typeof localStorage === 'undefined') return 'en';
     return loadStoredLanguageSync(localStorage, getSystemDefaultLanguage());
@@ -90,7 +82,7 @@ export function useLanguage() {
     return context;
 }
 
-/** Documentation links can safely use English in isolated renders without the provider. */
+
 export function useDocumentationLanguage(): Language {
     return useContext(LanguageContext)?.language ?? 'en';
 }

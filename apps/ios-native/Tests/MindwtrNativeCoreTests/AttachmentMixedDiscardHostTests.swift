@@ -3,8 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Actual bundled JSC, SQLite and native descriptor retirement. V3 Add records
-/// below are explicitly seeded from real V2 jobs, not AddV3 producer acceptance.
+
 final class AttachmentMixedDiscardHostTests: XCTestCase {
     private typealias Store = NativeAttachmentDraftStore
     private var root: URL!
@@ -108,8 +107,8 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
             let mixed = Store.MixedRecord(session: legacy.session, operations: legacy.operations.map { .add($0) })
             _ = try Store.mixedFingerprint(mixed)
             try DurableFile.write(JSONEncoder().encode(mixed), to: store.url, privateDraft: true)
-            // This is already a retained validated mixed fixture. New BeginV3
-            // intentionally does not admit an interrupted Add producer.
+
+
             return host
         }
         let current = try latest()
@@ -519,9 +518,8 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
     }
 
     func testActual128EntryHistoryUsesOneTemplateAnd64RealPublicationProofs() async throws {
-        // The native cap includes every opaque snapshot copy. A shorter,
-        // exclusively owned home/disk path keeps 128 real entries within that
-        // cap on Mac; the earlier long checkout URI correctly exceeded it.
+
+
         let previousRoot = try XCTUnwrap(root)
         let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".m262-\(UUID().uuidString.prefix(8))", isDirectory: true)
         guard !FileManager.default.fileExists(atPath: directory.path) else { throw HostFailure("Owned fixture path collision") }
@@ -530,14 +528,13 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
         defer { free(physical) }
         let ownedRoot = URL(fileURLWithPath: String(cString: physical), isDirectory: true)
         root = ownedRoot; defer { root = previousRoot }
-        // Registered before hosts, so their LIFO teardown closes them first.
+
         addTeardownBlock { try FileManager.default.removeItem(at: ownedRoot) }
         let host = try await seed(adds: 1, empty: true)
         let template = try XCTUnwrap(NativeAttachmentDraftCoordinator.mixedSaveAdds(record()).first)
         await host.close()
-        // One real fresh preparation supplies metadata. Each additional Add
-        // gets real descriptor reservation/fill/publication proofs; full shared
-        // history validation runs at the Discard owner, not inside this loop.
+
+
         func compact(_ value: Any) throws -> String {
             String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes]), as: UTF8.self)
         }
@@ -624,9 +621,8 @@ final class AttachmentMixedDiscardHostTests: XCTestCase {
         await refused { try await self.remove(host, id: added.requestId) }
         let template = try record(); XCTAssertEqual(template.operations.count, 3)
         await host.close()
-        // Preserve three real prepared operations and their RN projections.
-        // Leading JSON whitespace is opaque editor evidence; its Foundation
-        // escaping grows every retained copy without new shared preparations.
+
+
         func padded(_ count: Int) throws -> Store.MixedRecord {
             let prefix = String(repeating: "\n", count: count)
             func snapshot(_ original: EditorDraftSnapshot) -> EditorDraftSnapshot {

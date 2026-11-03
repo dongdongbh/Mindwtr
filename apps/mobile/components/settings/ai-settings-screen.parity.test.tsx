@@ -1,22 +1,6 @@
-/**
- * React Native's Settings › Advanced › AI screen, replayed against the frozen
- * parity fixture (packages/core/src/ai-settings-parity.fixtures.json) that core's
- * AI settings model and the native host contract are tested against.
- *
- * To recapture, keep every file under apps/ at HEAD except this one, then run
- *   MINDWTR_CAPTURE_AI_SETTINGS=1 TZ=UTC bunx vitest run components/settings/ai-settings-screen.parity.test.tsx
- * The capture refuses to run while any other file under apps/ differs from HEAD,
- * so the provenance always names the React Native code that ran.
- *
- * Each scenario renders the real screen with the real core store, drives it
- * through its own controls, and records what a user sees (a closed modal is not
- * drawn), what the store is asked to write, what the screen stores on the device
- * (AsyncStorage and the secure store), its alerts and toasts, and every model
- * list it asks for. The device is stubbed: the model lists answer from the
- * scenario's queue (none queued: the request fails), and the Whisper model store
- * reports no downloaded model. A secure text field is recorded as the dots a
- * user sees.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -55,7 +39,7 @@ const harness = vi.hoisted(() => ({
 
 const translate = (key: string) => harness.strings[harness.language]?.[key] || harness.strings.en?.[key] || key;
 
-/** The next answer for `name`: `{ value }` answers the value, `{ error }` rejects; none queued rejects. */
+
 const answer = async (name: string): Promise<any> => {
   const queue = harness.queues[name];
   const entry = queue && queue.length > 0 ? queue.shift() : { error: 'offline' };
@@ -167,8 +151,6 @@ vi.mock('@/lib/app-log', () => ({
   logError: async () => undefined,
 }));
 
-// ---------------------------------------------------------------------------
-// Scenario data.
 
 const SETTINGS: Record<string, AppSettings> = {
   base: {},
@@ -209,13 +191,8 @@ type Device = {
   secrets?: Record<string, string>;
   queues?: Record<string, unknown[]>;
 };
-/**
- * Actions: ['press', label] a control; ['switch', index] flips a switch;
- * ['type', index, text] types into a text field; ['alert', label] presses the open
- * alert's button, ['alert', null] dismisses it; ['backdrop'] taps the open
- * picker's backdrop. A label is the control's text (or its accessibility label, or
- * the first of its texts); 'k:<key>' is that key's translation.
- */
+
+
 type Scenario = { name: string; settings: string; device: Device; actions: [string, ...unknown[]][] };
 
 const scenarios: Scenario[] = [
@@ -266,7 +243,7 @@ const scenarios: Scenario[] = [
   },
   {
     name: 'assistant: models, pickers and the OpenAI panel',
-    // This device agreed to OpenAI before (review C1 3: a model list asks only a provider it agreed to).
+
     settings: 'base', device: { storage: { [CONSENT_KEY]: JSON.stringify({ openai: true }) } },
     actions: [
       ['press', 'k:settings.ai'],
@@ -283,7 +260,7 @@ const scenarios: Scenario[] = [
     ],
   },
   {
-    // Review C1 3: a key and an endpoint saved while the assistant is off reach no provider before its question is answered.
+
     name: 'assistant: a key and an endpoint saved while it is off list no models before consent',
     settings: 'base', device: {},
     actions: [
@@ -397,8 +374,6 @@ const scenarios: Scenario[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// The store: real data, recorded writes.
 
 const writeLog: unknown[][] = [];
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
@@ -444,8 +419,6 @@ function setDevice(device: Device) {
   writeLog.length = 0;
 }
 
-// ---------------------------------------------------------------------------
-// Reading the rendered screen.
 
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -453,7 +426,7 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
   return node.children.map((child) => deepText(child as ReactTestInstance | string)).join('');
 };
 
-/** Host nodes of `type` a user can see: a closed Modal draws nothing. */
+
 function hosts(root: ReactTestInstance, type: string): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -471,7 +444,7 @@ const flatten = (style: unknown): Record<string, unknown> => (Array.isArray(styl
 
 const colorOf = (node: ReactTestInstance) => String(flatten(node.props.style).color ?? '').toLowerCase();
 
-/** The visible text, one entry per outermost Text, in screen order; a danger line is marked. */
+
 function textsIn(root: ReactTestInstance): unknown[] {
   const out: unknown[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -493,13 +466,13 @@ const controlLabel = (node: ReactTestInstance) => node.props.accessibilityLabel 
 function readScreen(root: ReactTestInstance) {
   return {
     texts: textsIn(root),
-    // [label, first text drawn in the tint]
+
     controls: hosts(root, 'TouchableOpacity').map((node) => {
       const first = hosts(node, 'Text')[0];
       return [controlLabel(node), first ? colorOf(first) === TINT : false];
     }),
     switches: hosts(root, 'Switch').map((node) => node.props.value),
-    // [placeholder, the text a user sees (dots for a secure field), secure]
+
     inputs: hosts(root, 'TextInput').map((node) => {
       const secure = node.props.secureTextEntry === true;
       const shown = String(node.props.value ?? '');
@@ -528,8 +501,6 @@ type Seen = Parameters<typeof drain>[0];
 
 const observe = (root: ReactTestInstance, seen: Seen) => normalize({ ...readScreen(root), ...drain(seen) });
 
-// ---------------------------------------------------------------------------
-// Driving the screen.
 
 async function run(what: string, fn: (() => unknown) | undefined) {
   if (!fn) throw new Error(`Nothing to do for ${what}`);
@@ -575,8 +546,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
   }
 }
 
-// The model lists wait 400 ms after a change; a key that loads asynchronously
-// only starts its timer on the render after it lands, hence two passes.
+
 const settle = async () => {
   for (let pass = 0; pass < 2; pass += 1) {
     await act(async () => {
@@ -657,8 +627,7 @@ describe('React Native Settings › AI parity fixture', () => {
     expect(Object.keys(observations)).toEqual(Object.keys(captured));
   }, 300_000);
 
-  // Both FOSS corrections run on the same render: each must merge into the settings stored
-  // by then, never into that render's copy (which put the cloud provider back in between).
+
   it('stores the FOSS corrections without writing the cloud provider back', async () => {
     await runScenario({ name: 'foss corrections', settings: 'fossWrong', device: { foss: true }, actions: [] });
     expect(writeLog.map(([, update]) => (update as { ai: { provider: string } }).ai.provider)).toEqual(['openai', 'openai']);

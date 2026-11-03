@@ -1,7 +1,6 @@
-/**
- * The mobile Menu tab's More sheet as data: its destinations, their order,
- * labels, icons and routes, and which view the quick-access tab holds.
- */
+
+
+
 import { SETTINGS_MOBILE_QUICK_ACCESS_VIEW_VALUE_SET } from './settings-options';
 import type { MobileQuickAccessView, SavedSearch } from './types';
 
@@ -9,7 +8,7 @@ type Translate = (key: string) => string;
 
 const DEFAULT_MOBILE_QUICK_ACCESS_VIEW: MobileQuickAccessView = 'review';
 
-/** The stored quick-access view, or Review for anything unknown. */
+
 export function resolveMobileQuickAccessView(value: unknown): MobileQuickAccessView {
     return SETTINGS_MOBILE_QUICK_ACCESS_VIEW_VALUE_SET.has(value as MobileQuickAccessView)
         ? value as MobileQuickAccessView
@@ -17,26 +16,26 @@ export function resolveMobileQuickAccessView(value: unknown): MobileQuickAccessV
 }
 
 export type MoreMenuItem = {
-    /** The destination: a screen id, or a saved search's id. */
+
     id: string;
-    /** Accessibility label; the tile shows `displayLabel`. */
+
     label: string;
     displayLabel: string;
-    /** An SF Symbols name; mobile maps it to its own icon set. */
+
     icon: string;
     iconColor: string;
-    /** Mobile's route for the destination. */
+
     route: string;
 };
 
 export type MoreMenuModel = {
     quickAccessView: MobileQuickAccessView;
-    /** The compact row at the top: Trash, Board, History, Settings. */
+
     utilities: MoreMenuItem[];
-    /** Shown only when there are saved searches. */
+
     savedSearchesTitle: string;
     savedSearches: MoreMenuItem[];
-    /** The tile grid, three to a row. */
+
     primary: MoreMenuItem[];
 };
 
@@ -62,7 +61,7 @@ const QUICK_ACCESS_ROUTES: Record<MobileQuickAccessView, string> = {
     contexts: '/contexts',
 };
 
-// "Someday/Maybe" is too long for a tile; the tile shows the part before the slash.
+
 const compactSlashLabel = (label: string) => label.split('/')[0]?.trim() || label;
 
 const item = (id: string, label: string, icon: string, iconColor: string, route: string, displayLabel = label): MoreMenuItem => ({
@@ -70,7 +69,7 @@ const item = (id: string, label: string, icon: string, iconColor: string, route:
 });
 
 export function buildMoreMenuModel(input: {
-    /** The stored setting (appearance.mobileQuickAccessView), resolved here. */
+
     quickAccessView: unknown;
     savedSearches: readonly SavedSearch[] | undefined;
     t: Translate;
@@ -83,7 +82,7 @@ export function buildMoreMenuModel(input: {
         calendar: item('calendar', t('nav.calendar'), 'calendar', ICON_COLORS.calendar, QUICK_ACCESS_ROUTES.calendar),
         contexts: item('contexts', t('nav.contexts'), 'circle', ICON_COLORS.contexts, QUICK_ACCESS_ROUTES.contexts),
     };
-    // The view on the quick-access tab gives its tile to Projects.
+
     const quickAccessTile = (view: Exclude<MobileQuickAccessView, 'projects'>) => (
         quickAccessView === view ? quickAccessItems.projects : quickAccessItems[view]
     );

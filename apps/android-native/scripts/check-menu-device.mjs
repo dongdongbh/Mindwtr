@@ -1,22 +1,9 @@
-// Menu tab check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-menu-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays), captures five tasks with titles unique to
-// this run (Waiting with and without person 6061, Someday, Done, Archived), and checks RN's Menu tab against core's own
-// menu views on a copy of the app's database: (a) the Menu tab opens the More sheet with core's tiles and utilities, the
-// screens this app lacks drawn disabled; (b) Waiting shows core's stats and rows, and the person chip narrows them as
-// core does; (c) Someday: New section… stores the fixed section 6000 once (later runs find it), Move to section… moves the
-// Someday capture into it and the toast's Undo moves it back (one write each), and a failed commit of a heading's Add task
-// keeps its exact retry (the capture UUID on disk) and Try again stores it once; (d) Reference opens on core's list;
-// (e) History's Done and Archived tabs show core's rows; (f) Archived's Restore (move to Inbox) stores once; (g) rotation
-// and process death keep History on its Archived tab. It touches only the development package (it refuses any other APK),
-// never launches over another app, restores rotation and clears its debug properties on exit.
-// Leave the device on its home screen before running. It needs host `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { EDGE_SAFE_X, besideRow, box, button, check, chipOn, connect, evidenced, fail, hasText, inboxCount, owedRetry, Stopped, tab, tabSelected, tagged, taskRows, withDescription } from './device.mjs';
@@ -44,20 +31,20 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/menu-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits for titles and tokens: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const titles = { waitingPerson: `60${run}1`, waiting: `60${run}2`, someday: `60${run}3`, added: `60${run}4`, done: `60${run}5`, archived: `60${run}6` };
-// One fixed section and person, so runs add no sections (core returns an existing section for its title).
+
 const SECTION = '6000';
 const PERSON = '6061';
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
-const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
+const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
 const commands = (operation, outcome = 'saved') => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = () => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -66,7 +53,7 @@ const pullDatabase = () => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/** Core's menu views on a copy (the first window of each), and the stored tasks titled as this run's. */
+
 const core = () => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -94,7 +81,8 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
     const sections = (store.settings.gtd?.viewSections?.someday ?? []).filter((section) => section.title === process.env.CHECK_SECTION);
     const live = store._allTasks.filter((task) => !task.deletedAt);
     const stored = Object.fromEntries(Object.values(JSON.parse(process.env.CHECK_TITLES)).map((title) => [title,
-        live.filter((task) => task.title === title).map((task) => ({ id: task.id, status: task.status, section: task.viewSectionIds?.someday ?? null }))]));
+        live.filter((task) => task.title === title).map((task) => ({ id: task.id, status: task.status, section: task.viewSectionIds?.someday ?? null,
+            areaId: task.areaId ?? null, projectId: task.projectId ?? null }))]));
     console.log(JSON.stringify({
         tiles: [...more.primary, ...more.utilities].map((item) => ({ id: item.id, label: item.label })),
         waiting: { rows: waiting.rows.map((row) => row.title), stats: waiting.stats },
@@ -103,23 +91,25 @@ const core = () => JSON.parse(execFileSync('bun', ['-e', `
         archive: archive.items.map(titleOf).filter(Boolean),
         reference: { rows: reference.items.map(titleOf).filter(Boolean), empty: reference.empty.message },
         sections: sections.map((section) => section.id),
+        areas: store.areas.filter((area) => !area.deletedAt).map((area) => ({ id: area.id, name: area.name })),
+        projects: store.projects.filter((project) => !project.deletedAt && project.status === 'active').map((project) => ({ id: project.id, title: project.title })),
         stored,
     }));
     process.exit(0);
 `], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: pullDatabase(), CHECK_TITLES: JSON.stringify(titles), CHECK_SECTION: SECTION, CHECK_PERSON: PERSON } })
     .trim().split('\n').pop());
 
-// ---- UI (core's English) ----
+
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
 const onInbox = (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && Number.isFinite(inboxCount(nodes));
 const inScreen = (title) => (nodes) => Boolean(tagged(nodes, 'menu-screen')) && hasText(nodes, title);
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
-/** The task rows fully inside the list, top to bottom (their title nodes). */
-// A clickable row's label can sit on a child node with the row's own bounds (Archived's rows): read it there.
+
+
 const rowLabel = (nodes, row) => row.text || row['content-desc']
     || nodes.find((node) => node !== row && node.bounds === row.bounds && (node.text || node['content-desc']))?.['content-desc'] || '';
 const rowTitles = (nodes) => taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1]).map((node) => rowLabel(nodes, node));
-/** Opens the popup from + and saves [text] ('%s' is a space for `input text`); the popup closes on Save, as in RN. */
+
 const capture = async (text, shown) => {
     let nodes = await screen();
     if (!inPopup(nodes)) nodes = await device.openCapture();
@@ -129,7 +119,7 @@ const capture = async (text, shown) => {
     await waitFor(`"${shown}" in the capture field`, (current) => tagged(current, 'capture-title')?.text === shown, 15_000);
     await tapExpecting(button(await screen(), en['common.save']) ?? fail('no Save'), onInbox, 'the capture to close the popup');
 };
-/** The More sheet from the Menu tab, then the tile labelled [label]. */
+
 const openTile = async (label, title) => {
     let nodes = await screen();
     if (!sheetOpen(nodes)) nodes = await tapExpecting(tab(nodes, en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
@@ -141,13 +131,13 @@ const back = async (done) => {
     sh('input keyevent KEYCODE_BACK');
     return waitFor('Back', done, 15_000);
 };
-/** Swipes the row whose TalkBack text is [title] to the right by [dx] px (RN's Swipeable), and returns the screen. */
+
 const swipeRight = async (title) => {
     const row = withDescription(await screen(), title) ?? fail(`no row ${title}`);
     const [x1, y1, , y2] = box(row);
     const y = Math.round((y1 + y2) / 2);
     requireAppFront();
-    // Start clear of the screen edge: a swipe from the edge is the system Back gesture (run 29 closed History).
+
     const from = Math.max(x1 + 10, EDGE_SAFE_X);
     sh(`input swipe ${from} ${y} ${from + 440} ${y} 400`);
     await sleep(700);
@@ -157,8 +147,8 @@ const swipeRight = async (title) => {
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
-    // Leave the app on its Inbox tab: the other checks start there.
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
+
     try {
         for (let step = 0; step < 3 && front().includes(`${PKG}/`); step += 1) {
             const nodes = await screen();
@@ -168,11 +158,11 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 try {
@@ -189,7 +179,7 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onInbox, 60_000);
 
-    // The run's own captures, each with core's quick-add status (and person) token.
+
     await capture(`${titles.waitingPerson}%s/waiting%s%${PERSON}`, `${titles.waitingPerson} /waiting %${PERSON}`);
     await capture(`${titles.waiting}%s/waiting`, `${titles.waiting} /waiting`);
     await capture(`${titles.someday}%s/someday`, `${titles.someday} /someday`);
@@ -198,7 +188,7 @@ try {
     let seen = core();
     check(Object.values(titles).filter((title) => title !== titles.added).every((title) => seen.stored[title].length === 1), 'the five captures are stored once each');
 
-    // (a) The Menu tab opens RN's More sheet: core's tiles and utilities; the screens this app lacks are drawn disabled.
+
     let nodes = await tapExpecting(tab(await screen(), en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await device.settle(nodes);
     for (const tile of seen.tiles) {
@@ -208,7 +198,7 @@ try {
     }
     check(true, `(a) the sheet shows core's ${seen.tiles.length} destinations; the unbuilt ones are disabled`);
 
-    // (b) Waiting: core's stats and rows; the person chip narrows them as core does.
+
     nodes = await tapExpecting(withDescription(nodes, seen.tiles.find((tile) => tile.id === 'waiting').label), inScreen(en['waiting.title']), 'Waiting');
     nodes = await waitFor('core\'s Waiting rows', (current) => rowTitles(current).length > 0);
     const statText = `${seen.waiting.stats[0].value} ${seen.waiting.stats[0].label}`;
@@ -221,7 +211,7 @@ try {
     check(true, `(b) the ${PERSON} chip narrows Waiting to core's rows (${seen.person.length})`);
     await back(onInbox);
 
-    // (c) Someday: New section…, Move to section… with Undo, and a failed Add task's exact retry.
+
     const somedayLabel = seen.tiles.find((tile) => tile.id === 'someday').label;
     await openTile(somedayLabel, en['someday.title']);
     nodes = await tapExpecting(withDescription(await screen(), en['taskEdit.moreOptions']) ?? fail('no list menu'),
@@ -236,8 +226,8 @@ try {
     check(seen.sections.length === 1, `(c) exactly one section "${SECTION}" is stored (created now or found again)`);
 
     const statusLabel = en['task.aria.changeStatus'].replace('{{status}}', en['status.someday']);
-    // The list reads itself again after the create and gains the new section's heading, which moves every row down:
-    // wait for that heading and a still screen, so the tap below cannot land on the row that slid into place (run 23).
+
+
     await waitFor(`the "${SECTION}" heading`, (current) => hasText(current, SECTION), 10_000);
     await device.settle();
     nodes = await device.settle(await device.reveal(titles.someday));
@@ -246,8 +236,8 @@ try {
     nodes = await tapExpecting(withDescription(nodes, en['viewSections.moveToSection']), (current) => Boolean(withDescription(current, SECTION)), 'core\'s move dialog');
     const [movesBefore, undosBefore] = [commands('somedayMove'), commands('somedayUndo')];
     const moved = en['viewSections.moved'].replace('{section}', SECTION).replace('{count}', '1');
-    // RN's toast lasts 5.2 s and one screen read takes about a second, so Undo is tapped on the first read that shows the
-    // toast (runs 22-25 tapped it about 7 s after the move, when the toast had already gone). The writes are counted after.
+
+
     requireAppFront();
     const [sl, st, sr, sb] = box(withDescription(nodes, SECTION) ?? fail(`no "${SECTION}" choice`));
     sh(`input tap ${Math.round((sl + sr) / 2)} ${Math.round((st + sb) / 2)}`);
@@ -264,6 +254,58 @@ try {
     seen = core();
     check(seen.stored[titles.someday][0].section === null && commands('somedayUndo') === undosBefore + 1, '(c) Undo is one write and puts the task back under No section');
 
+
+    const openStatusMenu = async () => {
+        nodes = await device.settle(await device.reveal(titles.someday));
+        return tapExpecting(besideRow(nodes, titles.someday, statusLabel) ?? fail('no status control on the Someday row'),
+            (current) => Boolean(withDescription(current, en['task.copyTaskId'])), 'the status menu');
+    };
+    nodes = await openStatusMenu();
+    check(hasText(nodes, en['task.destination']) && [en['task.moveToProjectOrArea'], en['viewSections.moveToSection'], en['task.copyTaskLink'], en['task.copyTaskId']]
+        .every((label) => withDescription(nodes, label) && hasText(nodes, label)), '(c2) the status menu shows Destination, Move to project or area…, Move to section…, Copy task link and Copy task ID, as RN writes them');
+    mkdirSync(work, { recursive: true });
+    writeFileSync(resolve(work, 'status-menu.png'), adbRaw('exec-out', 'screencap', '-p'));
+    await tap(withDescription(nodes, en['task.copyTaskId']));
+    await waitFor('RN\'s copied toast', (current) => hasText(current, en['list.taskCopied']), 10_000);
+    check(true, `(c2) Copy task ID shows "${en['list.taskCopied']}"`);
+    nodes = await openStatusMenu();
+    nodes = await tapExpecting(withDescription(nodes, en['task.moveToProjectOrArea']), (current) => Boolean(tagged(current, 'destination-search')), 'core\'s destination picker');
+    writeFileSync(resolve(work, 'destination-picker.png'), adbRaw('exec-out', 'screencap', '-p'));
+    check(hasText(nodes, en['task.destination']) && hasText(nodes, en['common.none']) && hasText(nodes, en['nav.projects']), '(c2) the picker shows Destination, None and Projects');
+
+
+    const plain = (name) => /^[A-Za-z0-9 ]{2,40}$/.test(name);
+    const target = seen.areas.filter((entry) => plain(entry.name)).map((entry) => ({ kind: 'area', id: entry.id, name: entry.name, label: en['taskEdit.areaLabel'] }))
+        .concat(seen.projects.filter((entry) => plain(entry.title)).map((entry) => ({ kind: 'project', id: entry.id, name: entry.title, label: en['nav.projects'] })))[0]
+        ?? fail('(c2) the development data has no area and no active project with a plain name to move the task to');
+    const rowLabel = `${target.label}: ${target.name}`;
+    nodes = await tapExpecting(tagged(nodes, 'destination-search'), () => /mInputShown=true/.test(sh('dumpsys input_method')), 'the keyboard for the picker\'s search');
+    sh(`input text '${target.name.replace(/ /g, '%s')}'`);
+    nodes = await waitFor(`the picker's row "${rowLabel}"`, (current) => Boolean(withDescription(current, rowLabel)) && hasText(current, en['common.cancel']), 10_000);
+    await sleep(600);
+    nodes = await device.settle(await screen());
+    const keyboard = sh('dumpsys window windows').split(/\n  Window #/).find((part) => part.includes('InputMethod')) ?? fail('no keyboard window');
+    const keyboardTop = Number(/ frame=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? /mFrame=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? NaN)
+        + Number(/mGivenContentInsets=\[\d+,(\d+)\]/.exec(keyboard)?.[1] ?? NaN);
+    writeFileSync(resolve(work, 'destination-search-keyboard.png'), adbRaw('exec-out', 'screencap', '-p'));
+
+    const bottoms = [withDescription(nodes, rowLabel), nodes.find((node) => node.text === en['common.cancel'])].map((node) => node ? box(node)[3] : NaN);
+    check(Number.isFinite(keyboardTop) && bottoms.every((bottom) => bottom <= keyboardTop),
+        `(c2) with the keyboard up (top ${keyboardTop}), the found row and Cancel sit above it (bottoms ${bottoms.join(', ')})`);
+    const destinationsBefore = commands('taskDestinationMove');
+    await tap(withDescription(nodes, rowLabel));
+    await waitFor('the move', () => commands('taskDestinationMove') === destinationsBefore + 1, 10_000);
+    seen = core();
+    const placed = seen.stored[titles.someday][0];
+    check(target.kind === 'area' ? placed.areaId === target.id && placed.projectId === null : placed.projectId === target.id && placed.areaId === null,
+        `(c2) the ${target.kind} "${target.name}" is stored on the task in one write`);
+    nodes = await openStatusMenu();
+    nodes = await tapExpecting(withDescription(nodes, en['task.moveToProjectOrArea']), (current) => Boolean(tagged(current, 'destination-search')), 'core\'s destination picker');
+    await tap(nodes.find((node) => node.text === en['common.none']) ?? fail('no None row'));
+    await waitFor('the move back', () => commands('taskDestinationMove') === destinationsBefore + 2, 10_000);
+    seen = core();
+    check(seen.stored[titles.someday][0].areaId === null && seen.stored[titles.someday][0].projectId === null, '(c2) None puts the task back with no area and no project, one write more');
+
     setProp('fail_commit', '1');
     const addLabel = en['viewSections.addTask'].replace('{section}', SECTION);
     nodes = await device.reveal(SECTION);
@@ -277,7 +319,7 @@ try {
     check(tagged(nodes, 'menu-dialog-field')?.enabled === 'false' && core().stored[titles.added].length === 0,
         `(c) the failed commit stored nothing; the prompt is locked to its exact request (capture ${captureId}, on disk)`);
     setProp('fail_commit', '');
-    // The prompt keeps its exact request and offers RN's Retry (core's `common.retry`) over the failure banner's Try again.
+
     await tapExpecting(withDescription(await screen(), en['common.retry']) ?? fail('no Retry in the prompt'),
         (current) => !owedRetry(current) && !tagged(current, 'menu-dialog-field'), 'the prompt\'s Retry');
     seen = core();
@@ -285,7 +327,7 @@ try {
         && commands('somedayTask', 'failed') >= 1, `(c) Try again stored the task once, with the capture UUID, in "${SECTION}"`);
     await back(onInbox);
 
-    // (d) Reference opens on core's list.
+
     await openTile(seen.tiles.find((tile) => tile.id === 'reference').label, en['nav.reference']);
     nodes = await waitFor('core\'s Reference list', (current) => rowTitles(current).length > 0 || hasText(current, seen.reference.empty), 20_000);
     const referenceRows = rowTitles(nodes);
@@ -293,9 +335,9 @@ try {
         `(d) Reference shows core's list (${seen.reference.rows.length} rows in its first window)`);
     await back(onInbox);
 
-    // (e) History: Done, then Archived, each with core's rows.
+
     await openTile(seen.tiles.find((tile) => tile.id === 'history').label, en['nav.history']);
-    // The rows are read once they are core's or 20 s pass (never one dump while the list may still load); a mismatch names both.
+
     const doneShown = (current) => (tabSelected(current, en['nav.done']) ? rowTitles(current) : []);
     const doneMatch = (rows) => rows.length > 0 && JSON.stringify(rows) === JSON.stringify(seen.done.slice(0, rows.length));
     nodes = await screen();
@@ -312,7 +354,7 @@ try {
         `(e) Archived shows core's first ${archiveRows.length} rows in core's order, the run's Archived capture on screen`
         + (JSON.stringify(archiveRows) === JSON.stringify(seen.archive.slice(0, archiveRows.length)) ? '' : ` (screen ${JSON.stringify(archiveRows)}, core ${JSON.stringify(seen.archive.slice(0, 8))}, run's ${titles.archived})`));
 
-    // (f) Archived's Restore: the task goes to Inbox, one write.
+
     const restoresBefore = commands('archiveAction');
     const restoreLabel = en['trash.restore'];
     nodes = await swipeRight(titles.archived);
@@ -320,7 +362,7 @@ try {
     await waitFor('the Restore write', () => commands('archiveAction') === restoresBefore + 1, 10_000);
     check(core().stored[titles.archived][0].status === 'inbox' && commands('archiveAction') === restoresBefore + 1, '(f) Restore moved the task to Inbox in one write');
 
-    // (g) Rotation and process death keep History on its Archived tab.
+
     const onArchived = (current) => inScreen(en['nav.history'])(current) && tabSelected(current, en['nav.archived']);
     sh('settings put system user_rotation 1');
     await waitFor('landscape History › Archived', onArchived, 20_000);

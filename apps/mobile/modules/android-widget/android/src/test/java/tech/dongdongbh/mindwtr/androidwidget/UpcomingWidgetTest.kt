@@ -118,7 +118,7 @@ class UpcomingWidgetTest {
 
   @Test
   fun labelsFollowTheNextActionsDayRuleAndRollOverAtLocalMidnight() {
-    // Monday 2026-10-26, as in #1455.
+
     val cases = mapOf(
       "2026-10-26" to "Starts Today", "2026-10-27" to "Starts Tomorrow", "2026-10-28" to "Starts Wed",
       "2026-11-01" to "Starts Sun", "2026-11-02" to "Starts 11/2", "2026-10-20" to "Starts 10/20",
@@ -130,7 +130,7 @@ class UpcomingWidgetTest {
     val tomorrow = payload(listOf(item("t", "2026-10-27")))
     assertEquals("Starts Tomorrow", label(tomorrow, "2026-10-26T23:59"))
     assertEquals("Starts Today", label(tomorrow, "2026-10-27T00:00"))
-    // The day is the device's local day, not UTC's.
+
     val tokyo = TimeZone.getTimeZone("Asia/Tokyo")
     assertEquals("Starts Today", label(tomorrow, "2026-10-26T15:00", tokyo))
   }
@@ -151,14 +151,14 @@ class UpcomingWidgetTest {
   @Test
   fun aTasksRenderSchedulesTheNextLocalMidnightRedrawBecauseAndroidSkipsDateChanged() {
     val newYork = TimeZone.getTimeZone("America/New_York")
-    // 2026-11-01 ends daylight time: that day is 25 hours long.
+
     assertEquals(at("2026-11-01T04:00").time, TasksWidgetProvider.nextLocalMidnight(at("2026-10-31T16:00").time, newYork))
     assertEquals(at("2026-11-02T05:00").time, TasksWidgetProvider.nextLocalMidnight(at("2026-11-01T04:00").time, newYork))
 
     val alarms = org.robolectric.Shadows.shadowOf(context.getSystemService(android.app.AlarmManager::class.java))
     WidgetRenderer.render(context, android.appwidget.AppWidgetManager.getInstance(context), intArrayOf(), WidgetKind.TASKS)
     assertNull(alarms.nextScheduledAlarm)
-    // Every Tasks render calls this; the second replaces the first.
+
     TasksWidgetProvider.scheduleMidnightRefresh(context)
     TasksWidgetProvider.scheduleMidnightRefresh(context)
     val alarm = alarms.scheduledAlarms.single()
@@ -197,7 +197,7 @@ class UpcomingWidgetTest {
     WidgetListStore.write(context, 9, "upcoming")
     val factory = TasksWidgetFactory(context, WidgetKind.TASKS, 9, payload)
     val views = factory.getViewAt(0)
-    // Collection children carry their row intent on the root, consumed by the launcher template.
+
     RemoteViews::class.java.getDeclaredMethod("addFlags", Int::class.javaPrimitiveType)
       .apply { isAccessible = true }.invoke(views, 2)
     val row = views.apply(context, null)

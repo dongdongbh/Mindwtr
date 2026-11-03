@@ -28,13 +28,9 @@ const MIN_LOCAL_API_PORT: u16 = 1024;
 const MAX_LOCAL_API_PORT: u16 = u16::MAX;
 const REQUEST_HEADER_LIMIT_BYTES: usize = 16 * 1024;
 const REQUEST_BODY_LIMIT_BYTES: usize = 1_000_000;
-// Generous for one desktop user's local integrations (a few concurrent
-// MCP/automation clients), small enough that an unbounded slow-drip flood
-// can't pin the whole thread pool (R-04).
+
 const MAX_LOCAL_API_CONNECTIONS: usize = 32;
-// Bounds total per-request wall time across every read, not just a single
-// read() syscall the way set_read_timeout does - closes the slow-drip gap
-// where a peer sends a few bytes just under that timeout, forever (R-04).
+
 const REQUEST_DEADLINE: Duration = Duration::from_secs(10);
 const LOCAL_API_TOKEN_BYTES: usize = 32;
 const LOCAL_API_REV_BY: &str = "desktop-local-api";
@@ -97,9 +93,6 @@ impl Drop for LocalApiHandle {
     fn drop(&mut self) {
         self.shutdown.store(true, Ordering::SeqCst);
         if let Some(join) = self.join.take() {
-            // The accept loop is nonblocking; a rejected peer's response has a
-            // five-second write timeout. Never let optional-server cleanup
-            // prevent the desktop from exiting even if the loop panics/stalls.
             let deadline = Instant::now() + Duration::from_secs(6);
             while !join.is_finished() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(10));
@@ -138,8 +131,7 @@ impl LocalApiAccess {
         write_lock: &'a Mutex<()>,
     ) -> Result<std::sync::MutexGuard<'a, ()>, String> {
         let guard = lock_recovering(write_lock);
-        // A request may have queued before stop/rotation. Re-check after it
-        // acquires the shared mutation lock, immediately before storage.
+
         self.ensure_write()?;
         Ok(guard)
     }
@@ -157,10 +149,6 @@ pub(crate) struct LocalApiServerState {
     write_lock: Arc<Mutex<()>>,
 }
 
-/// Poison-recovering lock. A panic in one request thread must not permanently 500 every
-/// future write while reads keep working: the write lock is a `Mutex<()>` (no state a panic
-/// could half-mutate) and the runtime holds two `Option`s that are only ever replaced
-/// wholesale. Same shape as `config.rs`'s `lock_dropbox_credential_state`.
 fn lock_recovering<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
@@ -271,13 +259,6 @@ fn read_local_api_config(app: &tauri::AppHandle) -> LocalApiConfig {
     }
 }
 
-// Sole chokepoint for local-API config writes (ensure_local_api_token and
-// set_local_api_server_config both route through here) — one held lock
-// across the whole read+mutate+write closes the race now that callers run
-// off the main thread (B2): two concurrent writers here (or in
-// clear_sync_path/set_desktop_rendering_config, which share the lock) could
-// otherwise each read the same base config and the second write clobbers the
-// first's unrelated field changes.
 fn write_local_api_config(app: &tauri::AppHandle, next: LocalApiConfig) -> Result<(), String> {
     let _config_guard = lock_config_read_modify_write()?;
     let mut config: AppConfigToml = read_config(app);
@@ -538,9 +519,6 @@ pub(crate) fn set_local_api_server_config(
     Ok(status_from_runtime(config, &runtime))
 }
 
-// Decrements the shared counter on drop, so a panic inside handle_connection
-// (unwinding through this guard) can't leak a permit the way a plain
-// fetch_sub call at the end of the function would (R-04).
 struct ConnectionSlotGuard(Arc<AtomicUsize>);
 
 impl Drop for ConnectionSlotGuard {
@@ -549,13 +527,6 @@ impl Drop for ConnectionSlotGuard {
     }
 }
 
-// Lifted out of the accept loop so the cap can be exercised with a real
-// loopback socket in tests, without a tauri::AppHandle (R-04, same pattern as
-// apply_task_action). The accept loop is the only incrementer (this function
-// only ever runs on that one thread), so a plain load-then-add has no TOCTOU
-// window that could let the count exceed the cap - a concurrent decrement
-// from a finishing handler can only make a borderline request wait, never
-// let the count overshoot.
 fn accept_or_reject(
     mut stream: TcpStream,
     active_connections: &Arc<AtomicUsize>,
@@ -577,9 +548,6 @@ fn handle_connection(
     handler: &impl Fn(&LocalApiAccess, u16, ApiRequest) -> ApiResponse,
     mut stream: TcpStream,
 ) {
-    // macOS and Windows can inherit the listener's nonblocking mode. Blocking
-    // reads and writes avoid rejecting an early request or truncating a large
-    // response when the socket buffer fills.
     if let Err(error) = stream.set_nonblocking(false) {
         log::warn!(
             "Local HTTP connection setup failed stage=blocking errorKind={:?}",
@@ -597,9 +565,6 @@ fn handle_connection(
     let _ = write_response(&mut stream, response);
 }
 
-// Generic over Read (R-05) so tests can drive it with an in-memory reader
-// instead of a real socket - TcpStream: Read, so the one call site in
-// handle_connection is unchanged.
 fn read_request(stream: &mut impl Read, deadline: Instant) -> Result<Option<ApiRequest>, String> {
     let mut buffer: Vec<u8> = Vec::new();
     let mut temp = [0_u8; 1024];
@@ -718,13 +683,6 @@ fn parse_request_target(target: &str) -> (String, HashMap<String, String>) {
 }
 
 fn write_response(stream: &mut TcpStream, response: ApiResponse) -> Result<(), String> {
-    // Without this, write_all against a client that never reads its socket
-    // buffer (or a peer that vanished) blocks forever once the buffer fills.
-    // The shared write path for both handle_connection's real response and
-    // accept_or_reject's 503 rejection - that second one runs synchronously
-    // on the accept loop's own thread, so an unbounded block there would
-    // stop the server from accepting any connection at all, not just pin one
-    // of the capped slots (I3).
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let raw = http_response(&response);
     stream.write_all(raw.as_bytes()).map_err(|error| {
@@ -825,11 +783,6 @@ fn authorize_api_request(
     None
 }
 
-// Constant-time over fixed-length digests rather than the raw header value:
-// loopback-only with a random token keeps the real-world severity low, but a
-// bare `==` still leaks the token length and a byte-by-byte early-out, so hash
-// both sides first (like apps/cloud/src/server-auth.ts's timingSafeEqual over
-// SHA-256 digests) and compare with no short-circuit.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
@@ -893,8 +846,6 @@ pub(crate) fn api_error_response(error: String) -> ApiResponse {
     ApiResponse::error(500, error)
 }
 
-/// Validated transport adapters invoke these operations directly. Both endpoints
-/// retain the same storage transactions, mutation lock, and durable responses.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalOperation {
     Health,
@@ -1536,7 +1487,6 @@ fn live_project_area<'a>(data: &'a Value, area_id: &str) -> Option<&'a Value> {
 }
 
 fn trim_area_name(name: &str) -> &str {
-    // Match JavaScript trim, including BOM and excluding NEXT LINE.
     name.trim_matches(|character| {
         matches!(character,
         '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}' |
@@ -2309,9 +2259,6 @@ pub(crate) fn patch_project_in_data(
     Ok((Value::Object(project), changed_tasks, changed_sections))
 }
 
-/// Mirrors core project delete/restore: delete detaches live tasks instead of
-/// deleting them; restore only revives children from the same legacy cascade.
-/// Called on fresh transaction-scoped rows, never a stale whole-app snapshot.
 pub(crate) fn apply_project_delete_or_restore(
     data: &mut Value,
     project_id: &str,
@@ -2322,10 +2269,6 @@ pub(crate) fn apply_project_delete_or_restore(
     apply_project_delete_or_restore_at(data, project_id, restore, &now, &device_id)
 }
 
-/// The clock and device id are parameters so the shared core/Rust fixture
-/// (`packages/core/src/recurrence-local-api-parity.fixtures.json`, kind
-/// `project-action`) can pin both engines against the same frozen `now`, the
-/// way `apply_task_action` already is.
 fn apply_project_delete_or_restore_at(
     data: &mut Value,
     project_id: &str,
@@ -2454,12 +2397,6 @@ fn apply_project_delete_or_restore_at(
     Ok(changed)
 }
 
-/// Refuses `POST /tasks/{id}/complete` outright when the task's recurrence
-/// carries selectors this engine cannot compute (byDay/byMonthDay/rrule —
-/// see `recurrence_needs_core_engine`). A vanished recurring series is worse
-/// than a rejected request: nothing is read here except to decide, and the
-/// caller must not proceed to `update_task_in_data` when this returns `Some`,
-/// so the task is left completely untouched on disk.
 fn recurrence_completion_refusal(
     data: &Value,
     task_id: &str,
@@ -2509,11 +2446,6 @@ where
     Ok(Value::Object(task_object.clone()))
 }
 
-/// Live (non-deleted, non-purged) project/section/area ids, snapshotted from
-/// the data file before a restore mutates it. A section only counts as live
-/// when its own owning project is also live, mirroring
-/// `sanitizeRestoredTaskContainerReferences`'s `sectionProjectId` check
-/// (store-tasks.ts) exactly.
 #[derive(Default)]
 struct LiveContainers {
     project_ids: std::collections::HashSet<String>,
@@ -2671,9 +2603,6 @@ fn finite_order_number(value: f64) -> Option<serde_json::Number> {
     serde_json::Number::from_f64(value)
 }
 
-/// Direct Rust port of `resolveTaskContainerHierarchy` (task-container-rules.ts):
-/// a section wins the project it lives under (or gets dropped if its project
-/// isn't live/doesn't match), and an area only survives when no project is set.
 struct ResolvedContainers {
     project_id: Option<String>,
     section_id: Option<String>,
@@ -2988,7 +2917,7 @@ fn patch_task_in_data_at(
         let queued = candidate.get("status").and_then(Value::as_str) == Some("next")
             && has_non_empty_string(&candidate, "startTime")
             && future_start;
-        // Match core normalizeTaskUpdate: only a schedule/status edit clears a deferred star.
+
         if future_start
             && !queued
             && ["startTime", "dueDate", "reviewAt", "recurrence", "status"]
@@ -3014,9 +2943,6 @@ fn patch_task_in_data_at(
     })
 }
 
-/// Direct Rust port of `sanitizeRestoredTaskContainerReferences`
-/// (store-tasks.ts): a restored task never keeps a reference to a
-/// project/section/area that no longer exists.
 fn sanitize_restored_task_container_references(
     task: &mut Map<String, Value>,
     live: &LiveContainers,
@@ -3055,18 +2981,12 @@ fn sanitize_restored_task_container_references(
     set_or_remove_string(task, "areaId", resolved_area_id);
 }
 
-/// A completedAt value counts as set only if it's a non-empty string -
-/// mirrors core's `oldTask.completedAt || now` falsy fallback
-/// (applyTaskUpdates in store-helpers.ts) so complete's archived-correction
-/// branch and archive's own completedAt fallback use the same rule.
 fn has_non_empty_string(task: &Map<String, Value>, key: &str) -> bool {
     task.get(key)
         .and_then(Value::as_str)
         .is_some_and(|value| !value.is_empty())
 }
 
-// Cancellation is an archived outcome, never a completed occurrence. Keep this
-// boundary aligned with core's normalizeTaskLifecycleFields for native writes.
 fn normalize_local_task_lifecycle(
     task: &mut Map<String, Value>,
     now: &str,
@@ -3102,18 +3022,6 @@ fn normalize_local_task_lifecycle(
     }
 }
 
-/// The complete/archive/restore mutation lifted out of `route_api_request`'s
-/// closure (previously untestable without a `tauri::AppHandle`). Mirrors
-/// core's write-invariant home for tasks: `applyTaskUpdates` for
-/// complete/archive (composed after `normalizeTaskUpdate`'s boardOrder
-/// clearing, per the store's own `updateTask`), `sanitizeRestoredTaskContainerReferences`
-/// for restore. Returns the recurring follow-up task to insert alongside
-/// `task`, if the action spawns one; `task` is mutated in place with
-/// `updatedAt`/`rev`/`revBy` stamped, matching every write path in core
-/// (`mutateTasks`/`updateTask`) - except when the status isn't actually
-/// changing (complete on an already-done task, archive on an already-archived
-/// one), which is a full no-op: core's `statusChanged` gate means nothing in
-/// `applyTaskUpdates` would touch the task, so nothing here should either.
 fn apply_task_action(
     task: &mut Map<String, Value>,
     action: &str,
@@ -3138,21 +3046,14 @@ fn apply_task_action(
             let previous_task = task.clone();
             task.remove("cancelledAt");
             task.remove("archivedAt");
-            // archived -> done is a lifecycle correction, not a new
-            // completion: keep the existing completedAt (falling back to
-            // `now` only if it is somehow missing) instead of overwriting it,
-            // and never spawn a follow-up occurrence.
+
             let is_archive_correction = previous_status == "archived";
             task.insert("status".to_string(), Value::String("done".to_string()));
             if !is_archive_correction || !has_non_empty_string(task, "completedAt") {
                 task.insert("completedAt".to_string(), Value::String(now.to_string()));
             }
             task.insert("isFocusedToday".to_string(), Value::Bool(false));
-            // A manual Focus position only means something while starred;
-            // completing always unstars, so it must take focusOrder with it.
-            // boardOrder also resets on a status change unless the same
-            // patch sets it itself, which the server-triggered complete/
-            // archive actions never do (normalizeTaskUpdate's rule).
+
             task.remove("focusOrder");
             task.remove("boardOrder");
             if should_create_recurring_follow_up(action, previous_status) {
@@ -3175,9 +3076,6 @@ fn apply_task_action(
             task.remove("boardOrder");
         }
         "restore" => {
-            // Mirrors core's `restoreTask`: a purged task is the compacted
-            // tombstone of a permanent delete, so reviving it would resurrect
-            // an emptied row and sync it back to every device.
             if has_non_empty_string(task, "purgedAt") {
                 return Err("Task status conflict: purged task cannot be restored".to_string());
             }
@@ -3232,13 +3130,6 @@ fn bump_task_revision(task: &mut Map<String, Value>, device_id: &str) {
     task.insert("revBy".to_string(), Value::String(device_id.to_string()));
 }
 
-/// True when the recurrence carries selectors this fixed interval/anchor-day
-/// engine cannot compute: explicit weekdays, explicit month days, a raw
-/// RFC 5545 fragment (which may itself encode BYSETPOS or other selectors
-/// this engine never parses), or a `relativeStartOffset` (which core's
-/// `createNextRecurringTask` recomputes onto the follow-up's startTime -
-/// this engine doesn't carry it at all). Only `packages/core/src/recurrence.ts`
-/// understands these — the local API must refuse rather than guess a date.
 fn recurrence_needs_core_engine(task: &Map<String, Value>) -> bool {
     if task
         .get("relativeStartOffset")
@@ -3264,7 +3155,6 @@ fn recurrence_needs_core_engine(task: &Map<String, Value>) -> bool {
     has_by_day || has_by_month_day || has_rrule
 }
 
-// Catchup belongs to core; refuse before changing the source when one step is stale.
 fn recurrence_start_needs_catchup(task: &Map<String, Value>, completed_at: &str) -> bool {
     if recurrence_strategy(task) == "fluid"
         || has_non_empty_string(task, "dueDate")
@@ -3337,15 +3227,6 @@ fn create_next_recurring_task_for_local_api(
 ) -> Option<Map<String, Value>> {
     let rule = recurrence_rule(task)?;
     if recurrence_needs_core_engine(task) || recurrence_start_needs_catchup(task, completed_at) {
-        // Refuse what this engine cannot model instead of guessing a wrong
-        // date (e.g. an every-Mon/Wed/Fri task otherwise gets a follow-up 7
-        // days out because `next_recurring_iso` below only knows fixed
-        // day/week/month steps). The HTTP complete handler already refuses
-        // this case via `recurrence_completion_refusal` before this function
-        // is ever reached, so the task is never marked done without its
-        // follow-up — a vanished recurring series would be worse than a
-        // rejected request. This `None` is a defensive backstop for any
-        // other caller (tests call this function directly).
         return None;
     }
     let interval = recurrence_interval(task);
@@ -3408,8 +3289,6 @@ fn create_next_recurring_task_for_local_api(
         });
 
     if next_start_time.is_none() && next_due_date.is_none() && next_review_at.is_none() {
-        // Date-only deferral: an unscheduled task must not inherit the completion's
-        // time of day. Mirrors the core TypeScript behavior (ISO date prefix).
         let completed_at_date = completed_at.get(..10).unwrap_or(completed_at);
         next_start_time = next_recurring_iso(
             completed_at,
@@ -3465,6 +3344,7 @@ fn create_next_recurring_task_for_local_api(
             "timeEstimate",
             "repeatReminderMinutes",
             "dueReminderLeadMinutes",
+            "startReminderLeadMinutes",
             "reminderPolicy",
         ],
     );
@@ -3535,14 +3415,6 @@ fn create_next_recurring_task_for_local_api(
 }
 
 fn should_create_recurring_follow_up(action: &str, previous_status: &str) -> bool {
-    // Completing a task that was already archived is a lifecycle correction
-    // (archived -> done), not a new completion event: core never spawns a
-    // follow-up occurrence for it (store-helpers.ts's applyTaskUpdates treats
-    // `isReturningFromArchive` as `nextRecurringTask = null` regardless of
-    // recurrence), and this is also the sole gate the 409 refusal check
-    // (`recurrence_completion_refusal`) uses to decide whether to even look at
-    // the recurrence rule — so an archived-source completion is never refused
-    // either, even when its recurrence is one this engine cannot compute.
     action == "complete" && previous_status != "done" && previous_status != "archived"
 }
 
@@ -3635,12 +3507,6 @@ fn iso_day(value: &str) -> Option<u32> {
     parse_iso_prefix(value).map(|(_, _, day, _)| day)
 }
 
-// The legacy single `anchorDay` is credited ONLY to the field it was derived
-// from (dueDate, else startTime, else reviewAt — the order that writes it).
-// Letting it anchor the other fields advanced a start of the 14th as a day-15
-// rule, so "start 14th / due 15th, monthly" came back starting Aug 15 instead
-// of Sep 14. Mirrors resolveRecurrenceFieldAnchorDays in core's recurrence.ts;
-// the shared parity fixtures pin both sides.
 fn recurrence_anchor_owner_field(task: &Map<String, Value>) -> Option<&'static str> {
     ["dueDate", "startTime", "reviewAt"]
         .into_iter()
@@ -3903,8 +3769,7 @@ fn duplicate_attachment_value(value: Option<&Value>, timestamp: &str) -> Option<
                 Value::String(timestamp.to_string()),
             );
             attachment.remove("deletedAt");
-            // A duplicate is a distinct attachment record; sharing the original's
-            // cloud identity would point two records at one cloud blob (A4).
+
             attachment.remove("cloudKey");
             attachment.remove("fileHash");
             attachment.remove("localStatus");
@@ -3927,6 +3792,9 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
     let had_advance_reminder = task
         .get("dueReminderLeadMinutes")
         .is_some_and(|value| !value.is_null());
+    let had_start_advance_reminder = task
+        .get("startReminderLeadMinutes")
+        .is_some_and(|value| !value.is_null());
     for key in [
         "startTime",
         "dueDate",
@@ -3938,6 +3806,7 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
         "suppressMindwtrReminders",
         "repeatReminderMinutes",
         "dueReminderLeadMinutes",
+        "startReminderLeadMinutes",
         "showFutureRecurrence",
         "focusOrder",
         "boardOrder",
@@ -3946,6 +3815,9 @@ fn normalize_created_reference_task(task: &mut Map<String, Value>) {
     }
     if had_advance_reminder {
         task.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
+    if had_start_advance_reminder {
+        task.insert("startReminderLeadMinutes".to_string(), json!(0));
     }
     task.insert("isFocusedToday".to_string(), Value::Bool(false));
     task.insert("pushCount".to_string(), Value::Number(0.into()));
@@ -4150,8 +4022,7 @@ fn local_api_focus_candidate_is_sequential_first(
     };
     let candidate_section = candidate.get("sectionId").and_then(Value::as_str);
     let project_sequential = project.get("isSequential").and_then(Value::as_bool) == Some(true);
-    // Per section Flow mode (#1429), same rule as core getTaskSequenceKey: only a live
-    // Sequential section of this project is a sequence; everything else is parallel.
+
     let in_sequential_section = !project_sequential
         && project.get("perSectionFlow").and_then(Value::as_bool) == Some(true)
         && candidate_section.is_some_and(|section_id| {
@@ -4553,6 +4424,13 @@ fn normalize_task_triage_patch(
             || sanitized
                 .get("dueReminderLeadMinutes")
                 .is_some_and(|value| !value.is_null());
+        let clear_start_advance = previous_status != "reference"
+            || task
+                .get("startReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null())
+            || sanitized
+                .get("startReminderLeadMinutes")
+                .is_some_and(|value| !value.is_null());
         for field in [
             "startTime",
             "dueDate",
@@ -4564,6 +4442,7 @@ fn normalize_task_triage_patch(
             "suppressMindwtrReminders",
             "repeatReminderMinutes",
             "dueReminderLeadMinutes",
+            "startReminderLeadMinutes",
             "showFutureRecurrence",
             "focusOrder",
             "boardOrder",
@@ -4572,6 +4451,9 @@ fn normalize_task_triage_patch(
         }
         if clear_advance {
             sanitized.insert("dueReminderLeadMinutes".to_string(), json!(0));
+        }
+        if clear_start_advance {
+            sanitized.insert("startReminderLeadMinutes".to_string(), json!(0));
         }
         sanitized.insert("isFocusedToday".to_string(), Value::Bool(false));
         sanitized.insert("pushCount".to_string(), Value::Number(0.into()));
@@ -4589,6 +4471,12 @@ fn normalize_task_triage_patch(
 fn normalize_task_reminder_patch(patch: &mut Map<String, Value>, default_skip: bool) {
     if patch.get("dueReminderLeadMinutes").is_some_and(Value::is_null) {
         patch.insert("dueReminderLeadMinutes".to_string(), json!(0));
+    }
+    if patch
+        .get("startReminderLeadMinutes")
+        .is_some_and(Value::is_null)
+    {
+        patch.insert("startReminderLeadMinutes".to_string(), json!(0));
     }
     if let Some(policy) = patch.get("reminderPolicy").and_then(Value::as_str) {
         let skip = policy == "skip" || (policy == "inherit" && default_skip);
@@ -4693,6 +4581,12 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
             "dueReminderLeadMinutes" => {
                 value.is_null() || value.as_i64().is_some_and(|minutes| (0..=10080).contains(&minutes))
             }
+            "startReminderLeadMinutes" => {
+                value.is_null()
+                    || value
+                        .as_i64()
+                        .is_some_and(|minutes| matches!(minutes, 0 | 5 | 15 | 30 | 60))
+            }
             "repeatReminderMinutes" => {
                 value.is_null()
                     || value
@@ -4706,9 +4600,7 @@ pub(crate) fn sanitize_task_patch_map(patch: &mut Map<String, Value>) -> Result<
             "attachments" => value.is_null() || valid_attachments(value),
             "relativeStartOffset" => value.is_null() || valid_relative_start_offset(value),
             "recurrence" => value.is_null() || valid_recurrence(value),
-            // Presentational grouping per view (#1090). Keys are view scopes and
-            // values are section ids from the settings catalogue; this engine
-            // never resolves them, so it only checks the shape.
+
             "viewSectionIds" => value.is_null() || valid_view_section_ids(value),
             _ => return Err(format!("Unsupported task field: {key}")),
         };
@@ -5023,14 +4915,10 @@ fn valid_recurrence(value: &Value) -> bool {
         }),
         "byMonthDay" => value.as_array().is_some_and(|items| {
             items.len() <= 31
-                && items
-                    .iter()
-                    // -1 = RFC 5545 "last day of the month", the one negative
-                    // ordinal the core engine supports.
-                    .all(|item| {
-                        item.as_i64()
-                            .is_some_and(|day| (1..=31).contains(&day) || day == -1)
-                    })
+                && items.iter().all(|item| {
+                    item.as_i64()
+                        .is_some_and(|day| (1..=31).contains(&day) || day == -1)
+                })
         }),
         "weekStart" => value.as_str().is_some_and(valid_recurrence_weekday),
         "count" => value.as_i64().is_some_and(|count| count > 0),
@@ -5220,8 +5108,7 @@ fn parse_supported_rrule(value: &str) -> Option<RecurrenceSchedule> {
                     .split(',')
                     .map(|token| token.trim().parse::<i64>().ok())
                     .collect::<Option<Vec<_>>>()?;
-                // -1 = RFC 5545 "last day of the month"; other values keep the
-                // positive 1..=31 contract.
+
                 if days.iter().any(|day| !(1..=31).contains(day) && *day != -1) {
                     return None;
                 }
@@ -5338,10 +5225,6 @@ fn valid_checklist(value: &Value) -> bool {
     })
 }
 
-/// Mirrors `ATTACHMENT_CLOUD_KEY_PATTERN` in packages/core/src/sync-normalization.ts. The local
-/// HTTP API is a second write path into the same attachments, so a cloudKey accepted here must be
-/// one the sync merge would accept too — the pattern is what rules out separators, traversal
-/// segments and NUL bytes reaching a filesystem or remote path.
 fn valid_attachment_cloud_key(value: &str) -> bool {
     fn valid_name(name: &str) -> bool {
         let mut chars = name.chars();
@@ -5390,7 +5273,7 @@ fn valid_attachments(value: &Value) -> bool {
                     .as_str()
                     .is_some_and(|kind| matches!(kind, "file" | "link")),
                 "mimeType" | "deletedAt" | "fileHash" | "staleContentHash" => value.is_string(),
-                // Device-local sync state a GET returns, so a GET-edit-PATCH round trip carries it back unchanged.
+
                 "pendingContentUpload" => value.is_boolean(),
                 "cloudKey" => value.as_str().is_some_and(valid_attachment_cloud_key),
                 "size" | "contentRev" | "contentMtimeMs" | "contentSize" => {
@@ -5459,6 +5342,43 @@ mod tests {
         }
         for minutes in [json!(-1), json!(1.5), json!(10081), json!("15"), json!(true)] {
             let mut patch = json!({"dueReminderLeadMinutes": minutes}).as_object().unwrap().clone();
+            assert!(super::sanitize_task_patch_map(&mut patch).is_err());
+        }
+    }
+
+    #[test]
+    fn start_advance_reminder_patch_validation_and_clear() {
+        for minutes in [
+            json!(0),
+            json!(5),
+            json!(15),
+            json!(30),
+            json!(60),
+            Value::Null,
+        ] {
+            let mut patch = json!({"startReminderLeadMinutes": minutes})
+                .as_object()
+                .unwrap()
+                .clone();
+            super::sanitize_task_patch_map(&mut patch).unwrap();
+            super::normalize_task_reminder_patch(&mut patch, false);
+            assert_eq!(
+                patch["startReminderLeadMinutes"],
+                if minutes.is_null() { json!(0) } else { minutes }
+            );
+        }
+        for minutes in [
+            json!(-1),
+            json!(1),
+            json!(1.5),
+            json!(61),
+            json!("15"),
+            json!(true),
+        ] {
+            let mut patch = json!({"startReminderLeadMinutes": minutes})
+                .as_object()
+                .unwrap()
+                .clone();
             assert!(super::sanitize_task_patch_map(&mut patch).is_err());
         }
     }
@@ -5755,10 +5675,6 @@ mod tests {
         }
     }
 
-    /// Core's Focus admission table (focus-admission-cases.test.ts runs the
-    /// same cases against resolveTaskFocusUpdate). A case's patch is the
-    /// before -> after difference; refused-limit maps to the exact error,
-    /// focused/queued to a saved star, unchanged to a successful patch.
     #[test]
     fn local_api_patch_focus_matches_core_admission_cases() {
         let fixture: Value = serde_json::from_str(include_str!(
@@ -5814,7 +5730,7 @@ mod tests {
                 "unchanged" => result.is_ok(),
                 other => panic!("{name}: unknown outcome {other}"),
             };
-            // A listed divergence that starts matching must leave the list.
+
             if matches == divergences.contains(&name) {
                 mismatches.push(format!("{name}: {result:?}"));
             }
@@ -6113,8 +6029,7 @@ mod tests {
         let reopened = read_sqlite_data(&conn).unwrap();
         assert_eq!(find_task(&reopened, &id).unwrap()["title"], "Shared task");
         assert_eq!(find_task(&reopened, &id).unwrap()["rev"], 1);
-        // Another writer changes the row between requests; the common transaction
-        // reloads it before the next REST/MCP patch and preserves that edit.
+
         let intervening = LocalOperation::PatchTask {
             id: id.clone(),
             body: json!({"description":"Intervening edit"})
@@ -6309,7 +6224,7 @@ mod tests {
                 403
             );
         }
-        // The public Local API token is deliberately unrelated.
+
         request.method = "GET".into();
         assert_eq!(
             authorize_api_request(&request, "external-token", &access)
@@ -6349,10 +6264,6 @@ mod tests {
         );
     }
 
-    /// Every write route serializes on the same `Mutex<()>`, and requests run on their own
-    /// threads. One panic in a handler used to poison it for the life of the process: reads
-    /// kept working while every POST/PATCH/DELETE answered 500 until restart. A `Mutex<()>`
-    /// protects no state a panic could half-mutate, so recover instead of failing.
     #[test]
     fn a_poisoned_write_lock_still_hands_out_a_guard() {
         let write_lock: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
@@ -6624,7 +6535,7 @@ mod tests {
         } else {
             body.to_string()
         };
-        // HTTP framing completes the response without waiting for a clean socket EOF.
+
         let client = reqwest::blocking::Client::builder()
             .no_proxy()
             .retry(reqwest::retry::never())
@@ -6879,11 +6790,6 @@ mod tests {
         assert_eq!(query.get("status").map(String::as_str), Some("next"));
     }
 
-    // R-04: without the deadline check, a client that sends a partial
-    // request and then goes silent would block read_request on read()
-    // forever (nothing here ever closes the socket or sends more data). An
-    // already-expired deadline must be caught at the top of the loop before
-    // that blocking read is attempted at all.
     #[test]
     fn read_request_aborts_a_slow_drip_connection_once_the_deadline_passes() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -6903,14 +6809,6 @@ mod tests {
         );
     }
 
-    // I3: without a write timeout, write_all against a peer that never drains
-    // its socket buffer blocks forever - and since accept_or_reject's 503
-    // rejection runs synchronously on the accept loop's own thread, that
-    // would stop the server from accepting any connection at all, not just
-    // pin one of the capped slots. TcpStream::write_timeout() reads back
-    // what's actually configured on the socket, so this checks the real
-    // write_response wiring directly and fast, instead of filling a send
-    // buffer with a non-reading peer to force an actual multi-second block.
     #[test]
     fn write_response_sets_a_write_timeout_so_a_non_reading_peer_cannot_block_it_forever() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -6937,8 +6835,7 @@ mod tests {
             .unwrap();
         client.write_all(b"GET /tasks HTTP/1.1\r\n\r\n").unwrap();
         let (stream, _) = listener.accept().unwrap();
-        // Model platforms that inherit the listener's mode, even on Linux,
-        // where accept() currently gives us a blocking stream.
+
         stream.set_nonblocking(true).unwrap();
         let body = json!({ "payload": "任務".repeat(1_000_000) });
         let expected_body = serde_json::to_vec_pretty(&body).unwrap();
@@ -6959,11 +6856,9 @@ mod tests {
             );
             finished.send(()).unwrap();
         });
-        // Wait for the first response byte without draining the socket, so
-        // JSON serialization speed cannot race the delayed reader below.
+
         assert_eq!(client.peek(&mut [0_u8; 1]).unwrap(), 1);
-        // Let the send buffer fill before reading. A nonblocking write_all
-        // returns early here instead of waiting for the client to drain it.
+
         let _ = completion.recv_timeout(Duration::from_millis(100));
         let mut received = Vec::new();
         client.read_to_end(&mut received).unwrap();
@@ -6993,9 +6888,6 @@ mod tests {
         );
     }
 
-    // Feeds fixed byte chunks to read_request one read() call at a time, so
-    // a test can force "split across multiple reads" deterministically and
-    // instantly - no real sockets or sleeps needed (R-05).
     struct ChunkedReader {
         chunks: std::collections::VecDeque<Vec<u8>>,
     }
@@ -7101,8 +6993,6 @@ mod tests {
         );
     }
 
-    // R-04: the 33rd concurrent connection (cap already at 32) gets a 503
-    // instead of a thread.
     #[test]
     fn accept_or_reject_serves_503_once_the_connection_cap_is_reached() {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
@@ -7191,13 +7081,6 @@ mod tests {
         }
     }
 
-    /// Mirrors `packages/core/src/task-query.test.ts` against the SAME
-    /// (tasks, query) -> expected ids fixture table. `filter_tasks`'s query
-    /// param shape can't express every case the JS/SQL sides cover
-    /// (`excludeStatuses` lists, `projectId`, or "hide archived but keep
-    /// done" independently of `done`) - those cases carry `rustQuery: null`
-    /// and are skipped here; the TS test is the one asserting the full
-    /// fixture-name roster hasn't shrunk.
     #[test]
     fn local_api_filter_tasks_matches_task_query_fixture() {
         let cases: Value = serde_json::from_str(include_str!(
@@ -7245,8 +7128,6 @@ mod tests {
             ran += 1;
         }
 
-        // Sanity check on the check itself: if every case ever became
-        // `rustQuery: null`, the loop above would pass vacuously.
         assert!(
             ran > 0,
             "expected at least one Rust-expressible fixture case"
@@ -7745,8 +7626,6 @@ mod tests {
 
     #[test]
     fn local_api_valid_attachments_accepts_content_identity_fields() {
-        // #370b74f09 added contentRev/contentMtimeMs/contentSize; a GET-edit-PUT
-        // round trip of a task with a synced file attachment must not be rejected.
         let round_trip = json!([{
             "id": "attachment-1",
             "kind": "file",
@@ -7799,9 +7678,6 @@ mod tests {
 
     #[test]
     fn local_api_valid_attachments_enforces_cloud_key_shape() {
-        // SEC-08: the local HTTP API is a second write path into the same attachments, so a
-        // cloudKey it accepts must be one the sync merge would accept too
-        // (ATTACHMENT_CLOUD_KEY_PATTERN in packages/core/src/sync-normalization.ts).
         let with_cloud_key = |cloud_key: &str| {
             json!([{
                 "id": "attachment-1",
@@ -7846,9 +7722,6 @@ mod tests {
 
     #[test]
     fn local_api_duplicate_attachment_resets_content_identity_fields() {
-        // Mirrors core's duplicateProjectAttachmentCopy semantics: a duplicated
-        // attachment must not share cloudKey/fileHash/content-identity with the
-        // original, or two records point at one cloud blob.
         let original = json!([{
             "id": "attachment-1",
             "kind": "file",
@@ -8412,12 +8285,8 @@ mod tests {
         );
     }
 
-    /// Companion to the task parity test below. Without it, adding a cloud-writable project
-    /// field to the schema silently leaves the local API answering 400 for it. Every
-    /// cloud-writable field must be either accepted or listed here with a reason.
     #[test]
     fn local_api_project_allowlist_matches_project_sync_schema() {
-        // Owned by the merge engine / tombstone lifecycle — never a client write.
         const DELIBERATELY_DENIED: [&str; 5] = [
             "deletedAt",
             "purgedAt",
@@ -8425,9 +8294,7 @@ mod tests {
             "attachments",
             "areaTitle",
         ];
-        // Cloud-writable in the schema, but the local API project routes do not implement them
-        // yet. This is a known gap, not a decision: adding one to the allowlist is a deliberate
-        // change and must move the name out of this list.
+
         const NOT_IMPLEMENTED: [&str; 8] = [
             "tagIds",
             "taskSortBy",
@@ -8528,7 +8395,6 @@ mod tests {
         assert!(!task.contains_key("boardOrder"));
         assert_eq!(task["rev"], 4);
 
-        // A later notes edit must not turn cancellation into completion.
         apply_task_patch(
             &mut task,
             json!({"description": "Reason added"}).as_object().unwrap(),
@@ -8539,8 +8405,6 @@ mod tests {
         assert!(task.contains_key("cancelledAt"));
         assert_eq!(task["archivedAt"], archived_at);
 
-        // Correcting the outcome to Completed clears cancellation and does not
-        // create another recurring occurrence from an already archived item.
         let follow_up = apply_task_action(
             &mut task,
             "complete",
@@ -8711,13 +8575,6 @@ mod tests {
         assert_eq!(api_error_response(error).status, 409);
     }
 
-    /// The project counterpart to
-    /// `local_api_apply_task_action_matches_core_write_path_fixture`: drives
-    /// `apply_project_delete_or_restore_at` against the shared fixture's
-    /// `kind: "project-action"` cases, whose `expected` rows are independently
-    /// pinned against core's real `deleteProject`/`restoreProject` in
-    /// packages/core/src/local-api-project-action-parity.test.ts (which also
-    /// owns the case roster).
     #[test]
     fn local_api_project_delete_or_restore_matches_core_fixture() {
         let cases: Value = serde_json::from_str(include_str!(
@@ -8794,11 +8651,7 @@ mod tests {
         let Some(mut task) = task else {
             return Value::Null;
         };
-        // `id` is a fresh random UUID minted independently by each engine
-        // (TS's createNextRecurringTask and this Rust port each call their own
-        // uuid generator) - the one legitimately platform/run-variant field,
-        // so it is excluded rather than compared. Every other key is real
-        // full-task equality against the fixture's `expected`/`localApiExpected`.
+
         task.remove("id");
         Value::Object(task)
     }
@@ -8812,11 +8665,6 @@ mod tests {
         let cases = cases.as_array().expect("fixture array");
 
         for test_case in cases {
-            // The same fixture file also carries `kind: "action"` and
-            // `kind: "project-action"` cases (task and project write-path
-            // parity), asserted by their own tests - this test only owns the
-            // recurrence-only cases, which predate the `kind` field, so its
-            // absence means "recurrence". Mirrors recurrence.test.ts's filter.
             if test_case
                 .get("kind")
                 .and_then(Value::as_str)
@@ -8840,12 +8688,7 @@ mod tests {
                 .get("previousStatus")
                 .and_then(|value| value.as_str())
                 .unwrap_or_else(|| panic!("missing previousStatus for {name}"));
-            // `localApiExpected` is an optional, Rust-only override: recurrence.ts
-            // (the correct engine) and this local API deliberately diverge on
-            // byDay/byMonthDay/rrule cases — core computes the real next date,
-            // this engine refuses (None) rather than guess. `expected` still
-            // pins core's real answer via recurrence.test.ts unchanged;
-            // `localApiExpected`, when present, is what this engine must produce.
+
             let expected = test_case
                 .get("localApiExpected")
                 .or_else(|| test_case.get("expected"))
@@ -8900,7 +8743,7 @@ mod tests {
                 "{start}"
             );
         }
-        // A one-step date-only candidate on local today remains supported.
+
         let (year, month, day, _) = parse_iso_prefix(&local_day).unwrap();
         let (year, month, day) = add_days(year, month, day, -1);
         let mut task = base.as_object().unwrap().clone();
@@ -9037,8 +8880,7 @@ mod tests {
     #[test]
     fn local_api_complete_does_not_repeat_done_recurring_tasks() {
         assert!(should_create_recurring_follow_up("complete", "next"));
-        // archived -> done is a lifecycle correction (mirrors core's
-        // `isReturningFromArchive` in applyTaskUpdates): no new occurrence.
+
         assert!(!should_create_recurring_follow_up("complete", "archived"));
         assert!(!should_create_recurring_follow_up("complete", "done"));
         assert!(!should_create_recurring_follow_up("archive", "next"));
@@ -9066,9 +8908,6 @@ mod tests {
 
     #[test]
     fn local_api_complete_does_not_refuse_archived_correction_even_with_complex_recurrence() {
-        // archived -> done never spawns a follow-up (it's a correction, not a
-        // completion), so it must never be refused either, even for a
-        // recurrence this engine could not otherwise compute a next date for.
         let data = json!({
             "tasks": [{
                 "id": "byday-archived",
@@ -9084,12 +8923,6 @@ mod tests {
         );
     }
 
-    /// Consolidation-law pin: a test that only iterates `kind: "action"`
-    /// cases can't catch the fixture shrinking - deleting a case would
-    /// silently narrow the loop right along with the bug it stopped
-    /// covering. This roster mirrors the independent, hand-written list in
-    /// packages/core/src/local-api-action-parity.test.ts; removing a case
-    /// from the JSON without removing it in both places fails here.
     #[test]
     fn local_api_action_fixture_matches_pinned_case_roster() {
         const PINNED_ACTION_CASE_NAMES: &[&str] = &[
@@ -9128,12 +8961,6 @@ mod tests {
         assert_eq!(actual_names, expected_names);
     }
 
-    /// The write-path counterpart to `local_api_recurring_task_matches_core_golden_fixture`:
-    /// exercises `apply_task_action` (complete/archive/restore, plus the 409
-    /// refusal) against the same shared fixture's `kind: "action"` cases,
-    /// whose `expectedTask`/`expectedFollowUp` are independently pinned
-    /// against core's real `applyTaskUpdates`/`nextRevision` in
-    /// packages/core/src/local-api-action-parity.test.ts.
     #[test]
     fn local_api_apply_task_action_matches_core_write_path_fixture() {
         let cases: Value = serde_json::from_str(include_str!(
@@ -9221,8 +9048,6 @@ mod tests {
 
             match follow_up {
                 Some(mut next_task) => {
-                    // `id` is a fresh random uuid - the one legitimately
-                    // platform/run-variant field.
                     next_task.remove("id");
                     assert_eq!(
                         Value::Object(next_task),

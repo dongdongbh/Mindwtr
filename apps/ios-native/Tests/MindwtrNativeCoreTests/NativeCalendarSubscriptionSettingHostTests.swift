@@ -67,7 +67,7 @@ private final class SubscriptionSettingNoHTTP: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Actual public prepared facade, production JSC and SQLite. Only transport/fault cuts are substituted.
+
 final class NativeCalendarSubscriptionSettingHostTests: XCTestCase {
     private struct Library {
         let root: URL
@@ -198,7 +198,7 @@ final class NativeCalendarSubscriptionSettingHostTests: XCTestCase {
             stamps.removeValue(forKey: "externalCalendars")
             if value { first["syncPreferencesUpdatedAt"] = stamps } else { second["syncPreferencesUpdatedAt"] = stamps }
         }
-        // An uninitialized device ID is the one frozen initialization allowed by the prepared producer.
+
         if first["deviceId"] == nil { second.removeValue(forKey: "deviceId") }
         XCTAssertEqual(try json(first), try json(second))
     }
@@ -357,7 +357,7 @@ final class NativeCalendarSubscriptionSettingHostTests: XCTestCase {
         let before = try json(settings(library)), rows = try domain(library), receipts = try receiptCount(library)
         await writer.close()
         try frozen.write(to: library.journal)
-        // No NativeDeviceKV can lease this missing namespace, yet durable receipt remains sufficient.
+
         try FileManager.default.moveItem(at: library.device, to: library.root.appendingPathComponent("revoked-device"))
         let cold = host(library), startup = try object(await cold.start()), recovery = try XCTUnwrap(startup["recovery"] as? [String: Any])
         XCTAssertEqual(recovery["method"] as? String, "calendarSubscriptionSettingCommit"); try result(json(try XCTUnwrap(recovery["result"])))

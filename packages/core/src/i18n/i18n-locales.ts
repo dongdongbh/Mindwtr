@@ -1,103 +1,46 @@
-// Single descriptor table for every locale except English. English is bundled directly and
-// loaded synchronously (see i18n-loader.ts) because it's both the base dictionary and the
-// fallback every other locale merges onto — it isn't a member of this table.
-//
-// `Language`, `SUPPORTED_LANGUAGES`, i18n-loader.ts's dispatch, both apps' settings-screen
-// language pickers, and locale-parity.test.ts's locale rosters all derive from this table, so
-// adding a locale means adding one entry here instead of editing ~11 files in lockstep.
+
+
+
 export type LocaleMode = 'full' | 'overrides';
 
 type LocaleDescriptorCommon = {
-    // Synchronous (require) and asynchronous (dynamic import) loaders for the same module.
-    // Both stay literal `require('./locales/xx')` / `import('./locales/xx')` calls — not a
-    // templated path built from the locale key — so bundlers that need a statically
-    // analyzable module specifier (Metro, webpack) can still resolve and code-split each
-    // locale file. loadWithFallback() in i18n-loader.ts tries loadSync first (works
-    // synchronously under CJS/Node and Metro's require shim) and falls back to loadAsync.
+
+
     loadSync: () => Record<string, unknown>;
     loadAsync: () => Promise<Record<string, unknown>>;
-    // Basename under ./locales, for tooling that reads the file rather than importing it
-    // (scripts/i18n-locale-parity.ts). Usually the locale key, except zh -> 'zh-Hans'; that
-    // one difference is the whole reason the script used to hand-mirror this table.
+
+
     file: string;
-    // Export name to read off the loaded module (e.g. 'viOverrides', 'zhHans').
+
     export: string;
     native: string;
-    // Non-Latin script: worth flagging separately when mixed-in English fragments leak
-    // through in a partial ('overrides') locale — see locale-parity.test.ts.
+
+
     nonLatin: boolean;
 };
 
-// Coverage at which a non-Latin partial locale stops being checked for mixed-in English.
-// Below it, Latin text in a value is almost always an untranslated leftover. At or above it
-// the locale is essentially complete and the English still in it is deliberate — brand names,
-// protocols, search operators, file extensions — so the check only yields false positives.
-// Compared against translatedKeyFloor (the ratcheted commitment) rather than measured coverage,
-// so a locale does not fall under the check merely by translating fewer keys than en.ts has.
-//
-// It CAN still be crossed by English growth, and this comment used to claim otherwise. The
-// denominator is the live en key count, so a floor sitting just above 90% slides under it as
-// en.ts grows, with no change to that locale at all: ko at 2240 read 90.07% against 2487
-// English keys and 89.42% against 2505, which switched the check on and flagged 113 values
-// that were the deliberate English this ceiling exists to allow. The remedy is to re-pin that
-// locale's floor to its measured translated count -- the sanctioned ratchet direction, and
-// what keeps the ratio honest -- not to lower the ceiling. ko has been re-pinned three times this
-// way now, which is the signal that a floor left stale near the ceiling is the real hazard.
+
 export const MIXED_ENGLISH_COVERAGE_CEILING = 90;
 
-// The translation commitment a locale is held to. Either the minimum NUMBER of English keys
-// it must translate — ratcheted against silent regression, only ever raised as real
-// translation work lands, never lowered — or 'all', meaning every key in en.ts, so a new
-// English string has to be translated rather than merely counted around.
-//
-// It was a percentage of Object.keys(en).length until 2026-08-08, and a percentage is not a
-// ratchet: adding an English string shrinks every locale's percentage with no locale
-// regressing, and the recorded remedy was to lower the floor. This comment used to document
-// re-pinning de 67->66, it 72->71, vi 99->98 for exactly that, and 8 more locales the batch
-// before. en.ts grew ~480 lines in six weeks and 16 of 19 locales had under 45 keys of
-// slack, so the gate broke on non-regressions roughly every other week — and each lowering
-// opened headroom for a real regression to hide in. A count is strictly stronger: deleting a
-// translation always fails it, whereas under percentages a simultaneously-growing en.ts
-// could mask a deletion. 'all' carries the locales whose old floor was literally 100.
+
 export type TranslationCommitment = number | 'all';
 
 export type LocaleDescriptor =
-    // A complete, standalone translation dictionary (not merged onto the English base at
-    // load time), so it is always an 'all' commitment.
+
+
     | (LocaleDescriptorCommon & { mode: 'full'; translatedKeyFloor: 'all' })
-    // A partial dictionary merged onto the English base at load time; missing keys fall back
-    // to English. Usually a count, but an override locale maintained at full parity carries a
-    // floor of 'all' and is held to it — 'mode' is about how the dictionary loads, the floor is
-    // about what we promise. Read the table below for which locales those are; naming them here
-    // went stale twice.
+
+
     | (LocaleDescriptorCommon & { mode: 'overrides'; translatedKeyFloor: TranslationCommitment });
 
-// Whether a locale is still checked for mixed-in English fragments (see
-// MIXED_ENGLISH_COVERAGE_CEILING). The one home for that derivation: locale-parity.test.ts
-// and scripts/i18n-locale-parity.ts both read it, and the script used to hand-keep the
-// resulting locale list. englishKeyCount is passed in so this table stays free of an import
-// of en.ts.
+
 export function isMixedEnglishChecked(descriptor: LocaleDescriptor, englishKeyCount: number): boolean {
     if (descriptor.mode !== 'overrides' || !descriptor.nonLatin) return false;
     if (descriptor.translatedKeyFloor === 'all') return false;
     return (descriptor.translatedKeyFloor / englishKeyCount) * 100 < MIXED_ENGLISH_COVERAGE_CEILING;
 }
 
-/**
- * Whether a locale is checked for substituted English (see englishResidueWords in
- * locale-quality.ts). The complement of isMixedEnglishChecked's population: that check
- * only works where any Latin word is suspicious, so Latin-script locales had no
- * equivalent and went unchecked entirely.
- *
- * No coverage ceiling here, deliberately. The ceiling above exists because a nearly
- * complete non-Latin locale keeps English brand names on purpose and the check turns
- * into noise. This check does not have that failure mode: it fires only on an English
- * function word that survived from the same key's English source, which a finished
- * translation never has at any coverage level. Swedish is at full parity and flags zero.
- *
- * Lives beside isMixedEnglishChecked for the same reason that one does: locale-parity.test.ts
- * and scripts/i18n-locale-parity.ts must agree, and the script used to hand-keep its roster.
- */
+
 export function isEnglishResidueChecked(descriptor: LocaleDescriptor): boolean {
     return descriptor.mode === 'overrides' && !descriptor.nonLatin;
 }
@@ -141,8 +84,8 @@ export const LOCALES = {
         mode: 'overrides',
         native: 'Español',
         nonLatin: false,
-        // Complete translation with every English key translated. Keep this at full parity
-        // so new English UI copy cannot silently fall back in Spanish.
+
+
         translatedKeyFloor: 'all',
     },
     hu: {
@@ -153,8 +96,8 @@ export const LOCALES = {
         mode: 'overrides',
         native: 'Magyar',
         nonLatin: false,
-        // Complete translation with every English key translated. Keep this at full parity
-        // so new English UI copy cannot silently fall back in Hungarian.
+
+
         translatedKeyFloor: 'all',
     },
     uk: {
@@ -215,8 +158,8 @@ export const LOCALES = {
         mode: 'overrides',
         native: '日本語',
         nonLatin: true,
-        // Rewritten end to end with every English key translated. Keep this at full
-        // parity so new English UI copy cannot silently fall back in Japanese.
+
+
         translatedKeyFloor: 'all',
     },
     fr: {
@@ -235,9 +178,8 @@ export const LOCALES = {
         file: 'pt',
         export: 'ptOverrides',
         mode: 'overrides',
-        // Qualified because the app resolves Portuguese to Brazilian conventions in
-        // both date paths (date-fns ptBR + Intl pt-BR), so a Portugal user should see
-        // which variant they are choosing. Same reason zh/zh-Hant carry a script tag.
+
+
         native: 'Português (Brasil)',
         nonLatin: false,
         translatedKeyFloor: 1485,
@@ -270,23 +212,8 @@ export const LOCALES = {
         mode: 'overrides',
         native: '한국어',
         nonLatin: true,
-        // Rewritten end to end by a native speaker in #934 (64 -> ~100%), replacing a machine
-        // translation that rendered brand names as common nouns ('Gemini' as the constellation).
-        // Re-pinned 2240 -> 2297, the count ko actually translates: at 2240 the ratio against a
-        // growing en.ts sat on 90.00%, so a single new English key dropped ko back under
-        // MIXED_ENGLISH_COVERAGE_CEILING and the mixed-English check fired on deliberate English
-        // (E-Ink, Material 3, Base URL, quick-add token syntax).
-        // Include the newly translated sandbox and Reference strings; keep the native translation above
-        // the mixed-English brand-name check threshold as the English dictionary grows.
-        // Includes subsequent shipped translations and the UI simplification labels.
-        // Re-pin to the 2482 keys currently present after English grew to 2735 keys;
-        // the old 2444 floor fell below the 90% brand-name check ceiling.
-        // Three translated UpNote link recovery strings raise the commitment with English.
-        // Includes the local MCP integration strings; pin to the actual translated count
-        // so English growth does not reclassify deliberate protocol and brand names.
-        // Eight MCP permission, port, and Codex-copy labels are translated in #1337.
-        // Five Timeline reorder labels and keyboard instructions are translated in #1362.
-        // The saved search "Use global setting" sort choice is translated in #1453.
+
+
         translatedKeyFloor: 2560,
     },
     it: {
@@ -327,8 +254,8 @@ export const LOCALES = {
         mode: 'overrides',
         native: 'فارسی',
         nonLatin: true,
-        // Complete translation. mode stays 'overrides' (not 'full') to mirror ar's shape
-        // per the add-persian handoff; the commitment is full parity either way.
+
+
         translatedKeyFloor: 'all',
     },
     sv: {
@@ -339,8 +266,8 @@ export const LOCALES = {
         mode: 'overrides',
         native: 'Svenska',
         nonLatin: false,
-        // Complete translation. mode stays 'overrides' (not 'full') to mirror fa/ar's shape;
-        // the commitment is full parity either way.
+
+
         translatedKeyFloor: 'all',
     },
     da: {
@@ -355,5 +282,5 @@ export const LOCALES = {
     },
 } as const satisfies Record<string, LocaleDescriptor>;
 
-/** Every locale code except 'en' (see the header comment for why English lives outside this table). */
+
 export type Locale = keyof typeof LOCALES;

@@ -27,7 +27,7 @@ export function GmailCaptureSection() {
     const [operation, setOperation] = useState<Operation>(null);
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
-    // Shown until capture starts again or the account disconnects: other actions leave capture off, so the reason holds.
+
     const [receiptsReset, setReceiptsReset] = useState(false);
     const [status, setStatus] = useState(getGmailCaptureStatus);
     const generation = useRef(0);
@@ -41,7 +41,7 @@ export function GmailCaptureSection() {
                 const next = await getGmailCaptureConfig();
                 if (current !== generation.current) return;
                 setConfig(next);
-                // The status read opens the receipts file, so a reset it just made shows too.
+
                 setReceiptsReset(gmailReceiptsWereReset());
                 if (next.connected) {
                     const nextLabels = await getGmailCaptureLabels();

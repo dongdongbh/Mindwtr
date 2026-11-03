@@ -51,7 +51,7 @@ const readRequest = (value: unknown): NativeTaskPromotionRequest | null => {
         ? request as NativeTaskPromotionRequest : null;
 };
 
-/** Rebuild from frozen consulted rows, never live store/clock/translator. */
+
 const expectedPromotion = (prepared: NativePreparedTaskPromotion) => {
     const { request, sourceBefore, sourceProject, selectedProject, selectedArea } = prepared;
     const projectWitness: Project[] = [];
@@ -75,7 +75,7 @@ const expectedPromotion = (prepared: NativePreparedTaskPromotion) => {
         projectId: request.requestId });
 };
 
-/** Pure journal validation, including on a cold boot before SQLite is opened. */
+
 const readPrepared = (value: unknown): NativePreparedTaskPromotion | null => {
     const input = detach<Record<string, unknown>>(value);
     if (!input || !exact(input, ['request', 'prepared']) || !record(input.prepared)) return null;

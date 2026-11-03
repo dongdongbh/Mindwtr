@@ -48,13 +48,6 @@ import { getSecureConfigValue } from './secure-config';
 import { logInfo, logWarn, sanitizeLogMessage } from './app-log';
 import { backgroundSafeFetch } from './background-safe-fetch';
 
-// The attachment files layer — managed storage, safe writes, presence and stat, the refusal
-// budget, the download backoff, the stored configs, the presence stamp and the pending-work
-// predicate — lives in core (`packages/core/src/mobile-attachment-files.ts`) so the native app
-// runs the same rules. This module binds it to expo-file-system, AsyncStorage, the keystore,
-// the Dropbox credentials and the app log. Every binding calls the imported function when
-// used, so tests that replace these modules still reach their mocks; the core object is made
-// on first use.
 
 export {
   ATTACHMENT_LOCAL_MIGRATION_MAX_PER_SYNC,
@@ -84,9 +77,8 @@ export {
   WEBDAV_ATTACHMENT_RETRY_OPTIONS,
 };
 export type { DropboxAccessTokenResolver, PersistAttachmentOutcome } from '@mindwtr/core/mobile-attachment-files';
-// `collectAttachments` predates `collectAttachmentsById` moving into core (packages/core/src/
-// attachment-transfer.ts) — kept under its original name here so none of the 5 backend files
-// need a call-site rename.
+
+
 export const collectAttachments = collectAttachmentsById;
 export const DEFAULT_CONTENT_TYPE = DEFAULT_ATTACHMENT_CONTENT_TYPE;
 export const StorageAccessFramework = FileSystem.StorageAccessFramework;
@@ -100,8 +92,7 @@ export type CloudConfig = MobileCloudSyncConfig;
 export type ResolvedSyncDir = AttachmentSyncDir;
 export type SafDirectoryEntriesResult = AttachmentSafDirectoryEntries;
 
-/** expo-file-system as core's attachment file port. Shared with the attachment passes and the
- *  cleanup run. */
+
 export const mobileAttachmentFileSystem: MobileAttachmentFileSystemPort = {
   documentDirectory: () => FileSystem.documentDirectory,
   cacheDirectory: () => FileSystem.cacheDirectory,
@@ -111,7 +102,7 @@ export const mobileAttachmentFileSystem: MobileAttachmentFileSystemPort = {
   readBytes: async (uri) => base64ToBytes(
     await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 }),
   ),
-  // The legacy module, not the wrapper: the modern File API cannot read a byte range.
+
   readBytesRange: async (uri, position, length) => base64ToBytes(
     await LegacyFileSystem.readAsStringAsync(uri, {
       encoding: LegacyFileSystem.EncodingType.Base64,
@@ -132,14 +123,14 @@ export const mobileAttachmentFileSystem: MobileAttachmentFileSystemPort = {
     if (!saf?.readDirectoryAsync) return null;
     return {
       readDirectory: (uri) => saf.readDirectoryAsync(uri),
-      // SafDocumentsCore's listing and lookup: display names (document IDs are opaque) and
-      // provider errors that reject instead of reading as an empty folder.
+
+
       listChildren: (uri) => listSafChildren(uri),
       stat: (uri) => statSafDocument(uri),
       makeDirectory: (parentUri, name) => saf.makeDirectoryAsync(parentUri, name),
       createFile: (parentUri, name, mimeType) => saf.createFileAsync(parentUri, name, mimeType),
-      // No writability pre-check (SafDocumentsCore.writeBytes): expo's legacy SAF write refuses
-      // every attempt on RSAF, which never declares FLAG_SUPPORTS_WRITE (#1001).
+
+
       writeBytes: (uri, bytes) => writeSafDocument(uri, bytes),
     };
   },
@@ -147,7 +138,7 @@ export const mobileAttachmentFileSystem: MobileAttachmentFileSystemPort = {
 
 let files: MobileAttachmentFiles | null = null;
 
-/** The core attachment files object, made on first use. */
+
 export const mobileAttachmentFiles = (): MobileAttachmentFiles => {
   if (files) return files;
   files = createMobileAttachmentFiles({

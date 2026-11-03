@@ -52,8 +52,7 @@ const load = (initial: AppData): void => {
     });
 };
 
-// Frozen pre-extraction RN loop. This stays independent of the new batch helper
-// so changing its application order, lazy dedupe or parent transition is caught.
+
 const legacyEffects = (initial: AppData, requests: Update[]) => {
     const prepared = new Map<string, Partial<Task>>();
     for (const request of requests) {

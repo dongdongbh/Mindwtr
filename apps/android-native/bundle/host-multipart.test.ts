@@ -3,9 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-// Core's OpenAI speech upload (packages/core/src/speech-to-task.ts transcribeRemoteOpenAI) posts a FormData through the
-// polyfilled fetch. The bytes the host gets must be the ones RN's Android app sends for the same form (RN FormData.getParts,
-// NetworkingModule.constructMultipartBody, OkHttp MultipartBody; the layout is written down in host-polyfills.js).
+
 type Payload = { url: string; method: string; headers: [string, string][]; base64?: string; text?: string };
 
 const load = () => {
@@ -29,9 +27,7 @@ const load = () => {
 
 const AUDIO = [0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x0d, 0x0a, 0xff, 0x80];
 
-// The OkHttp layout, built apart from the polyfill: per part `--b CRLF`, the part's headers (RN's lowercase
-// content-disposition), OkHttp's `Content-Type:` when the part has a type, `Content-Length:`, a blank line, the body, CRLF;
-// then `--b--` CRLF.
+
 const expectedMultipart = (boundary: string, parts: { disposition: string; type?: string; body: Buffer }[]) =>
     Buffer.concat([
         ...parts.flatMap((part) => [

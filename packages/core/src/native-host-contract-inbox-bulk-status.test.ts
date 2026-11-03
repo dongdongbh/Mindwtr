@@ -229,7 +229,7 @@ describe('guarded Inbox bulk Move status', () => {
             expect(rows()).toEqual(expected); expect(await raw(sqlite)).toEqual(expectedRaw);
             if (status === 'next') {
                 const future = rows().tasks.find((row) => row.id === 'b')!;
-                expect(future.status).toBe('next'); // Actual RN keeps Next, clears the star and retains this hidden order.
+                expect(future.status).toBe('next');
                 expect(future.isFocusedToday).toBe(false); expect(future.focusOrder).toBe(9);
             }
             expect(await sqlite.receiptIds()).toEqual([REQUEST_ID]);
@@ -288,7 +288,7 @@ describe('guarded Inbox bulk Move status', () => {
             task('unrelated-peer')], settings: { deviceId: DEVICE, analyticsProfileId: REQUEST_ID } } as Partial<AppData>;
         const command = await parity(initial, ['other-series', 'second', 'first']);
         expect(command.prepared.scope.tasks.map((row) => row.id)).toEqual(initial.tasks!.map((row) => row.id));
-        expect(command.prepared.allocatedIds).toHaveLength(4); // first checklist + first candidate + second candidate + independent candidate
+        expect(command.prepared.allocatedIds).toHaveLength(4);
         expect(command.prepared.effect.createdTasks).toHaveLength(1);
         expect(command.prepared.effect.createdTasks[0].recurrence?.seriesId).toBe('other-series');
     });
@@ -440,7 +440,7 @@ describe('guarded Inbox bulk Move status', () => {
             const before = await raw(sqlite); const memory = useTaskStore.getState();
             const replacement = new NativeReceiptSqliteAdapter(sqlite.client(), { rejectConcurrentWrites: true });
             const committing = memory.commitPreparedInboxTasksMove(command.prepared, read.authority);
-            // The commit has yielded at import(), with no store or database changes.
+
             setStorageAdapter(replacement);
             expect(useTaskStore.getState()).toBe(memory);
             expect(await committing).toMatchObject({ success: false, reason: 'conflict' });

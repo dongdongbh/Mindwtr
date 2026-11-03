@@ -10,9 +10,7 @@ import {
     AREA_SYNC_SCHEMA_VERSION,
 } from './area-sync-schema';
 
-// Frozen snapshot of the hand-written literals these lists replaced (as of the
-// parity-entities follow-up, 2026-07-24). See the equivalent comment in
-// project-sync-schema.test.ts — same rules apply here.
+
 const PRE_REFACTOR_AREA_SQLITE_COLUMNS = [
     'id', 'name', 'color', 'icon', 'orderNum', 'rev', 'revBy', 'createdAt', 'updatedAt', 'deletedAt',
 ];
@@ -63,9 +61,7 @@ describe('Area sync schema contract', () => {
         expect(sorted(AREA_SQLITE_COLUMNS)).toEqual(sorted(expectedColumns));
     });
 
-    // Snapshot-equality guards: AREA_SQLITE_COLUMNS, AREA_SQLITE_MIGRATION_COLUMNS, and
-    // AREA_UPSERT_UPDATE_CLAUSE are all generated from AREA_SYNC_FIELD_SCHEMA now instead
-    // of hand-maintained literals.
+
     it('derives AREA_SQLITE_COLUMNS identical to the pre-refactor literal, in order', () => {
         expect(AREA_SQLITE_COLUMNS).toEqual(PRE_REFACTOR_AREA_SQLITE_COLUMNS);
     });

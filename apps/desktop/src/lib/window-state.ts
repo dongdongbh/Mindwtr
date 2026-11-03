@@ -25,6 +25,6 @@ export function saveStoredFullscreen(isFullscreen: boolean, storage?: StorageLik
         }
         storage.removeItem(FULLSCREEN_STORAGE_KEY);
     } catch {
-        // Ignore local storage failures and fall back to the current session state.
+
     }
 }

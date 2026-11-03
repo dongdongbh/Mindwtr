@@ -1,6 +1,6 @@
 import Foundation
 
-// Shared by the WidgetKit templates and the Foundation-only widget tests.
+
 struct MindwtrWidgetTaskItem: Decodable {
     let id: String
     let title: String
@@ -13,15 +13,14 @@ struct MindwtrWidgetTaskItem: Decodable {
     let contextLabel: String?
     let identityColor: String?
     let completionToken: String?
-    // Optional so cached payloads from older app versions still decode.
+
     let contexts: [String]?
     let upcomingDate: String?
     let upcomingLabel: String?
 
     var isUpcomingPreview: Bool { upcomingDate != nil }
 
-    /// An Upcoming row relabeled for the day `now` falls on; other rows, and
-    /// payloads cached before the day words existed, keep the published label.
+
     func relabeled(
         days: MindwtrWidgetUpcomingDays?, now: Date, calendar: Calendar = .current, locale: Locale = .current
     ) -> MindwtrWidgetTaskItem {
@@ -51,7 +50,7 @@ struct MindwtrWidgetTaskItem: Decodable {
     }
 }
 
-/// Core's relative-day words (#1455); weekdays are short names, Sunday first.
+
 struct MindwtrWidgetUpcomingDays: Decodable {
     let today: String
     let tomorrow: String
@@ -59,8 +58,7 @@ struct MindwtrWidgetUpcomingDays: Decodable {
     let dayFirst: Bool
 }
 
-// Core's formatRelativeDayLabel at render time, so a cached row rolls over at
-// local midnight and follows a timezone change.
+
 enum MindwtrWidgetUpcomingProjection {
     static func label(
         date value: String?, prefix: String?, days: MindwtrWidgetUpcomingDays, now: Date,
@@ -131,8 +129,8 @@ enum MindwtrWidgetUpcomingProjection {
 }
 
 enum MindwtrCompactTaskLayout {
-    // Context-bearing rows have one extra line. Budget those rows individually
-    // so bare tasks keep the compact widget's existing density at every size.
+
+
     static func visibleTaskCount(
         items: [MindwtrWidgetTaskItem],
         availableHeight: Double,

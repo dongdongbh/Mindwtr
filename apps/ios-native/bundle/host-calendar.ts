@@ -6,7 +6,7 @@ import type { CalendarSyncEntry, SqliteAdapter } from '../../../packages/core/sr
 
 export type CalendarCall = (request: Record<string, unknown>) => Promise<unknown>;
 
-/** Core retains RN selection, all-day handling and exported-event suppression. */
+
 export function createIOSCalendarHost(deps: {
     call: CalendarCall;
     storage: NativeCalendarHost['storage'];
@@ -30,10 +30,10 @@ export function createIOSCalendarHost(deps: {
     const host: NativeCalendarHost = {
         platform: { os: 'ios' }, storage: deps.storage, fetch: deps.fetch, log: deps.log,
         repairFeedDeviceCopyOnOpen: false,
-        // Native accepts only digest-checked calendar copies in the current library.
+
         readLocalFile: (uri, signal) => {
             const adapter = deps.adapter();
-            // The native queue reserves two jobs; one local read leaves room for EventKit.
+
             const pending = localReadTail.then(async () => {
                 const current = () => {
                     if (signal?.aborted) throw new Error('Local calendar read cancelled');
@@ -54,7 +54,7 @@ export function createIOSCalendarHost(deps: {
         },
         calendars: {
             getPermissions: permissions,
-            // The explicit Swift Settings owner requests access outside JSC, then reads again.
+
             requestPermissions: permissions,
             getCalendars: () => read({ op: 'calendars' }),
             getEvents: (calendarIds, start, end) => read({ op: 'events', calendarIds,

@@ -102,7 +102,7 @@ final class NativeCalendarPushHostTests: XCTestCase {
         return try json([namespace, database.path, String(identity.st_dev), String(identity.st_ino)])
     }
     private func withEffects<T>(_ work: (NativeCalendarPushEffects, SQLiteBridge, NativeDeviceKV) throws -> T) throws -> T {
-        // Call only with the host closed: this acquires the same real namespace lease.
+
         let storage = try NativeDeviceKV(containerURL: container, bundleIdentifier: namespace)
         defer { storage.close() }
         let sqlite = try SQLiteBridge(url: database)
@@ -125,7 +125,7 @@ final class NativeCalendarPushHostTests: XCTestCase {
     }
     private func exactEvent(_ effect: NativeCalendarPushEffect, id: String = " recovered-e\u{301} ") throws -> [String: Any] {
         guard case .createEvent(let calendar, let details) = effect.request else { throw NativeCalendarWriteError.invalid }
-        // These exact provider milliseconds avoid deriving the witness from a lossy Date formatter.
+
         return ["id": id, "calendarId": calendar, "title": details.title, "notes": details.notes,
                 "location": details.location, "startDate": "4196-07-10T05:57:06.648Z",
                 "endDate": "4196-07-10T06:57:06.648Z", "allDay": false, "isRecurring": false]

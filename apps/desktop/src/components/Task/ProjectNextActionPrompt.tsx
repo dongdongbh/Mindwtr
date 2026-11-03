@@ -64,8 +64,8 @@ export function ProjectNextActionPrompt({
             describedBy={descriptionId}
             placement="top"
             overlayClassName="pt-[16vh]"
-            // Capped under the 16vh offset so the candidate list scrolls rather
-            // than pushing the Add/Skip buttons off a short window (#957).
+
+
             panelClassName="max-w-lg max-h-[70vh]"
         >
             <DialogHeader className="px-4 py-3 border-b">

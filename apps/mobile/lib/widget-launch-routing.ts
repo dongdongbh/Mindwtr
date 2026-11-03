@@ -3,7 +3,7 @@ import { getWidgetLaunchState } from '@/modules/android-widget';
 let routedToken = 0;
 const listeners = new Set<() => void>();
 
-/** Called by Expo Router before it navigates, independently of useIncomingUrl's duplicate-delivery suppression. */
+
 export function recordWidgetLaunchRouting(url: string) {
     const state = getWidgetLaunchState();
     if (state?.stage !== 'pending' || state.url !== url) return;

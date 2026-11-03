@@ -7,7 +7,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** PomodoroAlarmBook (PomodoroAlarms.kt): what Android cannot list for core's Pomodoro plan (design R2b §3b). */
+
 class PomodoroAlarmBookTest {
     private val disk = mutableMapOf<String, String>()
     private var failWrites = false
@@ -36,15 +36,15 @@ class PomodoroAlarmBookTest {
         val armed = occurrence()
         book.arm(armed)
         assertEquals(listOf(armed.identifier), ids(book.inventories(held = { true }, shown = emptySet()).first))
-        // Force-stop or reboot dropped its PendingIntent: neither inventory, so core may arm it again.
+
         val dropped = book.inventories(held = { false }, shown = emptySet())
         assertEquals(emptyList<String>(), ids(dropped.first) + ids(dropped.second))
-        // Shown and still in the tray before its ledger write would be odd, but it still counts as delivered.
+
         assertEquals(listOf(armed.identifier), ids(book.inventories(held = { true }, shown = setOf(armed.identifier)).second))
         assertTrue(book.deliver(armed, now))
         val after = book.inventories(held = { true }, shown = emptySet())
         assertEquals(emptyList<String>(), ids(after.first))
-        // Dismissed from the tray, it stays delivered: the ledger keeps it.
+
         assertEquals(listOf(armed.identifier), ids(after.second))
     }
 
@@ -56,7 +56,7 @@ class PomodoroAlarmBookTest {
         val stale = occurrence(fireAtMs = now - PomodoroAlarmBook.LATE_LIMIT_MS - 1)
         assertFalse(book.deliver(stale, now))
         assertTrue(book.deliver(occurrence(fireAtMs = now - PomodoroAlarmBook.LATE_LIMIT_MS), now))
-        // A ledger that cannot be written shows nothing (a loss, never a duplicate).
+
         failWrites = true
         assertThrowsIllegalState { book.deliver(occurrence(phase = "break"), now) }
     }

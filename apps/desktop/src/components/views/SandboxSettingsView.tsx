@@ -24,7 +24,7 @@ export function SandboxSettingsView() {
     const updateSettings = useTaskStore((state) => state.updateSettings);
     const [error, setError] = useState<string | null>(null);
 
-    // A built update reads the settings as stored when its write is admitted, so a newer key stays (as on mobile).
+
     const save = async (updates: Partial<AppSettings> | ((latest: AppSettings) => Partial<AppSettings>), setting: string) => {
         if (!isSandboxMode()) return;
         setError(null);

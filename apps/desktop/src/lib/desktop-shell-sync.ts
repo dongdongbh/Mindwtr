@@ -6,22 +6,15 @@ import type { DesktopCloseBehavior } from './window-behavior';
 
 export type DesktopShellSyncOptions = {
     enabled?: boolean;
-    /** `undefined` until settings hydrate — the tray is left alone until then. */
+
     showTray: boolean | undefined;
     trayTooltip: string;
-    /** `lock` is the privacy lock's "Lock Mindwtr" item; null leaves it out. */
+
     trayLabels: { quickAdd: string; show: string; quit: string; lock?: string | null };
     closeBehavior: DesktopCloseBehavior;
 };
 
-/**
- * Fires one shell command and reports failures under `scope`/`step` — the
- * strings field logs are grepped by, so they are part of the contract.
- *
- * Returns the effect cleanup. A command that settles after the effect is torn
- * down no longer logs; the send itself is not recalled, which only matters
- * during teardown or a superseded value, and later sends still land in order.
- */
+
 function runShellCommand(
     command: string,
     args: Record<string, unknown>,
@@ -38,12 +31,7 @@ function runShellCommand(
     };
 }
 
-/**
- * Mirrors settings out to the OS shell: tray icon, tray tooltip, macOS dock.
- *
- * One effect per command on purpose — each re-runs on its own inputs, and the
- * tray icon must exist before its tooltip is set.
- */
+
 export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, trayLabels, closeBehavior }: DesktopShellSyncOptions): void {
     useEffect(() => {
         if (!enabled) return;
@@ -52,10 +40,7 @@ export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, tra
         return runShellCommand('set_tray_visible', { visible: showTray !== false }, 'tray', 'setVisible');
     }, [enabled, showTray]);
 
-    // Hovering the tray icon showed an empty rectangle because no tooltip was
-    // ever set. Fill it with today's Focus so the list can be glanced at without
-    // opening the window (#935). Linux ignores this natively — Tauri does not
-    // support tray tooltips there — so the command is a no-op on that platform.
+
     useEffect(() => {
         if (!enabled) return;
         if (!isTauriRuntime()) return;
@@ -70,15 +55,7 @@ export function useDesktopShellSync({ enabled = true, showTray, trayTooltip, tra
         }, 'tray', 'setLabels');
     }, [enabled, showTray, trayLabels.quickAdd, trayLabels.show, trayLabels.quit, trayLabels.lock]);
 
-    // Settings alone can only ever put the app *back* in the Dock, Cmd+Tab and
-    // the menu bar. Enabling close-to-tray used to make it an accessory app for
-    // the rest of the session, window on screen or not; becoming an accessory
-    // belongs to the hide path (hide-to-tray.ts) and is undone by the show path
-    // (Rust `show_main`), the only two places that know where the window is.
-    // Restoring Regular here still matters: a window already hidden in the tray
-    // when close-to-tray or the tray icon is turned off (a settings sync from
-    // another device can do this) would otherwise be left with no Dock icon and
-    // no tray to come back through.
+
     useEffect(() => {
         if (!enabled) return;
         if (!isTauriRuntime()) return;

@@ -67,18 +67,7 @@ import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.util.Locale
 import java.util.UUID
 
-/*
- * The native Pomodoro on the Focus screen (pass R2b, design .orchestrator/tasks/native-r2b-20261022/design.md): RN's card
- * (components/pomodoro-panel.tsx) drawn from core's panel (native-pomodoro-panel.ts, the session iOS built), each control a
- * core transition (prepared, then committed with its receipt and the task's credit in one transaction, journaled), and the
- * completion alarms planned after each (PomodoroAlarms.kt).
- */
 
-/**
- * When a card read plans the alerts (design R2b §3 "Runs on"): for a session state they were not planned for, as after the boot's
- * journal replay of a control, which commits outside the card; and once for a requested plan (a resume) even when a newer read took
- * that read's place.
- */
 internal class PomodoroPlanGate {
     private var requested = false
     private var last: String? = null
@@ -87,32 +76,28 @@ internal class PomodoroPlanGate {
 
     fun planned(state: String) { last = state; requested = false }
 
-    /** Whether the read of [state] plans; it then counts as planned. */
+
     fun take(state: String): Boolean = (requested || state != last).also { if (it) planned(state) }
 }
 
-/** The card's state: core's panel, the open picker's rows, and the two presentation values core takes back (collapsed, the last feedback). */
+
 class PomodoroModel(private val shell: InboxViewModel) {
     var panel by mutableStateOf<JSONObject?>(null); private set
-    /** The picker's rows while it is open (core's getPomodoroTaskWindow), null while closed. */
+
     var picker by mutableStateOf<List<JSONObject>?>(null); private set
     private var pickerTotal = 0
     private var pickerRevision = ""
-    /** Core's completion feedback (NativePomodoroFeedback), shown under the clock until the next transition. */
+
     private var feedback: JSONObject? = null
 
     private val app: Application get() = shell.getApplication()
     private val prefs get() = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-    /** RN's card folded to its time row (RN's `@mindwtr_pomodoro_collapsed`, adopted once). Device-local, as RN's. */
+
     val collapsed: Boolean get() = prefs.getBoolean(COLLAPSED, false)
 
     private fun presentation() = JSONObject().put("collapsed", collapsed).put("lastEvent", feedback ?: JSONObject.NULL).toString()
 
-    /**
-     * Core's card again, in the background (each Focus read, a resume, the phase's end on screen). What core asks before anything
-     * else runs as a write: the first start adopts RN's session, a linked task that went away is unlinked, an ended phase is
-     * settled. [planAlarms]: plan the alerts after it (a start or resume, never before the ended phase settled: design §3b K5).
-     */
+
     fun refresh(planAlarms: Boolean = false) {
         if (planAlarms) planGate.request()
         shell.background(listOf(Part.Pomodoro), { runtime -> runtime.pomodoroPanelRead(presentation()) }) { next, mine ->
@@ -123,20 +108,20 @@ class PomodoroModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** Which session state the alerts were last planned for (UI thread only). */
+
     private val planGate = PomodoroPlanGate()
     private fun planned(shown: JSONObject) = "${shown.optString("sessionID")}:${shown.optLong("generation")}"
 
-    /** A control's transition ([action] and its fields), then the card and the alarms again. */
+
     fun act(action: String, fields: JSONObject? = null) = settle(action, fields)
 
-    /** RN's fold: presentation only (no transition), the card read again. */
+
     fun toggleCollapsed() {
         prefs.edit().putBoolean(COLLAPSED, !collapsed).apply()
         refresh()
     }
 
-    /** What core asks of a card before any control: adopt RN's session, unlink a task that went away, settle an ended phase. */
+
     private fun owed(shown: JSONObject): String? = when {
         shown.getString("kind") == "uninitialized" -> "adoptLegacy"
         shown.optBoolean("selectionMissing") -> "selectTask"
@@ -149,20 +134,16 @@ class PomodoroModel(private val shell: InboxViewModel) {
             val next = transition(runtime, requested, fields)
             shell.ui {
                 panel = next
-                // transition() planned once nothing was owed.
+
                 if (owed(next) == null) planGate.planned(planned(next))
             }
         }
     }
 
-    /**
-     * iOS's order (CoreModel.swift runtime admission): read, then the transition core owes or the control asked, read again, and
-     * plan the alerts only once nothing is owed any more. A transition core refuses as stale or busy wrote nothing; the next
-     * refresh tries again.
-     */
+
     private fun transition(runtime: CoreHost, requested: String?, fields: JSONObject?): JSONObject {
         val before = runtime.pomodoroPanelRead(presentation())
-        // iOS's order: adoption first, then the control (core's prepare settles an ended phase inside any action), then what is owed.
+
         val owed = owed(before)
         val action = (if (owed == "adoptLegacy") owed else requested ?: owed) ?: return before.also { plan(runtime) }
         val legacy = if (action == "adoptLegacy") adoptionInput(runtime) else null
@@ -176,7 +157,7 @@ class PomodoroModel(private val shell: InboxViewModel) {
         val prepared = runtime.pomodoroTransitionPrepare(request.toString())
         if (prepared.getString("kind") == "prepared") {
             val result = runtime.pomodoroTransitionCommit(prepared.getString("planJSON")).getJSONObject("result")
-            // Core's feedback rule (iOS's pomodoroFeedback): a phase that ended in this transition says so under the clock.
+
             val event = before.optString("completionEvent")
             feedback = if (action in FEEDBACK_ACTIONS && event in EVENTS && result.getLong("generation") == before.optLong("generation") + 1) {
                 JSONObject().put("sessionID", result.getString("sessionID")).put("generation", result.getLong("generation")).put("value", event)
@@ -184,15 +165,12 @@ class PomodoroModel(private val shell: InboxViewModel) {
             if (legacy != null) prefs.edit().putBoolean(COLLAPSED, legacy.optString("collapsedRaw") == "true").apply()
         }
         val after = runtime.pomodoroPanelRead(presentation())
-        // One owed transition per pass: the next refresh settles the rest before any plan.
+
         if (owed(after) == null) plan(runtime)
         return after
     }
 
-    /**
-     * RN's stored session for core's adoption (RN's AsyncStorage keys in RKStorage), at the first start: the upgrade time is kept
-     * first, and RN's alert that fell due between the upgrade and this start is shown once (design §3b K6).
-     */
+
     private fun adoptionInput(runtime: CoreHost): JSONObject {
         val alarms = PomodoroAlarms(app)
         runCatching { alarms.rememberUpgrade() }.onFailure { Log.w(CoreHost.TAG, "Native Android Pomodoro upgrade time not kept", it) }
@@ -207,13 +185,10 @@ class PomodoroModel(private val shell: InboxViewModel) {
         runCatching { PomodoroAlarms(app).plan(runtime) }.onFailure { Log.w(CoreHost.TAG, "Native Android Pomodoro alarms not planned", it) }
     }
 
-    /** The alerts again with no read before (the alert setting or the permission changed). */
+
     fun planInBackground() = shell.background(listOf(Part.Pomodoro), { runtime -> plan(runtime) }) { _, _ -> }
 
-    /**
-     * RN's Mark task done: the Focus rows' completion command for the linked task at the revision the card showed. The feedback
-     * line goes, as RN's clearLastEvent; the Focus read after the command reads the card again.
-     */
+
     fun taskDone(id: String, taskRevision: String) {
         feedback = null
         shell.complete(id, taskRevision)
@@ -222,7 +197,7 @@ class PomodoroModel(private val shell: InboxViewModel) {
     fun openPicker() { picker = emptyList(); pickerTotal = 0; pickerRevision = ""; more() }
     fun closePicker() { picker = null }
 
-    /** The picker's next window of Focus tasks (RN's card takes the Focus screen's lists), for the Focus controls on screen. */
+
     fun more() {
         val loaded = picker ?: return
         if (loaded.isNotEmpty() && loaded.size >= pickerTotal) return
@@ -237,8 +212,8 @@ class PomodoroModel(private val shell: InboxViewModel) {
                 window(loaded.size, revision)
             } catch (failure: Exception) {
                 if (failure.message?.startsWith("STALE_REVISION") != true) throw failure
-                // Core's Focus revision moves with the minute and each edit: one fresh Focus snapshot restarts the paging, never
-                // mixing revisions (iOS's loadMorePomodoroTasks).
+
+
                 val fresh = runtime.focus(1, controls).getString("revision")
                 window(0, fresh).put("restarted", true)
             }
@@ -249,7 +224,7 @@ class PomodoroModel(private val shell: InboxViewModel) {
             pickerTotal = next.getInt("total")
             pickerRevision = next.getString("revision")
             picker = (if (restarted) emptyList() else shown) + next.menuObjects("rows")
-            // The screen's Focus was older than the picker's: read it again too.
+
             if (restarted) shell.refreshFocus()
         }
     }
@@ -258,7 +233,7 @@ class PomodoroModel(private val shell: InboxViewModel) {
         private const val PREFS = "mindwtr-pomodoro"
         private const val COLLAPSED = "collapsed"
         private const val WINDOW = 100
-        /** RN's AsyncStorage keys (apps/mobile/lib/pomodoro-session.ts) and RN's alarm record (core's POMODORO_ALARM_STORAGE_KEY). */
+
         const val RN_SESSION_KEY = "@mindwtr_pomodoro_state"
         const val RN_COLLAPSED_KEY = "@mindwtr_pomodoro_collapsed"
         const val RN_ALARM_KEY = "mindwtr:local:pomodoro-alarm:v1"
@@ -267,34 +242,28 @@ class PomodoroModel(private val shell: InboxViewModel) {
     }
 }
 
-/**
- * RN's Text on Android for the card's styles, which set no line height: Android's TextView metrics with the font's padding
- * (RN's includeFontPadding default), so each line is as tall as RN's (the S23 side by side, pass R2).
- */
+
 private fun cardText(size: Int, weight: Int, lineHeight: Int? = null, letterSpacing: Float = 0f) =
     rnText(size, weight, lineHeight, letterSpacing).copy(platformStyle = PlatformTextStyle(includeFontPadding = true))
 
-/** Core's formatPomodoroClock (pomodoro.ts): H:MM:SS from an hour, else MM:SS. */
+
 internal fun pomodoroClock(totalSeconds: Long): String {
     val safe = maxOf(0L, totalSeconds)
     val hours = safe / 3600
     val minutes = (safe % 3600) / 60
     val seconds = safe % 60
-    // ASCII digits in every language, as core's padStart.
+
     return if (hours > 0) String.format(Locale.ROOT, "%d:%02d:%02d", hours, minutes, seconds)
     else String.format(Locale.ROOT, "%02d:%02d", safe / 60, seconds)
 }
 
-/** Core's remaining seconds from the phase's end (pomodoro-session.ts getRemainingSecondsFromPhaseEnd): rounded up, 0 once ended. */
+
 internal fun pomodoroRemaining(endsAtMs: Long, nowMs: Long): Long = if (endsAtMs <= nowMs) 0 else maxOf(1L, (endsAtMs - nowMs + 999) / 1000)
 
-/** The shown panel while the Pomodoro feature is on, else null (the card draws nothing). Before the adoption core's panel is the default timer. */
+
 internal fun JSONObject?.pomodoroShown(): JSONObject? = this?.takeIf { it.optBoolean("visible") && it.optString("kind") in setOf("ready", "uninitialized") }
 
-/**
- * RN's card (components/pomodoro-panel.tsx) on core's panel: the folded time row or the full card. While the timer runs and the
- * screen is resumed the clock redraws each second from the phase's end, with no engine call; at 0 core settles the phase once.
- */
+
 @Composable
 fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
     val shown = panel.pomodoroShown() ?: return
@@ -307,21 +276,21 @@ fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
             while (true) {
                 now = System.currentTimeMillis()
                 if (now >= endsAt) {
-                    // The phase ended on screen: core settles it (RN's tick at 0), then the alerts are planned.
+
                     refresh(planAlarms = true)
                     break
                 }
-                // The next whole second of the countdown.
+
                 delay((endsAt - now - 1) % 1000 + 1)
             }
         }
     }
-    // `now` only schedules the redraw; the clock reads the time itself, so a resume never shows a stale second first.
+
     val clock = if (running && endsAt != null && now > 0) pomodoroClock(pomodoroRemaining(endsAt, System.currentTimeMillis())) else shown.getString("clock")
     val c = LocalTheme.current.colors
     val theme = LocalTheme.current
     val text = shown.getJSONObject("text")
-    // RN's card while its session loads: the default timer with its controls off (presets at 0.6, Start at 0.5) and a Loading row.
+
     val loading = shown.getString("kind") == "uninitialized"
     val enabled = model.menu.idle && !loading
     val phaseColor = if (shown.getString("phase") == "focus") c.tint else c.success
@@ -329,7 +298,7 @@ fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
     val collapsed = shown.getBoolean("collapsed")
     @Composable fun Fold() {
         val label = text.getString("collapse")
-        // RN's fold stays on while the session loads.
+
         val foldable = model.menu.idle
         Box(Modifier.clearAndSetSemantics { testTag = "pomodoro-fold"; contentDescription = label; role = Role.Button; if (foldable) onClick { toggleCollapsed(); true } else disabled() }
             .clickable(enabled = foldable) { toggleCollapsed() }.padding(horizontal = 6.dp, vertical = 2.dp)) {
@@ -377,7 +346,7 @@ fun PomodoroCard(model: InboxViewModel) = with(model.pomodoro) {
     }
 }
 
-/** RN's preset chips: the active one filled with the tint. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PomodoroModel.Presets(shown: JSONObject, enabled: Boolean) {
@@ -399,7 +368,7 @@ private fun PomodoroModel.Presets(shown: JSONObject, enabled: Boolean) {
     }
 }
 
-/** RN's actionPrimary (padding 14) or actionSecondary (12). */
+
 @Composable
 private fun CardButton(label: String, enabled: Boolean, background: Color, border: Color, text: Color, horizontal: Int, tag: String, onClick: () -> Unit) {
     val shape = RoundedCornerShape(10.dp)
@@ -410,7 +379,7 @@ private fun CardButton(label: String, enabled: Boolean, background: Color, borde
     }
 }
 
-/** RN's linked task row: the picker button (Timer task, the task or Timer only, Change or Link task) and Task done while a task is linked. */
+
 @Composable
 private fun PomodoroModel.LinkRow(shown: JSONObject, text: JSONObject, enabled: Boolean) {
     val c = LocalTheme.current.colors
@@ -441,12 +410,12 @@ private fun PomodoroModel.LinkRow(shown: JSONObject, text: JSONObject, enabled: 
     }
 }
 
-/** RN's task picker modal: Timer task, Timer only, then the Focus lists' tasks (core's windows), or core's empty line. */
+
 @Composable
 fun PomodoroPicker(model: InboxViewModel) = with(model.pomodoro) {
     val rows = picker ?: return
     val shown = panel.pomodoroShown()?.takeIf { it.optBoolean("linkTaskEnabled") }
-    // RN closes its picker when task linking is turned off.
+
     if (shown == null) {
         LaunchedEffect(Unit) { closePicker() }
         return
@@ -457,7 +426,7 @@ fun PomodoroPicker(model: InboxViewModel) = with(model.pomodoro) {
     val enabled = model.menu.idle
     BackHandler { closePicker() }
     val choose = { id: String? -> if (enabled) { closePicker(); act("selectTask", JSONObject().put("taskId", id ?: JSONObject.NULL)) } }
-    // Its own root over the screen: its tags reach UiAutomator as resource ids only when it says so, as the other overlays do.
+
     Box(Modifier.fillMaxSize().background(Color(0x99000000)).semantics { testTagsAsResourceId = true }
         .pointerInput(Unit) { detectTapGestures { closePicker() } }.padding(20.dp),
         contentAlignment = Alignment.Center) {
@@ -481,7 +450,7 @@ fun PomodoroPicker(model: InboxViewModel) = with(model.pomodoro) {
     }
 }
 
-/** RN's taskPickerOption: the selected one in the tint, washed `${tint}18`. */
+
 @Composable
 private fun Option(label: String, selected: Boolean, lines: Int, tag: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors

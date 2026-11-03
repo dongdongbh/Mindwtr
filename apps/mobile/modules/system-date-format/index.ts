@@ -2,7 +2,7 @@ import { normalizeSystemDateFormat } from '@mindwtr/core/date';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
-/** Older clients and Expo Go keep the existing locale fallback. */
+
 export function getSystemDateFormat(): string | undefined {
     if (Platform.OS !== 'ios') return undefined;
     try {

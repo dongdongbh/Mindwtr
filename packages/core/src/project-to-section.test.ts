@@ -145,7 +145,7 @@ describe('project to section', () => {
         const cues = getSequentialProjectTaskCues(destination, saved.tasks, saved.sections);
         expect([cues.get('first'), cues.get('second')]).toEqual(['available', 'later']);
 
-        // A Parallel source lands as an explicit Parallel section.
+
         rows([project('source'), project('destination', { perSectionFlow: true })], [task('only')]);
         const parallel = prepare();
         expect(parallel.section.isSequential).toBe(false);
@@ -197,7 +197,7 @@ describe('project to section', () => {
                 expect(previewDestination(destinationId), `${sourceId} -> ${destinationId}`).toEqual(expected);
             }
         }
-        // The fixture must reach the success branch with real counts, not only blocked paths.
+
         expect(okCount).toBeGreaterThan(4);
         expect(createProjectToSectionPreviewer(state, 'source')('in-area')).toMatchObject({
             ok: true, taskCount: 7, completedCount: 1, archivedCount: 1 });
@@ -237,7 +237,7 @@ describe('project to section', () => {
             expect(persisted.recurrence).toEqual(before.recurrence);
         }
         expect(command.tasks.map(({ after }) => after.order)).toEqual([21, 22, 23]);
-        expect(saved.tasks).toHaveLength(5); // no recurring follow-up
+        expect(saved.tasks).toHaveLength(5);
         expect(await useTaskStore.getState().convertProjectToSection(command)).toMatchObject({ success: true });
         expect(useTaskStore.getState()._allSections.filter((row) => row.id === command.sectionId)).toHaveLength(1);
     });

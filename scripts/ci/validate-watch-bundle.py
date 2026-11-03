@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Verify Watch channel exclusion and companion bundle metadata in an archive/IPA."""
 import pathlib
 import plistlib
 import sys

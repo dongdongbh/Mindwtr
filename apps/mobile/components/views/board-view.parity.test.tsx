@@ -1,14 +1,6 @@
-/**
- * React Native's Board screen, replayed against the board views parity fixture
- * (packages/core/src/board-views-parity.fixtures.json).
- * MINDWTR_CAPTURE_BOARD_VIEWS=1 rewrites its `board` part.
- *
- * Each scenario renders the real screen with the real core store, measures the
- * columns and cards with a fixed layout, drags, swipes, taps and filters, and
- * records what a user sees and what the store is asked to write. The task editor
- * and the shared filter sheet are stand-ins that record their props: they belong
- * to other components. The sheet stand-in draws the Board's own top content.
- */
+
+
+
 import React from 'react';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -75,7 +67,7 @@ vi.mock('react-native-gesture-handler', () => {
   return {
     Gesture: { Pan: gesture('pan'), Tap: gesture('tap'), Race: (...items: unknown[]) => items },
     GestureDetector: (props: any) => React.createElement('GestureDetector', props, props.children),
-    // Both action panels are drawn behind the card, as the real Swipeable draws them.
+
     Swipeable: (props: any) => React.createElement('Swipeable', props, props.renderLeftActions?.(), props.children, props.renderRightActions?.()),
   };
 });
@@ -102,14 +94,14 @@ vi.mock('lucide-react-native', () => {
 const FIXTURE_PATH = new URL('../../../../packages/core/src/board-views-parity.fixtures.json', import.meta.url).pathname;
 const CAPTURE = process.env.MINDWTR_CAPTURE_BOARD_VIEWS === '1';
 const TIME_ZONE = 'America/New_York';
-/** Thursday 2026-09-24, 10:00 in New York. */
+
 const NOW = '2026-09-24T14:00:00.000Z';
 
 const at = (day: string, time = '12:00:00') => `2026-${day}T${time}.000Z`;
 const task = (id: string, title: string, status: Task['status'], day: string, extra: Partial<Task> = {}): Task => ({
   id, title, status, contexts: [], tags: [], createdAt: at(day), updatedAt: at(day), ...extra,
 });
-// Every project stores the placeholder colour; the card's badge shows its area's colour.
+
 const project = (id: string, title: string, extra: Partial<Project> = {}): Project => ({
   id, title, status: 'active', color: '#94a3b8', order: 0, tagIds: [], createdAt: at('09-01'), updatedAt: at('09-01'), ...extra,
 });
@@ -211,7 +203,7 @@ export const scenarios: Scenario[] = [
     ],
   },
   { name: 'drag: reorder under a search', settings: 'base', actions: [['search', 'o'], ['drag', 'n-gone', 'next', null], ['clearSearch']] },
-  // The store orders the whole column, so a card the Board hides (a parked project's) moves too.
+
   { name: 'drag: to the end, past a card the Board hides', settings: 'base', actions: [['drag', 'i-plumber', 'next', 'n-gone']] },
   { name: 'cards: tap opens the editor', settings: 'base', actions: [['tap', 'n-draft'], ['closeEditor'], ['tap', 'w-alice']] },
   { name: 'cards: swipe to delete', settings: 'base', actions: [['swipe', 'n-bulbs', 'right']] },
@@ -219,8 +211,6 @@ export const scenarios: Scenario[] = [
   { name: 'cards: a refused duplicate', settings: 'base', actions: [['swipe', 'n-locked', 'left']] },
 ];
 
-// ---------------------------------------------------------------------------
-// The store: real data, recorded writes.
 
 const writeLog: unknown[][] = [];
 const createdIds = new Map<string, string>();
@@ -229,7 +219,7 @@ const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, 
 )).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, (match) => createdIds.get(match) ?? match));
 
 const RECORDED = ['updateTask', 'deleteTask', 'duplicateTask', 'reorderBoardTasks'] as const;
-/** The store refuses to copy this task, so the Board's error toast shows. */
+
 const REFUSED_COPY = 'n-locked';
 let realActions: Record<string, (...args: any[]) => Promise<any>> | null = null;
 
@@ -258,8 +248,6 @@ async function seedStore(settings: AppSettings, seededTasks: Task[]) {
   }])) as never);
 }
 
-// ---------------------------------------------------------------------------
-// Reading the rendered screen.
 
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -267,7 +255,7 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
   return node.children.map((child) => deepText(child as ReactTestInstance | string)).join('');
 };
 
-/** Hidden modals render their children in the test shim; skip them, as a user would. */
+
 function visibleNodes(root: ReactTestInstance): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -279,7 +267,7 @@ function visibleNodes(root: ReactTestInstance): ReactTestInstance[] {
   return out;
 }
 
-/** The visible text, one entry per outermost Text, in screen order. */
+
 function textsIn(root: ReactTestInstance): string[] {
   const out: string[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -362,9 +350,6 @@ function observe(root: ReactTestInstance, seen: { writes: number; toasts: number
   return normalize(observation);
 }
 
-// ---------------------------------------------------------------------------
-// A fixed layout: columns stacked from y 16 with a 16 gap; a 45 header; cards 60
-// high every 68 from y 10 in the column content.
 
 const HEADER = 45;
 const CARD_TOP = 10;
@@ -392,7 +377,7 @@ function measure(root: ReactTestInstance): Layout {
 
 const COLUMN_ORDER = ['inbox', 'next', 'waiting', 'someday', 'done'];
 
-/** The drag distance that drops `id` into `status`, after `afterId` when it stays in its column. */
+
 function dragDistance(layout: Layout, id: string, status: string, afterId: string | null | undefined): number {
   const from = layout.columns.findIndex((column) => column.ids.includes(id));
   const top = (columnIndex: number, cardId: string) => (
@@ -458,7 +443,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       return run('tap', () => tap.handlers.onEnd());
     }
     case 'swipe': {
-      // The real Swipeable calls the side's own callback, then onSwipeableOpen with the side.
+
       const swipeable = hostsOf(cardOf(root, target as string)!, 'Swipeable')[0].props;
       return run('swipe', () => {
         if (rest[0] === 'left') swipeable.onSwipeableLeftOpen?.();

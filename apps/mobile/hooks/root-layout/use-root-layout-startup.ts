@@ -56,7 +56,7 @@ const applyStartupSnapshotToStore = (data: AppData): void => {
     const allAreas = Array.isArray(data.areas) ? data.areas : [];
     const settings = data.settings && typeof data.settings === 'object' ? data.settings : {};
 
-    // Keep lastDataChangeAt untouched so the canonical storage fetch can still apply.
+
     useTaskStore.setState({
         settings,
         _allTasks: allTasks,
@@ -68,18 +68,11 @@ const applyStartupSnapshotToStore = (data: AppData): void => {
     });
 };
 
-// The first canonical load plus up to two re-fetches.
+
 const CANONICAL_LOAD_ATTEMPTS = 3;
 const CANONICAL_LOAD_RELEASE_CHECK = 'v1.3.3/mobile-startup-writes-after-canonical-load';
 
-// Runs the canonical storage load and reports whether core applied it to the
-// store. A store write during the load (a tap on a snapshot row, the Focus
-// Pomodoro panel crediting a session) makes core skip the result. The check
-// mirrors the native host contract's activate(): the result counts as applied
-// only if every relevance check saw the same lastDataChangeAt, including the
-// third one, which core runs inside its state producer just before applying.
-// Comparing lastDataChangeAt before and after is not enough: a load migration
-// bumps it on an applied load, and an edit-lock exit leaves it unchanged.
+
 const loadCanonicalData = async (): Promise<boolean> => {
     const loadStartedAt = useTaskStore.getState().lastDataChangeAt;
     let invalidated = false;
@@ -144,8 +137,8 @@ export function useRootLayoutStartup({
                 let canonicalAttempts = 0;
                 const fetchPromise = measureStartupPhase('js.store.fetch_data', async () => {
                     do {
-                        // A skipped load means a local write landed on the snapshot.
-                        // Save it to SQLite first, so the re-read includes it.
+
+
                         if (canonicalAttempts > 0) await flushPendingSave();
                         canonicalAttempts += 1;
                         canonicalApplied = await loadCanonicalData();
@@ -175,8 +168,8 @@ export function useRootLayoutStartup({
                 if (cancelled) return;
                 const loadedStore = useTaskStore.getState();
                 if (canonicalAttempts > 1) {
-                    // After the last attempt a skipped load still marks data ready
-                    // below (no error), as before; the warning makes that visible.
+
+
                     void (canonicalApplied ? logInfo : logWarn)('Canonical data re-fetched after a local change', {
                         scope: 'startup',
                         extra: {
@@ -187,7 +180,7 @@ export function useRootLayoutStartup({
                     });
                 }
                 setDataReady(true);
-                // A backup snapshot/error screen is not successful canonical hydration.
+
                 setCanonicalDataReady(!loadedStore.error);
                 if (!loadedStore.error) markStartupPhase('js.local_data_ready');
                 markStartupPhase('js.store.fetch_data.applied');
@@ -242,7 +235,7 @@ export function useRootLayoutStartup({
                             );
                         });
                     } catch {
-                        // Keep analytics heartbeat failures silent on mobile.
+
                     }
                 }
                 if (!sandboxMode && hasActiveMobileNotificationFeature(loadedStore.settings)) {

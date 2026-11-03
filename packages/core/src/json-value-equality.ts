@@ -1,4 +1,4 @@
-/** Canonical JSON comparison keeps raw dates and array order; absent fields equal null. */
+
 export const taskEditValuesEqual = (left: unknown, right: unknown): boolean => {
     const canonical = (value: unknown): unknown => {
         if (value == null) return null;

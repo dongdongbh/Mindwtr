@@ -1,16 +1,14 @@
-// Lightweight shim that prefers native Hermes URL/URLSearchParams.
-// Falls back to a minimal, standards-like implementation if missing.
-// IMPORTANT: This file is loaded via Metro's getModulesRunBeforeMainModule
-// to ensure it runs before any other module that might need URL.
+
+
 
 let logWarn = () => {};
 try {
     ({ logWarn } = require('../lib/app-log'));
 } catch {
-    // No-op in test environments where TS modules aren't resolved.
+
 }
 
-// A query name or value as WHATWG's application/x-www-form-urlencoded parser reads it: "+" is a space.
+
 const decodeQueryComponent = (text) => decodeURIComponent(text.replace(/\+/g, ' '));
 
 class FallbackURLSearchParams {
@@ -20,7 +18,7 @@ class FallbackURLSearchParams {
             const stripped = init.startsWith('?') ? init.slice(1) : init;
             stripped.split('&').forEach(pair => {
                 if (!pair) return;
-                // The value is everything after the first "=", as WHATWG reads it (a value may hold "=").
+
                 const at = pair.indexOf('=');
                 const k = at < 0 ? pair : pair.slice(0, at);
                 const v = at < 0 ? '' : pair.slice(at + 1);
@@ -83,8 +81,7 @@ class FallbackURLSearchParams {
     }
 }
 
-// Resolve references before parsing components. Concatenating base + input makes
-// even an absolute Nextcloud DAV href point inside the requested folder (#1342).
+
 const resolveHref = (input, base) => {
     const value = String(input || '');
     if (!base || /^[a-z][a-z0-9.+-]*:/i.test(value)) return value;
@@ -114,21 +111,15 @@ const resolveHref = (input, base) => {
 };
 
 class FallbackURL {
-    // `href` is the stored input, and `pathname`/`search` edits do not change
-    // it (same as React Native's URL). Deriving href from the components broke
-    // base resolution for expo-router (`new URL('/focus', 'file:')` became
-    // '//focus' and navigation reset in a loop), so sync code derives sibling
-    // URLs by string instead of mutating a URL (#1132).
+
+
     constructor(url, base) {
         const href = resolveHref(url, base);
         this.href = href;
         const match = href.match(/^(?:([a-z0-9.+-]+:))?(?:\/\/([^\/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?/i);
         this.protocol = match ? (match[1] || '') : '';
-        // Authority without credentials. `@expo/metro-runtime` builds
-        // `window.location` from this class (the Metro alias routes Expo's own
-        // URL polyfill here) and every dynamic `import()` in a dev client joins
-        // `location.origin` with the split-bundle path; an undefined origin
-        // killed that with "Cannot read property 'replace' of undefined".
+
+
         const authority = match && match[2] ? match[2] : '';
         const hostIndex = authority.lastIndexOf('@');
         this.host = hostIndex >= 0 ? authority.slice(hostIndex + 1) : authority;
@@ -146,14 +137,8 @@ class FallbackURL {
     toString() {
         return this.href;
     }
-    /**
-     * Non-standard implementation: returns empty string instead of throwing or creating a blob URL.
-     * 
-     * Rationale: React Native (especially Hermes) does not support Blob/File API fully in the same way
-     * browsers do. Many libraries call this feature detection or blindly.
-     * Throwing here causes immediate crashes in those libraries.
-     * returning '' is safer and prevents the crash, though function will assume it failed or got nothing.
-     */
+
+
     static createObjectURL() {
         void logWarn('[Mindwtr] URL.createObjectURL called but not supported by shim. Returning empty string to prevent crash.', {
             scope: 'polyfill',
@@ -172,11 +157,11 @@ class FallbackURL {
     }
 }
 
-// Determine which implementation to use
+
 const NativeURL = typeof globalThis !== 'undefined' ? globalThis.URL : undefined;
 const NativeURLSearchParams = typeof globalThis !== 'undefined' ? globalThis.URLSearchParams : undefined;
 
-// Check if native URLSearchParams has .keys() method (the critical missing feature)
+
 const nativeURLSearchParamsWorks = (() => {
     try {
         if (NativeURLSearchParams) {
@@ -190,10 +175,10 @@ const nativeURLSearchParamsWorks = (() => {
 })();
 
 const URLPoly = NativeURL || FallbackURL;
-// Use fallback if native lacks .keys()
+
 const URLSearchParamsPoly = nativeURLSearchParamsWorks ? NativeURLSearchParams : FallbackURLSearchParams;
 
-// Patch createObjectURL/revokeObjectURL if missing (e.g. strict Hermes)
+
 if (!URLPoly.createObjectURL) {
     URLPoly.createObjectURL = FallbackURL.createObjectURL;
 }
@@ -201,8 +186,7 @@ if (!URLPoly.revokeObjectURL) {
     URLPoly.revokeObjectURL = FallbackURL.revokeObjectURL;
 }
 
-// Set globals at module load time (before exports)
-// This ensures URL is defined before any other module tries to use it
+
 if (typeof globalThis !== 'undefined') {
     globalThis.URL = URLPoly;
     globalThis.URLSearchParams = URLSearchParamsPoly;
@@ -213,7 +197,7 @@ if (typeof global !== 'undefined') {
 }
 
 function setupURLPolyfill() {
-    // Ensure globals are set in case tests or other shims reset them.
+
     if (typeof globalThis !== 'undefined') {
         globalThis.URL = URLPoly;
         globalThis.URLSearchParams = URLSearchParamsPoly;
@@ -222,7 +206,7 @@ function setupURLPolyfill() {
         global.URL = URLPoly;
         global.URLSearchParams = URLSearchParamsPoly;
     }
-    // Patch createObjectURL/revokeObjectURL if missing (e.g. strict Hermes)
+
     if (!URLPoly.createObjectURL) {
         URLPoly.createObjectURL = FallbackURL.createObjectURL;
     }

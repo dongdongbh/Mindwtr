@@ -398,9 +398,8 @@ export const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginTop: 16,
   },
-  // Bounded so a day full of all-day items cannot crowd out the timeline.
-  // Collapsed, the card shows core's first four chips (they fit) and a
-  // "+N more" chip; expanded, the list scrolls past this height.
+
+
   allDayList: {
     maxHeight: 176,
   },
@@ -433,8 +432,8 @@ export const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  // 9 above and below the grid (half the 18-high hour row), so the first and
-  // last hour labels show whole.
+
+
   timelineCard: {
     borderWidth: 1,
     borderRadius: 12,
@@ -458,7 +457,7 @@ export const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
   },
-  // Raised by half its height, so the rule lies on the current minute.
+
   nowLine: {
     position: 'absolute',
     left: 50,
@@ -480,8 +479,8 @@ export const styles = StyleSheet.create({
     height: 2,
     backgroundColor: '#EF4444',
   },
-  // Raised by half its height, so the divider lies on its hour, where blocks
-  // starting at that hour begin.
+
+
   hourLine: {
     position: 'absolute',
     left: 0,
@@ -567,7 +566,7 @@ export const styles = StyleSheet.create({
     position: 'relative',
   },
   weekTimeGutterPinned: {
-    // Day columns are later siblings, so they would paint over the pinned gutter without this.
+
     zIndex: 5,
   },
   weekDayHeader: {
@@ -638,7 +637,7 @@ export const styles = StyleSheet.create({
   weekVertical: {
     flex: 1,
   },
-  // Room for the first hour label, which rises 7 to center on its rule.
+
   weekVerticalContent: {
     paddingTop: 7,
     paddingBottom: 24,
@@ -664,7 +663,7 @@ export const styles = StyleSheet.create({
     height: 1,
     opacity: 0.7,
   },
-  // Raised by half its height, so the rule lies on the current minute.
+
   weekNowLine: {
     position: 'absolute',
     left: 0,

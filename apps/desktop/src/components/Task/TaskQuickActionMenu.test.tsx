@@ -420,7 +420,7 @@ describe('TaskQuickActionMenu', () => {
             await waitFor(() => expect(logInfo).toHaveBeenCalledExactlyOnceWith('Task clipboard write completed', {
                 scope: 'clipboard', extra: expect.objectContaining({
                     releaseCheck: 'v1.3.7/task-copy-input', source: 'menu', inputKind,
-                    // DOM events dispatched by this test are untrusted.
+
                     inputTrusted: false,
                 }),
             }));
@@ -521,8 +521,8 @@ describe('TaskQuickActionMenu', () => {
             fireEvent.change(input, { target: { value: 'gard' } });
 
             if (selectionMethod === 'pointer') {
-                // Real browsers can commit the list removal before this event reaches window.
-                // Flush at document to reproduce that ordering in jsdom.
+
+
                 document.addEventListener('mousedown', () => flushSync(() => undefined), { once: true });
                 fireEvent.mouseDown(screen.getByRole('option', { name: '@garden' }));
                 fireEvent.mouseUp(window);
@@ -681,8 +681,7 @@ describe('TaskQuickActionMenu', () => {
         try {
             const props = renderMenu();
 
-            // A real dismissing gesture fires mousedown, then (on the same
-            // target) click — both are part of the same user click.
+
             fireEvent.mouseDown(outsideButton);
             fireEvent.click(outsideButton);
 
@@ -693,17 +692,13 @@ describe('TaskQuickActionMenu', () => {
         }
     });
 
-    // Pointer dismissals must not restore focus to the opener: the deferred
-    // focus() lands after whatever the pointer opened next (another row's
-    // menu) and leaves the old row wearing the focus ring (#999). Keyboard
-    // closes keep the a11y focus-return.
+
     it('marks pointer dismissals as no-focus-restore', () => {
         const props = renderMenu();
         fireEvent.mouseDown(document.body);
         expect(props.onClose).toHaveBeenCalledWith({ restoreFocus: false });
-        // Finish the gesture: the dismissal armed capture-once click/mouseup
-        // swallowers on window, which would otherwise eat the next test's
-        // first click.
+
+
         fireEvent.mouseUp(document.body);
         fireEvent.click(document.body);
     });
@@ -732,9 +727,7 @@ describe('TaskQuickActionMenu', () => {
         }
     });
 
-    // Focusing a partially clipped item on mousedown scrolls it into view;
-    // dismissing on that scroll unmounted the menu before mouseup, so the tap
-    // silently did nothing (feedback 9cb87074).
+
     it('stays open when the scroll comes from inside the menu surface', () => {
         vi.useFakeTimers();
         try {
@@ -776,7 +769,7 @@ describe('TaskQuickActionMenu', () => {
         const calendar = screen.getByRole('dialog', { name: 'Due Date Calendar' });
         await user.click(within(calendar).getByRole('button', { name: 'Tomorrow' }));
 
-        // Picking a suggestion applies to the draft and closes the popover.
+
         expect(screen.queryByRole('dialog', { name: 'Due Date Calendar' })).not.toBeInTheDocument();
 
         await user.click(within(panel).getByRole('button', { name: 'Cancel' }));
@@ -1020,7 +1013,7 @@ describe('TaskQuickActionMenu', () => {
         fireEvent.change(search, { target: { value: 'Wo' } });
         fireEvent.keyDown(search, { key: 'Enter' });
 
-        // Enter picked the area in the dropdown; the panel stays open for Save.
+
         expect(onUpdateTask).not.toHaveBeenCalled();
         expect(props.onClose).not.toHaveBeenCalled();
         expect(within(panel).getByRole('button', { name: 'Destination' })).toHaveTextContent('Work');
@@ -1336,13 +1329,7 @@ describe('TaskQuickActionMenu', () => {
         expect(props.onClose).toHaveBeenCalledTimes(1);
     });
 
-    // Dismissing the menu must not also activate whatever sits underneath. On the
-    // calendar that fall-through opened the "add task to calendar" composer as a
-    // side effect of closing the menu (#867). Timing is the whole point of this
-    // test: `click` only arrives after `mouseup`, a separate user action, so the
-    // task queue is allowed to drain in between exactly as a real press does. A
-    // version that dispatched mousedown and click back-to-back passed against an
-    // implementation that was broken in the browser.
+
     const withControlUnderneath = async (
         run: (outside: HTMLButtonElement) => Promise<void>,
     ): Promise<ReturnType<typeof vi.fn>> => {
@@ -1377,7 +1364,7 @@ describe('TaskQuickActionMenu', () => {
             renderClosableMenu();
 
             fireEvent.mouseDown(outside);
-            // No click ever follows a press that became a drag.
+
             fireEvent.dragStart(outside);
 
             await new Promise((resolve) => { setTimeout(resolve, 0); });
@@ -1417,7 +1404,7 @@ describe('TaskQuickActionMenu', () => {
             await user.click(screen.getByRole('menuitem', { name: 'Priority…' }));
 
             const dialog = screen.getByRole('dialog', { name: 'Priority' });
-            // Exactly the four non-empty choices carry the canonical flag; Clear carries none.
+
             expect(document.querySelectorAll('[data-priority-flag]')).toHaveLength(4);
             const lowFlag = dialog.querySelector('[data-priority-flag="low"]');
             expect(lowFlag).toHaveAttribute('stroke', '#3b82f6');
@@ -1470,7 +1457,7 @@ describe('TaskQuickActionMenu', () => {
             expect(props.onClose).not.toHaveBeenCalled();
             expect(reportError).toHaveBeenCalledTimes(1);
 
-            // The panel stays mounted, the pending state clears, and a retry succeeds.
+
             await user.click(within(dialog).getByRole('button', { name: 'High' }));
 
             await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1));

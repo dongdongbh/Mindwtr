@@ -11,7 +11,7 @@ import {
 } from './active-filter-chips';
 
 const projects: Record<string, Pick<Project, 'title' | 'color' | 'colorOverride' | 'areaId'>> = {
-    // A project with no colour of its own stores the empty string, not undefined.
+
     'p-plain': { title: 'Plain project', color: '' },
     'p-colored': { title: 'Coloured project', color: '#111111' },
     'p-override': { title: 'Override project', color: '#ff0000', colorOverride: '#ff0000', areaId: 'area-1' },
@@ -115,7 +115,7 @@ describe('buildSelectionChips', () => {
         ]);
         expect(buildSelectionChips(criteria, deps, { duePresetAsBasic: true })[1].label)
             .toBe('Due date: filters.datePreset.today');
-        // A range with no preset is an advanced chip, never this one.
+
         expect(ids(buildSelectionChips({ dueDateRange: { from: '2026-01-01' } }, deps, { duePresetAsBasic: true })))
             .toEqual([]);
     });
@@ -181,8 +181,7 @@ describe('removeFilterChipFromCriteria', () => {
             expect(ids(buildActiveFilterChips(next, deps))).not.toContain(chip.id);
         }
 
-        // Last value of a list removed: the key goes with it, or the "filtered"
-        // badge stays lit over an empty array.
+
         expect(removeFilterChipFromCriteria(everything, 'time:30min')).not.toHaveProperty('timeEstimates');
         expect(removeFilterChipFromCriteria(everything, 'token:@office').contexts).toEqual(['@phone']);
     });

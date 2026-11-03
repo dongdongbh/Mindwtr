@@ -58,7 +58,10 @@ describe('native Apple Reminders pure item preparation', () => {
         expect(validated.target.row).toHaveLength(47);
         expect(JSON.stringify(validated)).toBe(bytes);
         expect(createHash('sha256').update(JSON.stringify(validated)).digest('hex')).toBe('c134076809b3875e00feafaa6ca8784aa4f666648e34529aef17258a13d1894c');
-        for (const length of [0, 1, 46, 49]) {
+        const previous = { ...prepared, target: { id, row: [...row, 15] } };
+        expect(validatePreparedNativeAppleReminderImportItem({ request, prepared: previous })).toEqual(previous);
+        expect(JSON.stringify(previous.target.row)).toBe(JSON.stringify([...row, 15]));
+        for (const length of [0, 1, 46, 50]) {
             const malformed = { ...prepared, target: { id, row: [...row.slice(0, length), ...new Array(Math.max(0, length - row.length)).fill(null)] } };
             expect(() => validatePreparedNativeAppleReminderImportItem({ request, prepared: malformed })).toThrow();
         }
@@ -146,7 +149,7 @@ describe('native Apple Reminders pure item preparation', () => {
             expect(() => validatePreparedNativeAppleReminderImportItem({ request, prepared: plan })).toThrow();
         const classification = classifyAppleReminderForImport(source.request.reminder, source.request.list.id, new Set(['native:not-a-uuid']));
         expect(classification.kind).toBe('duplicate');
-        // A later registry state does not change an already accepted plan's pure validation.
+
         expect(validatePreparedNativeAppleReminderImportItem({ request: source.request, prepared: plan })).toEqual(plan);
     });
     it('rejects every factory/task/result witness alteration and existing-mode creation authority', () => {

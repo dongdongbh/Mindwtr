@@ -100,8 +100,8 @@ export function ExpandedMarkdownEditor({
             onClose={handleClose}
             labelledBy={titleId}
             overlayClassName="z-[70] p-4"
-            // Sized rather than capped: the editor deliberately fills the window
-            // and its edit/preview region owns the scrolling.
+
+
             panelClassName="h-[min(92vh,960px)] w-[min(1200px,96vw)] max-w-none max-h-[none] rounded-2xl border-border bg-card"
         >
             <DialogHeader className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">

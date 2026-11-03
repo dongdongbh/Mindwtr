@@ -146,7 +146,7 @@ describe('prepared native raw Project Notes edits', () => {
             { request: typeof input; prepared: typeof plan.value.prepared };
         expect(methods.validatePreparedProjectNotesWrite(frozen)).toEqual({ ok: true,
             value: { id: 'target', supportNotes: 'After' } });
-        // Matching text is insufficient: revision, timestamp and all other fields form the receipt.
+
         useTaskStore.setState({ _allProjects: [{ ...rich, supportNotes: 'After' }, project('other')] });
         expect(await methods.commitPreparedProjectNotesWrite(frozen)).toMatchObject({ ok: false,
             error: { code: 'STALE_REVISION' } });

@@ -44,18 +44,17 @@ type CraftedZipEntry = {
     name: string;
     data: Uint8Array;
     method?: 0 | 8;
-    /** Declared sizes, written to both headers unless the local ones are overridden. */
+
     compressedSize?: number;
     size?: number;
     localCompressedSize?: number;
     localSize?: number;
     flags?: number;
-    /** Bytes written after the data (a data descriptor). */
+
     trailer?: Uint8Array;
 };
 
-// A ZIP written byte by byte, so a test can declare sizes and offsets the data does not have.
-// `aliases` adds central entries that point at an earlier entry's local header.
+
 const craftZip = (entries: CraftedZipEntry[], aliases: number[] = []): Uint8Array => {
     const out: number[] = [];
     const u16 = (value: number) => { out.push(value & 0xff, (value >>> 8) & 0xff); };
@@ -141,9 +140,9 @@ describe('import-source-reader', () => {
     it('detectDelimiter prefers semicolon only when it strictly outnumbers commas', () => {
         expect(detectDelimiter('a,b,c')).toBe(',');
         expect(detectDelimiter('a;b;c')).toBe(';');
-        expect(detectDelimiter('a,b;c')).toBe(','); // tie goes to comma
-        expect(detectDelimiter('')).toBe(','); // default fallback
-        expect(detectDelimiter('', ';')).toBe(';'); // custom fallback
+        expect(detectDelimiter('a,b;c')).toBe(',');
+        expect(detectDelimiter('')).toBe(',');
+        expect(detectDelimiter('', ';')).toBe(';');
     });
 
     it('parseCsvRows handles quoted fields, escaped quotes, and reports an unclosed quote', () => {
@@ -159,8 +158,7 @@ describe('import-source-reader', () => {
         expect(unclosed.rows).toEqual([['a', 'b']]);
     });
 
-    // No test — old or new — pinned CRLF handling before this refactor, even though the code has
-    // an explicit `\r\n` branch. Cheap to close: same fixture, `\r\n` line endings instead of `\n`.
+
     it('parseCsvRows treats CRLF as a single row terminator, not an extra blank row', () => {
         const { rows } = parseCsvRows('a,"b,c","d""e"\r\nf,g,h\r\n', ',');
         expect(rows).toEqual([

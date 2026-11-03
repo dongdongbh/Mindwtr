@@ -91,10 +91,7 @@ export const getProjectedRecurringTaskId = (taskId: string): string => (
     `${taskId}${PROJECTED_RECURRENCE_ID_SUFFIX}`
 );
 
-// Range expansion needs one synthetic id per occurrence (`<id>:projected-recurrence:<anchor-iso>`)
-// instead of the single-projection suffix above. `isProjectedRecurringTaskId` matches both forms
-// via substring rather than `endsWith` so it keeps recognizing every synthetic id calendar-push-run
-// still mints with the old suffix-only scheme.
+
 const getRangeProjectedRecurringTaskId = (taskId: string, occurrenceIso: string): string => (
     `${taskId}${PROJECTED_RECURRENCE_ID_SUFFIX}:${occurrenceIso}`
 );
@@ -147,9 +144,8 @@ const normalizeMonthDays = (days?: string[] | null): number[] | undefined => {
     if (!days || days.length === 0) return undefined;
     const normalized = days
         .map((day) => Number(day))
-        // -1 is RFC 5545's "last day of the month" (BYMONTHDAY=-1) — the only
-        // negative ordinal supported; deeper counts from the end stay rejected
-        // until someone actually asks for them.
+
+
         .filter((day) => Number.isFinite(day) && ((day >= 1 && day <= 31) || day === -1));
     const unique = Array.from(new Set(normalized)).sort((a, b) => a - b);
     return unique.length > 0 ? unique : undefined;
@@ -205,7 +201,7 @@ const rruleTokens = (rrule: string): Record<string, string> => (
     }, {})
 );
 
-/** Read recurrence selectors without interpreting UNTIL in the current timezone. */
+
 const parseRRuleSelectors = (rrule: string): Omit<ParsedRRule, 'until'> => {
     if (!rrule) return {};
     const tokens = rruleTokens(rrule);
@@ -330,12 +326,7 @@ export function normalizeRecurrenceForLoad(value: unknown): Recurrence | undefin
     };
 }
 
-/**
- * A recurring follow-up in the shape the sync pass writes (sync-canonical-reads contract):
- * the rrule carries the series stamp, the boolean is explicit, and the push count restarts.
- * The store and the cloud server both stamp follow-ups with it. createNextRecurringTask keeps
- * its own shape because the Rust local API parity fixture pins it.
- */
+
 export const canonicalRecurringFollowUp = (task: Task): Task => ({
     ...task,
     recurrence: normalizeRecurrenceForLoad(task.recurrence),
@@ -414,10 +405,7 @@ const hasRRuleEditOverride = <TKey extends keyof RRuleEditOverrides>(
     key: TKey,
 ): boolean => Object.prototype.hasOwnProperty.call(overrides, key);
 
-/**
- * Rebuild the editor-owned RRULE fields while carrying every field the action
- * did not override. Unknown key/value tokens stay opaque and survive edits.
- */
+
 export function editRRuleString(
     existingRRule: string,
     rule: RecurrenceRule,
@@ -457,11 +445,7 @@ export function editRRuleString(
     return opaqueTokens.length > 0 ? `${edited};${opaqueTokens.join(';')}` : edited;
 }
 
-/**
- * Returns the RRULE used by task editors for an existing recurrence value.
- * Stored RRULE text stays authoritative so extensions and interval metadata
- * that are not represented as top-level fields survive an edit unchanged.
- */
+
 export function getRecurrenceRRuleValue(value: Task['recurrence']): string {
     if (!value || typeof value === 'string' || !value.rule) return '';
     if (value.rrule) return value.rrule;
@@ -494,7 +478,7 @@ export function hasRecurrenceRule(value: Task['recurrence']): boolean {
     return getRecurrenceRule(value) !== null;
 }
 
-/** A fixed recurrence needs a date to have an occurrence that can be skipped. */
+
 export function canSkipRecurringTaskOccurrence(task: Task): boolean {
     const anchorField = getRecurrenceScheduleAnchorField(task);
     return !task.deletedAt
@@ -613,11 +597,7 @@ export function getRecurrenceCompletedOccurrencesValue(value: Task['recurrence']
     return Math.floor(recurrence.completedOccurrences);
 }
 
-/**
- * "After 10 occurrence(s)", or "After 6 of 10 occurrence(s)" once the series has
- * progress worth showing. Zero completions stay on the plain form so a freshly
- * created series carries no "0 of 10" noise.
- */
+
 export function formatRecurrenceCountLabel(
     count: number,
     completedOccurrences: number | undefined,
@@ -694,17 +674,7 @@ const getRecurrenceScheduleAnchorField = (
     (['dueDate', 'startTime', 'reviewAt'] as const).find((field) => Boolean(dates[field])) ?? null
 );
 
-/**
- * Per-field anchor days with the legacy single `anchorDay` credited ONLY to
- * the field it was derived from (due, else start, else review — the same
- * order that writes it). A recurrence saved before per-field anchors existed
- * carries just `anchorDay` from its due day; letting that number anchor the
- * OTHER fields advanced a start of the 14th as a day-15 rule, so completing
- * "start 14th / due 15th, monthly" produced start Aug 15 instead of Sep 14.
- * The owner keeps the global anchor over its own date's day on purpose: the
- * stored date may be a clamped 31st sitting on Feb 28, and the anchor is what
- * returns it to the 31st.
- */
+
 function resolveRecurrenceFieldAnchorDays(
     recurrence: Task['recurrence'],
     dates: RecurrenceScheduleDates,
@@ -857,7 +827,7 @@ const getNthWeekdayOfMonth = (year: number, month: number, weekday: RecurrenceWe
         const candidate = new Date(year, month, day);
         return candidate.getMonth() === month ? candidate : null;
     }
-    // ordinal < 0 => from end of month
+
     const lastOfMonth = new Date(year, month + 1, 0);
     const lastWeekday = lastOfMonth.getDay();
     const targetWeekday = weekdayIndex(weekday);
@@ -939,7 +909,7 @@ function nextMonthlyByMonthDay(base: Date, byMonthDay: number[], interval: numbe
         const month = monthDate.getMonth();
         const candidates = normalized.map((day) => new Date(
             year,
-            // -1 = last day of this month, via day 0 of the following month.
+
             day === -1 ? month + 1 : month,
             day === -1 ? 0 : day,
             base.getHours(),
@@ -986,9 +956,7 @@ function nextIsoFrom(
                 ? nextMonthlyByMonthDay(base, effectiveByMonthDay, interval, bySetPos)
                 : addInterval(base, rule, interval, anchorDay ?? formatBase.getDate());
 
-    // Preserve existing storage format:
-    // - If base has timezone/offset, keep ISO (Z/offset).
-    // - Otherwise, return local datetime-local compatible string.
+
     const isDateOnly = !!baseIso && /^\d{4}-\d{2}-\d{2}$/.test(baseIso);
     if (isDateOnly) {
         return format(nextDate, 'yyyy-MM-dd');
@@ -1001,14 +969,7 @@ function nextIsoFrom(
     return hasTimezone ? nextDate.toISOString() : format(nextDate, "yyyy-MM-dd'T'HH:mm");
 }
 
-/**
- * Next occurrence for "repeat after completion" bases. Fluid recurrence has no
- * series anchor — the completion date is the only base — so a day-aligned rule
- * (weekly BYDAY, monthly BYDAY/BYMONTHDAY) with INTERVAL=N must land in the Nth
- * week/month after the base. Shift the search base by N-1 whole units and scan
- * the following unit for the first matching day; without the shift the base's
- * own week/month satisfies the scan and the interval is silently ignored (#867).
- */
+
 function nextFluidIsoFrom(
     baseIso: string | undefined,
     rule: RecurrenceRule,
@@ -1040,13 +1001,7 @@ const preserveDateOnlyFormat = (
     return parsed ? format(parsed, 'yyyy-MM-dd') : nextIso;
 };
 
-/**
- * Rebuild one sibling schedule field around the selected occurrence anchor.
- * RRULE selectors choose an occurrence once; they do not independently snap a
- * task's start, due, and review fields onto the selector grid. Calendar-day
- * offsets preserve the task's shape across DST while the source field supplies
- * its own precision and wall-clock time.
- */
+
 function shiftScheduleFieldFromAnchor(
     sourceIso: string,
     sourceAnchorIso: string,
@@ -1130,12 +1085,7 @@ const hasMonthlyRuleDateAnchor = (byDay?: RecurrenceByDay[], byMonthDay?: number
     || Boolean(byDay?.length)
 );
 
-/**
- * Strict occurrences at or before this instant are already past (#1366). A
- * date-only start is still current today; explicit times must be future.
- * Completion and the preview/calendar projection share it so the preview shows
- * the date completion creates.
- */
+
 const getStrictCatchUpBoundary = (
     anchorField: RecurrenceScheduleField | null,
     anchorIso: string | undefined,
@@ -1163,12 +1113,7 @@ function projectStrictIsoFrom(
     let skippedSteps = 0;
     let fastForwardedBaseIso = baseIso;
 
-    // Simple interval rules can jump close to the requested projection boundary
-    // without enumerating every occurrence since the series anchor. Use calendar
-    // units rather than elapsed milliseconds so date-only values and local wall
-    // times keep their DST behavior. Leave one step of headroom and finish with
-    // the canonical nextIsoFrom loop below; that makes month-end clamps and exact
-    // boundary inclusion identical to the iterative path.
+
     if (parsedBase && parsedBase < projectionBase && !hasComplexCalendarRule) {
         const calendarDayNumber = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000;
         const calendarDayDelta = Math.max(0, calendarDayNumber(projectionBase) - calendarDayNumber(parsedBase));
@@ -1239,10 +1184,8 @@ function projectFluidIsoFrom(
     weekStart?: RecurrenceWeekday,
     bySetPos?: number,
 ): ProjectedIsoResult {
-    // Fluid recurrence remains anchored to the completion/projection instant for
-    // its first occurrence. Catch-up only begins after that canonical first step,
-    // so opening a distant calendar range cannot change repeat-after-completion
-    // semantics.
+
+
     const fieldBaseDate = safeParseDate(baseIso);
     const fieldIsFuture = Boolean(fieldBaseDate && fieldBaseDate.getTime() > projectionBase.getTime());
     const fluidBaseIso = fieldIsFuture ? baseIso : projectedAtIso;
@@ -1291,10 +1234,7 @@ function projectFluidIsoFrom(
         }
     }
 
-    // Month-end fluid rules intentionally drift after a clamp, and BYDAY /
-    // BYMONTHDAY rules have their own interval semantics. Finish those cases by
-    // canonical stepping rather than replacing them with anchor-based math. The
-    // outer range loop can continue catch-up if this defensive bound is reached.
+
     for (let guard = 0; guard < 1000 && parsedNext && parsedNext <= catchUpBase; guard += 1) {
         const followingIso = preserveDateOnlyFormat(
             nextFluidIsoFrom(nextIso, rule, parsedNext, byDay, safeInterval, byMonthDay, weekStart, bySetPos),
@@ -1321,7 +1261,7 @@ function projectUnscheduledStart(
     const seedIso = format(projectionBase, 'yyyy-MM-dd');
     if (rule === 'daily') return { iso: seedIso, steps: 1 };
     if (rule === 'weekly' && normalizeWeeklyByDay(byDay)?.length) {
-        // Include today; intervals apply only after the first matching weekday.
+
         const iso = nextIsoFrom(seedIso, rule, projectionBase, byDay, 1, undefined, weekStart, addDays(projectionBase, -1));
         return iso ? { iso, steps: 1 } : emptyProjectedIsoResult();
     }
@@ -1347,28 +1287,12 @@ type ProjectedOccurrenceAnchors = {
     reviewAt?: number;
 };
 
-/**
- * Per-field anchor day (e.g. 31 for a monthly task due the 31st), resolved once
- * from the series' first base task and held fixed for every later occurrence.
- * `projectStrictIsoFrom` already holds its own anchor fixed across its internal
- * catch-up loop -- this does the same across occurrence-to-occurrence steps in
- * `expandCalendarRecurringTasksInRange`. Recomputing the anchor from each new
- * occurrence's (already clamped) date would drift it down every step: a task
- * due the 31st would clamp to 28 in February and then re-anchor on 28 for every
- * month after, instead of returning to 31 whenever the month allows it.
- */
+
 function resolveProjectedOccurrenceAnchors(task: Task, baseTask: Task): ProjectedOccurrenceAnchors {
     return resolveRecurrenceFieldAnchorDays(task.recurrence, baseTask);
 }
 
-/**
- * One recurrence step forward from `baseTask`'s schedule fields. Shared by the
- * single-occurrence preview (`createProjectedRecurringTask`) and the range-based
- * calendar expansion (`expandCalendarRecurringTasksInRange`) so there remains
- * exactly one implementation of "what is a recurring task's next instance" (P10) --
- * the range expansion just calls this again with the previous occurrence as the
- * new `baseTask` instead of duplicating the stepping math.
- */
+
 function projectNextRecurringOccurrenceFields(
     task: Task,
     baseTask: Task,
@@ -1439,12 +1363,7 @@ function projectNextRecurringOccurrenceFields(
     return { startTime: nextStartIso, dueDate: nextDueIso, reviewAt: nextReviewIso, steps };
 }
 
-/**
- * Create a read-only, calendar-only preview of the next visible occurrence.
- *
- * This never creates a persisted task. It uses a synthetic ID so calendar views
- * and device calendar push can add/update/remove the preview independently.
- */
+
 export function createProjectedRecurringTask(
     task: Task,
     projectedAtIso: string = new Date().toISOString()
@@ -1499,12 +1418,7 @@ export function getProjectedRecurringTaskCalendarDate(
     return projectedTask ? getTaskCalendarOccurrenceDate(projectedTask) : undefined;
 }
 
-/**
- * Toggle-independent date for a recurring task's preview row: the first
- * upcoming occurrence for unscheduled tasks, or the occurrence after the
- * current one for scheduled tasks. `showFutureRecurrence` only opts a task
- * into Calendar projection entities; it must not hide this display date.
- */
+
 export function getRecurringTaskPreviewDate(
     task: Task,
     projectedAtIso: string = new Date().toISOString()
@@ -1561,21 +1475,11 @@ export function expandCalendarRecurringTasks(
     return projectedTask ? [currentTask, projectedTask] : [currentTask];
 }
 
-// Safety caps for expandCalendarRecurringTasksInRange: per-task in-range-occurrence cap (only
-// occurrences that actually land inside `range` count against it -- see MAX_RANGE_PROJECTION_ITERATIONS
-// below for the separate walk guard), and a total across one calendar render's whole expansion
-// pass (all tasks) so one screen can never enumerate unboundedly (perf guardrail P19). Both
-// truncate deterministically -- earliest occurrences win -- never silently reordering what's shown.
+
 export const CALENDAR_RANGE_PROJECTION_PER_TASK_CAP = 62;
 export const CALENDAR_RANGE_PROJECTION_TOTAL_CAP = 500;
 
-// The walk itself needs its own, larger iteration guard, separate from the in-range cap above:
-// occurrences before `range.startIso` are generated and discarded (they establish the stepping
-// chain) without counting against the per-task cap, so a range that starts far in the future
-// (e.g. paging the calendar several months ahead of a daily task's anchor date) must still be
-// able to walk that many steps before it ever reaches something worth keeping. ~800 covers about
-// two years of daily stepping; the `anchorDate > rangeEndMs` break just below already bounds the
-// tail for any range that isn't absurdly far out, so this guard only matters for the walk-up.
+
 const MAX_RANGE_PROJECTION_ITERATIONS = 800;
 
 export type CalendarRecurrenceRange = {
@@ -1583,21 +1487,7 @@ export type CalendarRecurrenceRange = {
     endIso: string;
 };
 
-/**
- * Calendar-only range expansion: every occurrence of a recurring task that
- * intersects `range` (inclusive of both ends), instead of just the single next
- * occurrence `expandCalendarRecurringTasks` returns. A drop-in superset of that
- * function for calendar views -- when `showFutureRecurrence` is off, or the task
- * isn't an active recurring series, it returns `[task]` (or the synthetic
- * "current" unscheduled occurrence), exactly like `expandCalendarRecurringTasks`.
- *
- * Device-calendar push and the ICS feed keep using `expandCalendarRecurringTasks`
- * (single occurrence) -- they must not gain multi-occurrence projections.
- *
- * `maxOccurrences` lets a caller iterating many tasks in one render thread a
- * shared total budget (CALENDAR_RANGE_PROJECTION_TOTAL_CAP) on top of the
- * per-task cap; it defaults to the per-task cap alone.
- */
+
 export function expandCalendarRecurringTasksInRange(
     task: Task,
     range: CalendarRecurrenceRange,
@@ -1622,10 +1512,8 @@ export function expandCalendarRecurringTasksInRange(
     const until = getRecurrenceUntilValue(task.recurrence);
     const baseCompletedOccurrences = getRecurrenceCompletedOccurrencesValue(task.recurrence) ?? 0;
     const projectionBase = getProjectionBaseDate(projectedAtIso);
-    // Catch up to the instant immediately before the visible range. Strict
-    // recurrence can use it directly because the original task remains its
-    // anchor. Fluid recurrence keeps projectionBase as its completion anchor and
-    // receives the same boundary separately, after its first canonical step.
+
+
     const catchUpBase = Number.isFinite(rangeStartMs) && rangeStartMs > projectionBase.getTime()
         ? new Date(rangeStartMs - 1)
         : undefined;
@@ -1656,8 +1544,8 @@ export function expandCalendarRecurringTasksInRange(
         const anchorIso = fields.dueDate ?? fields.startTime ?? fields.reviewAt;
         if (shouldStopAtUntil(anchorIso, until)) break;
         const anchorDate = safeParseDate(anchorIso);
-        // Occurrences only move forward, so once one lands past the range end no
-        // later occurrence can re-enter it -- safe to stop the whole walk here.
+
+
         if (!anchorDate || anchorDate.getTime() > rangeEndMs) break;
 
         const occurrenceTask: ProjectedRecurringTask = {
@@ -1688,13 +1576,7 @@ export function expandCalendarRecurringTasksInRange(
     return results;
 }
 
-/**
- * Expand one calendar render's task set while sharing the total projection
- * budget fairly across recurring series. Source tasks never consume the budget.
- * Every eligible series gets an equal tranche before any series receives the
- * remainder, so store iteration order cannot let an early daily series starve
- * every later one.
- */
+
 export function expandCalendarRecurringTaskSetInRange(
     tasks: readonly Task[],
     range: CalendarRecurrenceRange,
@@ -1755,10 +1637,7 @@ export function expandCalendarRecurringTaskSetInRange(
     const projectedCount = (): number => Array.from(expansionByTaskId.values())
         .reduce((total, expansion) => total + Math.max(0, expansion.length - 1), 0);
 
-    // A nominal series can be exhausted by COUNT/UNTIL or simply have no
-    // occurrence in this range. Reallocate its unused share among the series
-    // that filled their tranche. Water-filling the lowest allocation first
-    // keeps the result fair while the 500-occurrence global cap bounds work.
+
     remainder = boundedTotalCap - projectedCount();
     while (remainder > 0 && activeTaskIds.size > 0) {
         const activeTasks = projectionCandidates
@@ -1869,9 +1748,8 @@ const sourceAnchorDaysMatch = (
             if (anchor !== explicit) return false;
             continue;
         }
-        // Legacy invalid schedules have no source day; RN still generates its
-        // existing completion-based fallback. Native intent decoding can refuse
-        // unsupported raw dates without changing the RN recurrence wrapper.
+
+
         if (anchor === undefined && explicit === undefined && !safeParseDate(task[field])) continue;
         if (!Number.isInteger(anchor) || anchor! < 1 || anchor! > 31) return false;
         if (explicit !== undefined && anchor !== explicit) return false;
@@ -1908,17 +1786,7 @@ const stopAtFrozenUntil = (candidate: RecurrenceProjection['candidate'], until: 
     return comparison.candidateMs > comparison.untilMs;
 };
 
-/**
- * Create the next instance of a recurring task.
- *
- * - Advances dueDate only when the original task has a dueDate.
- * - Shifts startTime/reviewAt forward if present.
- * - Keeps schedule fields independent: due-only tasks stay due-only, start-only tasks stay start-only.
- * - Never splits the fields a task does have: when a late completion pushes the next
- *   instance past the completion date, every schedule field moves by the same steps.
- * - Resets checklist completion and IDs.
- * - New instance status is based on the previous status, with done -> next.
- */
+
 export function projectNextRecurringTask(
     task: Task,
     completedAtIso: string,
@@ -1979,8 +1847,8 @@ export function projectNextRecurringTask(
             const sourceDate = safeParseDate(sourceAnchorIso);
             if (sourceDate && ((rule === 'weekly' && byDay?.length)
                 || (rule === 'monthly' && (byDay?.length || byMonthDay?.length)))) {
-                // Move whole calendar periods near completion, then use the rule's
-                // canonical selector search. Preview occurrence counts stay untouched.
+
+
                 const periods = rule === 'weekly'
                     ? Math.floor(differenceInCalendarDays(catchUpBoundary, sourceDate) / 7)
                     : (catchUpBoundary.getFullYear() - sourceDate.getFullYear()) * 12
@@ -2025,11 +1893,8 @@ export function projectNextRecurringTask(
         }
     }
     if (!nextStartTime && !nextDueDate && !nextReviewAt) {
-        // When recurrence exists but no schedule fields are set, defer the next instance
-        // from completion so it does not reappear in Next immediately. Seed with the
-        // completion's date part only: the task never had a time, so its next instance
-        // must stay date-only instead of inheriting the completion's time of day. The
-        // ISO prefix (not the local date) keeps parity with the Rust local API.
+
+
         const completedAtDatePart = /^\d{4}-\d{2}-\d{2}/.exec(completedAtIso)?.[0]
             ?? format(completedAtDate, 'yyyy-MM-dd');
         nextStartTime = nextFluidIsoFrom(completedAtDatePart, rule, completedAtDate, byDay, interval, byMonthDay, weekStart, bySetPos);
@@ -2068,11 +1933,7 @@ export function projectNextRecurringTask(
     };
 }
 
-/** Verify a frozen strict one-step calendar projection with the canonical projector.
- * Date-only inputs make the rule and sibling-day calculation independent of the
- * validating process's timezone. Explicit instants are interpreted in the
- * preparing process's recorded calendar zone before that calculation.
- */
+
 export function matchesAdvanceOneCalendarProjection(
     task: Task,
     completedAtIso: string,
@@ -2107,7 +1968,7 @@ export function matchesAdvanceOneCalendarProjection(
             ? true : candidateDays[field] === expected.candidate[field]));
 }
 
-/** Build one full follow-up row without recalculating local calendar dates. */
+
 export function buildNextRecurringTask(
     task: Task,
     completedAtIso: string,
@@ -2139,9 +2000,8 @@ export function buildNextRecurringTask(
     if (recurrence?.rrule && rruleTokens(recurrence.rrule).UNTIL !== projection.rruleUntilSourceToken) {
         throw new Error('Invalid recurrence UNTIL token');
     }
-    // Date-only and explicit UTC tokens have a timezone-independent normalized
-    // value. Naive wall-time tokens can normalize through a local DST gap, so
-    // their preparing-time interpretation remains part of the frozen witness.
+
+
     const sourceUntilToken = projection.rruleUntilSourceToken;
     if (!recurrence?.until && sourceUntilToken
         && (/^\d{8}$/.test(sourceUntilToken) || /^\d{8}T\d{4}(?:\d{2})?Z$/i.test(sourceUntilToken))
@@ -2192,10 +2052,7 @@ export function buildNextRecurringTask(
         newStatus = 'next';
     }
 
-    // The next instance keeps its attachments, so the copies intentionally share
-    // cloudKey/uri with the completed instance (unlike duplicateTask, which drops
-    // file attachments). Every remote-delete and cleanup path must therefore
-    // refcount cloudKeys across all tasks before deleting remote bytes.
+
     const duplicatedAttachments = (task.attachments || [])
         .filter((attachment) => !attachment.deletedAt)
         .map<Attachment>((attachment) => ({
@@ -2212,7 +2069,7 @@ export function buildNextRecurringTask(
                 scope: 'recurrence', category: 'storage', force: true,
                 context: { releaseCheck: 'v1.3.7/recurring-checklist-progress', outcome: 'constructed' },
             });
-        } catch { /* Diagnostics must not interrupt recurrence creation. */ }
+        } catch {                                                           }
     }
     const nextCompletedOccurrences = completedOccurrences + 1;
     const seriesId = typeof task.recurrence === 'object' && typeof task.recurrence.seriesId === 'string'
@@ -2261,6 +2118,7 @@ export function buildNextRecurringTask(
         suppressMindwtrReminders: task.suppressMindwtrReminders ? true : undefined,
         repeatReminderMinutes: task.repeatReminderMinutes,
         dueReminderLeadMinutes: task.dueReminderLeadMinutes,
+        startReminderLeadMinutes: task.startReminderLeadMinutes,
         tags: [...(task.tags || [])],
         contexts: [...(task.contexts || [])],
         checklist: copyRecurringChecklist(task.checklist, createId, task.taskMode !== 'list' && recurrence?.preserveChecklistOnRepeat === true),

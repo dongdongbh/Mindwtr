@@ -51,8 +51,8 @@ export function AppAnnouncementModal({
             describedBy={bodyId}
             placement="top"
             overlayClassName="z-[60] px-4 pt-[18vh]"
-            // Capped so a long announcement body can never push the dismiss
-            // and action buttons off a short window (#957).
+
+
             panelClassName="max-h-[78vh] rounded-lg border-border"
         >
             <DialogBody className="flex items-start justify-between gap-4 border-b border-border px-4 py-3">

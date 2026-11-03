@@ -131,7 +131,7 @@ const plannedResult = (request: FocusSavedFilterRequest, after: SavedFilter): Fo
             ? { ...request.controls, savedFilterId: null } : request.controls,
 });
 
-/** Pure validation of a cold journal, before opening native SQLite. */
+
 const readPrepared = (value: unknown): PreparedFocusSavedFilter | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -260,7 +260,7 @@ export function createFocusSavedFilterMethods(deps: {
                 try { logInfo('Native Context filter saved', {
                     scope: 'native-host', category: 'storage', force: true,
                     context: { releaseCheck: 'v1.3.8/context-filter-save', outcome: 'confirmed' },
-                }); } catch { /* Logging must not change the durable save outcome. */ }
+                }); } catch {                                                         }
             }
             return saved.ok ? { ok: true, value: prepared.result } : saved;
         },

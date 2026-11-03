@@ -55,7 +55,7 @@ const readRequest = (value: unknown): NativeProjectTagsWriteRequest | null => {
 };
 const validTagProject = (value: unknown, projectId: string): value is Project => {
     if (!record(value)) return false;
-    // SQLite may hydrate nullable optional columns as null. Preserve the raw frozen row.
+
     const normalized = { ...value, areaId: value.areaId ?? undefined, areaTitle: value.areaTitle ?? undefined,
         startDate: value.startDate ?? undefined, dueDate: value.dueDate ?? undefined,
         reviewAt: value.reviewAt ?? undefined, supportNotes: value.supportNotes ?? undefined,
@@ -65,7 +65,7 @@ const validTagProject = (value: unknown, projectId: string): value is Project =>
     return validProject(normalized, projectId);
 };
 
-/** Pure cold-journal validation before consulting the mutable store or SQL. */
+
 const readPrepared = (value: unknown): NativePreparedProjectTagsWrite | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

@@ -101,9 +101,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
 
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
 
-    // Token autocomplete for the inbox processor wants every non-reference
-    // active task, not the review-candidate subset (a done task can still
-    // carry useful contexts/tags for autocomplete).
+
     const activeTasks = useMemo(
         () => tasks.filter((task) => !task.deletedAt && task.status !== 'reference' && isTaskInActiveProject(task, projectMap)),
         [projectMap, tasks],
@@ -111,8 +109,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
     const allContexts = getUsedTaskTokens(activeTasks, (task) => task.contexts, { prefix: '@' });
     const allTags = getUsedTaskTokens(activeTasks, (task) => task.tags, { prefix: '#' });
 
-    // Single source of "what needs reviewing today" (#867): shared with
-    // mobile via core so a raw startTime-vs-now check can't drift back in.
+
     const dailyBuckets = useMemo(
         () => getDailyReviewBuckets(tasks, projects, { now: today, sortBy, sections }),
         [tasks, projects, sections, today, sortBy],
@@ -213,8 +210,8 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
             { id: 'today', title: t('dailyReview.todayStep'), description: t('dailyReview.todayDesc'), icon: Calendar, hasWork: stepHasWork.get('today') ?? false },
         ];
         visibleSteps.push({ id: 'inbox', title: t('dailyReview.inboxStep'), description: t('dailyReview.inboxDesc'), icon: CheckSquare, hasWork: stepHasWork.get('inbox') ?? false });
-        // Waiting For comes before focus selection: items unblocked today can be
-        // switched to Next here and then picked up in the focus step.
+
+
         visibleSteps.push({ id: 'waiting', title: t('dailyReview.waitingStep'), description: t('dailyReview.waitingDesc'), icon: ArrowRight, hasWork: stepHasWork.get('waiting') ?? false });
         if (includeFocusStep) {
             visibleSteps.push({ id: 'focus', title: t('dailyReview.focusStep'), description: t('dailyReview.focusDesc'), icon: CheckSquare, hasWork: stepHasWork.get('focus') ?? false });
@@ -238,7 +235,7 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
         }
     }, [activeStep, currentStep, setCurrentStep]);
     const stepScrollRef = useRef<HTMLDivElement>(null);
-    // Each step opens at its top, not at the previous step's scroll position (#1471).
+
     useLayoutEffect(() => {
         if (stepScrollRef.current) stepScrollRef.current.scrollTop = 0;
     }, [activeStep]);
@@ -342,8 +339,8 @@ export function DailyReviewGuideModal({ onClose }: DailyReviewGuideModalProps) {
             <div className="space-y-2">
                 {focusCandidates.map((task) => {
                     const project = task.projectId ? projectMap.get(task.projectId) : null;
-                    // Same contract as every other star surface: core decides
-                    // eligibility, and a refusal is shown rather than swallowed.
+
+
                     const starAction = useTaskStore.getState().getFocusStarAction(task);
                     const blockedText = getFocusStarBlockedText(t, starAction, focusTaskLimit);
                     const canFocus = starAction.canToggle;

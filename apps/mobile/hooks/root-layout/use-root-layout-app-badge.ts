@@ -25,7 +25,7 @@ export function useRootLayoutAppBadge({ canonicalDataReady, disabled = false }: 
             const state = useTaskStore.getState();
             if (!readiness.current.canonicalDataReady || state.isLoading || state.error) return null;
             const now = new Date();
-            // The UTC boundary changes on a timezone change even when the local date stays the same.
+
             const dayBoundary = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
             if (!cached || cached.tasks !== state._allTasks || cached.projects !== state._allProjects
                 || cached.sections !== state._allSections || cached.dayBoundary !== dayBoundary) {
@@ -39,7 +39,7 @@ export function useRootLayoutAppBadge({ canonicalDataReady, disabled = false }: 
         const run = (force = false) => {
             if (disposed) return;
             void refreshIosAppBadge(getCount, { canWrite: () => !disposed, force }).catch(() => {
-                // Fixed fields only: native/storage exceptions may contain sensitive implementation details.
+
                 void logWarn('iOS task badge refresh failed', {
                     scope: 'notifications',
                     extra: { releaseCheck: 'v1.3.7/ios-task-badge', result: 'failed' },

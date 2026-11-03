@@ -53,12 +53,7 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
 
-/**
- * RN's Contexts (components/views/contexts-view.tsx), as a stack screen or the quick-access tab, on core's getContextsView and
- * runContextsAction: the chip search with RN's direct Sort control beside it (core's shared list sort), core's chips (All,
- * No context, each context and tag, with core's counts), core's All/Any switch, the bulk bar while rows are selected (core's statuses, token actions and Delete), core's rows, and core's empty
- * state. A row swipes right to core's status action, left to Delete with core's Undo, and a long-press selects it.
- */
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ContextsList(model: InboxViewModel) = with(model.menu) {
@@ -68,7 +63,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
     val theme = LocalTheme.current
     val bulk = view.optJSONObject("bulk")
     val selected = view.optJSONArray("selectedIds").ids()
-    // Back leaves selection mode before the screen (RN's useTaskListSelection); an open dialog takes Back first.
+
     BackHandler(enabled = bulk != null && dialog == null && model.failedAction == null) { endSelection(); reload() }
     LazyColumn(Modifier.fillMaxSize().testTag("contexts-list"), contentPadding = PaddingValues(bottom = 16.dp)) {
         item(key = "search") {
@@ -77,7 +72,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                 ListSearchField(own("contexts").optString("searchQuery"), view.getString("searchPlaceholder"), Modifier.weight(1f)) {
                     typeSearch("contexts", "searchQuery", it)
                 }
-                // RN's TaskListSortButton: core's "Sort: <current>" label; the choice is core's setTaskListSort (#1415).
+
                 view.optJSONObject("sort")?.let { sort ->
                     DirectControl(Lucide.ArrowUpDown, sort.getString("accessibilityLabel"), null, null, idle) { openDialog("sort") }
                 }
@@ -106,8 +101,8 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
                         val on = chip.getBoolean("selected")
                         val count = chip.getInt("count")
                         val shape = RoundedCornerShape(16.dp)
-                        // RN's chip (#1427): a tap switches to core's `next`; a token chip's long-press, also TalkBack's labelled
-                        // long-press action, applies core's `additive` selection. All and No context have no long-press.
+
+
                         val additive = chip.optJSONObject("additive")
                         Row(Modifier.heightIn(min = 44.dp).clip(shape).background(if (on) c.tint else c.filterBg).rnBorder(1.dp, c.border, shape)
                             .combinedClickable(enabled = idle, role = Role.Button, onLongClickLabel = additive?.optString("label"),
@@ -161,10 +156,7 @@ fun ContextsList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/**
- * RN's Contexts bulk bar, in the look of the task lists' bar (BulkBar): core's count and the X exit, core's statuses, then core's
- * token actions and Delete (core's question first). Each sends the selection with [revisions], the view's taskRevisions for it.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ContextsBulkBar(model: InboxViewModel, bulk: JSONObject, selected: List<String>, revisions: JSONObject) = with(model.menu) {
@@ -195,7 +187,7 @@ private fun ContextsBulkBar(model: InboxViewModel, bulk: JSONObject, selected: L
     }
 }
 
-/** RN's search input on a list (Contexts): 40 high, radius 8, the input background, core's placeholder; the text as typed. */
+
 @Composable
 fun ListSearchField(value: String, placeholder: String, modifier: Modifier, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -210,30 +202,26 @@ fun ListSearchField(value: String, placeholder: String, modifier: Modifier, onCh
         })
 }
 
-/** Contexts' chip: the selection core put on it (its `next`, or its additive press's), read at once. */
+
 internal fun MenuModel.contextsChip(next: JSONObject) {
     editOwn("contexts") { put("tokens", next.getJSONArray("tokens")).put("matchMode", next.getString("matchMode")) }
     reload()
 }
 
-/** Contexts' All/Any switch: core's mode, read at once. */
+
 internal fun MenuModel.contextsMatchMode(mode: String) {
     editOwn("contexts") { put("matchMode", mode) }
     reload()
 }
 
-/** RN's toggleMultiSelect: one row in or out of the list's selection; core prunes it to the rows on screen and counts it. */
+
 internal fun MenuModel.toggleRow(list: String, id: String) {
     val picked = own(list).optJSONArray("selected").ids()
     editOwn(list) { put("selected", JSONArray(if (id in picked) picked - id else picked + id)) }
     reload()
 }
 
-/**
- * The picker the open dialog names: a Contexts token action (core's picker), Review's Remove tag (core's tags), or a list's Remove
- * tag (core's bulk picker). While text is typed, its tokens are core's search answer (the view's `bulk.picker`; a list's bar picker
- * is read with the query already); before core's first answer, the whole list shows.
- */
+
 private fun MenuModel.tokenPicker(open: JSONObject): JSONObject? {
     if (open.optString("list") == "bulk") {
         val bar = page?.bulk ?: return null
@@ -244,7 +232,7 @@ private fun MenuModel.tokenPicker(open: JSONObject): JSONObject? {
     }
     val bulk = page?.view?.optJSONObject("bulk") ?: return null
     val review = open.optString("list") == "review"
-    // ponytail: a typed search shows core's first window of matches (100 tokens, no More); page `picker.offset` if a query ever matches more.
+
     val found = bulk.optJSONObject("picker")?.takeIf { picker ->
         tokenQuery(open) != null && if (review) picker.optString("kind") == "removeTag"
             else picker.optString("field") == open.optString("field") && picker.optString("mode") == open.optString("mode")
@@ -258,12 +246,7 @@ private fun MenuModel.tokenPicker(open: JSONObject): JSONObject? {
         ?.let { action -> found?.let { JSONObject(action.toString()).put("tokens", it) } ?: action }
 }
 
-/**
- * RN's TokenPickerModal: a card over a dimmed screen with core's title (RN repeats it as the description), the field (RN's query:
- * core's matching tokens show, and it is a new token's text where core allows a custom value), core's tokens as chips, and Cancel
- * and Save. Adding takes the tapped token or the typed text; removing takes every tapped token. Save sends core's editTaskTokens
- * (Contexts) or removeTags (Review).
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
@@ -278,13 +261,13 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val canSave = values.isNotEmpty() && idle
     val review = open.optString("list") == "review"
     val save = {
-        // The selection and its revisions as core's view showed them: Contexts' top-level ones, or Review's bar's.
+
         val selection = page?.view?.takeIf { it.has("selectedIds") } ?: page?.view?.optJSONObject("bulk")
         val ids = selection?.optJSONArray("selectedIds").ids()
         val revisions = selection?.optJSONObject("taskRevisions") ?: JSONObject()
         keepDialog(null)
         when {
-            // A list's Remove tag: core's editTaskTokens on its selection (or Select all).
+
             open.optString("list") == "bulk" -> bulkAction(JSONObject().put("type", "editTaskTokens").put("field", "tags").put("mode", "remove").put("values", JSONArray(values)), "removeTag")
             review -> act("reviewAction", removeTags(ids, values, revisions))
             else -> act("contextsAction", editTaskTokens(ids, open.getString("field"), open.getString("mode"), values, revisions))
@@ -298,7 +281,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
             val title = picker.getString("title")
             Text(title, style = rnText(18, 700), color = c.text, modifier = Modifier.semantics { heading() })
             Text(title, style = rnText(13, 400, 18), color = c.secondaryText)
-            // RN's query field in both modes: typing asks core for the matching tokens; a single pick also names the typed token.
+
             run {
                 val focus = remember { FocusRequester() }
                 LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -327,7 +310,7 @@ fun TokenPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                         Text(token, style = rnText(13, 600), color = if (on) c.onTint else c.text, modifier = Modifier.clip(CircleShape)
                             .background(if (on) c.tint else c.filterBg).rnBorder(1.dp, if (on) c.tint else c.border, CircleShape)
                             .selectable(selected = on, role = Role.Button) {
-                                // A single pick fills the field (RN's setQuery), so core's search narrows to it; a multi pick leaves the search.
+
                                 if (multi) keepDialog(JSONObject(open.toString()).put("picked", JSONArray(if (on) picked - token else picked + token)))
                                 else typeToken(JSONObject(open.toString()).put("picked", JSONArray(listOf(token))).put("text", token))
                             }.padding(horizontal = 12.dp, vertical = 8.dp))

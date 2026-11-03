@@ -196,7 +196,7 @@ describe('checked native Someday section task creation', () => {
         const restarted = createNativeHostContract();
         await restarted.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' });
         await restarted.activate({ writeSafetyReady: true });
-        // Recreate the later edit after activation reloads the saved snapshot.
+
         useTaskStore.setState((state) => ({ _allTasks: state._allTasks.map((task) => task.id === envelope.request.requestId
             ? { ...task, deletedAt: '2026-09-29T00:00:00.000Z', rev: (task.rev ?? 0) + 1 } : task) }));
         expect(restarted.probeSomedaySectionTaskOutcome(envelope)).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });

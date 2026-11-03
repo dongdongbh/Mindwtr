@@ -734,10 +734,7 @@ describe('ListView', () => {
     try {
       vi.setSystemTime(new Date('2026-07-14T10:00:00Z'));
 
-      // The #867 shape: a bimonthly chore respawned by "repeat after completion"
-      // carries a future due date and no start date. Focus already defers it;
-      // Next used to show it the moment it was recreated. The stale synced
-      // setting from pre-1.1.5 devices must not resurrect the reveal (#900).
+
       useTaskStore.setState({
         _allTasks: [
           makeTask('chore', {
@@ -1001,14 +998,13 @@ describe('ListView', () => {
 
     const view = renderListView('next', 'Next');
 
-    // The priority category is gated off here (no task carries a priority), so
-    // the list is unfiltered and the header claims no filter.
+
     await waitFor(() => expect(view.getByText('Unprioritized task')).toBeInTheDocument());
     expect(view.queryByText('No tasks match these filters.')).not.toBeInTheDocument();
     const summaryRow = view.getByText('1 tasks').parentElement as HTMLElement;
     expect(within(summaryRow).queryByText(/High/)).toBeNull();
 
-    // The chip stays, muted and removable, so the selection can be cleared.
+
     const chip = view.getByRole('button', { name: 'Remove filter: High' }).parentElement as HTMLElement;
     expect(chip.className).toContain('opacity-60');
     fireEvent.click(view.getByRole('button', { name: 'Remove filter: High' }));
@@ -1242,9 +1238,7 @@ describe('ListView', () => {
     expect(secondRender.getByText('Home reference')).toBeInTheDocument();
   });
 
-  // useListSelection reveals the highlighted task, but a collapsed group keeps
-  // it out of visibleTasks entirely, so search sent the user to Done and
-  // nothing happened (#991).
+
   it('expands the collapsed group holding a task sent here by global search', () => {
     window.localStorage.removeItem('mindwtr:view:list:done:v1');
     useTaskStore.setState({
@@ -1334,7 +1328,7 @@ describe('ListView', () => {
     expect(firstRender.queryByText('Work next')).not.toBeInTheDocument();
     expect(firstRender.getByText('Home next')).toBeInTheDocument();
 
-    // Per status, so folding Next cannot fold another list.
+
     const persisted = JSON.parse(window.localStorage.getItem('mindwtr:view:list:next:v1') ?? '{}') as {
       collapsedGroups?: Record<string, string[]>;
     };
@@ -1419,7 +1413,7 @@ describe('ListView', () => {
       expect(queryByText('Errand task')).not.toBeInTheDocument();
     });
 
-    // Included → excluded: the chip subtracts instead of narrowing.
+
     fireEvent.click(panel().getByRole('button', { name: /^@computer/ }));
     await waitFor(() => {
       expect(queryByText('Computer task')).not.toBeInTheDocument();
@@ -1428,7 +1422,7 @@ describe('ListView', () => {
     expect(useUiStore.getState().listFilters.criteria.excludedContexts).toEqual(['@computer']);
     expect(panel().getByRole('button', { name: '@computer (Excluded)' })).toHaveAttribute('aria-pressed', 'mixed');
 
-    // Excluded → neutral.
+
     fireEvent.click(panel().getByRole('button', { name: '@computer (Excluded)' }));
     await waitFor(() => {
       expect(queryByText('Computer task')).toBeInTheDocument();
@@ -1675,8 +1669,8 @@ describe('ListView', () => {
       _allTasks: [makeTask('existing', { title: 'Filtered visible task', status: 'inbox', contexts: ['@work'] })],
       lastDataChangeAt: 1,
     });
-    // An active context filter that the new task will not match, so the created
-    // row never enters the rendered row model.
+
+
     act(() => {
       useUiStore.getState().setListFilters({ criteria: { contexts: ['@work'] } });
     });
@@ -1685,7 +1679,7 @@ describe('ListView', () => {
     await waitFor(() => {
       expect(queryByText('Filtered visible task')).toBeInTheDocument();
     });
-    // Ignore any scroll from the initial mount / selection settle.
+
     scrollIntoViewMock.mockClear();
 
     const input = getByRole('combobox', { name: 'Add Task' });
@@ -1730,8 +1724,7 @@ describe('ListView', () => {
 
     reportArchivedTaskQueryFailure(new Error('disk read failed'), showToast, 'Kunde inte läsa in arkiverade uppgifter');
 
-    // The reportError label stays English (diagnostic); the toast shows the
-    // caller's localized copy.
+
     expect(reportErrorMock).toHaveBeenCalledWith('Failed to load archived tasks', expect.any(Error));
     expect(showToast).toHaveBeenCalledWith('Kunde inte läsa in arkiverade uppgifter', 'error');
   });
@@ -1859,9 +1852,9 @@ describe('ListView', () => {
     ['done', 'Completed'],
     ['waiting', 'Waiting'],
     ['someday', 'Someday'],
-    // The shared criteria narrow the Inbox too, so it must expose them (#956).
+
     ['inbox', 'Inbox'],
-    // Reference adds its archive-visibility option to the shared filter panel.
+
     ['reference', 'Reference'],
   ] as const)('offers a Filters toggle in the %s toolbar', (statusFilter, title) => {
     const { getByRole } = renderListView(statusFilter, title);

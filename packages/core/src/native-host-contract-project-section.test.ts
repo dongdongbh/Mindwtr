@@ -83,7 +83,7 @@ describe('prepared native Project Section creation', () => {
         const raw = project('target', { status, startDate: null as never, dueDate: null as never,
             supportNotes: null as never });
         const { methods, request, prepare, data } = await open({ projects: [raw] });
-        // fetchData normally hydrates nulls away. Freeze a pre-hydration parent as on native recovery.
+
         useTaskStore.setState({ _allProjects: [raw] });
         const input = request(' New ');
         const planned = prepare(input);

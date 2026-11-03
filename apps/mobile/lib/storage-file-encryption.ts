@@ -1,6 +1,5 @@
-// File Sync's folder IO and transition port: core's mobile-file-sync-remote.ts (moved there in
-// S5), bound to this app's host in file-sync-host.ts. Kept as a module so callers and tests
-// keep their imports.
+
+
 
 import type { FileSyncTransitionTestHooks } from '@mindwtr/core';
 

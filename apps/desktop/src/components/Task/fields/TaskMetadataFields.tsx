@@ -44,23 +44,19 @@ type PillOption<TValue extends string> = {
     value: TValue;
     label: string;
     onContextMenu?: () => void;
-    /** Decorative node (priority dot) rendered before the label. */
+
     leading?: ReactNode;
-    /** When set, the pill renders only this node instead of the visible label.
-     *  The accessible name still comes from `label` (kept as aria-label), e.g.
-     *  the icon-only priority "None" control. */
+
+
     iconOnly?: ReactNode;
-    /** Overrides the selected look for this option (status pills wear their
-     *  Board status color instead of the generic primary). */
+
+
     activeClassName?: string;
 };
 
 const selectedPillClassName = 'border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90';
 
-// Choice-chip icons added in front of each option's label (never replacing it,
-// except for the icon-only None pill above). Statuses and energy levels map to
-// a fixed lucide glyph so options stay scannable without text length alone.
-// One status, one glyph across the app: the map lives in lib/task-status-icons (#1256).
+
 const STATUS_OPTION_ICONS = TASK_STATUS_ICONS;
 
 const ENERGY_OPTION_ICONS: Record<TaskEnergyLevel, LucideIcon> = {
@@ -819,8 +815,8 @@ export function TimeEstimateField({
                 className="text-xs bg-muted/50 border border-border rounded px-2 py-1 w-full text-foreground"
             >
                 <option value="">{t('common.none')}</option>
-                {/* The fixed list only — `resolveTimeEstimateOptions` would append the
-                    task's own custom value, which the Custom… entry already covers. */}
+                {
+                                                                                         }
                 {TIME_ESTIMATE_OPTIONS.map((estimate) => (
                     <option key={estimate} value={estimate}>{formatTimeEstimateLabel(estimate, { t })}</option>
                 ))}
@@ -927,10 +923,8 @@ export function TimeSpentField({
             <input
                 type="number"
                 min={0}
-                // step=1 so every whole minute is a valid value. step=5 made the
-                // arrows move in fives but marked anything off the grid (7, 23)
-                // as stepMismatch, so the browser rejected times people had
-                // actually spent (#896).
+
+
                 step={1}
                 inputMode="numeric"
                 aria-label={t('taskEdit.timeSpentLabel')}

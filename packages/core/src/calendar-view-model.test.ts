@@ -162,7 +162,7 @@ describe('calendar view model', () => {
         expect(getCalendarMovedStart(dayStart.getTime(), 8 * 60).getHours()).toBe(8);
     });
     it('keeps the second 1:30 AM instant when dropped in place on the fall DST day', () => {
-        // Pinned: CI runs in UTC, which has no DST day.
+
         const previous = process.env.TZ;
         process.env.TZ = 'America/New_York';
         try {
@@ -205,7 +205,7 @@ describe('calendar view model', () => {
             expect(next.selectedDate?.getHours()).toBe(0);
             const start = getCalendarWeekStart(next.selectedDate!, 0);
             const range = getCalendarVisibleRange({ calendarSystem: 'gregorian', currentMonthDate: new Date(2026, 10, 1), selectedDate: next.selectedDate, viewMode: 'week', weekStartTime: start.getTime() });
-            // Nov 1 starts in daylight time (UTC-4) and the week ends in standard time (UTC-5).
+
             expect([range.rangeStart.toISOString(), range.rangeEnd.toISOString()]).toEqual(['2026-11-01T04:00:00.000Z', '2026-11-08T04:59:59.999Z']);
             const day = moveCalendarPeriod({ viewMode: 'day', selectedDate: new Date(2026, 11, 31), visibleMonthDate: new Date(2026, 11, 31) }, 'next', { calendarSystem: 'gregorian' });
             expect([day.selectedDate?.getFullYear(), day.visibleMonthDate.getMonth()]).toEqual([2027, 0]);
@@ -293,7 +293,7 @@ describe('calendar view model', () => {
         const date = new Date(2026, 9, 28);
         const english = (dateFormat: string) => createCalendarPatternDates(createDateFormatter({ language: 'en', dateFormat, systemLocale: 'en-US' }));
         const styles = ['monthYear', 'monthDay', 'dayTitle', 'longDate', 'shortDate', 'cellDate'] as const;
-        // What toLocaleDateString gives for en-US and en-GB (the fixture's ICU).
+
         expect(styles.map((style) => english('mdy')[style](date))).toEqual([
             'October 2026', 'Oct 28', 'Wed, October 28', 'Wednesday, October 28, 2026', 'Wed, Oct 28', 'Wednesday, October 28',
         ]);

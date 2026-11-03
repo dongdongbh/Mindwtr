@@ -62,29 +62,15 @@ import java.util.UUID
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
-/*
- * RN's Settings › Calendar (components/settings/calendar-settings-screen.tsx) on core's contract
- * (native-host-contract-settings-calendar.ts). Kotlin keeps only what RN keeps in React state for one visit, in memory (a URL as
- * typed may hold a password, so never in saved state): which card is open, the open Area choice, the name and URL as typed, and
- * Delete's confirmation. Every word, option, value and write is core's; the system document picker is the host's.
- */
 
-/**
- * Settings › Calendar's screen calls CalendarSettings.kt sends itself: a new subscription (host-entry.ts MENU_COMMANDS, never
- * journaled: WriteJournal.UNJOURNALED, its URL may carry a password). Every other write is `calendarSetting` through the Menu
- * tab's journaled send.
- */
 val CALENDAR_COMMANDS = setOf("calendarFeedAdd")
 
-/**
- * Settings › Calendar's visits: each Back ends one, so an open (or a device call) that ends after it counts for nothing, its toasts
- * are dropped, and the next visit opens afresh (RN unmounts the screen). Thread-safe: opens run off the main thread.
- */
+
 class CalendarVisit {
     @Volatile var current = 0L; private set
     @Volatile var isOpen = false; private set
 
-    /** The visit [visit]'s open answered: true when it is still the visit on screen (now open). */
+
     @Synchronized fun opened(visit: Long): Boolean = (visit == current).also { if (it) isOpen = true }
     fun isCurrent(visit: Long) = visit == current
     @Synchronized fun leave() { current += 1; isOpen = false }
@@ -92,41 +78,38 @@ class CalendarVisit {
 
 class CalendarSettingsModel(private val menu: MenuModel) {
     private companion object {
-        /** A visit's open and close, and each new subscription, in the order sent. */
+
         val visits: ExecutorService = Executors.newSingleThreadExecutor { task -> Thread(task, "mindwtr-calendar-settings") }
     }
     private val shell get() = menu.shell
     private val settings get() = menu.settings
 
-    /** This visit, and whether openCalendarSettings ran for it: RN reads the device once, when the screen mounts. */
+
     private val visit = CalendarVisit()
     var pushOpen by mutableStateOf(false); private set
     var deviceOpen by mutableStateOf(false); private set
-    /** The open Area choice (core's `key`), one at a time. */
+
     var areas by mutableStateOf<String?>(null); private set
     var name by mutableStateOf(""); private set
     var url by mutableStateOf(""); private set
-    /** Delete Mindwtr calendar's question (core's confirm and edit) while it shows. */
+
     var confirm by mutableStateOf<JSONObject?>(null); private set
 
-    /** Settings' read of this screen: it opens once per visit (its toasts shown), then core's view for the fields as typed. */
+
     fun read(runtime: CoreHost): JSONObject {
         open(runtime)
         val input = { JSONObject().put("draft", JSONObject().put("name", name).put("url", url)).toString() }
         return try {
             runtime.menuRead("calendarSettings", input())
         } catch (failure: Exception) {
-            // Core has no open screen (a close that raced this visit): open it again, once.
+
             if (failure.message?.contains("(openCalendarSettings)") != true) throw failure
             open(runtime, reopen = true)
             runtime.menuRead("calendarSettings", input())
         }
     }
 
-    /**
-     * One open per visit, after any close sent before it. An open that ends after Back counts for nothing: core's session it made
-     * is closed again and its toasts dropped.
-     */
+
     private fun open(runtime: CoreHost, reopen: Boolean = false) = visits.submit {
         val mine = visit.current
         if (visit.isOpen && !reopen) return@submit
@@ -135,7 +118,7 @@ class CalendarSettingsModel(private val menu: MenuModel) {
         else runCatching { runtime.menuRead("calendarSettingsClose", "{}") }
     }.get()
 
-    /** Leaving the screen (RN unmounts it): its state goes, and core forgets the visit. */
+
     fun leave() {
         visit.leave()
         pushOpen = false; deviceOpen = false; areas = null; name = ""; url = ""; confirm = null
@@ -151,9 +134,7 @@ class CalendarSettingsModel(private val menu: MenuModel) {
     fun askDelete(delete: JSONObject) { confirm = delete }
     fun closeConfirm() { confirm = null }
 
-    // ---- Writes ----
 
-    /** An edit core's view gave (setCalendarSetting), through the Menu tab's journaled send. */
     fun edit(edit: JSONObject) = menu.command("calendarSetting", JSONObject().put("edit", edit))
 
     fun delete() {
@@ -162,13 +143,10 @@ class CalendarSettingsModel(private val menu: MenuModel) {
         edit(question.getJSONObject("edit"))
     }
 
-    /** Add: the URL and name as typed, at the list's revision the view showed. Never journaled (its URL may hold a password). */
+
     fun add(revision: String) = addFeed(JSONObject().put("name", name).put("url", url).put("revision", revision))
 
-    /**
-     * Choose local .ics file's pick: kept readable after a restart (a persisted read grant; RN's picker keeps none), then sent
-     * with the name as typed, the file's name and its URI.
-     */
+
     fun addFile(uri: Uri, revision: String) {
         val resolver = shell.getApplication<android.app.Application>().contentResolver
         keepPickedFileReadable { flags -> resolver.takePersistableUriPermission(uri, flags) }
@@ -185,21 +163,21 @@ class CalendarSettingsModel(private val menu: MenuModel) {
             val result = runCatching { runtime.menuCommand("calendarFeedAdd", input.put("requestId", UUID.randomUUID().toString()).toString()) }
             shell.ui {
                 result.onSuccess { reply -> done(reply) }
-                // Core's message names no URL.
+
                 result.exceptionOrNull()?.let { failed("calendarFeedAdd", it) }
                 menu.whenIdle { settings.refresh() }
             }
         }
     }
 
-    /** Grant access, Test and Refresh calendars: core's device calls, which wait on a prompt, the provider or every feed. */
+
     fun request(name: String) {
         val runtime = shell.coreHost() ?: return
         val mine = visit.current
         Thread({
             val result = runCatching { runtime.calendarRequest(name, "{}") }
             shell.ui {
-                // An answer after Back belongs to a screen no longer shown.
+
                 if (!visit.isCurrent(mine)) return@ui
                 result.onSuccess { toasts(name, it) }
                 result.exceptionOrNull()?.let { failed(name, it) }
@@ -208,9 +186,7 @@ class CalendarSettingsModel(private val menu: MenuModel) {
         }, "mindwtr-calendar-$name").start()
     }
 
-    // ---- Answers ----
 
-    /** Core's answer to a write: its toasts, the card it opens, the fields emptied, and Grant access when core asks for it. */
     fun done(reply: JSONObject) {
         toasts("calendarSetting", reply)
         when (reply.menuText("open")) { "push" -> pushOpen = true; "device" -> deviceOpen = true }
@@ -218,7 +194,7 @@ class CalendarSettingsModel(private val menu: MenuModel) {
         if (reply.optBoolean("requestAccess")) request("grantDeviceCalendarAccess")
     }
 
-    /** A write core refused before writing: a stale view is read again; any other refusal shows core's words. */
+
     fun refused(failure: Exception) {
         if (failure.message?.startsWith("STALE_REVISION") != true) shell.showToast(null, failure.message.orEmpty().substringAfter(": "), "error")
         menu.whenIdle { settings.refresh() }
@@ -229,10 +205,7 @@ class CalendarSettingsModel(private val menu: MenuModel) {
         shell.showToast(null, error.message.orEmpty().substringAfter(": "), "error")
     }
 
-    /**
-     * Core's toasts, RN's in order: the newest stays on screen. The log names each toast's tone, title and message for the device
-     * check: Settings › Calendar's toasts are core's fixed words and counts, never a URL or a calendar's name.
-     */
+
     private fun toasts(name: String, reply: JSONObject) {
         val all = reply.menuObjects("toasts")
         if (all.isNotEmpty()) Log.i(CoreHost.TAG, "Native Android calendar screen command=$name toasts=${all.joinToString("|") { "${it.optString("tone")}:${it.optString("title")}:${it.optString("message")}" }}")
@@ -241,9 +214,7 @@ class CalendarSettingsModel(private val menu: MenuModel) {
     }
 }
 
-// ---- The screen ----
 
-/** RN's calendar screen from core's view: the push card (none until calendar push, C4), the device calendars card, the subscription form and the list. */
 @Composable
 internal fun CalendarSettings(model: InboxViewModel, view: JSONObject) {
     view.optJSONObject("push")?.let { PushCard(model, it) }
@@ -251,7 +222,7 @@ internal fun CalendarSettings(model: InboxViewModel, view: JSONObject) {
     FeedsSection(model, view.getJSONObject("feeds"))
 }
 
-/** Over the screen: Delete Mindwtr calendar's question, as RN's Alert asks it. */
+
 @Composable
 internal fun CalendarSettingsDialogs(model: InboxViewModel) {
     val screen = model.menu.settings.calendar
@@ -265,7 +236,7 @@ internal fun CalendarSettingsDialogs(model: InboxViewModel) {
     )
 }
 
-/** RN's settingRow: the content at the left (settingInfo), a hairline above when [divider], the trailing control at the top. */
+
 @Composable
 private fun CalendarRow(divider: Boolean, modifier: Modifier = Modifier, info: @Composable ColumnScope.() -> Unit, trailing: @Composable () -> Unit = {}) {
     val c = LocalTheme.current.colors
@@ -284,7 +255,7 @@ private fun Label(text: String, color: Color = LocalTheme.current.colors.text, l
 private fun Detail(text: String, top: Int = 2, color: Color = LocalTheme.current.colors.secondaryText, lines: Int = Int.MAX_VALUE) =
     Text(text, style = rnText(13, 400, 18), color = color, maxLines = lines, modifier = Modifier.padding(top = top.dp))
 
-/** RN's CollapsibleSettingHeader: the title and description with ▸ or ▾ fold the card; RN's switch sends core's edit. */
+
 @Composable
 private fun FoldHeader(model: InboxViewModel, card: JSONObject, open: Boolean, tag: String, fold: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -307,7 +278,7 @@ private fun FoldHeader(model: InboxViewModel, card: JSONObject, open: Boolean, t
     }
 }
 
-/** RN's backendOption: a bordered pill with a CompactText label; [filled] is Add's filled look once the URL has text. */
+
 @Composable
 private fun Pill(label: String, tag: String, enabled: Boolean = true, filled: Boolean = false, top: Int = 0, press: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -321,7 +292,7 @@ private fun Pill(label: String, tag: String, enabled: Boolean = true, filled: Bo
     }
 }
 
-/** RN's renderAreaSelector: core's label in the tint opens the choice; each Area is a checkbox sending core's edit. */
+
 @Composable
 private fun AreaChoice(model: InboxViewModel, choice: JSONObject?) {
     choice ?: return
@@ -345,11 +316,11 @@ private fun AreaChoice(model: InboxViewModel, choice: JSONObject?) {
     }
 }
 
-/** RN's spinner in the tint (ActivityIndicator). */
+
 @Composable
 private fun Spinner(color: Color = LocalTheme.current.colors.tint) = CircularProgressIndicator(Modifier.size(20.dp), color = color, strokeWidth = 2.dp)
 
-/** RN's push card: the header; while open and on, access denied, or the calendar choice, the colors, Refresh and Delete. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PushCard(model: InboxViewModel, push: JSONObject) {
@@ -419,7 +390,7 @@ private fun PushCard(model: InboxViewModel, push: JSONObject) {
     }
 }
 
-/** RN's device calendars card: the header; while open and on, Grant access, a spinner, "none found", or each calendar's row. */
+
 @Composable
 private fun DeviceCard(model: InboxViewModel, device: JSONObject) {
     val screen = model.menu.settings.calendar
@@ -453,7 +424,7 @@ private fun DeviceCard(model: InboxViewModel, device: JSONObject) {
     }
 }
 
-/** RN's ICS subscriptions: the heading, the guide, the name and URL form with Add, Test and Choose local .ics file, then the list. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun FeedsSection(model: InboxViewModel, feeds: JSONObject) {
@@ -474,7 +445,7 @@ private fun FeedsSection(model: InboxViewModel, feeds: JSONObject) {
             Box(Modifier.padding(top = 12.dp)) { Label(urlField.getString("label")) }
             FeedInput(screen.url, urlField, "calendar-url", KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, keyboardType = KeyboardType.Uri)) { screen.typeUrl(it) }
             val add = feeds.getJSONObject("add")
-            // The URL as typed decides Add at once, as RN's button follows its field (core's `add.enabled` follows a read later).
+
             val canAdd = screen.url.isNotBlank()
             FlowRow(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Pill(add.getString("label"), "calendar-add", enabled = canAdd && model.menu.idle, filled = canAdd) { screen.add(revision) }
@@ -514,7 +485,7 @@ private fun FeedsSection(model: InboxViewModel, feeds: JSONObject) {
     }
 }
 
-/** A feed's color swatch (22 px): Auto (ban-outline on the card) or a color; the chosen one ringed in the tint. */
+
 @Composable
 private fun Swatch(model: InboxViewModel, option: JSONObject) {
     val screen = model.menu.settings.calendar
@@ -526,14 +497,14 @@ private fun Swatch(model: InboxViewModel, option: JSONObject) {
     val fill = coreColorOrNull(option.menuText("fill")) ?: color
     Box(Modifier.size(22.dp).clip(CircleShape).background(fill ?: c.cardBg).rnBorder(if (on) 3.dp else 1.dp, if (on) c.tint else c.border, CircleShape)
         .clearAndSetSemantics { contentDescription = option.getString("accessibilityLabel"); role = Role.Button; selected = on
-            // Picking the color it has writes nothing (core sends no edit).
+
             if (enabled) onClick { edit?.let(screen::edit); true } else disabled() }
         .clickable(enabled = enabled) { edit?.let(screen::edit) }, contentAlignment = Alignment.Center) {
         if (color == null) Icon(SettingsIonicons.BanOutline, null, tint = c.secondaryText, modifier = Modifier.size(12.dp))
     }
 }
 
-/** RN's textInput: a bordered field under its label, with core's placeholder. */
+
 @Composable
 private fun FeedInput(value: String, field: JSONObject, tag: String, keyboard: KeyboardOptions, change: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -551,9 +522,6 @@ private fun FeedInput(value: String, field: JSONObject, tag: String, keyboard: K
         })
 }
 
-/**
- * RN's 5bfa6bf6b: a picked document stays readable after a reboot only through a persisted read grant, which an
- * ACTION_OPEN_DOCUMENT result (OpenDocument) allows. [take] persists it for reading only; its failure is answered, not thrown.
- */
+
 internal fun keepPickedFileReadable(take: (flags: Int) -> Unit): Throwable? =
     runCatching { take(Intent.FLAG_GRANT_READ_URI_PERMISSION) }.exceptionOrNull()

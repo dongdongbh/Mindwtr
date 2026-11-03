@@ -21,7 +21,7 @@ const project = (extra: Partial<Project> = {}): Project => ({
     rev: 1, createdAt: AT, updatedAt: AT, ...extra,
 } as Project);
 
-/** A sync save holds the gate while [write] is called, then publishes [publish] before the write is admitted. */
+
 async function behindSyncSave<T>(publish: () => void, write: () => Promise<T>): Promise<T> {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
@@ -88,7 +88,7 @@ describe('a draft saved field by field on the latest row', () => {
         const latest = task({ title: 'Remote title', tags: ['a', 'b', 'remote'], checklist: [item('c1'), item('c2', true), item('c3')], priority: 'high' });
         const draft = { title: 'Old', tags: ['b', 'mine'], checklist: [item('c1', true), item('c2'), item('c4')], priority: 'medium' as const };
         expect(mergeTaskDraftOntoLatest(base, draft, latest)).toEqual({
-            // The draft kept the title: the other device's title stays (nothing written).
+
             tags: ['b', 'remote', 'mine'],
             checklist: [item('c1', true), item('c2', true), item('c3'), item('c4')],
             priority: 'medium',
@@ -104,7 +104,7 @@ describe('a draft saved field by field on the latest row', () => {
     it('never brings back an item either side removed: tags, contexts, checklist and attachments', () => {
         const att = (id: string, extra: Partial<Attachment> = {}) => file(id, extra);
         const base = task({ tags: ['x', 'k'], contexts: ['@x', '@k'], checklist: [item('x'), item('k')], attachments: [att('X'), att('K')] });
-        // The user removes X; another device adds Y.
+
         const remoteAdded = task({ tags: ['x', 'k', 'y'], contexts: ['@x', '@k', '@y'], checklist: [item('x'), item('k'), item('y')],
             attachments: [att('X'), att('K'), att('Y')] });
         const userRemoved = { tags: ['k'], contexts: ['@k'], checklist: [item('k')],
@@ -113,11 +113,11 @@ describe('a draft saved field by field on the latest row', () => {
             tags: ['k', 'y'], contexts: ['@k', '@y'], checklist: [item('k'), item('y')],
             attachments: [att('X', { deletedAt: AT }), att('K'), att('Y')],
         });
-        // Another device removes X; the user edits another field and leaves the lists as opened.
+
         const remoteRemoved = task({ tags: ['k'], contexts: ['@k'], checklist: [item('k')], attachments: [att('X', { deletedAt: AT }), att('K')] });
         expect(mergeTaskDraftOntoLatest(base, { title: 'Edited', tags: base.tags, contexts: base.contexts, checklist: base.checklist,
             attachments: base.attachments }, remoteRemoved)).toEqual({ title: 'Edited' });
-        // Another device removes X; the user adds Z to every list: X stays removed.
+
         expect(mergeTaskDraftOntoLatest(base, { tags: ['x', 'k', 'z'], contexts: ['@x', '@k', '@z'], checklist: [item('x'), item('k'), item('z')],
             attachments: [att('X'), att('K'), att('Z')] }, task({ ...remoteRemoved, attachments: [att('K')] }))).toEqual({
             tags: ['k', 'z'], contexts: ['@k', '@z'], checklist: [item('k'), item('z')], attachments: [att('K'), att('Z')],
@@ -141,7 +141,7 @@ describe('a draft saved field by field on the latest row', () => {
             const kept = logs.filter((entry) => entry.message === 'Draft saved onto a synced change');
             expect(kept).toEqual([expect.objectContaining({ context: expect.objectContaining({ releaseCheck: 'v1.3.7/sync-field-merge', entity: 'task', fields: 'tags' }) })]);
             logs.length = 0;
-            // Only a single value both sides changed: the draft wins it, and nothing was kept, so nothing is logged.
+
             await updateTaskFromDraft('t1', task({ priority: 'medium' }), { priority: 'low' });
             expect(logs.filter((entry) => entry.message === 'Draft saved onto a synced change')).toEqual([]);
         } finally {
@@ -158,7 +158,7 @@ describe('a draft saved field by field on the latest row', () => {
             useTaskStore.setState({ _allTasks: [task({ rev: 3, tags: ['a', 'remote'] })] });
             await saveTaskDraftOntoLatest('t1', base, { tags: ['a', 'mine'] }, { write: async () => ({ success: false, error: 'disk full' }) });
             expect(kept()).toEqual([]);
-            // The other device removed tag a; the draft removed it too and added b: nothing of the other side's is left.
+
             useTaskStore.setState({ _allTasks: [task({ rev: 4, tags: [] })] });
             await saveTaskDraftOntoLatest('t1', base, { tags: ['b'] });
             expect(useTaskStore.getState()._tasksById.get('t1')?.tags).toEqual(['b']);

@@ -1,13 +1,6 @@
-/**
- * Test support only (imported by the quick capture tests; not exported).
- * Replays the frozen React Native capture popup scenarios
- * (quick-capture-parity.fixtures.json, captured by
- * apps/mobile/components/quick-capture-sheet/quick-capture-parity.test.tsx)
- * through core: either quick-capture-model's functions, as React Native's sheet
- * calls them, or the native host contract, as a native popup would. The host
- * here keeps only what the sheet keeps outside core: the typed text, which
- * picker is open with its search text, the More panel, and the confirmation.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { resolveCaptureAreaQuery, resolveCaptureProjectQuery } from './capture';
 import { safeFormatDate } from './date';
@@ -95,8 +88,6 @@ export const loadQuickCaptureFixture = (): QuickCaptureFixture => JSON.parse(
     readFileSync(new URL('./quick-capture-parity.fixtures.json', import.meta.url), 'utf8'),
 ) as QuickCaptureFixture;
 
-// ---------------------------------------------------------------------------
-// Store and write log, as the harness records them
 
 type Recorder = { log: unknown[]; createdIds: Map<string, string> };
 type RealActions = Pick<ReturnType<typeof useTaskStore.getState>, 'addTask' | 'addTasks' | 'addProject' | 'addArea'>;
@@ -145,8 +136,8 @@ export async function seedQuickCaptureStore(
     await flushPendingSave();
     if (useTaskStore.getState()._allTasks.length !== data.tasks.length) throw new Error('Store seed did not load');
     const log = (name: string, args: unknown[]) => { recorder.log.push([name, ...encode(args) as unknown[]]); };
-    // The contract names a picker's new project or area by its request UUID (an `id` prop); React Native
-    // lets the store draw one, so the log leaves that id out, as the harness records the call.
+
+
     const withoutId = <T extends object>(props: T | undefined) => {
         if (!props || !('id' in props)) return props;
         const { id: _id, ...rest } = props as T & { id: unknown };
@@ -181,10 +172,7 @@ export async function seedQuickCaptureStore(
     return recorder;
 }
 
-// ---------------------------------------------------------------------------
-// Observations
 
-/** What a user can see: labels of hidden chips (no due date, Priorities off) are left out on both sides. */
 export function projectQuickCaptureObservation(observation: Record<string, unknown>): Record<string, unknown> {
     type Sheet = Record<string, unknown> & {
         showDueTime: boolean;
@@ -210,7 +198,7 @@ type Ui = {
     options: QuickCaptureOptions;
     expanded: boolean;
     bag: QuickAddParseOptions | null;
-    /** The context picker's loaded choices. */
+
     choices: string[];
     queries: { project: string; area: string; context: string };
     open: Picker | null;
@@ -241,7 +229,7 @@ const observeView = (
         expanded: ui.expanded,
         moreLabel: ui.expanded ? view.text.hideOptions : view.text.more,
         quickDates: ui.expanded ? view.due.quickDates.map(({ label, selected }) => ({ label, selected })) : null,
-        // startDay is native-only (RN's picker reads its own state), so it stays out of the RN comparison.
+
         customDate: ui.expanded ? { label: view.due.custom.label, accessibilityLabel: view.due.custom.accessibilityLabel } : null,
         dueTimeChip: ui.expanded && view.due.time ? view.due.time.accessibilityLabel : null,
         pickers: {
@@ -281,14 +269,7 @@ const pickerOf = (ui: Ui, context: QuickCaptureContext) => {
 
 const toastOf = (notice: QuickCaptureNotice) => [notice.tone, notice.title, notice.message, notice.durationMs ?? null];
 
-// ---------------------------------------------------------------------------
-// Replay
 
-/**
- * Replay one scenario. Without `contract`, through quick-capture-model as React
- * Native's sheet calls it; with it, through the native host contract. Returns
- * the harness's observations, projected.
- */
 export async function replayQuickCaptureScenario(input: {
     fixture: QuickCaptureFixture;
     scenario: QuickCaptureScenario;
@@ -350,7 +331,7 @@ export async function replayQuickCaptureScenario(input: {
             projects: state.projects,
             defaultAreaId: resolveQuickCaptureDefaultAreaId(state.settings, state.areas),
         });
-        // The sheet clears a preset priority while Priorities are off.
+
         if (!resolveFeatureFlags(state.settings).priorities) options.priority = null;
         if (preference) options.addAnother = true;
         ui = freshUi(options, scenario.initialValue ?? '', rebuildBag());
@@ -389,7 +370,7 @@ export async function replayQuickCaptureScenario(input: {
 
     const viewOf = (current: Ui) => {
         if (contract) {
-            // A host shows no priority picker while Priorities are off (the contract refuses one).
+
             const shown = current.open === 'priority' && !resolveFeatureFlags(store().settings).priorities ? null : current.open;
             const picker = shown ? { kind: shown, ...(shown === 'priority' ? {} : { query: current.queries[shown] }) } : undefined;
             const view = unwrap(contract.getQuickCaptureView({ text: current.text, options: current.options, picker }));
@@ -455,7 +436,7 @@ export async function replayQuickCaptureScenario(input: {
         const bulk = current.bulk!;
         current.bulk = null;
         if (contract) {
-            // Mobile saves a recovery snapshot before the batch; the host writes the file.
+
             const snapshot = unwrap(await contract.createQuickCaptureSnapshot());
             const result = unwrap(await contract.submitQuickCaptureLines({
                 text: current.text,
@@ -595,7 +576,7 @@ export async function replayQuickCaptureScenario(input: {
             return observeView(current, view, picker);
         })() : null;
         const entry = {
-            // The contract adds capture IDs for exact retries; every other write is the sheet's.
+
             writes: contract
                 ? JSON.parse(JSON.stringify(recorder.log.splice(0), (key, value) => (key === 'captureId' ? undefined : value)))
                 : recorder.log.splice(0),

@@ -7,6 +7,7 @@ import {
     buildReviewSteps,
     buildReviewSuggestionUpdates,
     createAIProvider,
+    flushPendingSave,
     getExternalCalendarDaySummaries,
     getReviewCalendarRange,
     getReviewStepRail,
@@ -18,6 +19,7 @@ import {
     getWeeklyReviewSettings,
     getWeeklyReviewStale,
     isActionableReviewSuggestion,
+    isTaskFinished,
     planReviewProjectTask,
     resolveReviewStepSession,
     restoreReviewSession,
@@ -51,7 +53,7 @@ import { useQuickCapture } from '../../contexts/quick-capture-context';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { buildAIConfig, isAIKeyRequired, loadAIKey } from '../../lib/ai-config';
-import { logError } from '../../lib/app-log';
+import { logError, logInfo } from '../../lib/app-log';
 import { fetchExternalCalendarEvents } from '../../lib/external-calendar';
 import { maybeRequestStoreReviewAfterPositiveMoment } from '../../lib/store-review-prompt';
 
@@ -64,9 +66,7 @@ export type ReviewStepDefinition = {
     title: string;
 };
 
-// Weekly Review's per-step candidate lists live in core (ADR 0021); these
-// three types are re-exported under their historical local names so callers
-// of this controller don't need to change their imports.
+
 export type {
     CalendarReviewEntry as CalendarTaskReviewEntry,
     ContextReviewGroup,
@@ -93,7 +93,7 @@ export function useReviewModalController({
     onClose,
     visible,
 }: UseReviewModalControllerParams) {
-    const { tasks, projects, people, areas, updateTask, deleteTask, settings, batchUpdateTasks, addTask } = useTaskStore();
+    const { tasks, projects, sections, people, areas, updateTask, deleteTask, settings, batchUpdateTasks, addTask } = useTaskStore();
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const { isDark } = useTheme();
     const { t, language } = useLanguage();
@@ -124,6 +124,19 @@ export function useReviewModalController({
 
     useEffect(() => () => { pendingNavigationRef.current = null; }, []);
     const [expandedProject, setExpandedProject] = useState<string | null>(null);
+    const [projectCompletionPrompt, setProjectCompletionPrompt] = useState<{ id: string; title: string } | null>(null);
+    const [projectCompletionError, setProjectCompletionError] = useState<string | null>(null);
+    const [completingProjectId, setCompletingProjectId] = useState<string | null>(null);
+    const completingProjectRef = useRef(false);
+    const [keepProjectsStep, setKeepProjectsStep] = useState(false);
+
+    useEffect(() => {
+        if (!visible) {
+            setProjectCompletionPrompt(null);
+            setProjectCompletionError(null);
+            setKeepProjectsStep(false);
+        }
+    }, [visible]);
     const [aiSuggestions, setAiSuggestions] = useState<TitledReviewSuggestion[]>([]);
     const [aiSelectedIds, setAiSelectedIds] = useState<Set<string>>(new Set());
     const [aiLoading, setAiLoading] = useState(false);
@@ -258,6 +271,52 @@ export function useReviewModalController({
         }
     }, [addTask, areas, closeProjectTaskPrompt, people, projects, projectTaskPrompt, projectTaskTitle, settings, tasks]);
 
+    const closeProjectCompletionPrompt = useCallback(() => {
+        if (!completingProjectRef.current) setProjectCompletionPrompt(null);
+    }, []);
+
+    const completeProject = useCallback(async (projectId: string, confirmed = false) => {
+        if (!visible || completingProjectRef.current) return;
+        const state = useTaskStore.getState();
+        const project = state._allProjects.find((item) => item.id === projectId && !item.deletedAt && item.status === 'active');
+        if (!project) {
+            setProjectCompletionPrompt(null);
+            return;
+        }
+        setProjectCompletionError(null);
+        const sectionIds = new Set(state._allSections.filter((section) => section.projectId === projectId).map((section) => section.id));
+        const hasUnfinishedTasks = state._allTasks.some((task) => (
+            (task.projectId === projectId || (!task.projectId && task.sectionId && sectionIds.has(task.sectionId)))
+            && !task.deletedAt && !isTaskFinished(task) && task.status !== 'reference'
+        ));
+        if (hasUnfinishedTasks && !confirmed) {
+            setProjectCompletionPrompt({ id: project.id, title: project.title });
+            return;
+        }
+        completingProjectRef.current = true;
+        setCompletingProjectId(projectId);
+
+        setKeepProjectsStep(true);
+        try {
+            const result = await state.updateProject(projectId, { status: 'archived' });
+            if (result && !result.success) throw new Error(result.error || 'Failed to complete project');
+            await flushPendingSave();
+            setProjectCompletionPrompt(null);
+            void logInfo('Weekly review project completed', {
+                scope: 'review',
+                force: true,
+                extra: { releaseCheck: 'v1.3.8/weekly-review-complete-project', outcome: 'completed' },
+            });
+        } catch (error) {
+            setProjectCompletionPrompt(null);
+            setProjectCompletionError(t('projects.archiveFailed'));
+            void logError(error, { scope: 'review', extra: { message: 'Failed to complete project during weekly review' } });
+        } finally {
+            completingProjectRef.current = false;
+            setCompletingProjectId(null);
+        }
+    }, [t, visible]);
+
     const toggleExternalDayExpanded = useCallback((dayKey: string) => {
         setExpandedExternalDays((prev) => {
             const next = new Set(prev);
@@ -328,15 +387,15 @@ export function useReviewModalController({
         }, 650);
     }, [handleClose]);
 
-    // Core owns the complete Weekly Review model (review-utils, review-views-model).
+
     const weeklyBuckets = useMemo(
-        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart }),
-        [projects, settings?.weekStart, tasks],
+        () => getWeeklyReviewBuckets(tasks, projects, { weekStart: settings?.weekStart, sections }),
+        [projects, sections, settings?.weekStart, tasks],
     );
     const staleItems = weeklyBuckets.staleItems;
     const completion = getWeeklyReviewCompletion(weeklyBuckets, settings, labels);
-    // Deliberately over tasks (visible tasks), not the store's _tasksById
-    // (all tasks incl. hidden) — PERF-03 leaves this site alone on purpose.
+
+
     const stale = useMemo(() => getWeeklyReviewStale(staleItems, tasks, labels), [labels, staleItems, tasks]);
     const staleTasks = stale.tasks;
     const staleProjectItems = stale.projects;
@@ -364,7 +423,7 @@ export function useReviewModalController({
         try {
             apiKey = await loadAIKey(aiProvider);
         } catch (error) {
-            // An unreadable keystore fails like a request, never as an unhandled rejection.
+
             setAiError(getWeeklyReviewAnalysisError(error, t, '', settings));
             return;
         }
@@ -380,6 +439,14 @@ export function useReviewModalController({
         setAiLoading(true);
         try {
             const provider = createAIProvider(buildAIConfig(settings, apiKey, language));
+            void logInfo('Weekly review sequence candidates prepared', {
+                extra: {
+                    releaseCheck: 'v1.3.8/review-sequence',
+                    candidateCount: staleItems.length,
+                    staleTaskCount: staleItems.filter((item) => !item.id.startsWith('project:')).length,
+                    staleProjectCount: staleItems.filter((item) => item.id.startsWith('project:')).length,
+                },
+            });
             const response = await provider.analyzeReview({ items: staleItems });
             const analysis = readWeeklyReviewAnalysis(response, staleItems);
             setAiSuggestions(analysis.suggestions);
@@ -407,7 +474,7 @@ export function useReviewModalController({
     );
     const contextReviewGroups = weeklyBuckets.contextGroups;
 
-    // A project without an area color takes the theme tint when drawn.
+
     const projectReviewEntries = useMemo(
         () => getWeeklyReviewProjects(weeklyBuckets.projectEntries, areaById, labels),
         [areaById, labels, weeklyBuckets.projectEntries],
@@ -421,8 +488,12 @@ export function useReviewModalController({
         externalCalendarLoading,
     }), [externalCalendarError, externalCalendarLoading, externalCalendarReviewItems.length, includeContextStep, weeklyBuckets]);
     const steps = useMemo<ReviewStepDefinition[]>(
-        () => titleWeeklyReviewSteps(stepFlags, labels).map((step) => ({ ...step, Icon: STEP_ICONS[step.id] })),
-        [labels, stepFlags],
+        () => titleWeeklyReviewSteps(stepFlags, labels).map((step) => ({
+            ...step,
+            hasWork: step.hasWork || (step.id === 'projects' && keepProjectsStep),
+            Icon: STEP_ICONS[step.id],
+        })),
+        [keepProjectsStep, labels, stepFlags],
     );
     const {
         displayedStep,
@@ -450,7 +521,7 @@ export function useReviewModalController({
 
     const navigateFromPreview = useCallback((navigate: () => void) => {
         if (!visible) return;
-        // UIKit must dismiss the child sheet, then the review, before changing routes.
+
         if (Platform.OS === 'ios') {
             pendingNavigationRef.current ??= { after: 'editor', navigate };
         } else {
@@ -478,8 +549,7 @@ export function useReviewModalController({
         navigateFromPreview(() => openProjectScreen(projectId));
     }, [navigateFromPreview]);
 
-    // From a review row, not the task editor: no child sheet is open, so on iOS
-    // only the review itself has to dismiss before the route changes (#1459).
+
     const handleOpenProject = useCallback((projectId: string) => {
         if (!visible) return;
         const navigate = () => openProjectScreen(projectId);
@@ -512,6 +582,11 @@ export function useReviewModalController({
         canGoBack: previousStepId !== null,
         closeEditModal,
         closeProjectTaskPrompt,
+        closeProjectCompletionPrompt,
+        completeProject,
+        completingProjectId,
+        projectCompletionPrompt,
+        projectCompletionError,
         completion,
         contextReviewGroups,
         currentStep: displayedStep,

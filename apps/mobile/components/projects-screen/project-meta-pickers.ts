@@ -48,7 +48,7 @@ export const applyLiveProjectUpdate = ({
         setSelectedProject({ ...project, ...updates });
         return true;
     }
-    // A built patch (a tag toggle) reads the project as it is when the write is admitted, so a sync save's newer tags stay.
+
     void runStoreCommand(async () => {
         const latest = getLiveMutableProject(projectId, getProjectById);
         const patch = latest ? updates(latest) : null;
@@ -59,12 +59,7 @@ export const applyLiveProjectUpdate = ({
     return true;
 };
 
-/**
- * Spoken/printed labels for the area swatches, used by the iOS action sheets
- * (which list colors as text rows, not dots). Keyed by the exact hex in
- * AREA_PRESET_COLORS — a preset missing here falls back to its raw hex, so
- * every new swatch needs a row.
- */
+
 export const AREA_COLOR_DISPLAY_BY_HEX: Record<string, AreaColorMeta> = {
     '#3b82f6': { nameKey: 'projects.colorBlue' },
     '#10b981': { nameKey: 'projects.colorGreen' },
@@ -81,9 +76,8 @@ export const AREA_COLOR_DISPLAY_BY_HEX: Record<string, AreaColorMeta> = {
 };
 
 const areaColorLabel = (t: TranslateFn, color: string): string => {
-    // The name alone: a native action sheet cannot draw a colour dot, and emoji circles stood
-    // in badly (two colours shared one circle, and the newer ones are empty boxes on iOS
-    // before 16.4).
+
+
     const nameKey = AREA_COLOR_DISPLAY_BY_HEX[color]?.nameKey;
     return nameKey ? t(nameKey) : color.toUpperCase();
 };

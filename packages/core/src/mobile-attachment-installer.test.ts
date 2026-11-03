@@ -86,7 +86,7 @@ describe('mobile attachment installer: File Sync publication journal', () => {
   it('records the reservation before native code creates the stage, then binds its identity', async () => {
     const { installer, native, records, values } = setup();
     native.prepareImmutableStageAsync.mockImplementationOnce(async (targetPath: string, operationId: string) => {
-      // The journal entry must already exist when native code creates the private stage.
+
       expect(JSON.parse(values.get(RESERVATIONS_KEY)!)).toEqual([expect.objectContaining({ operationId, state: 'reserved', stagedIdentity: null })]);
       return {
         stagedPath: `${targetPath.slice(0, targetPath.lastIndexOf('/') + 1)}.mindwtr-install-${operationId}.candidate/stage`,

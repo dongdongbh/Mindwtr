@@ -21,13 +21,13 @@ describe('quick-add', () => {
 
     it('trims a trailing hyphen or dash before a detected date, and nothing between } and the dashes', () => {
         const now = new Date('2025-01-01T10:00:00Z');
-        // Each separator on its own, before a date the parser reads out of the prose.
+
         for (const sep of [' - ', ' – ', ' — ', ' -- ', '- ']) {
             const result = parseQuickAdd(`Pay rent${sep}tomorrow`, undefined, now);
             expect(result.detectedDate?.titleWithoutDate).toBe('Pay rent');
         }
-        // If the class ever became `}-–` (a range), every character between `}`
-        // and `–` in code-point order, `~` among them, would be trimmed as well.
+
+
         expect(parseQuickAdd('Fix bug ~ tomorrow', undefined, now).detectedDate?.titleWithoutDate).toBe('Fix bug ~');
         expect(parseQuickAdd('Fix bug } tomorrow', undefined, now).detectedDate?.titleWithoutDate).toBe('Fix bug');
     });
@@ -55,13 +55,12 @@ describe('quick-add', () => {
 
     it('only opens a context or tag at a word start (#1087)', () => {
         const now = new Date('2026-08-27T10:00:00Z');
-        // A marker mid-word belongs to the word: an address, a URL fragment.
+
         const url = parseQuickAdd('Read https://example.com/docs#install', undefined, now);
         expect(url.title).toBe('Read https://example.com/docs#install');
         expect(url.props.tags ?? []).toEqual([]);
 
-        // A real token still parses when it starts a word, including alongside
-        // an address in the same line.
+
         const mixed = parseQuickAdd('Email bob@example.com @phone #followup', undefined, now);
         expect(mixed.title).toBe('Email bob@example.com');
         expect(mixed.props.contexts).toEqual(['@phone']);
@@ -231,8 +230,7 @@ describe('quick-add', () => {
         expect(afterNote.props.priority).toBe('high');
     });
 
-    // Guard for both quick-add boundary regexes: without `priority:` in them a
-    // preceding /link: (or /note:, /due:) value swallows the whole token.
+
     it('ends a preceding /link: value at the priority command', () => {
         const result = parseQuickAdd('Call plumber /link:https://example.com /priority:high');
 
@@ -434,7 +432,7 @@ describe('quick-add', () => {
             ['+02:00', '2026-09-27T13:00:00.000Z'],
             ['+05:30', '2026-09-27T09:30:00.000Z'],
             ['-0400', '2026-09-27T19:00:00.000Z'],
-            // Preserve Chrono's existing acceptance rather than adding offset validation.
+
             ['+02:99', '2026-09-27T11:21:00.000Z'],
         ])('keeps an accepted UTC offset %s before a project', (offset, reviewAt) => {
             for (const suffix of ['', ' +Project']) {
@@ -682,12 +680,7 @@ describe('quick-add', () => {
         expect(result.title).toBe('Call mom tomorrow');
     });
 
-    // #742 (2026-07-16 comment): naturalLanguageDates governs BARE phrase
-    // detection only. Matrix: {toggle on, toggle off} x {preserveText on,
-    // off} x {bare NL phrase, explicit /due:NL-value, @context + #tag, plain
-    // title}.
-    // Ambiguous slash dates follow the active date-format setting: `/due:10/8`
-    // is August 10 under d/m/y, October 8 under m/d/y (#1006).
+
     describe('slash dates follow the date format setting (#1006)', () => {
         afterEach(() => {
             configureDateFormatting({});
@@ -722,10 +715,7 @@ describe('quick-add', () => {
         });
     });
 
-    // #1059: quick-add's natural-language date parsing uses chrono-node's
-    // locale parsers for the app languages chrono supports, keyed off the
-    // active app language, always falling back to the English parser so an
-    // English phrase still works no matter the UI language.
+
     describe('locale-aware natural language dates (#1059)', () => {
         afterEach(() => {
             configureDateFormatting({});
@@ -755,9 +745,7 @@ describe('quick-add', () => {
             expect(result.detectedDate?.titleWithoutDate).toBe('Llamar al dentista');
         });
 
-        // The es/fr/pt/it chrono parsers leave the preposition and article that
-        // introduce a date out of the match, so the cleaned title used to keep a
-        // dangling "el"/"le"/"no dia"/"il".
+
         it('drops the date-introducing words the Romance parsers exclude', () => {
             const now = new Date('2026-08-04T10:00:00');
             const cases: Array<{ language: 'es' | 'fr' | 'pt' | 'it'; input: string; title: string }> = [
@@ -818,8 +806,7 @@ describe('quick-add', () => {
             expect(result.detectedDate).toBeUndefined();
         });
 
-        // Unlike fr, chrono's Italian parser DOES match a bare trailing month
-        // name, so this exercises the localized bare-month skip itself.
+
         it('skips a bare Italian month name the locale parser matches', () => {
             configureDateFormatting({ language: 'it' });
             const now = new Date('2026-08-04T10:00:00');
@@ -828,9 +815,7 @@ describe('quick-add', () => {
             expect(result.detectedDate).toBeUndefined();
         });
 
-        // Russian inflects months inside dates ("января", genitive) differently
-        // from the standalone form ("январь") the locale table lists first —
-        // chrono.ru matches the inflected form, so the skip must cover it too.
+
         it('skips inflected Russian bare month names', () => {
             configureDateFormatting({ language: 'ru' });
             const now = new Date('2026-08-04T10:00:00');
@@ -882,10 +867,7 @@ describe('quick-add', () => {
         });
     });
 
-    // A purely numeric date carries no locale signal, so the date-format
-    // setting decides it in every language, not the locale parser's own
-    // convention (#1006 x #1059) — chrono's locale bundles ship one numeric
-    // order each (day-first for de/es/fr/pt, month-first for it/ja).
+
     describe('locale numeric dates follow the date format setting', () => {
         afterEach(() => {
             configureDateFormatting({});
@@ -905,8 +887,7 @@ describe('quick-add', () => {
             expect(parseQuickAdd('Payer le loyer 10/8', undefined, now).detectedDate?.date).toContain('2026-08-10');
         });
 
-        // The English instances resolve these, but the title cleanup still
-        // belongs to the active language.
+
         it('still drops the date-introducing word ahead of a numeric date', () => {
             const now = new Date('2026-08-04T10:00:00');
             const cases: Array<{ language: 'es' | 'fr' | 'pt' | 'it'; input: string; title: string }> = [
@@ -982,8 +963,8 @@ describe('quick-add', () => {
 
             expect(result.title).toBe('Register for the race next week');
             expect(result.detectedDate).toBeDefined();
-            // Preserve mode applies the date but never strips the text: the
-            // consumer-facing titleWithoutDate is the verbatim title.
+
+
             expect(result.detectedDate?.titleWithoutDate).toBe('Register for the race next week');
         });
 
@@ -1301,8 +1282,8 @@ describe('quick-add', () => {
     });
 
     it('accepts a closing-glyph opener after the marker (#1094 macOS smart quotes)', () => {
-        // macOS smart punctuation sees the marker character before the quote and
-        // substitutes the CLOSING glyph for both quotes: %"Jim" becomes %”Jim”.
+
+
         const now = new Date('2026-08-27T10:00:00Z');
         for (const input of ['Do something %”my neighbor”', 'Do something %”my neighbor"']) {
             const result = parseQuickAdd(input, undefined, now);
@@ -1451,8 +1432,7 @@ describe('quick-add', () => {
         const input = 'Call mom @phone #family /due:tomorrow';
         const result = parseQuickAdd(input, undefined, now, undefined, { preserveText: true });
 
-        // Was 'Call mom @phone #family /due:tomorrow' until a reporter asked why
-        // '/next' stayed in the title of the task it had already set to Next.
+
         expect(result.title).toBe('Call mom');
         expect(result.props.contexts).toEqual(['@phone']);
         expect(result.props.tags).toEqual(['#family']);
@@ -1460,11 +1440,8 @@ describe('quick-add', () => {
     });
 
     it('leaves a pasted URL untouched while a trailing date still applies', () => {
-        // The URL-integrity guarantee of preserve mode is the verbatim title;
-        // a trailing date phrase outside the URL still becomes the due date
-        // (same stance as shortcut captures, which resolve relative dates at
-        // capture time). Consumers that must never infer dates pass
-        // naturalLanguageDates: false.
+
+
         const now = new Date('2025-01-01T10:00:00Z');
         const input = 'Read https://en.wikipedia.org/wiki/Foo_(bar) tomorrow';
         const result = parseQuickAdd(input, undefined, now, undefined, { preserveText: true });
@@ -1509,8 +1486,8 @@ describe('quick-add', () => {
         });
 
         it('leaves a slash-prefixed path inside a URL alone', () => {
-            // Only whole tokens count: a substring match would cut the path out
-            // of the link now that stripping is unconditional.
+
+
             const result = parseQuickAdd(
                 'Read https://example.com/next and https://example.com/area:5',
                 undefined,
@@ -1548,7 +1525,7 @@ describe('quick-add', () => {
         expect(stripped.title).toBe('Submit report');
         expect(stripped.props.dueDate).toBeTruthy();
 
-        // /due: is explicit syntax, so preserve mode has nothing ambiguous to keep.
+
         const preserved = parseQuickAddDateCommands('Submit report /due:tomorrow', now, { preserveText: true });
         expect(preserved.title).toBe('Submit report');
         expect(preserved.props.dueDate).toBeTruthy();
@@ -1740,9 +1717,7 @@ describe('quick-add', () => {
             expect(options.knownPeople).toEqual([]);
         });
 
-        // The regression that let the capture surfaces drift: every field in the
-        // bag is optional, so a surface that dropped knownPeople still compiled
-        // and only showed up as `%Jim Smith` capturing as `%Jim`.
+
         it('resolves a multi-word known person, which a bag missing knownPeople cannot', () => {
             const source = { tasks: [], people: [person('Jim Smith')] };
             const now = new Date('2026-07-11T10:00:00Z');

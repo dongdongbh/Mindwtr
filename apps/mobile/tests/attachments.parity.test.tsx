@@ -1,25 +1,6 @@
-/**
- * React Native's task-editor attachments (components/task-edit/use-task-edit-attachments.ts)
- * and project attachments (components/projects-screen/use-project-attachments.ts), replayed
- * against the frozen parity fixture (packages/core/src/attachments-parity.fixtures.json)
- * that core's attachment-editor-model and the native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture, commit
- * every other change first, then run
- *   MINDWTR_CAPTURE_ATTACHMENTS=1 MINDWTR_CAPTURE_ATTACHMENTS_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run tests/attachments.parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds nothing but
- * HEAD's code and this harness with its fixture. To recapture only the scenarios a
- * deliberate RN change affects (an RN bug fix), also set
- *   MINDWTR_CAPTURE_ATTACHMENTS_SCENARIOS='<name>|<name>' MINDWTR_CAPTURE_ATTACHMENTS_REASON='<why>'
- * The other scenarios keep their frozen observations, and `provenance.recaptured` records
- * the commit, the reason and the names.
- *
- * Each scenario mounts the real hook with react-test-renderer under a fake Date and English
- * strings, then runs its steps (the hook's handlers, as the editor's and the project
- * screen's buttons call them). Each step records, in order, what the hook did: alerts,
- * pickers opened, files persisted, downloads asked for, links and files opened, store and
- * draft writes and log lines; then the draft (or the project) and the screen state.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -50,7 +31,7 @@ type Scenario = {
   name: string;
   surface: 'task' | 'project';
   attachments: Attachment[];
-  /** The stored task's (or project's) attachments when they differ from the draft. */
+
   stored?: Attachment[];
   projectStatus?: Project['status'];
   steps: Step[];
@@ -171,7 +152,7 @@ const file = (id: string, fields: Partial<Attachment> = {}): Attachment => ({
 const link = (id: string, uri: string, title = uri): Attachment => ({
   id, kind: 'link', title, uri, createdAt: CREATED, updatedAt: CREATED,
 });
-// A synced file whose bytes are not on this device yet: Download fetches them.
+
 const remote = (id: string, fields: Partial<Attachment> = {}): Attachment => file(id, {
   uri: '', localStatus: 'missing', cloudKey: `attachments/${id}.pdf`, fileHash: 'a'.repeat(64), contentRev: 1, ...fields,
 });

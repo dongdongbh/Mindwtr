@@ -228,7 +228,7 @@ class WidgetCaptureStatusTest {
     session.awaitPermission()
     val host = controller(intent(41)).setup()
     host.newIntent(Intent(context, QuickCaptureActivity::class.java))
-    // ActivityResultRegistry can dispatch before Android has called onStop.
+
     host.get().onMicrophonePermissionResult(true)
     assertEquals(0, recordings)
     assertEquals(QuickCaptureAudioSession.State.PERMISSION, session.snapshot.state)

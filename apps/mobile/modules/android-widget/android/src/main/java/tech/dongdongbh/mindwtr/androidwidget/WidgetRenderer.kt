@@ -13,7 +13,7 @@ import android.view.View
 import android.widget.RemoteViews
 import java.util.IdentityHashMap
 
-/** Draws every widget kind from the payload in [WidgetPayloadStore]. */
+
 object WidgetRenderer {
   data class RefreshResult(
     val legacyWidgetCount: Int = 0,
@@ -40,9 +40,8 @@ object WidgetRenderer {
   const val EXTRA_KIND = "tech.dongdongbh.mindwtr.androidwidget.kind"
   private const val REQUEST_CAPTURE = 4612
   private const val REQUEST_ROW = 4613
-  // Every widget needs its own chooser PendingIntent (extras alone do not make
-  // two of them differ), so the request code carries the widget id, offset far
-  // enough that it can never land on one of the fixed codes above.
+
+
   private const val REQUEST_CHOOSER_BASE = 1 shl 20
   private const val REQUEST_NAVIGATION_BASE = 2 shl 20
   private const val REQUEST_HOME_BASE = 3 shl 20
@@ -91,10 +90,7 @@ object WidgetRenderer {
     return RefreshResult(legacyWidgetCount, compactWidgetCount)
   }
 
-  /**
-   * Modern widgets receive rows and chrome together without a service-backed
-   * adapter. Only pre-31 hosts need the legacy collection invalidation path.
-   */
+
   internal fun refreshTaskCollections(
     applicationPackage: String,
     sdkInt: Int,
@@ -112,11 +108,7 @@ object WidgetRenderer {
     return widgetCount
   }
 
-  /**
-   * Keeps the row PendingIntent template intact. On API 31+ the partial update
-   * carries direct rows: Android 16 can convert legacy notify calls into full
-   * asynchronous updates, so using that API here is not a row-only operation.
-   */
+
   fun refreshTaskCollections(context: Context): Int {
     val manager = AppWidgetManager.getInstance(context.applicationContext) ?: return 0
     val rawPayload = WidgetPayloadStore.read(context)
@@ -140,11 +132,11 @@ object WidgetRenderer {
   }
 
   fun render(context: Context, manager: AppWidgetManager, ids: IntArray, kind: WidgetKind): List<CollectionStats> {
-    // Commit check-offs whose undo window elapsed while nothing else ran.
+
     if (kind.hasTaskList) CheckoffStore.sweep(context)
     val rawPayload = WidgetPayloadStore.read(context)
-    // Prune against the unfiltered source, then hide only committed ids in the
-    // local presentation. The queue and app-published snapshot stay intact.
+
+
     if (kind.hasTaskList) CheckoffStore.prune(context, rawPayload.allTaskIds())
     val payload = if (kind.hasTaskList) {
       rawPayload.displaySnapshot(CheckoffStore.committed(context)).payload
@@ -208,7 +200,7 @@ object WidgetRenderer {
   internal fun captureIntent(context: Context, appWidgetId: Int, kind: WidgetKind): Intent =
     Intent(context, QuickCaptureActivity::class.java).apply {
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      // Extras do not distinguish PendingIntents; each widget must own its capture route.
+
       data = Uri.parse("mindwtr-widget://capture/${kind.name}/$appWidgetId")
       putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
       putExtra(EXTRA_KIND, kind.name)
@@ -221,8 +213,8 @@ object WidgetRenderer {
     payload: WidgetPayload,
     palette: WidgetPayload.Palette?,
   ): CollectionStats? {
-    // The simple style prefers Focus, then automatically shows Next Actions
-    // when Focus has no rows. It stays chooser-free like v1.2.8.
+
+
     bindCompactChrome(context, views, appWidgetId, payload)
     views.setTextViewText(R.id.mindwtr_widget_capture_label, payload.quickCapture.title)
     val stats = bindCollection(context, views, appWidgetId, WidgetKind.COMPACT, payload)
@@ -245,16 +237,14 @@ object WidgetRenderer {
     payload: WidgetPayload,
     palette: WidgetPayload.Palette?,
   ): CollectionStats? {
-    // Header: Focus shows the date plus the Inbox chip; any other list shows its
-    // full title with a small count, so the header never reads as two lists. A
-    // list picked in the chooser that the app has not published yet has no rows
-    // to count, so it shows its bare title until the next publish.
+
+
     val listId = payload.resolvedListId(WidgetListStore.displayListId(context, appWidgetId))
     bindTasksChrome(context, views, appWidgetId, payload, listId)
 
     val stats = bindCollection(context, views, appWidgetId, WidgetKind.TASKS, payload)
     hideSurfacesIfTransparent(context, views, appWidgetId, WidgetKind.TASKS)
-    // Match the body surface; the divider and capture plus carry the accent.
+
     palette?.let {
       val theme = tasksTheme(it)
       views.setInt(R.id.mindwtr_widget_surface, "setColorFilter", it.background)
@@ -269,14 +259,14 @@ object WidgetRenderer {
     return stats
   }
 
-  /** The full-panel layers a Transparent background drops; rows, text, icons and the capture button stay. */
+
   internal fun backgroundSurfaces(kind: WidgetKind): List<Int> = when (kind) {
     WidgetKind.TASKS -> listOf(R.id.mindwtr_widget_surface, R.id.mindwtr_widget_band)
     WidgetKind.COMPACT -> listOf(R.id.mindwtr_widget_surface)
     WidgetKind.QUICK_CAPTURE -> emptyList()
   }
 
-  /** A transparent widget's own text colors, else the app theme's (null = the launcher's day/night resources). */
+
   internal fun palette(context: Context, appWidgetId: Int, payload: WidgetPayload): WidgetPayload.Palette? =
     WidgetListStore.background(context, appWidgetId).textPalette ?: payload.resolvedPalette(context)
 
@@ -381,11 +371,8 @@ object WidgetRenderer {
       null
     }
     views.setEmptyView(R.id.mindwtr_widget_list, R.id.mindwtr_widget_empty)
-    // Collection rows deliver clicks through a fill-in intent, which the
-    // platform can only merge into a mutable template. The template fixes the
-    // component (the invisible WidgetTapActivity) and leaves the data unset,
-    // so a row's fill-in can add exactly one thing: the task's open link or its
-    // check-off URI, both validated before anything acts on them.
+
+
     val rowTemplate = Intent(context, WidgetTapActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     val mutable = PendingIntent.FLAG_UPDATE_CURRENT or
       (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
@@ -396,11 +383,11 @@ object WidgetRenderer {
     return stats
   }
 
-  /** Focus alone owns the curated hidden-row count; chooser lists keep their existing count title. */
+
   internal fun taskSubtitle(payload: WidgetPayload, isFocus: Boolean): String? =
     payload.subtitle.takeIf { isFocus }
 
-  /** Next Actions carries its translated payload title; normal Focus keeps the compact header. */
+
   internal fun compactHeaderTitle(payload: WidgetPayload): String {
     val listId = payload.compactListId()
     return if (listId == WidgetListStore.DEFAULT_LIST) payload.headerTitle else payload.listFor(listId).title
@@ -532,11 +519,7 @@ object WidgetRenderer {
 
   private fun immutableFlags(): Int = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 
-  /**
-   * Explicit VIEW intent to the app's MainActivity, same shape as the tile and notification. A `mindwtr:` link (the payload's,
-   * a shortcut's) takes the app's link scheme, mindwtr_link_scheme: RN's `mindwtr`, so RN opens the link as it is; an app that
-   * links on another scheme (the native development builds) overrides the resource.
-   */
+
   fun appIntent(context: Context, uri: String?): Intent =
     Intent(Intent.ACTION_VIEW).apply {
       if (uri != null) data = Uri.parse(linkInScheme(uri, context.getString(R.string.mindwtr_link_scheme)))
@@ -545,7 +528,7 @@ object WidgetRenderer {
       addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
     }
 
-  /** [uri] with [scheme] in place of `mindwtr`, when it is a `mindwtr:` link; any other URI as it is. */
+
   fun linkInScheme(uri: String, scheme: String): String =
     if (uri.startsWith("mindwtr:")) scheme + uri.substring("mindwtr".length) else uri
 }

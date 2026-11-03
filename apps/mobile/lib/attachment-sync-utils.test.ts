@@ -26,10 +26,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   },
 }));
 
-// Static, not a per-test dynamic import: attachment-sync-utils.ts pulls in a heavy
-// module graph, and paying that transform cost inside `it()` (as a dynamic import)
-// counted against the per-test timeout and made this file flaky under a parallel
-// full-suite run even though it passed reliably alone.
+
 // eslint-disable-next-line import/first
 import {
   attachmentNeedsManagedLocalCopy,
@@ -207,9 +204,7 @@ describe('getLocalAttachmentPresence', () => {
   });
 });
 
-// #1057: attachment downloads must be write-temp-then-rename so a cut connection
-// can never leave a truncated file at the real target path that a later sync would
-// mistake for new content.
+
 describe('writeBytesSafely', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -233,8 +228,7 @@ describe('writeBytesSafely', () => {
     await expect(writeBytesSafely('file://attachments/a1.pdf', new Uint8Array([1, 2, 3])))
       .rejects.toThrow(writeError);
 
-    // Only the temp write was attempted — the fallback direct-write-to-target
-    // branch (used only when the *move* fails, not the initial write) never runs.
+
     expect(fileSystemMock.writeAsStringAsync).toHaveBeenCalledTimes(1);
     expect(fileSystemMock.writeAsStringAsync.mock.calls[0]?.[0]).not.toBe('file://attachments/a1.pdf');
     expect(fileSystemMock.moveAsync).not.toHaveBeenCalled();
@@ -278,9 +272,7 @@ describe('deleteManagedAttachmentFile', () => {
   });
 });
 
-// SEC-07 follow-up: the upload gate was a bare `startsWith(managedDir)`, so a uri
-// like `<managedDir>/../../databases/mindwtr.db` passed it and the next sync
-// uploaded a sandbox file to the remote.
+
 describe('canUploadAttachmentFrom', () => {
   it('accepts only the id-named file directly inside the managed directory', () => {
     expect(canUploadAttachmentFrom('file:///documents/attachments/4b28a96e.m4a')).toBe(true);

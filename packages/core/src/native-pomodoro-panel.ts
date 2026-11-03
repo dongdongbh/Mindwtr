@@ -50,11 +50,11 @@ function buildPanel(input: {
     if (input.raw === null) return { kind: 'uninitialized' as const, ...common };
     const state = decodeNativePomodoroSession(input.raw), session = state.session;
     const needsReconcile = session.timerState.isRunning && Date.parse(session.phaseEndsAt!) <= input.nowMs;
-    // Completion counters and the next phase belong to the durable transition, not a display tick.
+
     const resolved = resolvePomodoroSession(session, input.nowMs, autoStart, day);
     const remaining = needsReconcile ? 0 : resolved.timerState.remainingSeconds;
     const { linkTaskEnabled } = common;
-    // RN's card links only an actionable task (e4d71e032): one done, archived or filed as Reference unlinks.
+
     const selected = linkTaskEnabled && session.selectedTaskId
         ? input.liveTasks.find((task) => task.id === session.selectedTaskId && isTaskActionable(task)) : undefined;
     const lastEvent = input.lastEvent;
@@ -78,7 +78,7 @@ function buildPanel(input: {
         presets: getPomodoroPresetOptions(options?.customDurations).map((preset) => ({ ...preset,
             active: preset.focusMinutes === session.durations.focusMinutes && preset.breakMinutes === session.durations.breakMinutes })),
         selectedTask: selected ? { id: selected.id, title: selected.title, taskRevision: taskRevisionOf(selected),
-            // A linked task is never Reference now; the field stays for the iOS reader.
+
             completionSource: 'ordinary' as const } : null,
         selectionMissing: linkTaskEnabled && session.selectedTaskId !== undefined && selected === undefined,
         event: event === 'focus-finished' ? tr('pomodoro.focusComplete', 'Focus session complete. Take a short break.')
@@ -106,7 +106,7 @@ function buildPanel(input: {
 export function buildNativePomodoroPanel(input: Parameters<typeof buildPanel>[0]) {
     const panel = buildPanel(input);
     if (panel.kind === 'ready') return panel;
-    // RN's card while its session loads (pomodoro-panel.tsx isHydrating): the default timer, its controls off, a Loading row.
+
     const defaults = buildPanel({ ...input, lastEvent: null, raw: JSON.stringify({ version: 1,
         sessionID: '00000000-0000-4000-8000-000000000000', generation: 0, session: { durations: DEFAULT_POMODORO_DURATIONS,
             timerState: createPomodoroState(DEFAULT_POMODORO_DURATIONS), sessionHistory: { totalCompletedFocusSessions: 0,

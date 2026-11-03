@@ -101,7 +101,7 @@ describe('refreshExactAlarmPermission', () => {
     await expect(refreshExactAlarmPermission()).resolves.toBe(true);
     expect(mockReschedule).toHaveBeenCalledTimes(1);
 
-    // Two settings screens can both refresh on the same foreground event.
+
     await refreshExactAlarmPermission();
     await refreshExactAlarmPermission();
     expect(mockReschedule).toHaveBeenCalledTimes(1);

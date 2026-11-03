@@ -63,29 +63,28 @@ const TIMELINE_VIEW_STATE_STORAGE_KEY = 'mindwtr:view:timeline:v1';
 const ZOOM_LEVELS = ['day', 'week', 'month'] as const;
 type TimelineZoom = (typeof ZOOM_LEVELS)[number];
 
-/** Column width in pixels for one calendar day at each zoom level. */
+
 const DAY_WIDTH: Record<TimelineZoom, number> = { day: 32, week: 12, month: 4 };
-/** Floor for a span bar, so a one-day span is still a bar and not a hairline. */
+
 const MIN_BAR_WIDTH = 10;
-/** A task dated on one side only is a moment, not a span: a small dot on its day. */
+
 const MARKER_WIDTH = 12;
 const MARKER_HEIGHT = 12;
 const ROW_HEIGHT = 30;
 const BAR_HEIGHT = 10;
-/** The project bar is the thicker, solid one, so it reads as the parent of the thin tinted task bars (#1111). */
+
 const PROJECT_BAR_HEIGHT = 14;
 const AXIS_HEIGHT = 44;
-/** The sticky name column: every row's title lives here, not floating on the canvas. */
+
 const GUTTER_WIDTH = 224;
-/** Breathing room right of the last column when the track scrolls. */
+
 const TRACK_TAIL = 24;
 const MIN_MAJOR_LABEL_GAP = 68;
 const MIN_MINOR_LABEL_GAP = 26;
-// ponytail: a fixed 400-day window instead of paging. Tasks dated entirely
-// outside it are not drawn (the header count reports what is drawn); add
-// paging only if real stores turn out to span more than that.
+
+
 const MAX_SPAN_DAYS = 400;
-/** Below this, rendering every row outright is cheaper than measuring them. */
+
 const VIRTUALIZE_ABOVE_ROWS = 100;
 
 const TIMELINE_STATUSES = ['inbox', 'next', 'waiting', 'someday', 'done'] as const;
@@ -116,11 +115,7 @@ function sanitizeTimelineViewState(
     };
 }
 
-/**
- * "255, 0, 0" from a row color. Area and project colors are hex from the
- * tailwind-500 family (#1085 allows a custom one); an 8-digit #RRGGBBAA is
- * read as its opaque prefix.
- */
+
 function hexChannels(hex: string): string | null {
     const value = hex.trim().replace('#', '');
     const full = value.length === 3
@@ -131,12 +126,7 @@ function hexChannels(hex: string): string | null {
     return `${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}`;
 }
 
-/**
- * A task bar is a child of the project bar above it, so it wears the same color
- * at a calmer strength: a translucent fill inside a thin border of that color.
- * Both stay visible on the light card and on the dark one, and every project
- * keeps its own hue. The accent falls back to the primary token.
- */
+
 export function taskBarTint(color: string | undefined): { fill: string; border: string } {
     const channels = color ? hexChannels(color) : null;
     return channels
@@ -144,7 +134,7 @@ export function taskBarTint(color: string | undefined): { fill: string; border: 
         : { fill: 'hsl(var(--primary) / 0.25)', border: 'hsl(var(--primary) / 0.7)' };
 }
 
-/** "Start date: 3 May. Due date: 9 May" — the spoken half of a bar's label. */
+
 function describeDates(
     t: (key: string) => string,
     start: string | undefined,
@@ -168,7 +158,7 @@ function describeDates(
     ].filter((part): part is string => Boolean(part)).join('. ');
 }
 
-/** The task's dates reduced to local calendar days — the same day the calendar files it under. */
+
 function taskDays(task: Task): { start: Date | null; due: Date | null } {
     const start = safeParseDate(task.startTime);
     const due = safeParseDate(task.dueDate);
@@ -178,19 +168,15 @@ function taskDays(task: Task): { start: Date | null; due: Date | null } {
     };
 }
 
-/**
- * Column widths are minimums, not fixed sizes: a range that fits the pane
- * stretches to fill it (the calendar's content-fit grid), and only a range too
- * wide at the minimum scrolls. `viewportWidth` of 0 is the pre-measure paint.
- */
+
 export function resolveTimelineTrack(
     days: number,
     minDayWidth: number,
     viewportWidth: number,
 ): { dayWidth: number; trackWidth: number; fitted: boolean } {
     if (days <= 0) return { dayWidth: minDayWidth, trackWidth: 0, fitted: false };
-    // Fitted returns the measured width verbatim rather than days * dayWidth, so
-    // float division can never round the track past the pane and add a scrollbar.
+
+
     return viewportWidth > 0 && days * minDayWidth <= viewportWidth
         ? { dayWidth: viewportWidth / days, trackWidth: viewportWidth, fitted: true }
         : { dayWidth: minDayWidth, trackWidth: days * minDayWidth, fitted: false };
@@ -198,11 +184,7 @@ export function resolveTimelineTrack(
 
 type AxisTick = { left: number; label: string };
 
-/**
- * Drop every label that would land within `gap` of the one before it. A tick at
- * the very left edge is the partial leading period, so a real boundary that
- * collides with it wins the slot instead of being the one dropped.
- */
+
 function thinTicks(ticks: AxisTick[], gap: number): AxisTick[] {
     const kept: AxisTick[] = [];
     for (const tick of ticks) {
@@ -223,7 +205,7 @@ type TimelineRow =
         label: string;
         color: string | undefined;
         project: Project | undefined;
-        /** Day indexes of the project's own bar, absent when it has no dates. */
+
         span: { lo: number; hi: number } | undefined;
     }
     | { kind: 'task'; key: string; task: Task; color: string | undefined; lo: number; hi: number; single: boolean };
@@ -329,7 +311,7 @@ export function TimelineView() {
             const completed = isTaskCompleted(task);
             if (!statuses.includes(completed ? 'done' : task.status as TimelineStatus)) return false;
             if (!safeParseDate(task.startTime) && !safeParseDate(task.dueDate)) return false;
-            // History keeps parked-project context without reactivating its work.
+
             return completed
                 ? taskMatchesAreaFilterSelection(task, resolvedAreaFilter, projectById, areaById)
                 : isTaskVisibleInArea(task, visibility);
@@ -367,7 +349,7 @@ export function TimelineView() {
                 if (!max || day > max) max = day;
             }
         }
-        // A project deadline past its last dated task still has to fit on the axis.
+
         for (const span of projectSpans.values()) {
             for (const day of [span.start, span.due]) {
                 if (!day) continue;
@@ -387,13 +369,13 @@ export function TimelineView() {
             const to = requestedTo > max ? max : requestedTo;
             return { from, to, days: differenceInCalendarDays(to, from) + 1 };
         }
-        // Today is part of the axis whenever it fits, so the today line and the
-        // Today button are there even when every task is dated ahead.
+
+
         let from = min < today ? min : today;
         let to = max > today ? max : today;
         if (differenceInCalendarDays(to, from) > MAX_SPAN_DAYS) {
-            // Too wide: give up the padding to today first, then window the data
-            // itself around today when today is inside it.
+
+
             from = min;
             to = max;
             if (differenceInCalendarDays(to, from) > MAX_SPAN_DAYS) {
@@ -422,7 +404,7 @@ export function TimelineView() {
             const a = start ? dayIndex(start) : null;
             const b = due ? dayIndex(due) : null;
             const single = a === null || b === null;
-            // Reversed dates (due before start) still draw as the span they cover.
+
             const lo = Math.min(a ?? b!, b ?? a!);
             const hi = Math.max(a ?? b!, b ?? a!);
             if (hi < 0) {
@@ -446,8 +428,8 @@ export function TimelineView() {
             if (!projectId) continue;
             projectGroups.push({ project: projectById.get(projectId), rows: groupRows });
         }
-        // A dated project with no dated task still earns its row: the group
-        // header and its bar, with nothing under it.
+
+
         for (const projectId of projectSpans.keys()) {
             if (byProject.has(projectId)) continue;
             const project = projectById.get(projectId);
@@ -484,11 +466,11 @@ export function TimelineView() {
                     ? a.lo - b.lo || (safeParseDate(a.task.createdAt)?.getTime() ?? 0) - (safeParseDate(b.task.createdAt)?.getTime() ?? 0)
                     : 0);
             }
-            // Project first, then its area — the same helper the bars use, so a
-            // never-recolored project (placeholder grey) shows its area color.
+
+
             const groupColor = group.project ? getProjectAccentColor(group.project, areaById) : undefined;
-            // The group's extents, measured once here: the render loop never
-            // walks a group's rows again.
+
+
             const projectSpan = group.project ? projectSpans.get(group.project.id) : undefined;
             let span: { lo: number; hi: number } | undefined;
             if (projectSpan) {
@@ -499,8 +481,8 @@ export function TimelineView() {
                     if (row.lo < taskLo) taskLo = row.lo;
                     if (row.hi > taskHi) taskHi = row.hi;
                 }
-                // One project date given, the other borrowed from the work under
-                // it — and from the given date itself when there is no work.
+
+
                 const from = projectSpan.start
                     ? dayIndex(projectSpan.start)
                     : Number.isFinite(taskLo) ? taskLo : dayIndex(projectSpan.due!);
@@ -509,15 +491,13 @@ export function TimelineView() {
                     : Number.isFinite(taskHi) ? taskHi : from;
                 const lo = Math.min(from, to);
                 const hi = Math.max(from, to);
-                // Clamped, not dropped: a bar reaching out of the window still
-                // shows the part of the project that falls inside it.
+
+
                 if (hi >= 0 && lo <= range.days - 1) {
                     span = { lo: Math.max(0, lo), hi: Math.min(range.days - 1, hi) };
                 } else if (group.rows.length === 0) {
-                    // Whole project outside the window and every task row under
-                    // it omitted: a header with a dot, a title and a blank track
-                    // tells the reader nothing. Count it in the same notice the
-                    // omitted tasks go to, so Earlier/Later brings it back.
+
+
                     if (hi < 0) earlierOmitted += 1;
                     else laterOmitted += 1;
                     continue;
@@ -565,9 +545,7 @@ export function TimelineView() {
     const todayVisible = range ? todayIndex >= 0 && todayIndex < range.days : false;
     const todayLeft = todayIndex * dayWidth;
 
-    // Two tiers so no label ever has to share a slot: the top one carries the
-    // coarser unit (the year once the columns are months), the bottom one the
-    // minor ticks for the zoom. Both are thinned to a minimum pixel spacing.
+
     const axis = React.useMemo(() => {
         if (!range) return { major: [] as AxisTick[], minor: [] as AxisTick[], monthLines: [] as number[], minorLines: [] as number[] };
         const majorCandidates: AxisTick[] = [];
@@ -597,10 +575,8 @@ export function TimelineView() {
                     left,
                     label: (zoom === 'month' ? axisDateFormatters.month : axisDateFormatters.day).format(day),
                 });
-                // Minor gridlines are real elements, never a repeating gradient:
-                // a gradient with a fractional period is resampled on scaled
-                // displays into soft vertical bands that testers read as
-                // shading (#1111). Month starts already have their own line.
+
+
                 if (zoom !== 'month' && index > 0 && !isMonthStart) minorLines.push(left);
             }
         }
@@ -620,8 +596,7 @@ export function TimelineView() {
         overscan: 12,
     });
 
-    // Same shape as ProjectsView's sidebar measurement: observer where there is
-    // one, window resize otherwise.
+
     React.useEffect(() => {
         const scroller = scrollRef.current;
         if (!scroller) return;
@@ -662,9 +637,7 @@ export function TimelineView() {
         scroller.scrollLeft = Math.max(0, GUTTER_WIDTH + todayLeft - scroller.clientWidth / 2);
     }, [todayLeft, todayVisible]);
 
-    // Open on today and re-center whenever the zoom changes, once the pane is
-    // measured (#1111). Data edits never re-center: a user who scrolled away
-    // stays where they are.
+
     const centeredZoomRef = React.useRef<TimelineZoom | null>(null);
     React.useLayoutEffect(() => {
         if (viewportWidth === 0 || centeredZoomRef.current === zoom) return;
@@ -767,15 +740,15 @@ export function TimelineView() {
             const groupDates = project ? describeDates(t, project.startDate, project.dueDate) : '';
             const groupActionLabel = groupDates ? `${row.label}. ${groupDates}` : row.label;
             const gutterClassName = 'sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-border/60 bg-muted pl-3 pr-2 text-left text-xs font-semibold text-foreground';
-            // A project with no color keeps the grey default dot, as in Focus and Next actions (#1422).
+
             const dot = (
                 <span
                     className="h-2 w-2 shrink-0 rounded-full"
                     style={{ backgroundColor: row.color || (project ? DEFAULT_AREA_COLOR : 'hsl(var(--primary))') }}
                 />
             );
-            // The first row is always a group, so any later group opens a new
-            // block: it gets a full-strength rule across gutter and track.
+
+
             const showSeparator = index > 0;
             return (
                 <div
@@ -789,8 +762,8 @@ export function TimelineView() {
                     <div className={gutterClassName} style={{ width: GUTTER_WIDTH }}>
                     {handle}
                     {project ? (
-                        // The project name is the row's click target, the way a task
-                        // row's name is: the rail below is a 10px secondary one.
+
+
                         <button
                             type="button"
                             data-testid="timeline-group"
@@ -844,8 +817,8 @@ export function TimelineView() {
                 </div>
             );
         }
-        // Keep each task's source dates intact for labels and ordering, but draw
-        // only the part that intersects the bounded axis.
+
+
         const project = row.task.projectId ? projectById.get(row.task.projectId) : undefined;
         const target: TimelineDateEditTarget = { kind: 'task', task: row.task, project };
         const displayedSpan = previewSpan(target) ?? row;
@@ -860,11 +833,11 @@ export function TimelineView() {
         const naturalLeft = row.single
             ? drawingLo * dayWidth + (dayWidth - MARKER_WIDTH) / 2
             : drawingLo * dayWidth;
-        // Centered markers and the minimum bar width can be wider than a day
-        // cell at month zoom. Shift them inward instead of widening the track.
+
+
         const left = Math.min(Math.max(0, naturalLeft), Math.max(0, trackWidth - width));
-        // The project bar keeps the full-strength area→project color; the work
-        // under it is drawn as a tint of the same one. Mini markers included.
+
+
         const tint = taskBarTint(row.color);
         const dateDescription = describeDates(t, row.task.startTime, row.task.dueDate);
         const status = isTaskCompleted(row.task) ? 'done' : row.task.status as TimelineStatus;
@@ -875,8 +848,8 @@ export function TimelineView() {
             : `${row.task.title}. ${label}`;
         return (
             <div className="group/timeline-row flex border-b border-border/40" style={{ height: ROW_HEIGHT }}>
-                {/* The name column is the row's primary click target; the bar is a
-                    secondary one, so a 14px dot never has to carry the interaction. */}
+                {
+                                                                                       }
                 <div
                     className="sticky left-0 z-20 flex shrink-0 items-center border-r border-border/60 bg-card pl-6 pr-3 group-hover/timeline-row:bg-muted"
                     style={{ width: GUTTER_WIDTH }}
@@ -909,8 +882,8 @@ export function TimelineView() {
                         title={row.task.title}
                         aria-hidden={editable ? undefined : true}
                         onClick={editable ? undefined : () => setOpenTaskId(row.task.id)}
-                        // No title on the bar: the sticky name column already
-                        // carries it, and the tooltip repeats it on hover.
+
+
                         className="group/timeline-bar absolute z-10 cursor-pointer rounded-full transition-[filter] hover:brightness-110"
                         style={{
                             left,
@@ -992,7 +965,7 @@ export function TimelineView() {
         } else if (pickedUp && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
             event.preventDefault();
             event.stopPropagation();
-            // Keyboard destinations come from logical rows, including unmounted ones.
+
             const targets = rows.flatMap((row, index) => {
                 const candidate = orderTargetForRow(row);
                 return candidate && timelineOrderScope(candidate) === timelineOrderScope(pickedUp)
@@ -1221,14 +1194,13 @@ export function TimelineView() {
                             </div>
                         )}
                         {hasRows && (
-                            // One surface, like the calendar and the board: the card hugs
-                            // its rows (no stretched empty canvas below the last one) and
-                            // only scrolls once they outgrow the viewport.
+
+
                             <div className="min-h-0 flex-1 pb-4">
                         <div className="flex max-h-full flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-                            {/* Focusable so the horizontal track can be scrolled with the
-                                arrow keys; without a tab stop the only way across the
-                                window was a pointer drag or the scrollbar. */}
+                            {
+
+                                                                              }
                             <div
                                 ref={scrollRef}
                                 data-testid="timeline-scroller"

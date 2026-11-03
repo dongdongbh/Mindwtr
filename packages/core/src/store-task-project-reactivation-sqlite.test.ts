@@ -137,7 +137,7 @@ const initialData = (): AppData => ({
     sections: [section()],
     areas: [],
     people: [],
-    // This fixture tests project reactivation, independently of completed-task age.
+
     settings: { deviceId: 'device-a', gtd: { autoArchiveDays: 0 } },
 });
 

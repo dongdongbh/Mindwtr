@@ -58,7 +58,7 @@ describe('native JSON, CSV and TaskNotes export', () => {
         } });
         expect(JSON.stringify(getInMemoryAppDataSnapshot())).toBe(before);
         expect(saveData).not.toHaveBeenCalled();
-        // A later edit cannot change a prepared file's bytes.
+
         useTaskStore.setState({ settings: { language: 'en' } });
         expect(result.ok && JSON.parse(result.value.content).settings.language).toBe('ar');
     });

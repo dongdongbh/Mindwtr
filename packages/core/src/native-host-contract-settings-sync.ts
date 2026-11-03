@@ -1,62 +1,6 @@
-/**
- * The native host contract for Settings › Sync (React Native's
- * `sync-settings-screen.tsx` in sync mode). Kept in its own file and spread into
- * createNativeHostContract. The rules are core's: the screen model
- * (sync-settings-model.ts), the transport actions (sync-settings-transport.ts) and
- * the encryption card (sync-encryption-card.ts), the same code React Native runs.
- *
- * A host binds its device through `NativeSyncSettingsHost` (createNativeHostContract's
- * `syncSettings` option): RN's key-value keys (sync-storage-keys.ts), RN's secret
- * store, the mobile sync service, and later the folder picker (File Sync), Dropbox
- * sign-in and the encryption transitions. Until a host passes them, the File Sync
- * folder, Dropbox and the encryption actions answer ACTION_FAILED, and the view
- * still shows the stored backend: which backends a build supports comes from
- * `platform` (as on React Native), never from which ports are bound.
- *
- * One visit is one screen, as on React Native: openSyncSettings reads the stored
- * configuration, closeSyncSettings drops what the visit staged (a backend chosen
- * but not proven). The view is read with getSyncSettings; while a command runs
- * (a sync, an encryption change), reads show its progress.
- *
- * Screen state the host keeps, reset on every visit: the text fields' drafts, and
- * whether the history, the settings sync options and the recovery snapshots are
- * open. A field's draft starts at the view's `value`, and takes the view's value
- * again whenever it changes (React Native's forms do this). The password and the
- * token never come back: the view shows `mask`, RN's dots, and a draft that was
- * not edited is sent as null ("keep the stored one"). Send the form's drafts to
- * getSyncSettings as `draft` so the form's checks follow the typed text.
- *
- * Toasts are React Native's, in order: each command answers the toasts shown
- * since the last answer (`toasts`), whichever action showed them.
- *
- * Replay rules. setSyncPreference is a synced-settings write with a request
- * receipt: target-state, so a replay writes nothing when the option already holds
- * the value. The other commands act on this device's sync configuration and must
- * never be written to disk, by the request journal or by durable receipts
- * (`NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS`): several carry a secret, which
- * must never reach disk outside the keystore, and the configuration commit is
- * itself crash-safe (the backend key is the activation flag, so a crash leaves the
- * old or the new proven configuration). They keep no request payload, only a
- * fingerprint of their input: a retry of a request still running joins it, a retry
- * of one that finished answers without running again, and the same UUID with other
- * input answers INVALID_INPUT. Each is also target-state or compare-and-set, so a
- * replay after a restart writes nothing wrong: a backend already proven is not
- * activated again, Off already stored writes nothing, a form's Save or Sync now
- * carries the view's `configRevision` and answers STALE_REVISION once the stored
- * configuration changed (its own commit included), an encryption submit needs its
- * flow open (a new visit has none), and Dropbox connect or disconnect does nothing
- * when the account is already in that state. Off answers SAVE_FAILED when the
- * device store refuses it, and the screen keeps showing the stored backend.
- * getSyncSettings's `draft.token` is a typed token too; it is a read.
- *
- * The URL field shows the URL as typed. Every other text that leaves the screen (the
- * status, the history, toasts, error answers, the error log) goes through the
- * transport's one redaction (`redactText`): no URL credentials and none of the
- * configured secrets, a short one as a whole word.
- *
- * Only functions read this module's imports from native-host-contract.ts, so the
- * import cycle between the two files is safe.
- */
+
+
+
 import { buildGettingStartedRow } from './data-settings-model';
 import { getDocsGuideUrl } from './docs-guidance';
 import { createDateFormatter } from './date';
@@ -139,62 +83,57 @@ import { formatActivationMissingAttachments } from './unreachable-attachments';
 
 type Translate = (key: string) => string;
 
-/** What a host binds for Settings › Sync. */
+
 export type NativeSyncSettingsHost = {
     platform: {
         os: 'android' | 'ios';
-        /** FOSS builds never offer Dropbox. */
+
         isFossBuild: boolean;
-        /** The build's Dropbox app key, or '' when none is configured. */
+
         dropboxAppKey: string;
-        /** iOS with CloudKit (React Native: `isCloudKitAvailable()`); false on Android. */
+
         cloudKitAvailable?: boolean;
     };
-    /** RN's key-value store (RKStorage on Android), with RN's keys. Durable when a write resolves. */
+
     storage: SyncSettingsTransportHost['storage'];
-    /** RN's secret store (the keystore), with RN's keys. */
+
     secrets: SyncSettingsTransportHost['secrets'];
-    /** The mobile sync service's performMobileSync (core's createMobileSyncService). */
+
     performSync: SyncSettingsTransportHost['performSync'];
-    /**
-     * The host shows the view's `missingFiles` question and sends `answerSyncMissingFiles`. Without it, a location missing
-     * attachment files is refused at once with RN's error toast (a question nobody can answer would hold the command).
-     */
+
+
     answersMissingFilesQuestion?: boolean;
     clearSyncConfigCache(): void;
-    /** Brings the background sync job in line with the stored backend. */
+
     reconcileBackgroundSync(): Promise<unknown>;
     rememberWebdavCapabilityProof(config: SyncSettingsWebDavFields): Promise<void>;
     encryption: {
-        /** Selected host capability: only unlock an existing saved WebDAV location. */
+
         unlockOnly?: boolean;
-        /** Selected capabilities; saved-webdav-or-local adds only local Enable and Disable. */
+
         mode?: 'saved-webdav-enable-unlock' | 'saved-webdav' | 'saved-webdav-or-local';
         getStatus(): Promise<SyncEncryptionStatus>;
         getIncompleteTransition(): Promise<SyncEncryptionTransitionKind | null>;
-        /** True while no durable sync backend exists (transitions then run local-only). */
+
         isBackendPending(): Promise<boolean>;
-        /** The transitions (core's sync encryption service on the host's crypto); absent until the host has them. */
+
         transitions?: Pick<SyncEncryptionCardHost, 'enable' | 'change' | 'disable' | 'provide' | 'decline' | 'abandon' | 'recheck' | 'randomBytes'>;
     };
-    /** The app log: an info line (no secrets are ever passed) and an error. */
+
     log: { info(message: string, context: { scope: string; extra: Record<string, string>; force?: boolean }): unknown; error(error: unknown): void };
     addBreadcrumb?(message: string): void;
-    /** The system folder picker (File Sync); absent until the host has it. */
+
     pickSyncFolder?(): Promise<{ uri: string; bookmark?: string | null } | null>;
-    /**
-     * Dropbox sign-in and tokens; absent until the host has them. Its token reads are
-     * core's createDropboxTokenStore over `storage` and `secrets`; without it the Dropbox
-     * panel shows the account as not connected and its actions refuse.
-     */
+
+
     dropbox?: SyncSettingsDropboxPort;
-    /** iCloud's account (iOS, with `platform.cloudKitAvailable`); without it the status reads unknown. */
+
     cloudKit?: { getAccountStatus(): Promise<CloudKitAccountStatus> };
-    /** Recovery snapshot file names, newest first; absent until the Data screen moves. */
+
     listRecoverySnapshots?(): Promise<string[]>;
 };
 
-/** Commands a host must not write to its request journal (see the header). */
+
 export const NATIVE_SYNC_SETTINGS_UNJOURNALED_COMMANDS = [
     'openSyncSettings',
     'closeSyncSettings',
@@ -214,7 +153,7 @@ export type SyncSettingsDeps = {
     save: () => Promise<NativeHostResult<null>>;
     t: () => Translate;
     language: () => Language;
-    /** The device locale React Native's dates follow (toLocaleString). */
+
     systemLocale: () => string | null;
     dataRevision: () => string;
     requestIdPattern: RegExp;
@@ -223,17 +162,17 @@ export type SyncSettingsDeps = {
 
 export type NativeSyncToast = { title: string; message: string; tone: SyncSettingsToast['tone']; durationMs: number | null };
 
-/** A row action: `enabled` says whether it can be pressed; `tinted` whether its label draws in the tint. */
+
 export type NativeSyncAction = { label: string; description: string | null; enabled: boolean; tinted: boolean; busy: boolean };
 
 export type NativeSyncLastSyncCard = {
     title: string;
     status: string;
-    /** The counts, then the resolved conflicts (or their IDs). */
+
     lines: string[];
-    /** Drawn in the danger color. */
+
     error: string | null;
-    /** The five newest syncs; draw `closed` or `open` as the toggle's text. */
+
     history: { closed: string; open: string; entries: string[] } | null;
 };
 
@@ -268,7 +207,7 @@ export type NativeSyncPanel =
         title: string;
         folder: { label: string; value: string; select: NativeSyncAction };
         syncNow: NativeSyncAction;
-        /** Drawn inside the settings card, under Sync now. */
+
         lastSync: NativeSyncLastSyncCard;
     }
     | {
@@ -276,7 +215,7 @@ export type NativeSyncPanel =
         title: string;
         description: string;
         redirect: string;
-        /** Drawn in the danger color. */
+
         notConfigured: string | null;
         status: string;
         connected: boolean;
@@ -302,11 +241,11 @@ export type NativeSyncEncryptionAction =
     | { type: 'retry' }
     | { type: 'recheck' };
 
-/** The encryption card's rows in screen order; a text's tone is its color. */
+
 export type NativeSyncEncryptionRow =
     | { kind: 'text'; text: string; tone: 'label' | 'description' | 'warning' | 'danger' }
-    /** The host's own secure text field; its text goes back with `{ type: 'typed' }`. */
-    /** `maxLength`: the most characters core takes (a longer text is refused, never cut); `tooLong`: what to say then. */
+
+
     | { kind: 'field'; field: SyncEncryptionPassphraseField; label: string; secure: boolean; maxLength: number; tooLong: string }
     | { kind: 'reveal'; label: string; revealed: boolean; action: NativeSyncEncryptionAction }
     | { kind: 'action'; label: string; action: NativeSyncEncryptionAction; enabled: boolean; busy: boolean };
@@ -320,51 +259,44 @@ export type NativeSyncEncryptionCard = {
 export type NativeSyncSettings = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
     revision: string;
-    /**
-     * The stored sync configuration's revision (a fingerprint, secrets included but
-     * never readable). A form's Save, and its Sync now, send the revision of the view
-     * the form was built from: a configuration stored since answers STALE_REVISION.
-     */
+
+
     configRevision: string;
     title: string;
-    /** Getting Started's seed words and language, for the welcome sheet's handoff card (buildGettingStartedRow). */
+
     gettingStarted: ReturnType<typeof buildGettingStartedRow>;
     backend: {
         title: string;
         current: string;
         hint: string;
-        /** Each option goes to selectSyncBackend. */
+
         options: { option: SyncSettingsBackendOption; label: string; selected: boolean }[];
         group: { title: string; description: string } | null;
     };
     guide: { title: string; description: string; url: string };
     off: { title: string; description: string } | null;
     panel: NativeSyncPanel | null;
-    /** Null when the backend cannot encrypt, or while its state is first read. */
+
     encryption: NativeSyncEncryptionCard | null;
     preferences: { title: string; description: string; rows: { key: SyncPreferenceKey; label: string; hint: string | null; value: boolean }[] };
     recoverySnapshots: {
         title: string; description: string; empty: string; snapshots: string[];
-        /**
-         * RN's RecoverySnapshotsCard rows: the date label over the file name, the Restore word, and TalkBack's name and hint
-         * ("label (file name)" when two snapshots of one minute would read alike). Each row is off while a sync runs.
-         */
+
+
         rows: { name: string; label: string; accessibilityLabel: string; accessibilityHint: string }[];
         restoreLabel: string; loading: string; enabled: boolean;
     };
-    /** The disclosure glyphs React Native draws after a folded card's title. */
+
     disclosure: { closed: string; open: string };
     busy: { syncing: boolean; testing: boolean; dropbox: boolean; encryption: boolean };
-    /**
-     * React Native's question (its Alert) while a running command's activation waits on it: the new sync location
-     * cannot find these attachment files. The host shows it as a dialog and answers with `answerSyncMissingFiles`.
-     */
+
+
     missingFiles: NativeSyncMissingFilesPrompt | null;
 };
 
 export type NativeSyncMissingFilesPrompt = { questionId: string; title: string; message: string; continueLabel: string; cancelLabel: string };
 
-/** A form's fields as the host sends them; a null password or token keeps the stored one. */
+
 export type NativeSyncWebDavFields = { url: string; username: string; password: string | null; allowInsecureHttp: boolean };
 export type NativeSyncSelfHostedFields = { url: string; token: string | null; allowInsecureHttp: boolean };
 export type NativeSyncCommandResult = { toasts: NativeSyncToast[] };
@@ -374,12 +306,12 @@ type Screen = {
     transport: SyncSettingsTransport;
     card: SyncEncryptionCard | null;
     cardCancels: (() => void)[];
-    /** The read a finished transport action started; the next action's start cancels it. */
+
     edgeRefresh: (() => void) | null;
     lastBusy: boolean;
     lastBackend: string;
     effectsQueued: boolean;
-    /** True until openSyncSettings has read the stored configuration. */
+
     opening: boolean;
     snapshots: string[];
     cancels: (() => void)[];
@@ -387,27 +319,27 @@ type Screen = {
     generation: number;
     configRevision: string;
     unsubscribe: () => void;
-    /** The activation waiting on the missing-files question; `answer` resolves the transport's confirm. */
+
     question: { id: string; files: ActivationMissingAttachment[]; answer: (accepted: boolean) => void } | null;
 };
 
-/** A question nobody answers is a Cancel within 28 minutes of its command's start: CoreHost waits 30 (SYNC_WAIT_MS). */
+
 const MISSING_FILES_COMMAND_BUDGET_MS = 28 * 60 * 1000;
 
 const MONTH_FIRST_LOCALE = /^en(?:[-_]US)?$/i;
-/** Date.prototype.toLocaleString's options (ECMA-402 ToDateTimeOptions "any", "all"). */
+
 const TO_LOCALE_STRING_OPTIONS: Intl.DateTimeFormatOptions = {
     year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
 };
 const PASSWORD_DOTS = '••••••••';
 const PASSPHRASE_FIELDS = new Set<string>(['current', 'next', 'confirm']);
 const FLOWS = new Set<string>(['enable', 'change', 'disable', 'unlock', 'abandon']);
-/** The longest passphrase a field takes (runSyncEncryptionAction's `typed`): a host's field stops there and says so. */
+
 export const SYNC_ENCRYPTION_PASSPHRASE_MAX_LENGTH = 1000;
 
-/** A value's 128-bit fingerprint: never readable, the same for the same value. */
+
 const fingerprint = (value: unknown): string => deterministicHash128Hex(JSON.stringify(value));
-/** A secret's fingerprint, or null. */
+
 const secretPrint = (secret: string | null | undefined) => (secret === null || secret === undefined ? null : fingerprint(['secret', secret]));
 
 const CONFIGURATION_KEYS = [
@@ -423,7 +355,7 @@ const CONFIGURATION_KEYS = [
     CLOUD_ALLOW_INSECURE_HTTP_KEY,
 ];
 
-/** The last KV snapshot supplies both the target and every configuration cell, with secrets fingerprinted. */
+
 const readConfigSnapshot = async (host: NativeSyncSettingsHost) => {
     const password = await host.secrets.get(WEBDAV_PASSWORD_KEY);
     const token = await host.secrets.get(CLOUD_TOKEN_KEY);
@@ -435,7 +367,7 @@ const readConfigSnapshot = async (host: NativeSyncSettingsHost) => {
 };
 const readConfigRevision = async (host: NativeSyncSettingsHost): Promise<string> => (await readConfigSnapshot(host)).revision;
 
-/** A form's fields as a request identity: the password or token only as fingerprints. */
+
 const fieldsPrint = (fields: NativeSyncWebDavFields | NativeSyncSelfHostedFields | null) => (
     !fields ? null : 'password' in fields ? { ...fields, password: secretPrint(fields.password) } : { ...fields, token: secretPrint(fields.token) }
 );
@@ -471,21 +403,21 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
 
     const takeToasts = (): NativeSyncToast[] => toasts.splice(0, toasts.length);
 
-    /** The host's error log, through the open screen's redaction (URL credentials and secrets). */
+
     const logError = (host: NativeSyncSettingsHost, error: unknown) => {
         host.log.error(screen?.host === host
             ? screen.transport.redactError(error)
             : new Error(redactSyncText(error instanceof Error ? error.message : String(error))));
     };
 
-    /** React Native's screen props, from the host and the store as they are now. */
+
     const params = (host: NativeSyncSettingsHost): SyncSettingsTransportParams => {
         const t = deps.t();
         const tr = createSyncSettingsTranslator(t);
         const settings = useTaskStore.getState().settings;
         const isFossBuild = host.platform.isFossBuild;
-        // The build decides which backends it supports, as on React Native. A port the host
-        // has not bound yet only refuses its actions: it never turns a stored backend off.
+
+
         const dropboxAppKey = host.platform.dropboxAppKey.trim();
         const push = (toast: SyncSettingsToast) => {
             toasts.push({ title: toast.title, message: toast.message, tone: toast.tone, durationMs: toast.durationMs ?? null });
@@ -511,8 +443,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             showToast: push,
             supportsNativeICloudSync: host.platform.os === 'ios' && host.platform.cloudKitAvailable === true,
             t,
-            // React Native's Alert: the activation waits here while the screen shows the question (its `missingFiles`), then
-            // goes on as RN's does: Continue reruns only the activation with these files accepted, Cancel changes nothing.
+
+
             ...(host.answersMissingFilesQuestion ? { confirmActivationWithoutFiles: (files: ActivationMissingAttachment[]) => new Promise<boolean>((resolve) => {
                 const current = screen;
                 if (!current || current.host !== host) {
@@ -612,7 +544,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 if (!transitions) throw new Error('Sync encryption is not available on this host yet');
                 return transitions.randomBytes(length);
             },
-            // The service reads the worklist from the sync location, not from here.
+
             appData: () => null,
             logSettingsError: (error) => host.log.error(current.transport.redactError(error)),
         });
@@ -623,7 +555,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         void promise.finally(() => current.pending.delete(promise));
     };
 
-    /** Waits for every read the screen started, as React Native's effects finish before a user acts. */
+
     const settle = async (current: Screen) => {
         while (current.pending.size > 0) await Promise.allSettled(Array.from(current.pending));
     };
@@ -633,10 +565,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         track(current, read.done);
     };
 
-    /**
-     * React Native mounts the encryption card while the backend can encrypt, and
-     * reads its state on mount and whenever a transport action finishes.
-     */
+
     const syncCard = (current: Screen) => {
         const state = current.transport.getState();
         const selection = resolveSyncBackendSelection({
@@ -687,8 +616,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             question: null,
         };
         screen = current;
-        // React Native runs these after the render a state change causes: after the
-        // action's synchronous part, once for a batch of changes.
+
+
         current.unsubscribe = transport.subscribe(() => {
             current.generation += 1;
             if (current.effectsQueued) return;
@@ -698,7 +627,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 if (screen !== current) return;
                 syncCard(current);
                 const { syncBackend } = transport.getState();
-                // iCloud's account is read again whenever iCloud becomes the backend.
+
                 if (syncBackend !== current.lastBackend && syncBackend === 'cloudkit') track(current, transport.refreshCloudKitAccountStatus());
                 current.lastBackend = syncBackend;
             }));
@@ -712,7 +641,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 .catch((error) => host.log.error(transport.redactError(error))));
         }
         await settle(current);
-        // An unreadable secret leaves no revision: a form's Save then reads as stale.
+
         current.configRevision = await readConfigRevision(host).catch(() => '');
         current.opening = false;
         return current;
@@ -720,7 +649,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
 
     function closeScreen() {
         if (!screen) return;
-        // Leaving the screen answers an open question with Cancel: nothing was stored.
+
         screen.question?.answer(false);
         screen.unsubscribe();
         for (const cancel of [...screen.cancels, ...screen.cardCancels]) cancel();
@@ -729,17 +658,15 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     }
 
     const formatDateTime = (iso: string): string => {
-        // React Native draws these with the device locale's toLocaleString (Hermes: its
-        // Intl on the platform's ICU). An engine with Intl (the Android host backs it with
-        // ICU) gives the same text; without it a month-first device gets en-US's text and
-        // others day-first.
+
+
         const locale = deps.systemLocale();
         const date = new Date(iso);
         if (typeof Intl === 'object' && typeof Intl.DateTimeFormat === 'function' && !Number.isNaN(date.getTime())) {
             try {
                 return new Intl.DateTimeFormat(locale ?? undefined, TO_LOCALE_STRING_OPTIONS).format(date);
             } catch {
-                // A locale tag Intl refuses falls back below.
+
             }
         }
         const monthFirst = !locale || MONTH_FIRST_LOCALE.test(locale);
@@ -942,7 +869,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const snapshot = await readConfigSnapshot(current.host), stored = snapshot.backend;
         const durable = stored == null || stored.trim() === 'off' ? 'local'
             : stored.trim() === 'webdav' ? 'webdav' : null;
-        // A selection started during the read is not a settled target proof.
+
         const refused = snapshot.revision !== revision
             ? fail('STALE_REVISION', 'The stored sync configuration changed since this form was read; read the screen again')
             : !captured || current.pending.size > 0 || durable !== captured || selectedEncryptionTarget(current) !== captured
@@ -954,7 +881,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                     extra: { releaseCheck: 'v1.3.5/native-encryption-target-guard', outcome: 'refused' },
                 });
             } catch {
-                // The refusal is terminal; diagnostics cannot reopen admission.
+
             }
         }
         return refused;
@@ -1058,7 +985,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             return { title: t('settings.syncEncryption'), guide: null, rows };
         }
         if (card.state === 'off' && card.partlyEncrypted) {
-            // Partly encrypted here: nothing syncs or turns on until the location is whole again.
+
             text(t('settings.syncEncryptionDesc'));
             text(t('settings.syncEncryptionPartlyEncrypted'), 'danger');
             act(t('settings.syncEncryptionRecheck'), { type: 'recheck' });
@@ -1084,8 +1011,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             text(t('settings.syncEncryptionStatusOn'), 'label');
             text(card.state === 'remote-plaintext' ? t('settings.syncEncryptionRemotePlaintextDesc') : t('settings.syncEncryptionDesc'));
             if (card.flow === 'none') {
-                // Changing the passphrase would run against a location that no
-                // longer holds ciphertext — disabling there is the only remedy.
+
+
                 if (card.state === 'enabled') act(t('settings.syncEncryptionChange'), { type: 'open', flow: 'change' });
                 act(t('settings.syncEncryptionDisable'), { type: 'open', flow: 'disable' });
             }
@@ -1136,11 +1063,11 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         }
         if (progressLabel) text(progressLabel);
         if (warningMessage) text(warningMessage, 'warning');
-        // Errors raised outside a flow (an incomplete transition found by the
-        // status read) have no field to sit next to.
+
+
         if (card.flow === 'none') error();
-        // An unfinished change this device cannot finish (its location is gone): drop it here only. Offered in an open flow too,
-        // right where a retry just failed.
+
+
         if (card.flow !== 'abandon' && card.incompleteTransition) act(t('settings.syncEncryptionAbandon'), { type: 'open', flow: 'abandon' });
         return {
             title: t('settings.syncEncryption'),
@@ -1214,7 +1141,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         };
     };
 
-    /** The open screen, or why there is none. */
+
     const openedScreen = (): { ok: true; value: Screen } | NativeHostResult<never> => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
@@ -1222,12 +1149,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         return { ok: true, value: screen };
     };
 
-    // Screen commands keep no request payload (several carry a secret), only a fingerprint
-    // of their input: a retry of a request still running joins it, a retry of one that
-    // finished answers without running it again, and the same UUID with other input is
-    // refused. Neither survives a restart; each command is target-state or
-    // compare-and-set instead.
-    // ponytail: remembers the last 50 finished request UUIDs; an older retry runs as a replay.
+
     const running = new Map<string, { identity: string; startedAt: number; result: Promise<NativeHostResult<NativeSyncCommandResult>> }>();
     const finished = new Map<string, { identity: string; value: NativeSyncCommandResult }>();
 
@@ -1240,15 +1162,11 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         const known = joined?.identity ?? done?.identity;
         if (known !== undefined && known !== print) return fail('INVALID_INPUT', 'Request ID already belongs to another action');
         if (joined) return joined.result;
-        // A finished request answers its first reply and runs nothing (receipt semantics).
+
         return done ? { ok: true, value: done.value } : null;
     };
 
-    /**
-     * Runs a screen action under its request UUID; answers the toasts once its reads
-     * settle. `run` may answer a refusal (STALE_REVISION); a device write the store
-     * refused answers SAVE_FAILED. Neither is remembered, so the exact retry runs.
-     */
+
     const runScreenAction = (
         requestId: string,
         identity: unknown,
@@ -1286,7 +1204,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         return result;
     };
 
-    /** A form command's compare-and-set: the stored configuration must be the one its form was built from. */
+
     const refuseStaleConfiguration = async (current: Screen, revision: string): Promise<NativeHostResult<never> | null> => (
         await readConfigRevision(current.host) === revision
             ? null
@@ -1295,10 +1213,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
 
     const isRequestId = (value: unknown): value is string => typeof value === 'string' && deps.requestIdPattern.test(value);
 
-    /**
-     * Off is the target already: stored, proven, shown, and its status reset. React
-     * Native would write the same values again; a replay writes nothing.
-     */
+
     const isOffAlready = async (current: Screen): Promise<boolean> => {
         const proven = current.transport.getProven();
         const settings = useTaskStore.getState().settings;
@@ -1308,7 +1223,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
         return stored === 'off';
     };
 
-    /** The panel's action, as the view shows it for these fields: null when it cannot be pressed. */
+
     const panelAction = (current: Screen, pick: 'save' | 'syncNow' | 'test', draft: Draft) => {
         const panel = buildPanel(current, draft);
         if (!panel) return null;
@@ -1329,11 +1244,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
     });
 
     return {
-        /**
-         * Opens Settings › Sync: reads the stored configuration (a backend this
-         * build cannot use is turned off, as on React Native), the Dropbox and
-         * iCloud accounts and the encryption state. Answers the view and any toasts.
-         */
+
+
         async openSyncSettings(): Promise<NativeHostResult<NativeSyncSettings & NativeSyncCommandResult>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1346,19 +1258,19 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 return fail('ACTION_FAILED', 'The selected sync encryption mode cannot be combined with unlockOnly');
             }
             const current = await openScreen(host);
-            // A close, or another open, while this one read: its view is gone.
+
             if (screen !== current) return fail('ACTION_FAILED', 'Settings › Sync closed or opened again before it finished opening');
             return { ok: true, value: { ...buildView(current, {}), toasts: takeToasts() } };
         },
 
-        /** Leaves the screen: a backend chosen but not proven is dropped. */
+
         closeSyncSettings(): NativeHostResult<null> {
             closeScreen();
             takeToasts();
             return { ok: true, value: null };
         },
 
-        /** The open screen. `draft` is the form's typed URL and token (null: the token was not edited). */
+
         getSyncSettings(input: { draft?: Draft } = {}): NativeHostResult<NativeSyncSettings> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
@@ -1371,7 +1283,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             return { ok: true, value: buildView(opened.value, draft as Draft) };
         },
 
-        /** Chooses a backend option; a complete target activates through its first sync. */
+
         async selectSyncBackend(input: { requestId: string; option: SyncSettingsBackendOption }): Promise<NativeHostResult<NativeSyncCommandResult>> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
@@ -1398,8 +1310,8 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                             writeFailed = true;
                             writeError = error;
                         }
-                        // Off resets status before its KV write, including a refused write.
-                        // Acknowledge only after that queued store change is durable.
+
+
                         const saved = await durableSave();
                         if (writeFailed) throw writeError;
                         if (!saved.ok) return saved;
@@ -1410,7 +1322,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                                     extra: { releaseCheck: 'v1.3.5/native-sync-off-durable', operation: 'off', outcome: 'confirmed' },
                                 });
                             } catch {
-                                // Diagnostics are best-effort after the durable acknowledgement.
+
                             }
                         }
                         return undefined;
@@ -1425,10 +1337,10 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             });
         },
 
-        /** The WebDAV or self-hosted form's Save: proves the settings with a sync, then stores them. */
+
         async saveSyncBackend(input: {
             requestId: string;
-            /** The view's `configRevision` when the form was read. */
+
             revision: string;
             webdav?: NativeSyncWebDavFields;
             selfHosted?: NativeSyncSelfHostedFields;
@@ -1454,13 +1366,10 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             });
         },
 
-        /**
-         * The shown panel's Sync now. The WebDAV and self-hosted forms send their
-         * fields (React Native syncs what the form holds); the other panels send none.
-         */
+
         async syncNow(input: {
             requestId: string;
-            /** With a form's fields: the view's `configRevision` when the form was read. */
+
             revision?: string;
             webdav?: NativeSyncWebDavFields;
             selfHosted?: NativeSyncSelfHostedFields;
@@ -1483,7 +1392,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             if (!panelAction(current, 'syncNow', draft)) return fail('ACTION_FAILED', 'Sync now is not available now; read the screen again');
             const identity = ['syncNow', kind, input.revision ?? null, fieldsPrint(webdav ?? selfHosted)];
             return runScreenAction(input.requestId, identity, current, async () => {
-                // A form's Sync now stores the form's settings, as its Save does.
+
                 if (withFields) {
                     const stale = await refuseStaleConfiguration(current, input.revision!);
                     if (stale) return stale;
@@ -1503,11 +1412,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             });
         },
 
-        /**
-         * The answer to the view's `missingFiles` question: Continue lets the waiting activation go on with those files accepted
-         * (their rows stay as missing files, nothing is deleted: sync-run.ts); Cancel ends it with nothing stored. The command that
-         * asked answers with its own result.
-         */
+
         answerSyncMissingFiles(input: { questionId: string; continue: boolean }): NativeHostResult<null> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
@@ -1520,7 +1425,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             return { ok: true, value: null };
         },
 
-        /** The shown panel's Test connection; it stores nothing but the WebDAV capability proof. */
+
         async testSyncConnection(input: {
             webdav?: NativeSyncWebDavFields;
             selfHosted?: NativeSyncSelfHostedFields;
@@ -1542,7 +1447,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             return { ok: true, value: { toasts: takeToasts() } };
         },
 
-        /** File Sync's Select folder: the system picker, then the picked folder activates through its first sync. */
+
         async pickSyncFolder(input: { requestId: string }): Promise<NativeHostResult<NativeSyncCommandResult>> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
@@ -1553,7 +1458,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             return runScreenAction(input.requestId, ['pickSyncFolder'], current, () => current.transport.handleSetSyncPath());
         },
 
-        /** Dropbox's Connect: sign-in, then the account activates through its first sync. Nothing when already connected. */
+
         async connectDropbox(input: { requestId: string }): Promise<NativeHostResult<NativeSyncCommandResult>> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
@@ -1563,13 +1468,13 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             const panel = buildPanel(current, {});
             if (panel?.kind !== 'dropbox' || !panel.connect.enabled) return fail('ACTION_FAILED', 'Connect Dropbox is not available now; read the screen again');
             return runScreenAction(input.requestId, ['connectDropbox'], current, () => {
-                // Target state: the toggle shows Disconnect for a connected account.
+
                 if (panel.connected) return undefined;
                 return current.transport.handleConnectDropbox();
             });
         },
 
-        /** Dropbox's Disconnect: turns Dropbox sync off first, then revokes and forgets the tokens. Nothing when not connected. */
+
         async disconnectDropbox(input: { requestId: string }): Promise<NativeHostResult<NativeSyncCommandResult>> {
             const opened = openedScreen();
             if (!opened.ok) return opened;
@@ -1579,13 +1484,13 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             const panel = buildPanel(current, {});
             if (panel?.kind !== 'dropbox' || !panel.connect.enabled) return fail('ACTION_FAILED', 'Disconnect Dropbox is not available now; read the screen again');
             return runScreenAction(input.requestId, ['disconnectDropbox'], current, () => {
-                // Target state: the toggle shows Connect once the account is gone.
+
                 if (!panel.connected) return undefined;
                 return current.transport.handleDisconnectDropbox();
             });
         },
 
-        /** A settings sync option. Target-state: an option already holding the value is not written. */
+
         async setSyncPreference(input: { requestId: string; key: SyncPreferenceKey; value: boolean }): Promise<NativeHostResult<{ changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -1603,12 +1508,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
             });
         },
 
-        /**
-         * The encryption card. `typed` sends a field's text as the user edits it
-         * (it clears the card's error); `generate` answers the new passphrase, to
-         * show in both new-passphrase fields; a `submit` (with its request UUID)
-         * runs the open flow with the typed fields and answers once it finishes.
-         */
+
         async runSyncEncryptionAction(input: {
             requestId?: string;
             revision?: string;
@@ -1646,11 +1546,11 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                 return [secretPrint(fields.currentPassphrase), secretPrint(fields.nextPassphrase), secretPrint(fields.confirmPassphrase)];
             };
             const capturedFields = printCardFields(), capturedFlow = card.getState().flow;
-            // The passphrases the submit runs with are part of its identity, as fingerprints.
+
             const identity = ['encryption', target, ...capturedFields,
                 ...(input.revision === undefined ? [] : [input.revision])];
-            // A Recheck disables and can remove its own button. Its exact receipt
-            // bypasses current-card admission, but still belongs to this saved target.
+
+
             if (savedWebDav && type === 'recheck') {
                 const receipt = screenActionReceipt(input.requestId!, fingerprint(identity));
                 if (receipt) {
@@ -1747,7 +1647,7 @@ export function createSyncSettingsMethods(deps: SyncSettingsDeps) {
                             }
                             await run();
                         } finally {
-                            // Only the owned submit retires text; joined or rejected callers do not own it.
+
                             if (selected && type === 'submit') card.clearPassphrases();
                         }
                     });

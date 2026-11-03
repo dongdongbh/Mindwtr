@@ -1,10 +1,6 @@
-// Local Whisper model catalogue shared by desktop and mobile. The sha256 here is a
-// security artifact (it gates whether a downloaded model file is trusted before
-// whisper.cpp loads it), so it must have exactly one implementation. Desktop and
-// mobile previously typed this table separately and had already drifted: mobile was
-// missing whisper-large-v3-turbo, desktop had no minBytes. This is the union of both
-// — no entry lost. Each platform decides locally which subset it *offers* in its UI;
-// this table only owns the data, not the per-platform selection.
+
+
+
 export type WhisperModelDescriptor = {
     id: string;
     fileName: string;
@@ -16,9 +12,7 @@ export type WhisperModelDescriptor = {
 
 export const WHISPER_MODEL_BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
 
-// Download hosts, tried in order. huggingface.co is unreachable on some networks
-// (mainland China); hf-mirror.com serves the same files. A host is only a transport:
-// every download is still gated by the sha256 below, so a mirror cannot substitute a model.
+
 export const WHISPER_MODEL_BASE_URLS: readonly string[] = [
     WHISPER_MODEL_BASE_URL,
     'https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main',

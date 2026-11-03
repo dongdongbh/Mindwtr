@@ -13,7 +13,7 @@ vi.mock('./webdav', async (importOriginal) => ({
     probeWebdavSyncCompatibility: async () => 'strong-etag',
 }));
 
-/** A transport over an in-memory device, with core's own rules (no host overrides). */
+
 function setup(syncResults: SyncSettingsSyncResult[], coreOverrides: SyncSettingsTransportHost['core'] = {}) {
     const storage = new Map<string, string>();
     const secrets = new Map<string, string>();
@@ -285,7 +285,7 @@ describe('sync settings transport', () => {
         expect(storage.get(WEBDAV_URL_KEY)).toBeUndefined();
         expect(secrets.size).toBe(0);
         expect(toasts).toEqual([{ title: 'settings.syncMobile.error', message: 'failed: HTTP 500', tone: 'error', durationMs: undefined }]);
-        // The form keeps the staged choice until the screen closes.
+
         expect(transport.getState()).toMatchObject({ syncBackend: 'webdav', webdavUrl: 'https://dav.example.com/', isSyncing: false });
         expect(transport.getProven()).toEqual({ backend: 'off', cloudProvider: 'selfhosted', pending: true });
     });
@@ -374,7 +374,7 @@ describe('sync settings transport', () => {
             'settings.syncMobile.insecureHttpEnabled', 'common.success',
         ]);
         expect(storage.get(SYNC_BACKEND_KEY)).toBe('cloud');
-        // Sync now on a form still warns: that tap has no save before it.
+
         await transport.handleSync({ backend: 'cloud', cloudProvider: 'selfhosted', cloud: { allowInsecureHttp: true, token: 'abcdefghijklmnopqrstuvwxyz012345', url: 'http://cloud.example.com' } });
         expect(toasts.slice(4).map((toast) => toast.title)).toEqual(['settings.syncMobile.insecureHttpEnabled', 'common.success']);
     });

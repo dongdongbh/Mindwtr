@@ -149,6 +149,40 @@ describe('WeeklyReviewGuideModal', () => {
         window.localStorage.setItem(storageKey, JSON.stringify({ step: 'projects', startedAt: new Date().toISOString() }));
         return updateProject;
     };
+    it('keeps the full sequential plan behind a collapsed disclosure without writing task data', () => {
+        const tasks = [
+            makeTask({ id: 'head', title: 'Waiting head', status: 'waiting', projectId: 'project-0', order: 0 }),
+            makeTask({ id: 'tail', title: 'Later tail', projectId: 'project-0', order: 1 }),
+        ];
+        seedProjects(tasks);
+        useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((project) => ({ ...project, isSequential: true })) }));
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        expect(screen.getByTestId('task-head')).toBeInTheDocument();
+        expect(screen.queryByTestId('task-tail')).not.toBeInTheDocument();
+        const disclosure = screen.getByRole('button', { name: 'projects.laterInSequence (1)' });
+        expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+        fireEvent.click(disclosure);
+        expect(screen.getByTestId('task-tail')).toBeInTheDocument();
+        fireEvent.click(disclosure);
+        expect(screen.queryByTestId('task-tail')).not.toBeInTheDocument();
+        expect(useTaskStore.getState().updateTask).not.toHaveBeenCalled();
+        expect(useTaskStore.getState()._allTasks).toEqual(tasks);
+    });
+
+    it('removes a retained stale Next row when a reorder blocks it again', () => {
+        const tasks = [
+            makeTask({ id: 'first', title: 'Stale first', projectId: 'project-0', order: 0 }),
+            makeTask({ id: 'waiting', title: 'Waiting blocker', status: 'waiting', projectId: 'project-0', order: 1 }),
+        ];
+        seedProjects(tasks);
+        useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((project) => ({ ...project, isSequential: true })) }));
+        window.localStorage.setItem(storageKey, JSON.stringify({ step: 'stale', startedAt: new Date().toISOString() }));
+        render(<WeeklyReviewGuideModal onClose={vi.fn()} />);
+        expect(screen.getByTestId('task-first')).toBeInTheDocument();
+        act(() => useTaskStore.setState({ _allTasks: tasks.map((task) => ({ ...task, order: task.id === 'waiting' ? 0 : 1 })) }));
+        expect(screen.queryByTestId('task-first')).not.toBeInTheDocument();
+    });
+
     const completeFirstProject = () => {
         const card = screen.getByRole('heading', { level: 3, name: 'Finish me' }).parentElement!.parentElement!;
         fireEvent.click(within(card).getByRole('button', { name: 'Complete project' }));
@@ -324,7 +358,7 @@ describe('WeeklyReviewGuideModal', () => {
             id, name: id, url: '', enabled: id !== 'disabled',
         }));
         const start = new Date();
-        // Keep the fixture on one calendar day even when CI runs near midnight.
+
         start.setHours(12, 0, 0, 0);
         const end = new Date(start.getTime() + 60 * 60 * 1000);
         const events = calendars.map((calendar) => ({
@@ -486,9 +520,8 @@ describe('WeeklyReviewGuideModal', () => {
                 timeEstimate: '1hr',
                 timeSpentMinutes: 45,
             })],
-            // No `features` key at all: time estimates default ON, so the
-            // look-back must render. `features?.timeEstimates === true` read
-            // this as OFF and hid the rows for everyone at defaults.
+
+
             settings: {
                 weekStart: 'monday',
                 gtd: {
@@ -502,7 +535,7 @@ describe('WeeklyReviewGuideModal', () => {
 
         expect(screen.getByText('1 completed task(s) had an estimate')).toBeInTheDocument();
         expect(screen.getByText('Estimated: 1h')).toBeInTheDocument();
-        // Pomodoro still defaults OFF, so the tracked line stays hidden.
+
         expect(screen.queryByText('Tracked on those tasks: 45m')).not.toBeInTheDocument();
     });
 
@@ -514,7 +547,7 @@ describe('WeeklyReviewGuideModal', () => {
         expect(screen.getByTestId('task-stale-1')).toBeInTheDocument();
         expect(screen.getByText(/days inactive|staleDaysInactive/)).toBeInTheDocument();
 
-        // Saving anything (a checklist item, a title) stamps updatedAt with "now".
+
         const touched = { ...staleTask, updatedAt: new Date().toISOString() };
         act(() => {
             useTaskStore.setState({ _allTasks: [touched], tasks: [touched] });
@@ -523,7 +556,7 @@ describe('WeeklyReviewGuideModal', () => {
         expect(screen.getByTestId('task-stale-1')).toBeInTheDocument();
         expect(screen.queryByText(/days inactive|staleDaysInactive/)).not.toBeInTheDocument();
 
-        // A task that leaves Next/Waiting is done with this step.
+
         const done = { ...touched, status: 'done' as const };
         act(() => {
             useTaskStore.setState({ _allTasks: [done], tasks: [done] });

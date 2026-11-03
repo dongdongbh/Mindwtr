@@ -64,7 +64,7 @@ const readRequest = <V extends AttachmentWriteVersion>(value: unknown, version: 
 };
 const validAttachmentProject = (value: unknown, projectId: string): value is Project => {
     if (!record(value)) return false;
-    // Keep raw SQLite-null columns in the frozen row; normalize only for validation.
+
     const normalized = { ...value, areaId: value.areaId ?? undefined, areaTitle: value.areaTitle ?? undefined,
         startDate: value.startDate ?? undefined, dueDate: value.dueDate ?? undefined,
         reviewAt: value.reviewAt ?? undefined, supportNotes: value.supportNotes ?? undefined,
@@ -84,7 +84,7 @@ const addedIds = (request: NativeProjectAttachmentWriteRequest, now: string): st
     return batch.kind === 'add' ? batch.added.map((attachment) => attachment.id) : null;
 };
 
-/** Pure validation for a cold journal, before mutable store or SQL checks. */
+
 const writeEffect = (project: Project, request: NativeProjectAttachmentWriteRequest, ids: string[],
     deviceId: string, now: string, version: AttachmentWriteVersion) => version === 1
     ? projectAttachmentWriteEffect(project, request.intent, ids, deviceId, now)
@@ -236,12 +236,12 @@ function createAttachmentWriteMethods<V extends AttachmentWriteVersion>(deps: At
     };
 }
 
-/** Historical link command: version 1 and URL-only acceptance remain sealed. */
+
 export function createProjectAttachmentWriteMethods(deps: AttachmentWriteDependencies) {
     return createAttachmentWriteMethods(deps, 1);
 }
 
-/** Separate metadata-only file Remove command; no Add grammar or file-byte authority. */
+
 export function createProjectFileRemoveWriteMethods(deps: AttachmentWriteDependencies) {
     const methods = createAttachmentWriteMethods(deps, 2);
     return {
@@ -252,6 +252,6 @@ export function createProjectFileRemoveWriteMethods(deps: AttachmentWriteDepende
     };
 }
 
-// Concrete Project metadata readers shared by the separate owned-file Add foundation.
+
 export { token as projectAttachmentWriteToken, validToken as isProjectAttachmentWriteToken,
     validAttachmentProject as isProjectAttachmentWriteProject };

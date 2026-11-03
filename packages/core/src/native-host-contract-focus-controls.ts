@@ -1,38 +1,6 @@
-/**
- * The native host contract for the Focus screen's controls: the filter sheet,
- * the saved Focus filters, View options (sort, grouping), the active chips and
- * the Today's Focus reorder screen, all from focus-controls.ts. Kept in its own
- * file and spread into createNativeHostContract; getFocus and
- * getFocusSectionWindow in native-host-contract.ts read the control state and
- * return `controls` (buildNativeFocusControls).
- *
- * Where React Native keeps each choice, and how a host keeps it the same way:
- *
- * - Filter selections, the applied saved filter and the sort: React state
- *   (useTaskFilterSelections and the screen's `focusSortBy`), nothing on disk.
- *   They last while the Focus screen is mounted and reset when it remounts. A
- *   host keeps `controls.state` in memory and sends it as `controls` with every
- *   Focus read and command, with a control's `edit` as `controlEdit` to change it.
- * - Grouping: the synced setting `settings.gtd.focusGroupBy` (setFocusGroupBy).
- * - Show details and folded sections: AsyncStorage key `mindwtr:view:focus:v1`,
- *   JSON `{"showDetails":false,"expandedSections":{"focus":true,"schedule":true,
- *   "next":true,"nextActions":true,"upcoming":true,"reviewDue":true,
- *   "reviewProjects":true}}` (`nextActions` repeats `next` for older builds).
- * - The home-screen widget: RN's setFocusWidgetFilter holds `controls.widgetFilter`
- *   ({ criteria, sortBy, sortOrder }) in memory and republishes the widget when it
- *   changes; publishing stays platform wiring.
- *
- * Every write takes a request UUID: while its save is owed a retry only saves
- * (native-request-receipts.ts). Each write is target-state, so a replay after a
- * restart writes nothing: a saved filter is created under its request UUID, a
- * deleted one is already marked deleted, a removed criterion is already gone,
- * the grouping or order is already stored. A reorder is also compare-and-set on
- * the revisions the reorder rows showed: a replay after a later change to any
- * starred task is refused (STALE_REVISION).
- *
- * Only functions read this module's imports from native-host-contract.ts, so the
- * import cycle between the two files is safe.
- */
+
+
+
 import type { DateFormatter } from './date';
 import {
     applyFocusSavedFilter,
@@ -84,7 +52,7 @@ type Translate = (key: string) => string;
 const isId = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 200;
 const CONTROL_KEYS = new Set(['filters', 'savedFilterId', 'sortBy', 'preservedCriteria']);
 
-/** The control state as a host sends it; missing keys are the default's. */
+
 export type NativeFocusControlsInput = {
     filters?: Partial<ListFilterState>;
     savedFilterId?: string | null;
@@ -92,17 +60,17 @@ export type NativeFocusControlsInput = {
     preservedCriteria?: FilterCriteria;
 };
 
-/** A host's control state, completed and checked; null when it is not one Focus can hold. */
+
 export function readNativeFocusControls(value: unknown): FocusControlState | null {
     if (value === undefined) return DEFAULT_FOCUS_CONTROL_STATE;
     if (!isObjectRecord(value) || Object.keys(value).some((key) => !CONTROL_KEYS.has(key))) return null;
     if (value.preservedCriteria !== undefined && !isPreservedFilterCriteria(value.preservedCriteria)) return null;
     const filters = readFilterState(value.filters);
-    // Focus has no search box.
+
     if (!filters || filters.searchQuery !== '') return null;
     if (value.savedFilterId !== undefined && value.savedFilterId !== null && !isId(value.savedFilterId)) return null;
-    // Applying a saved filter can retain a sort that Focus's menu does not offer.
-    // A later picker edit keeps that sort after detaching the saved filter.
+
+
     if (value.sortBy !== undefined && !isSavedFilterSortField(value.sortBy)) return null;
     return {
         filters,
@@ -112,7 +80,7 @@ export function readNativeFocusControls(value: unknown): FocusControlState | nul
     };
 }
 
-/** A control's edit as a host sends it back; null when it is not one. */
+
 export function readNativeFocusControlEdit(value: unknown): FocusControlEdit | null {
     if (!isObjectRecord(value)) return null;
     switch (value.type) {
@@ -140,108 +108,100 @@ type Confirm = { title: string; cancelLabel: string; confirmLabel: string };
 
 export type NativeFocusReorderRow = {
     id: string;
-    /** The task's revision: reorderFocus sends each row's as `taskRevisions`. */
+
     taskRevision: string;
     title: string;
     secondaryLabel: string;
-    /** The row's spoken label. */
+
     positionLabel: string;
-    /** The whole order after Move up / Move down, for reorderFocus; null at the ends. */
+
     moveUp: string[] | null;
     moveDown: string[] | null;
 };
 
-/**
- * The Focus screen's controls, in the current language. A control's `edit`
- * changes only the control state: send it as `controlEdit` with `controls` on
- * the next Focus read. Group options, saving, removing an advanced criterion,
- * deleting a saved filter and reordering are commands.
- */
-/** getFocus's revision ends in this part when the read sends the device's group folds (#1444). */
+
 export const FOCUS_FOLDS_REVISION_PART = ':folds:';
-/**
- * A getFocus revision without its folds part. The folds change no filter list and no Pomodoro choice, so those reads compare
- * only this base (a fold once made them refuse every read with STALE_REVISION).
- */
+
+
 export const focusRevisionWithoutFolds = (revision: string): string => {
     const at = revision.indexOf(FOCUS_FOLDS_REVISION_PART);
     return at < 0 ? revision : revision.slice(0, at);
 };
 
 export type NativeFocusControls = {
-    /** Send back as `controls` with every Focus read and command. */
+
     state: FocusControlState;
     header: {
-        /** Tinted while the sort or grouping is off its default (or details are shown: the host's own flag). */
+
         viewOptions: { label: string; active: boolean };
-        /** Tinted with a count badge while filters are active. */
+
         filters: { label: string; active: boolean; badge: string | null };
     };
     view: {
         title: string;
         doneLabel: string;
         sort: { label: string; options: { value: SortField; label: string; selected: boolean; edit: FocusControlEdit }[] };
-        /** Choose with setFocusGroupBy. */
+
         group: { label: string; options: { value: FocusGroupBy; label: string; selected: boolean }[] };
         details: { sectionLabel: string; showLabel: string; hideLabel: string };
     };
-    /** The row above the sections; null without saved Focus filters. Delete asks first with `deleteConfirm` (message: the name). */
+
     savedFilters: {
         all: { label: string; selected: boolean; edit: FocusControlEdit };
-        /** getFocusControlsList('savedFilters') pages the rest. */
+
         chips: NativeWindow<NativeFocusSavedFilterChip>;
         deleteConfirm: Confirm;
     } | null;
-    /** The active filters row; shown while filters are on without a saved filter. */
+
     activeChips: { chips: NativeFocusChip[]; clear: { label: string; edit: FocusControlEdit } } | null;
     filterSheet: NativeFocusFilterSheet;
-    /** Reorder mode for Today's Focus; null while it is not allowed (a filter, a non-default sort, or no star). */
+
     reorder: {
         label: string;
         title: string;
         doneLabel: string;
         hint: string;
-        /** RN's accessibilityHint on the Reorder button (0b859c1b7). */
+
         screenHint: string;
         moveUpLabel: string;
         moveDownLabel: string;
         rows: NativeWindow<NativeFocusReorderRow>;
     } | null;
-    /** The empty screen's lines, when no section has anything. */
+
     empty: { title: string; subtitle: string } | null;
-    /** What RN hands the home-screen widget's Focus list (setFocusWidgetFilter). */
+
     widgetFilter: { criteria: FilterCriteria; sortBy: SortField; sortOrder: 'asc' | 'desc' | null };
 };
 
 export type NativeFocusFilterSheet = {
     title: string;
     doneLabel: string;
-    /** Shown while any filter or advanced criterion is active. */
+
     clear: { label: string; visible: boolean; edit: FocusControlEdit };
     activeCount: number;
     hasActive: boolean;
     visibility: FocusControlsModel['options']['visibility'];
-    /** getFocusControlsList('tokens' / 'projects') pages the rest. */
+
     tokens: NativeWindow<NativeFocusToken>;
     projects: NativeWindow<NativeFocusProjectOption>;
     priorities: { value: TaskPriority; label: string; selected: boolean; edit: FocusControlEdit }[];
     energyLevels: { value: TaskEnergyLevel; label: string; selected: boolean; edit: FocusControlEdit }[];
     timeEstimates: { value: TimeEstimate; label: string; selected: boolean; edit: FocusControlEdit }[];
-    /** The location field's text; send typing as a setLocation filter edit. */
+
     location: string;
     taskDates: { label: string; options: { value: string; label: string; selected: boolean; edit: FocusControlEdit }[] };
-    /** Any / All for two or more selected contexts (or tags). */
+
     matchModes: {
         context: { visible: boolean; label: string; options: { value: 'any' | 'all'; label: string; selected: boolean; edit: FocusControlEdit }[] };
         tag: { visible: boolean; label: string; options: { value: 'any' | 'all'; label: string; selected: boolean; edit: FocusControlEdit }[] };
     };
-    /** The overview rows' summaries: the selections, or "All". */
+
     summaries: { tokens: string; projects: string; timeEstimates: string; energyLevels: string; more: string };
     chips: NativeFocusChip[];
-    /** An applied saved filter's criteria no picker expresses; removeFocusFilterCriterion after `removeConfirm` (message: the label). */
+
     advancedChips: { id: string; criterionId: string; label: string }[];
     removeConfirm: Confirm;
-    /** Save the current filter (saveFocusFilter); null when there is nothing to save. */
+
     save: {
         label: string;
         dialog: { title: string; placeholder: string; defaultName: string; cancelLabel: string; saveLabel: string };
@@ -279,7 +239,7 @@ function focusLists(model: FocusControlsModel, t: Translate): { tokens: NativeFo
                 id: filter.id,
                 label: `${filter.icon ? `${filter.icon} ` : ''}${filter.name}`,
                 selected,
-                // A selected chip clears, like the All chip.
+
                 edit: selected ? CLEAR_EDIT : { type: 'applySavedFilter', id: filter.id },
                 deleteLabel: `${deleteLabel} ${filter.name}`,
             };
@@ -287,7 +247,7 @@ function focusLists(model: FocusControlsModel, t: Translate): { tokens: NativeFo
     };
 }
 
-/** The controls view for a model (buildFocusControlsModel). */
+
 export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Translate; formatDate: DateFormatter }): NativeFocusControls {
     const { t } = ctx;
     const tf = (key: string, fallback: string) => tFallback(t, key, fallback);
@@ -369,7 +329,7 @@ export function buildNativeFocusControls(model: FocusControlsModel, ctx: { t: Tr
             deleteConfirm: confirm(tf('savedFilters.deleteTitle', 'Delete saved filter?')),
         } : null,
         activeChips: filter.hasActive && !filter.activeSavedFilter ? {
-            // No advanced chips here: they exist only while a saved filter is applied.
+
             chips,
             clear: { label: tf('filters.clear', 'Clear'), edit: CLEAR_EDIT },
         } : null,
@@ -467,15 +427,13 @@ export type FocusControlDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     t: () => Translate;
-    /**
-     * The Focus model for a control state (null: a read without `controls`, which keeps
-     * the flat pre-controls Focus), cached per revision, and the revision it answers under.
-     */
+
+
     focusModel: (state: FocusControlState | null, now: Date) => { model: FocusControlsModel; revision: string };
     requestIdPattern: RegExp;
 };
 
-/** A Focus control command's answer: the control state to keep, and whether the store changed. */
+
 export type NativeFocusCommandResult = { controls: FocusControlState; changed: boolean };
 
 export type NativeFocusGroupExpected = { groupBy: string | null; updatedAt: string | null };
@@ -516,7 +474,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
     };
     const receipts = createNativeRequestReceipts({ save: durableSave });
 
-    /** Checks readiness, the request UUID and the control state, then runs the write once per request. */
+
     const command = async (
         input: unknown,
         payload: (input: Record<string, unknown>) => unknown[] | null,
@@ -566,7 +524,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             } };
         },
 
-        /** Static validation for a journaled request, safe before the store opens. */
+
         validateFocusGroupWrite(input: unknown): NativeHostResult<NativeFocusGroupResult> {
             if (!isObjectRecord(input) || !hasExactKeys(input, ['requestId', 'controls', 'groupBy', 'expected'])
                 || typeof input.requestId !== 'string' || !deps.requestIdPattern.test(input.requestId)
@@ -583,7 +541,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             return { ok: true, value: { groupBy: input.groupBy as FocusGroupBy, controls: { ...controls, savedFilterId: null } } };
         },
 
-        /** Read-only answer after the native journal confirms the SQLite save completed. */
+
         probeFocusGroupOutcome(input: NativeFocusGroupWriteRequest): NativeHostResult<NativeFocusGroupResult> {
             const checked = this.validateFocusGroupWrite(input);
             if (!checked.ok) return checked;
@@ -618,7 +576,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             return receipts.run(input.requestId, JSON.stringify(['checkedGroup', input]), async () => {
                 const current = rawGroup();
                 if (!current.ok) return current;
-                // A journaled lost acknowledgment must not rewrite newer GTD preferences.
+
                 if (current.value === groupBy) return { ok: true, value: checked.value };
                 const stamp = rawGtdStamp();
                 if (!stamp.ok) return stamp;
@@ -640,10 +598,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             });
         },
 
-        /**
-         * A View options Group by chip: detaches an applied saved filter and stores the
-         * synced `settings.gtd.focusGroupBy`. Only an offered grouping is accepted.
-         */
+
         setFocusGroupBy(input: { requestId: string; controls?: NativeFocusControlsInput; groupBy: FocusGroupBy }) {
             return command(
                 input,
@@ -659,7 +614,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
                     });
                     if (!plan) return unchanged(state);
                     const controls = { ...state, savedFilterId: null };
-                    // Target state: a stored grouping is not written again.
+
                     if (settings.gtd?.focusGroupBy === groupBy) return unchanged(controls);
                     const written = await runStoreWrite(() => useTaskStore.getState().updateSettings(plan.settingsUpdate));
                     return settleWrite(written, { controls, changed: true });
@@ -667,10 +622,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             );
         },
 
-        /**
-         * Save the current filter, sort and grouping as a saved Focus filter named `name`
-         * (trimmed), then apply it. The request UUID becomes the saved filter's ID.
-         */
+
         saveFocusFilter(input: { requestId: string; controls?: NativeFocusControlsInput; name: string; view?: 'contexts' }) {
             return command(
                 input,
@@ -683,7 +635,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
                     const settings = useTaskStore.getState().settings;
                     const existing = settings.savedFilters?.find((filter) => filter.id === id);
                     if (existing) {
-                        // A replay after a restart: the filter it created answers it.
+
                         if (existing.name !== (value.name as string).trim() || existing.deletedAt) return fail('INVALID_INPUT', 'Request ID already belongs to another saved filter');
                         if (value.view === 'contexts' && (existing.view !== view
                             || JSON.stringify(existing.criteria) !== JSON.stringify(model.filter.currentCriteria)))
@@ -710,14 +662,14 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             );
         },
 
-        /** Remove one advanced criterion (a chip's `criterionId`) from the applied saved filter. */
+
         removeFocusFilterCriterion(input: { requestId: string; controls?: NativeFocusControlsInput; criterionId: string }) {
             return command(
                 input,
                 (value) => (isId(value.criterionId) ? ['removeCriterion', value.criterionId] : null),
                 async (value, state, model) => {
                     if (!model.filter.activeSavedFilter) return fail('INVALID_INPUT', 'No saved filter is applied');
-                    // Target state: a criterion the filter no longer shows is already removed.
+
                     if (!model.advancedChips.some((chip) => chip.criterionId === value.criterionId)) return unchanged(state);
                     const plan = planFocusFilterCriterionRemoval({
                         activeSavedFilter: model.filter.activeSavedFilter,
@@ -732,7 +684,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             );
         },
 
-        /** Delete a saved Focus filter (marked deleted: saved filters sync). An applied one is detached. */
+
         deleteFocusFilter(input: { requestId: string; controls?: NativeFocusControlsInput; id: string }) {
             return command(
                 input,
@@ -740,7 +692,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
                 async (value, state, model) => {
                     const id = value.id as string;
                     const controls = state.savedFilterId === id ? { ...state, savedFilterId: null } : state;
-                    // Target state: a filter Focus no longer offers is already deleted.
+
                     if (!model.savedFilters.some((filter) => filter.id === id)) return unchanged(controls);
                     const plan = planFocusFilterDelete(useTaskStore.getState().settings.savedFilters, id);
                     const written = await runStoreWrite(() => useTaskStore.getState().updateSettings({ savedFilters: plan.savedFilters }));
@@ -749,12 +701,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             );
         },
 
-        /**
-         * Put Today's Focus in this order: every starred task Focus shows, once. Allowed
-         * only while `controls.reorder` is (default sort, no filter), so hidden stars are
-         * never renumbered. Writes only the tasks whose position changes. `taskRevisions`
-         * holds each row's `taskRevision`: a task changed since refuses the order (STALE_REVISION).
-         */
+
         reorderFocus(input: { requestId: string; controls?: NativeFocusControlsInput; ids: string[]; taskRevisions: NativeRevisions }) {
             return command(
                 input,
@@ -768,7 +715,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
                         return fail('INVALID_INPUT', 'Every starred task Focus shows, once, is required');
                     }
                     const byId = new Map(focused.map((task) => [task.id, task]));
-                    // Target state: the same order again writes nothing.
+
                     if (ids.every((id, index) => byId.get(id)!.focusOrder === index)) return unchanged(state);
                     const stale = refuseStaleTasks(ids, value.taskRevisions as NativeRevisions);
                     if (stale) return stale;
@@ -778,10 +725,7 @@ export function createFocusControlMethods(deps: FocusControlDeps) {
             );
         },
 
-        /**
-         * A later window of the filter sheet's tokens or projects, or of the saved filter chips, under a Focus revision.
-         * `query` is the tokens or projects picker's search text: the ones matching it, from offset zero (the Inbox tokens' rule).
-         */
+
         getFocusControlsList(input: { controls?: NativeFocusControlsInput; list: ListName; offset: number; limit: number; revision: string; query?: string }): NativeHostResult<{
             version: typeof NATIVE_HOST_CONTRACT_VERSION;
             revision: string;

@@ -627,8 +627,8 @@ describe('legacy record removal coverage', () => {
             removableAttachmentIds: ['a1'],
             processedFileTombstoneIds: ['a2'],
         });
-        // The purged-parent record goes; the live-parent tombstone stays (a peer
-        // would resurrect it through the union merge) and is stamped instead.
+
+
         expect(cleaned.tasks[0].attachments).toHaveLength(0);
         expect(cleaned.projects[0].attachments?.map((attachment) => attachment.id)).toEqual(['a2']);
         expect(cleaned.projects[0].attachments?.[0]?.localStatus).toBe('missing');
@@ -909,10 +909,8 @@ describe('runAttachmentCleanupLifecycle', () => {
     });
 
     it('keeps a soft-deleted record as a tombstone and goes quiet once processed (#1064)', async () => {
-        // Removing the record never stuck: the merge unions attachments by id,
-        // so a peer's copy resurrected it next cycle and the conflict + cleanup
-        // pass repeated forever. The record must survive as a tombstone with
-        // processed-markers instead.
+
+
         const data = buildData();
         data.tasks.push({
             id: 'live-task',
@@ -1003,8 +1001,8 @@ describe('runAttachmentCleanupLifecycle', () => {
         expect(result.appData.settings.attachments?.pendingRemoteDeletes).toEqual([
             expect.objectContaining({ cloudKey: 'attachments/removed.pdf', attempts: 1 }),
         ]);
-        // The pending entry owns the retry cadence; the tombstone must not
-        // re-trigger an immediate pass on every sync cycle.
+
+
         expect(hasFreshAttachmentCleanupWork(result.appData)).toBe(false);
     });
 

@@ -171,9 +171,7 @@ export function buildAdvancedFilterCriteriaChips(
     return chips;
 }
 
-// Also runs on stored criteria (a saved filter as written), so a value
-// matches by its trimmed text, as the reader shows it, and a value this build
-// does not understand stays.
+
 function removeListItem<T extends string>(values: T[] | undefined, target: string): T[] | undefined {
     if (!Array.isArray(values)) return values;
     const next = values.filter((value) => typeof value !== 'string' || value.trim() !== target);

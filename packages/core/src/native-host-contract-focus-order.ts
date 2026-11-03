@@ -56,7 +56,7 @@ const readRequest = (value: unknown): NativeFocusOrderRequest | null => {
     return controls && same(controls, input.controls) ? input as NativeFocusOrderRequest : null;
 };
 
-/** Pure cold-journal validation before accessing SQLite or store state. */
+
 const readPrepared = (value: unknown): NativePreparedFocusOrder | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

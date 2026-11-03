@@ -45,8 +45,7 @@ describe('native host contract: the capture popup', () => {
     const writes = (log: unknown[]) => log.map((entry) => (entry as unknown[])[0]);
     const chip = (view: NativeQuickCaptureView, kind: string) => view.preview.find((entry) => entry.kind === kind)?.value;
 
-    // The opener preset is gone: Android's project "+" opens the capture screen (its route params), and iOS never sent one. A
-    // stray `preset` key is not read, so a capture saves as RN's tab-bar popup does.
+
     it('does not read an opener preset: the capture saves as the tab-bar popup does', async () => {
         const { host } = await openHost();
         const preset = { projectId: 'p-home', status: 'next' } as const;
@@ -58,8 +57,7 @@ describe('native host contract: the capture popup', () => {
             .toMatchObject({ ok: true });
     });
 
-    // Voice pass V3: a recording saves as RN's stopRecording does, through the popup's draft: the typed text titles it, else
-    // "Audio note" and the time; the recording is its attachment; a retry answers from the task its capture ID made.
+
     it('saves a voice capture with its recording, titled by the draft or the fallback, once per capture ID', async () => {
         const { host } = await openHost();
         const opened = value(host.openQuickCapture());
@@ -83,8 +81,28 @@ describe('native host contract: the capture popup', () => {
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
     });
 
-    // Voice V3 review N1: a voice capture's retry owes the save its first call could not make, as submitQuickCapture's receipts do,
-    // and a capture ID whose task was deleted since answers no "saved".
+
+    it('a popup Save with a kept recording follows Save and edit and Add another; a stop closes', async () => {
+        const { host } = await openHost();
+        const options = value(host.openQuickCapture()).options;
+        const audio = (id: string) => ({
+            id, kind: 'file' as const, title: 'Audio note 1', uri: `file:///docs/attachments/${id}.m4a`, mimeType: 'audio/mp4',
+            createdAt: fixture.now, updatedAt: fixture.now, localStatus: 'available' as const,
+        });
+        const base = { text: 'Call the bank', fallbackTitle: 'Audio note', attachments: [audio('att-2')] };
+        expect(value(await host.submitQuickCaptureAudio({ ...base, options, captureId: generateUUID(), openAfterSave: true } as never)))
+            .toMatchObject({ kind: 'saved', next: 'open', reset: null });
+        const another = { ...options, addAnother: true };
+        const kept = value(await host.submitQuickCaptureAudio({ ...base, options: another, captureId: generateUUID(), openAfterSave: false } as never));
+        expect(kept).toMatchObject({ kind: 'saved', next: 'addAnother', reset: { text: '' } });
+        expect((kept as { reset: { options: { addAnother: boolean } } }).reset.options.addAnother).toBe(true);
+        expect(value(await host.submitQuickCaptureAudio({ ...base, options: another, captureId: generateUUID() })))
+            .toMatchObject({ kind: 'saved', next: 'close', reset: null });
+        expect(await host.submitQuickCaptureAudio({ ...base, options, captureId: generateUUID(), openAfterSave: 'yes' } as never))
+            .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+    });
+
+
     it('retries a voice capture whose save failed by saving it, and refuses a capture ID whose task was deleted', async () => {
         const saveData = vi.fn().mockResolvedValue(undefined);
         const { host } = await openHost('base', saveData);
@@ -93,14 +111,14 @@ describe('native host contract: the capture popup', () => {
         const input = { text: '', options, captureId, fallbackTitle: 'Audio note 9:00 AM', attachments: [] };
         saveData.mockRejectedValue(new Error('disk unavailable'));
         expect(await host.submitQuickCaptureAudio(input)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
-        // The task landed in the store; only its save failed.
+
         expect(useTaskStore.getState().tasks.some((task) => task.id === captureId.toLowerCase())).toBe(true);
         saveData.mockClear();
         saveData.mockResolvedValue(undefined);
         expect(value(await host.submitQuickCaptureAudio(input))).toMatchObject({ kind: 'saved', taskId: captureId.toLowerCase() });
         expect(saveData).toHaveBeenCalled();
 
-        // After a restart (no receipt), a capture ID whose task was deleted since writes nothing and answers no "saved".
+
         const deletedId = generateUUID().toLowerCase();
         await useTaskStore.getState().addTask('Audio note', {}, { captureId: deletedId });
         await useTaskStore.getState().deleteTask(deletedId);
@@ -195,7 +213,7 @@ describe('native host contract: the capture popup', () => {
         };
         await useTaskStore.getState().updateSettings({ dateFormat: 'dmy' });
         expect(await dueDay('Pay rent /due:10/8')).toBe('08-10');
-        // A sync replaces settings without updateSettings; the next parse still follows it.
+
         useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, dateFormat: 'mdy', language: 'de' } });
         expect(await dueDay('Pay rent /due:10/8')).toBe('10-08');
         expect(await dueDay('Miete zahlen morgen')).toBe('09-24');
@@ -216,7 +234,7 @@ describe('native host contract: the capture popup', () => {
         expect(await host.submitQuickCapture({ text: '   ', options: view.options, captureId: generateUUID() }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
 
-        // With Priorities off the control is hidden: no priority edit, no picker, and a sent priority reads as none.
+
         const off = (await openHost('noPriorities')).host;
         const offView = value(off.openQuickCapture());
         expect(offView.priority).toBeNull();
@@ -230,7 +248,7 @@ describe('native host contract: the capture popup', () => {
     it('keeps one parse-options bag between rebuilds: preview and save agree, the next capture knows the last one', async () => {
         const { host } = await openHost('base');
         let options = value(host.editQuickCapture({ text: '', options: value(host.openQuickCapture()).options, edit: { type: 'setAddAnother', value: true } })).view.options;
-        // Another writer adds a multi-word context while the draft is open: unknown until the next rebuild.
+
         await useTaskStore.getState().addTask('Synced', { contexts: ['@focus time'] });
         const draft = value(host.getQuickCaptureView({ text: 'x @focus time', options }));
         expect(draft.preview.filter((entry) => entry.kind === 'context').map((entry) => entry.value)).toEqual(['@focus']);
@@ -281,12 +299,12 @@ describe('native host contract: the capture popup', () => {
         expect(saveData).toHaveBeenCalledTimes(saves);
         expect(await host.submitQuickCapture({ ...input, text: 'Something else' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
 
-        // After a restart the receipt is gone; the task the capture ID made answers the retry.
+
         const restarted = createNativeHostContract();
         expect(await restarted.setLanguage({ storedLanguage: 'en', systemLocale: null })).toMatchObject({ ok: true });
         expect(await restarted.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
         recorder.log.length = 0;
-        // The stored task does not match another draft: refused, never acknowledged.
+
         expect(await restarted.submitQuickCapture({ ...input, text: 'Call @phone' })).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(await restarted.submitQuickCapture({ ...input, options: { ...options, focus: true } }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
@@ -303,7 +321,7 @@ describe('native host contract: the capture popup', () => {
             .toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
         expect(useTaskStore.getState().persistenceFailure).toBeTruthy();
 
-        // An earlier save still fails, but these calls write nothing of their own.
+
         const captureId = generateUUID();
         expect(value(await host.submitQuickCapture({ text: 'Pay rent /due:whenever', options, captureId })))
             .toMatchObject({ kind: 'refused' });
@@ -357,7 +375,7 @@ describe('native host contract: the capture popup', () => {
         });
         expect(recorder.log).toEqual([]);
         const captureIds = [generateUUID(), generateUUID()];
-        // Mobile saves a recovery snapshot first; the host writes the file the contract serializes.
+
         expect(await host.submitQuickCaptureLines({ text, options, captureIds, snapshotFileName: null }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         const snapshot = value(await host.createQuickCaptureSnapshot())!;
@@ -413,12 +431,12 @@ describe('native host contract: the capture popup', () => {
         expect(await restarted.setLanguage({ storedLanguage: 'en', systemLocale: null })).toMatchObject({ ok: true });
         expect(await restarted.activate({ writeSafetyReady: true })).toEqual({ ok: true, value: null });
         recorder.log.length = 0;
-        // A completed batch needs no snapshot and prepares nothing.
+
         expect(value(await restarted.submitQuickCaptureLines({ text, options, captureIds, snapshotFileName: null }))).toEqual(saved);
         expect(await restarted.submitQuickCaptureLines({ text: 'Plan beds\nCall Bob', options, captureIds, snapshotFileName: null }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // Archiving Garden plan, the project this batch made: the retry is refused (the batch's own
-        // project is gone, as after a delete), and no second Garden plan is created.
+
+
         const garden = useTaskStore.getState().projects.find((project) => project.title === 'Garden plan')!;
         await useTaskStore.getState().updateProject(garden.id, { status: 'archived' });
         await flushPendingSave();
@@ -430,7 +448,7 @@ describe('native host contract: the capture popup', () => {
         expect(recorder.log).toEqual([]);
         expect(useTaskStore.getState()._allProjects.filter((project) => project.title === 'Garden plan')).toHaveLength(1);
 
-        // One line landed before the restart: only the other is prepared and written.
+
         const partial = [generateUUID(), generateUUID()];
         await useTaskStore.getState().addTask('Water', { status: 'inbox', areaId: undefined }, { captureId: partial[0] });
         recorder.log.length = 0;
@@ -475,7 +493,7 @@ describe('native host contract: the capture popup', () => {
         const areaId = area.requestId.toLowerCase();
         expect(value(await host.submitQuickCapturePickerQuery(project))).toEqual({ options: { ...options, projectId, areaId: null }, created: true });
         expect(value(await host.submitQuickCapturePickerQuery(area))).toEqual({ options: { ...options, areaId }, created: true });
-        // Renamed since: the search no longer names them, and the replay still finds them.
+
         await useTaskStore.getState().updateProject(projectId, { title: 'Kitchen' });
         await useTaskStore.getState().updateArea(areaId, { name: 'Yard' });
         const projectReplay = await replayAfterRestart((restarted) => restarted.submitQuickCapturePickerQuery(project));
@@ -484,12 +502,12 @@ describe('native host contract: the capture popup', () => {
         expect(areaReplay).toEqual({ result: { ok: true, value: { options: { ...options, areaId }, created: false } }, wrote: false });
         expect(useTaskStore.getState()._allProjects.filter((entry) => entry.title === 'Kitchen remodel')).toEqual([]);
         expect(useTaskStore.getState()._allAreas.filter((entry) => entry.name === 'Garden')).toEqual([]);
-        // One deleted since cannot be chosen: refused, and nothing is written.
+
         await useTaskStore.getState().deleteArea(areaId);
         const gone = await replayAfterRestart((restarted) => restarted.submitQuickCapturePickerQuery(area));
         expect(gone.result).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
         expect(gone.wrote).toBe(false);
-        // The store restores a deleted area of that name under its own id; the request UUID never renames it.
+
         const restored = value(await host.submitQuickCapturePickerQuery({ ...area, query: 'Gone', requestId: generateUUID() }));
         expect(restored.options.areaId).toBe('a-gone');
         expect(useTaskStore.getState()._allAreas.find((entry) => entry.id === 'a-gone')?.deletedAt).toBeUndefined();
@@ -503,7 +521,7 @@ describe('native host contract: the capture popup', () => {
         const snapshotFileName = value(await host.createQuickCaptureSnapshot())!.fileName;
         const lines = { text: 'Buy eggs\nCall plumber', options, captureIds: [generateUUID(), generateUUID()], snapshotFileName };
         expect(value(await host.submitQuickCaptureLines(lines))).toMatchObject({ kind: 'saved' });
-        // A replay of a request that landed answers from its task.
+
         expect(await replayAfterRestart((restarted) => restarted.submitQuickCapture(capture)))
             .toMatchObject({ result: { ok: true, value: { kind: 'saved', taskId: capture.captureId.toLowerCase() } }, wrote: false });
         await useTaskStore.getState().updateTask(capture.captureId.toLowerCase(), { title: 'Call Bob' });
@@ -518,7 +536,7 @@ describe('native host contract: the capture popup', () => {
             .toEqual(['Call Bob', 'Call the plumber']);
     });
 
-    // A capture's new project lands, then its task write fails: the request did not land, so it runs again.
+
     const failTaskWrites = async (name: 'addTask' | 'addTasks', write: () => Promise<unknown>) => {
         const real = useTaskStore.getState()[name];
         useTaskStore.setState({ [name]: async () => ({ success: false, error: 'Task store refused' }) });
@@ -551,11 +569,11 @@ describe('native host contract: the capture popup', () => {
         expect(replay.result).toMatchObject({ ok: true, value: { kind: 'saved', taskId, projectId } });
         expect(madeProjects()).toEqual([[projectId, 'Beds', false]]);
         expect(useTaskStore.getState()._tasksById.get(taskId)).toMatchObject({ title: 'Plan beds', projectId });
-        // Landed now: a later replay answers from the task in the renamed project.
+
         expect(await replayAfterRestart((restarted) => restarted.submitQuickCapture(capture)))
             .toMatchObject({ result: { ok: true, value: { kind: 'saved', taskId, projectId } }, wrote: false });
 
-        // A project deleted since is not made again: refused, and nothing is written.
+
         const other = { text: 'Sort boxes +Attic', options, captureId: generateUUID() };
         const atticId = requestRowId(other.captureId, 'project:attic');
         await failTaskWrites('addTask', () => host.submitQuickCapture(other));
@@ -577,7 +595,7 @@ describe('native host contract: the capture popup', () => {
         await renameProject('Garden plan', 'Beds');
         await renameProject('Taxes', 'Paperwork');
 
-        // A batch after a restart takes a new snapshot first.
+
         const replay = await replayAfterRestart(async (restarted) => restarted.submitQuickCaptureLines({
             ...lines, snapshotFileName: value(await restarted.createQuickCaptureSnapshot())!.fileName,
         }));
@@ -585,7 +603,7 @@ describe('native host contract: the capture popup', () => {
         expect(madeProjects()).toEqual([[gardenId, 'Beds', false], [taxesId, 'Paperwork', false]]);
         expect(lines.captureIds.map((id) => useTaskStore.getState()._tasksById.get(id.toLowerCase())?.projectId)).toEqual([gardenId, taxesId, gardenId]);
 
-        // A project deleted since is not made again: refused, and nothing is written.
+
         const other = { ...lines, text: 'Sort boxes +Attic\nSweep', captureIds: [generateUUID(), generateUUID()], snapshotFileName: value(await host.createQuickCaptureSnapshot())!.fileName };
         const atticId = requestRowId(other.captureIds[0], 'project:attic');
         await failTaskWrites('addTasks', () => host.submitQuickCaptureLines(other));
@@ -610,7 +628,7 @@ describe('native host contract: the capture popup', () => {
         expect(replay.result).toMatchObject({ ok: true, value: { kind: 'saved', taskId, projectId } });
         expect(useTaskStore.getState()._tasksById.get(taskId)?.projectId).toBe(projectId);
         expect(madeProjects()).toEqual([[projectId, 'Beds', false], [newer.id, 'Garden plan', false]]);
-        // Landed now: a later replay still answers from the task in the capture's own project.
+
         expect(await replayAfterRestart((restarted) => restarted.submitQuickCapture(capture)))
             .toMatchObject({ result: { ok: true, value: { kind: 'saved', taskId, projectId } }, wrote: false });
     });

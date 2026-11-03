@@ -91,11 +91,7 @@ function ChoiceButton({
   ) : button;
 }
 
-/**
- * One question per screen: the Inbox processor's decisions laid out as forward
- * steps instead of a form that expands downward. Owns no write paths — every
- * mutation is a controller handler, the same ones this flow has always used.
- */
+
 export function InboxStepFlow({ controller, mode }: { controller: Controller; mode: InboxProcessingMode }) {
   const {
     answers,
@@ -129,7 +125,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
   const taskId = currentTask?.id;
 
   const dateOnlyLabel = t('taskEdit.dateOnly');
-  // The time picker opens on the row's day at its picked time, else the default schedule time.
+
   const { timePickerField } = controller;
   const timePickerValue = (() => {
     if (!timePickerField) return null;
@@ -150,8 +146,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
   const aiWorkingText = aiWorkingLabel === 'ai.working' ? 'Working...' : aiWorkingLabel;
   const primaryForeground = filledButton.textColor ?? tc.onTint;
 
-  // Quick mode answers the whole tree in one tap, so it shares every terminal
-  // step and only replaces the entry screen with a flat row of decisions.
+
   const entryStep = getProcessInboxEntryStep(mode, processInboxPlan);
   const step = resolveProcessInboxStep(answers, mode, processInboxPlan);
   const isTerminal = isProcessInboxTerminalStep(step);
@@ -161,11 +156,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     setNotesOpen(false);
   }, [taskId]);
 
-  // Answering a question moves the next one in from the side; reduced motion
-  // lands it flat. Two plain Values — the RN shim has no interpolate().
-  // JS-driven on purpose: on iOS (new architecture) a re-render of a view whose
-  // opacity the native driver animates re-applied a stale value, so the step
-  // stayed faded or invisible until another re-render (#1317).
+
   useEffect(() => {
     if (reducedMotion) {
       fade.setValue(1);
@@ -184,8 +175,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
       committed === 'trash' ? 'discarded' : committed === 'done' ? 'completed' : 'filed',
     );
     if (!undoReceipt) return;
-    // Same title the write commits, not the raw capture — refining the title
-    // mid-step must show up in the Undo toast.
+
+
     const title = controller.processingTitle.trim() || currentTask?.title || '';
     submittingRef.current = true;
     try {
@@ -193,7 +184,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     } finally {
       submittingRef.current = false;
     }
-    // Same completion feedback a task row's own done button gives.
+
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
     showToast({
       message: formatProcessInboxCommitMessage(t, committed, title),
@@ -204,7 +195,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     });
   }, [controller.processingTitle, createDecisionUndoReceipt, currentTask?.title, showToast, t, undoDecision]);
 
-  /** A step button: move to the next question, or commit the destination. */
+
   const choose = useCallback((choice: string) => {
     const outcome = answerStep(choice, mode);
     if (outcome.type !== 'commit') return;
@@ -281,7 +272,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
             ENERGY_LEVEL_OPTIONS={controller.ENERGY_LEVEL_OPTIONS}
             timeEstimateOptions={controller.timeEstimateOptions}
           />
-          {/* Contexts stay on the step itself; tags ride the disclosure. */}
+          {                                                                 }
           {step === 'file' && (
             <InboxContextSection
               t={t}
@@ -378,7 +369,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     </View>
   );
 
-  /** A question step: its prompt, its choices, and Trash set apart. */
+
   const renderPrompt = () => {
     const grid = step === 'decisions' || step === 'actionable';
     const renderChoice = (choice: ProcessInboxStepChoice) => (
@@ -416,8 +407,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
 
   const renderStep = () => {
     switch (step) {
-      // Quick mode puts every destination on one screen. Terminal ones commit
-      // on the tap; the rest drop straight into that decision's follow-up step.
+
+
       case 'decisions':
       case 'actionable':
       case 'twoMinute':
@@ -463,7 +454,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
               clearLabel={t('common.clear')}
               tc={tc}
             />
-            {/* Start later lands in Next, where contexts decide when it shows (#1445). */}
+            {                                                                             }
             {renderContextRow()}
             {renderProjectSection(false)}
           </View>
@@ -535,8 +526,8 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
         const contextRow = renderContextRow();
         return (
           <View>
-            {/* Same precedence the one-scroll form used: context first unless
-                the user asked to be shown the project home first. */}
+            {
+                                                                     }
             {projectFirst ? projectRow : contextRow}
             {projectFirst ? contextRow : projectRow}
             {moreOptionsDisclosure}
@@ -546,8 +537,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
     }
   };
 
-  // The conversion card carries its own "Create project" commit (#827), so the
-  // step's own commit button would be a second way to finish the same step.
+
   const showFileItButton = isTerminal && !(step === 'file' && convertToProject);
 
   return (
@@ -646,7 +636,7 @@ export function InboxStepFlow({ controller, mode }: { controller: Controller; mo
         />
       </ScrollView>
 
-      {/* Reserve space above the footer; feedback must not cover decisions. */}
+      {                                                                        }
       <ToastViewport inline />
 
       {showFileItButton && (

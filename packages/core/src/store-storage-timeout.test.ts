@@ -4,14 +4,14 @@ import { getStorageTimeoutMs, setStorageTimeoutMs } from './store-settings';
 import type { StorageAdapter } from './storage';
 import type { AppData } from './types';
 
-// Pass D1c: a load waits for storage as long as the host's budget says; RN, desktop and iOS keep the 15 s default.
+
 describe('the storage read timeout', () => {
     const empty: AppData = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
     const slowStorage = (ms: number) => setStorageAdapter({
         getData: () => new Promise<AppData>((resolve) => setTimeout(() => resolve(empty), ms)),
         saveData: async () => undefined,
     } as unknown as StorageAdapter);
-    /** The load's outcome ("loaded" or its error text) once [advanceMs] of fake time passed. */
+
     const load = async (advanceMs: number) => {
         const outcome = useTaskStore.getState().fetchData({ throwOnError: true })
             .then(() => 'loaded', (error: unknown) => (error instanceof Error ? error.message : String(error)));

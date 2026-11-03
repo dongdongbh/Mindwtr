@@ -1,19 +1,10 @@
-/**
- * What a cancelled reminder alarm does to its delivered notification, on a fake alarm
- * library that behaves like the real ones: on Android, deleteAlarm deletes the alarm's
- * row and removeFiredNotification finds the notification through that row, so a removal
- * after the delete does nothing; on iOS, removeFiredNotification works by id. On Android
- * the tray notification's post id is not the row id (AlarmUtil posts under the row's
- * alarmId), so the fake posts under row id + 1000 there.
- *
- * One rule on both: a delivered reminder is removed when its reminder is withdrawn (the
- * task is completed or deleted, its time changed, reminders were turned off) and kept
- * when only its time passed.
- */
+
+
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const harness = vi.hoisted(() => ({
-  /** The id a fired alarm's notification is posted under. */
+
   postId: (rowId: number) => (harness.platform.OS === 'android' ? rowId + 1000 : rowId),
   platform: { OS: 'android', Version: 34 },
   storage: new Map<string, string>(),
@@ -22,7 +13,7 @@ const harness = vi.hoisted(() => ({
   tray: new Set<number>(),
   nextId: 1,
   failRemovals: false,
-  /** Runs once on the next storage read other than the alarm map's (the stored language). */
+
   onRead: null as null | (() => void),
   logs: [] as [string, Record<string, unknown> | undefined][],
 }));
@@ -49,7 +40,7 @@ vi.mock('react-native', () => ({
     }
   },
   NativeModules: {
-    // The patched Android module (patch-alarm-notification-gradle.js).
+
     RNAlarmNotification: {
       getNotificationId: async (id: number) => (harness.rows.has(id) ? harness.postId(id) : null),
       clearNotification: (notificationId: number) => { harness.tray.delete(notificationId); },
@@ -76,7 +67,7 @@ vi.mock('react-native-alarm-notification', () => ({
     deleteRepeatingAlarm: () => undefined,
     removeFiredNotification: (id: number) => {
       if (harness.failRemovals) throw new Error('notification service unavailable');
-      // Android resolves the notification through the alarm's row; iOS removes by id.
+
       if (harness.platform.OS === 'android' && !harness.rows.has(id)) return;
       harness.tray.delete(harness.postId(id));
     },
@@ -123,10 +114,10 @@ const task = (fields: Record<string, unknown>) => ({
   id: 't', title: 'Pay rent', status: 'next', tags: [], contexts: [], createdAt: CREATED, updatedAt: CREATED, ...fields,
 });
 const at = (iso: string) => vi.setSystemTime(new Date(iso));
-/** Runs one reconciliation cycle (the first call starts the service). */
+
 const cycle = () => startLocalMobileNotifications();
 const alarmId = (key: string) => __localNotificationTestUtils.getAlarmMapSnapshot().get(key)?.id;
-/** The alarm under `key` fires: its notification is in the tray (its post id is returned), and its row stays until a cycle cancels it. */
+
 const fire = (key: string) => {
   const id = alarmId(key);
   if (id === undefined) throw new Error(`No alarm for ${key}`);
@@ -174,8 +165,7 @@ describe.each(['android', 'ios'])('delivered reminders on %s', (platform) => {
     expect(withdrawnLines()).toEqual([{ reason: 'expired', count: 1 }]);
   });
 
-  // The cycle 5 s after a reminder fires lets its alarm expire and forgets it; the
-  // notification stays. A later withdrawal must still take it out of the tray.
+
   it('removes a delivered reminder when its task is completed after the cycle that let it expire', async () => {
     harness.state.tasks = [task({ dueDate: '2026-09-28T10:05:00.000Z' })];
     await cycle();
@@ -306,7 +296,7 @@ describe.each(['android', 'ios'])('delivered reminders on %s', (platform) => {
     await cycle();
     at('2026-09-28T10:05:05.000Z');
     const delivered = fire('task:t');
-    // The task is completed while the rebuild awaits the stored language.
+
     harness.onRead = () => {
       harness.state = { ...harness.state, tasks: [task({ dueDate: '2026-09-28T10:05:00.000Z', status: 'done' })] };
     };
@@ -322,7 +312,7 @@ describe.each(['android', 'ios'])('delivered reminders on %s', (platform) => {
     const reminder = fire('task:t');
     const pomodoroAlert = 999;
     harness.tray.add(pomodoroAlert);
-    // Turning every reminder feature off stops the service (use-root-layout-sync-effects.ts).
+
     await stopLocalMobileNotifications();
     expect(harness.tray.has(reminder)).toBe(false);
     expect(harness.tray.has(pomodoroAlert)).toBe(true);

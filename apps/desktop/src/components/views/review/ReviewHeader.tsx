@@ -18,8 +18,7 @@ type ReviewHeaderProps = {
     };
 };
 
-// The header carries only the review workflows. Filtering, display options,
-// and selection live in the toolbar immediately above the task list.
+
 export function ReviewHeader({
     title,
     taskCountLabel,

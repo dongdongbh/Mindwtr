@@ -1,7 +1,7 @@
 import Foundation
 import Darwin
 
-/// The payload is deliberately opaque to the host; shared core validates its field schema on resume.
+
 public struct EditorDraftSnapshot: Codable, Sendable, Equatable {
     public let version: Int
     public let sessionID: String
@@ -38,7 +38,7 @@ private struct StoredEditorDraft: Codable {
     let attempt: EditorDraftAttempt?
 }
 
-/// One fixed file beside the native database. All calls run on CoreHost's serial queue.
+
 struct EditorDraftStore {
     let url: URL
     private static let maxPayload = 1_000_000
@@ -128,7 +128,7 @@ struct EditorDraftStore {
         return stored
     }
 
-    /// V3's caller retains this descriptor, not merely an equivalent model.
+
     struct OwnedCheckpoint {
         let snapshot: EditorDraftSnapshot
         let attempt: EditorDraftAttempt?
@@ -177,8 +177,7 @@ struct EditorDraftStore {
             device: UInt64(before.st_dev), inode: UInt64(before.st_ino))
     }
 
-    /// Exact ownedAdvance semantics plus one actual encoded-write receipt. Even
-    /// matching-after retries rewrite, repairing a previous lost sync ack.
+
     func checkpointOwnedMatching(before: EditorDraftSnapshot, after: EditorDraftSnapshot,
                                  binding: OwnedCheckpoint) throws -> OwnedCheckpoint {
         try validate(StoredEditorDraft(snapshot: before, attempt: nil))
@@ -205,8 +204,7 @@ struct EditorDraftStore {
         return data
     }
 
-    /// Pure validation and exact encoded-file capacity admission. The caller
-    /// separately reads the actual editor/attempt and retains its sidecar intent.
+
     func preflightCheckpoint(_ snapshot: EditorDraftSnapshot) throws { _ = try encodedBytes(snapshot) }
 
     private func write(_ snapshot: EditorDraftSnapshot, attempt: EditorDraftAttempt? = nil) throws {
@@ -230,15 +228,12 @@ struct EditorDraftStore {
         try write(snapshot)
     }
 
-    /// Caller owns the durable operation intent; this store only compares the
-    /// complete opaque checkpoint and performs its existing durable file write.
+
     func checkpointMatching(before: EditorDraftSnapshot, after: EditorDraftSnapshot) throws {
         try checkpointMatching(before: before, after: after, mode: .add)
     }
 
-    /// A retained v2 sidecar pair and shared projection proof belong to the
-    /// caller. This distinct exact CAS accepts safe generation gaps and confirms
-    /// durability by rewriting matched after, including after a lost write ack.
+
     func checkpointOwnedAdvanceMatching(before: EditorDraftSnapshot, after: EditorDraftSnapshot) throws {
         try checkpointMatching(before: before, after: after, mode: .ownedAdvance)
     }
@@ -267,7 +262,7 @@ struct EditorDraftStore {
         try write(after)
     }
 
-    /// Missing is idempotent only because the caller retains its discard intent.
+
     func discardMatching(expected: EditorDraftSnapshot) throws {
         try validate(StoredEditorDraft(snapshot: expected, attempt: nil))
         guard let current = try read() else { return }
@@ -321,14 +316,13 @@ struct EditorDraftStore {
             && a.generation == b.generation && exact(a.method, b.method) && exact(a.argumentsJSON, b.argumentsJSON)
     }
 
-    /// Structural capacity admission only; the caller separately proves shared
-    /// correspondence and retained native ownership under the library lock.
+
     func preflightOwnedSave(expected: EditorDraftSnapshot, attempt: EditorDraftAttempt) throws {
         guard attempt.method == "attachmentDraftSave" else { throw EditorDraftStoreError.corrupt }
         _ = try encodedBytes(expected, attempt: attempt)
     }
 
-    /// Exact replay rewrites the same frozen record to repair a lost sync ack.
+
     func freezeOwnedSaveMatching(expected: EditorDraftSnapshot, attempt: EditorDraftAttempt) throws {
         try preflightOwnedSave(expected: expected, attempt: attempt)
         guard let current = try read(), ownedMatches(current.snapshot, expected),
@@ -338,8 +332,7 @@ struct EditorDraftStore {
         try write(expected, attempt: attempt)
     }
 
-    /// The caller proves nonapplication/no invocation; this does not grant it.
-    /// Even an already-thawed exact snapshot is rewritten for durable retry.
+
     func thawOwnedSaveMatching(expected: EditorDraftSnapshot, attempt: EditorDraftAttempt) throws {
         try preflightOwnedSave(expected: expected, attempt: attempt)
         guard let current = try read(), ownedMatches(current.snapshot, expected),
@@ -349,8 +342,7 @@ struct EditorDraftStore {
         try write(expected)
     }
 
-    /// Caller retains validated durable success. Missing still syncs the parent;
-    /// a present editor requires the entire exact snapshot and frozen attempt.
+
     func removeOwnedSaveMatching(expected: EditorDraftSnapshot, attempt: EditorDraftAttempt) throws {
         try preflightOwnedSave(expected: expected, attempt: attempt)
         if let current = try read() {

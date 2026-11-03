@@ -68,8 +68,7 @@ class HostDocumentsTest {
         assertEquals("data.json.bak", renamed.getString("name"))
     }
 
-    // Expo's SAF deleteAsync (FileSystemLegacyModule.kt): DocumentFile.delete() and its result ignored. A provider that refuses
-    // leaves the document, and the caller carries on, as RN's does (S5 review P3-8).
+
     @Test
     fun aDeleteNeverFailsAsExposDoesNotAndARefusedOneLeavesTheDocument() {
         val folder = Folder()

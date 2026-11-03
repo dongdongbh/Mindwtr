@@ -119,62 +119,55 @@ import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import android.os.Handler
 import android.os.Looper
 
-/**
- * Project details' writes: each is core's prepared commit (native-host-contract-project-*.ts), sent as a Menu command with its
- * request and its frozen preparation, journaled as it is, so a retry or a replay sends exactly that commit again.
- */
+
 val PROJECT_DETAIL_KINDS = setOf("projectEdit")
 
-/** RN's status menu choices (ProjectDetailModal), in RN's order. */
+
 private val PROJECT_STATUSES = listOf("active" to "status.active", "waiting" to "status.waiting", "someday" to "status.someday")
 
-/** A section manager editor: a section's id (null for Add Section) and the typed title. */
+
 data class SectionDraft(val sectionId: String?, val title: String)
 
-/**
- * RN's Project details (ProjectDetailModal's Details panel and its pickers) on core's project contracts: what it reads to draw
- * the raw values core's labels leave out (the status, the type and scope, the notes' text), and every write.
- */
+
 class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
-    /** The project these details are for; a new project starts with everything folded and shut, as RN's. */
+
     var projectId by mutableStateOf<String?>(null); private set
     var open by mutableStateOf(false)
     var statusMenu by mutableStateOf(false)
-    /** Core's status, flow and notes options for [projectId]: `{ status, flow, notes }`. */
+
     var raw by mutableStateOf<JSONObject?>(null); private set
     var notesExpanded by mutableStateOf(false)
     var notesPreview by mutableStateOf(false)
     var notesFullscreen by mutableStateOf(false)
-    /** Typed notes not yet stored; null when the field shows core's text. */
+
     var notesDraft by mutableStateOf<String?>(null)
-    /** The header's typed title not yet stored; null when it shows core's title. */
+
     var titleDraft by mutableStateOf<String?>(null)
-    /** The title and the notes last journaled for this project. */
+
     private var sentTitle: String? = null
-    /** The title when this project opened (RN's sheet base): a commit compares with it until one is sent. */
+
     private var openedTitle: String? = null
     private var sentNotes: String? = null
-    /** Core's resolved notes blocks (getProjectNotes) for the preview. */
+
     var notesView by mutableStateOf<JSONObject?>(null); private set
     var areaPicker by mutableStateOf<JSONObject?>(null); private set
     var tagPicker by mutableStateOf<JSONObject?>(null); private set
     var tagDraft by mutableStateOf("")
-    /** The open date picker: the field and core's options for it. */
+
     var datePicker by mutableStateOf<Pair<String, JSONObject>?>(null); private set
-    /** The section manager, open with core's section order options. */
+
     var sections by mutableStateOf<JSONObject?>(null); private set
     var sectionDraft by mutableStateOf<SectionDraft?>(null)
     var sectionDelete by mutableStateOf<JSONObject?>(null)
-    /** RN's header "..." sheet (projectActionsVisible), and the confirm Cancel project or Delete asks first. */
+
     var actionsOpen by mutableStateOf(false)
     var actionConfirm by mutableStateOf<String?>(null)
-    // ---- RN's project task filters (TaskList's filter sheet), on core's project filter view ----
 
-    /** The filters the open project's list is read with: core's ListFilterState, as its view sent it back; empty for each project. */
+
     var listFilterState by mutableStateOf(JSONObject()); private set
-    /** The open filter sheet (`{ kind, page?, query?, typed:<edit>?, <disclosure>? }`, the Menu's dialog shape), or null. */
+
     var listFilterSheet by mutableStateOf<JSONObject?>(null); private set
-    /** Token windows read past the view's first one (the sheet's More), at the view's revision. */
+
     private var tokenPages by mutableStateOf<Pair<String, List<JSONObject>>?>(null)
     override var pickerFound by mutableStateOf<JSONObject?>(null); private set
     private var filterTyped = 0
@@ -194,7 +187,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     override fun collectionTotal(name: String): Int =
         if (name == "tokens") listFilters?.getJSONObject("filters")?.optJSONObject("tokens")?.optInt("total") ?: 0 else 0
 
-    /** RN's Filters (the view options row, or the pinned row's chip): the sheet opens and the list is read with its tokens. */
+
     fun openFilters() {
         viewOptionsOpen = false
         listFilterSheet = JSONObject().put("kind", "filters")
@@ -217,7 +210,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
 
     override fun removeChip(action: JSONObject) { action.optJSONObject("filterEdit")?.let(::filterEdit) }
 
-    /** Typed search or location text: kept with the sheet as typed, then core's edit once typing pauses (the Menu's 200 ms). */
+
     override fun typeFilter(type: String, text: String) {
         listFilterSheet?.let { listFilterSheet = JSONObject(it.toString()).put("typed:$type", text) }
         val mine = ++filterTyped
@@ -240,7 +233,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         main.postDelayed({ if (mine == filterTyped) searchPicker(name, text) }, 200)
     }
 
-    /** Core's project tokens (getProjectDetailFilterOptions) for [query] from offset zero, to [depth]: the picker's search. */
+
     override fun searchPicker(name: String, query: String, depth: Int) {
         val revision = filterRevision ?: return
         if (name != "tokens" || query.isBlank()) { pickerFound = null; return }
@@ -252,7 +245,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }
     }
 
-    /** The sheet's More under the tokens: the next window of the project's tokens at the view's revision. */
+
     override fun loadCollection(name: String) {
         val revision = filterRevision ?: return
         if (name != "tokens") return
@@ -263,14 +256,14 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }
     }
 
-    /** The options read's fixed part for [query]: this project, its view controls and filters. */
+
     private fun tokenRead(query: String): JSONObject? {
         val id = projectId ?: return null
         return input(id).put("showCompleted", shell.projectShowCompleted).put("completedCollapsed", shell.projectCompletedCollapsed)
             .put("filters", listFilterState).put("picker", "tokens").put("query", query)
     }
 
-    /** Windows of core's matching tokens from [offset] until [depth] or the end, at one revision. */
+
     private fun collectTokens(runtime: CoreHost, read: JSONObject, offset: Int, depth: Int): Pair<Int, List<JSONObject>> {
         val items = ArrayList<JSONObject>()
         var revision: String? = null
@@ -286,15 +279,14 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         return total to items
     }
 
-    // ---- RN's reorder mode (the view options' Reorder): core's project order view and its prepared move ----
 
     var reorderMode by mutableStateOf(false); private set
-    /** The project list's first task at least 10% shown (RN's firstViewableTaskId): Task order opens on it (#765). */
+
     var viewedTaskId: String? = null
-    /** Core's project order view (getProjectTaskOrderView): its words, orderToken, and every row (all windows) in core's order. */
+
     var orderView by mutableStateOf<JSONObject?>(null); private set
 
-    /** Reorder on (the list reads core's order as it shows) or Done (back to the list, read again). */
+
     fun toggleReorder() {
         viewOptionsOpen = false
         reorderMode = !reorderMode
@@ -323,7 +315,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }) { reply, _ -> if (replies.current(ticket)) orderView = reply }
     }
 
-    /** A drop, or TalkBack's move: [taskId] after [after] (a row, or null for the top) on the order shown; the order reads again. */
+
     fun moveTask(taskId: String, after: JSONObject?) {
         val token = orderView?.optString("orderToken")?.takeIf { it.isNotEmpty() } ?: return
         edit(projectId, "taskOrder", refused = { readOrder() }, answer = { readOrder() }) {
@@ -332,40 +324,40 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }
     }
 
-    /** RN's section arrows in reorder mode: the section one step up or down on the order shown (Details' own section move). */
+
     fun moveOrderSection(sectionId: String, direction: String, order: List<String>) {
         edit(projectId, "sectionMove", answer = { readOrder() }) { put("sectionId", sectionId).put("direction", direction).put("order", JSONArray(order)) }
     }
 
-    /** RN's view options sheet (the pinned row's "..."), and its sort modal on core's sort choices for this project. */
+
     var viewOptionsOpen by mutableStateOf(false)
     var sortOpen by mutableStateOf(false)
     var sort by mutableStateOf<JSONObject?>(null); private set
-    /** The project's own sort is not Default: RN washes the "..." while a sort, Show completed or Order is on. */
+
     val customSort: Boolean get() = sort?.optString("effectiveSortBy", "default")?.let { it != "default" } == true
-    /** The sheet's Convert to section… row as core answers it: its label, and whether it is offered (or why not). */
+
     var convertRow by mutableStateOf<JSONObject?>(null); private set
-    /** RN's ProjectToSectionModal, open while set: core's destinations and preview for the picked destination and typed name. */
+
     var convert by mutableStateOf<JSONObject?>(null); private set
     var convertDestination by mutableStateOf<String?>(null); private set
     var convertTitle by mutableStateOf(""); private set
-    /** RN's prepared step: the preview with the new section's name, then Convert (or Back). */
+
     var convertConfirm by mutableStateOf(false)
-    /** The token of the preview Next confirmed: core converts only what it showed. */
+
     private var convertExpected: String? = null
-    /** What the screen does with an edit's reply, by request UUID: Duplicate opens the copy, Delete offers RN's Undo. */
+
     private val answers = java.util.Collections.synchronizedMap(HashMap<String, (JSONObject) -> Unit>())
-    /** What the screen shows when core refuses an edit (STALE_REVISION), by request UUID: RN's failure line for that action. */
+
     private val refusals = java.util.Collections.synchronizedMap(HashMap<String, (String) -> Unit>())
-    /** RN's help Alert: its title and text. */
+
     var help by mutableStateOf<Pair<String, String>?>(null)
 
-    /** The project on screen is [id]: another one resets the details, as RN's does on open, close, or a swap. */
+
     fun follow(id: String?) {
         if (id == projectId) return
-        // Leaving a project stores its typed title and notes, as RN's end of editing and blur do on close (review PD 1).
+
         projectId?.let { old ->
-            // Compared with what was last journaled (a field let go just now), else with core's: never journaled twice.
+
             for ((kind, text) in editsOnLeave(titleDraft, titleBase(sentTitle, openedTitle, shell.projects?.title(old)), notesDraft,
                 sentNotes ?: raw?.let { storedNotes() })) {
                 if (kind == "projectRename") rename(text, old) else writeNotes(text, old)
@@ -386,15 +378,15 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         reorderMode = false; orderView = null
     }
 
-    /** RN's TaskList starts each project with no filters and its sheet shut. */
+
     fun resetFilters() { listFilterState = JSONObject(); listFilterSheet = null; tokenPages = null; pickerFound = null }
 
     private fun input(id: String) = JSONObject().put("projectId", id)
 
-    /** Which replies still apply: the newest read of each kind, in the current session (review PD 3). */
+
     private val replies = ReplyGuard()
 
-    /** Core's status, flow and notes options, in the background. */
+
     fun read() {
         val id = projectId ?: return
         val ticket = replies.ticket("raw")
@@ -403,10 +395,10 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
                 .put("flow", runtime.menuRead("projectFlowOptions", input(id).toString()))
                 .put("notes", runtime.menuRead("projectNotesOptions", input(id).toString()))
         }) { reply, mine ->
-            // A read started before a write ended answers the old values: it must never clear a typed draft.
+
             if (!replies.current(ticket) || !shell.fresh(mine, InboxViewModel.Part.ProjectDetails)) return@background
             raw = reply
-            // The typed notes are stored: the field shows core's text again.
+
             if (notesDraft == storedNotes()) notesDraft = null
         }
     }
@@ -416,7 +408,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     fun flow(): JSONObject? = raw?.getJSONObject("flow")?.getJSONObject("project")
     fun flowMode(): String? = raw?.getJSONObject("flow")?.menuText("flowMode")
 
-    /** Core's blocks for the notes as typed (RN previews the unsaved draft), for the preview; a read, it stores nothing. */
+
     fun readNotes() {
         val id = projectId ?: return
         val text = notesDraft ?: storedNotes()
@@ -426,11 +418,11 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }) { reply, _ -> if (replies.current(ticket)) notesView = reply }
     }
 
-    /** The area picker, on core's area options. */
+
     fun openAreas() = choices("projectAreaOptions", JSONObject()) { areaPicker = it }
     fun closeAreas() { areaPicker = null }
 
-    /** The tag picker, on core's tag options (read again after each change while it is open). */
+
     fun openTags() { tagDraft = ""; choices("projectTagsOptions", JSONObject()) { tagPicker = it } }
     fun readTags() {
         val id = projectId ?: return
@@ -452,17 +444,17 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     }
     fun closeSections() { sections = null; sectionDraft = null; sectionDelete = null }
 
-    /** The project screen left (another tab, the editor over it): its pickers and menus close, as RN's modals go with their screen. */
+
     fun closeOverlays() {
         replies.close()
         statusMenu = false; areaPicker = null; tagPicker = null; datePicker = null; help = null; notesFullscreen = false; closeSections()
     }
 
-    /** A picker's choices: core's options, read as a user action. */
+
     private fun choices(read: String, extra: JSONObject, show: (JSONObject) -> Unit) {
         val id = projectId ?: return
         statusMenu = false
-        // A picker opens only for its project, still on screen: its reply after a close or a newer read never shows.
+
         val ticket = replies.ticket("picker")
         shell.perform { runtime ->
             val options = runtime.menuRead(read, JSONObject(extra.toString()).put("projectId", id).toString())
@@ -470,12 +462,10 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }
     }
 
-    // ---- Writes: the user's edit, journaled at once, then sent (core's runProjectEdit) ----
 
-    /** The header field showed [stored] for this project: it is the title at open when [follow] could not read one. */
     fun sawTitle(stored: String) { if (openedTitle == null) openedTitle = stored }
 
-    /** The header field's commit (Done, focus loss): only a typed rename, compared with [titleBase], so it is never sent twice. */
+
     fun commitTitle(stored: String) {
         titleToStore(titleDraft, titleBase(sentTitle, openedTitle, stored))?.let { titleDraft = it; rename(it) }
     }
@@ -487,22 +477,16 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         edit(projectId, "title") { put("title", text) }
     }
 
-    // ---- The header's actions sheet (RN's "..."): core's prepared lifecycle, duplicate and delete, inside runProjectEdit ----
 
-    /** Complete, Cancel project or Reactivate; the project stays open, as RN's does. */
     fun lifecycle(action: String) {
         actionsOpen = false; actionConfirm = null
-        // RN's Alert when Cancel project fails; Complete and Reactivate show core's line.
+
         edit(projectId, "lifecycle", refused = { message -> shell.showToast(t("common.error"), if (action == "cancel") t("projects.cancelFailed") else message, "error") }) {
             put("action", action)
         }
     }
 
-    /**
-     * The "..." opens the sheet and asks core whether Convert to section… is offered for this project. A typed title and typed
-     * notes are stored first (RN's onBeforeConvertToSection), so every action acts on what the user typed: a tap on a button does
-     * not take the focus from a field in Compose.
-     */
+
     fun openActions() {
         storeTyped()
         actionsOpen = true
@@ -516,7 +500,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         shell.background(emptyList(), { runtime -> runtime.menuRead("projectToSectionOptions", query) }) { reply, _ -> if (replies.current(ticket)) done(reply) }
     }
 
-    /** RN's Convert to section…: no destination picked, the project's title as the section name. */
+
     fun startConvert() {
         actionsOpen = false
         convertDestination = null; convertConfirm = false
@@ -536,13 +520,13 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
 
     fun closeConvert() { convert = null; convertConfirm = false }
 
-    /** Next: RN's prepared step, for the preview on screen now. */
+
     fun confirmConvert(preview: JSONObject) {
         convertExpected = preview.getString("token")
         convertConfirm = true
     }
 
-    /** A typed title and typed notes not yet stored go now, in order before what follows (RN's end of editing). */
+
     private fun storeTyped() {
         val id = projectId ?: return
         for ((kind, text) in editsOnLeave(titleDraft, sentTitle ?: shell.projects?.title(id), notesDraft, sentNotes ?: raw?.let { storedNotes() })) {
@@ -550,7 +534,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }
     }
 
-    /** Convert: the destination opens with core's toast, whose Undo puts the project back and opens it again (RN's). */
+
     fun convertNow() {
         val id = projectId ?: return
         val destination = convertDestination ?: return
@@ -570,7 +554,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         }) { put("destinationProjectId", destination).put("title", title).put("expected", expected) } ?: return
     }
 
-    /** Core's sort choices for this project (getProjectTaskSortOptions): the view options' Sort row, its modal, the "..." wash. */
+
     fun readSort() {
         val id = projectId ?: return
         val ticket = replies.ticket("sort")
@@ -584,13 +568,13 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         readSort()
     }
 
-    /** RN's sort modal: the project's task sort, stored as a target state (core's prepared sort, through runProjectEdit). */
+
     fun chooseSort(sortBy: String) {
         sortOpen = false
         edit(projectId, "sort", answer = { readSort() }) { put("sortBy", sortBy) }
     }
 
-    /** RN's Duplicate: the copy opens, with core's "Project duplicated". */
+
     fun duplicate() {
         actionsOpen = false
         edit(projectId, "duplicate", refused = { shell.showToast(t("common.notice"), t("projects.duplicateFailed"), "error") }, answer = { reply ->
@@ -598,7 +582,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         })
     }
 
-    /** RN's Delete: the project goes to Trash and closes; core's toast offers Undo, which restores it and its tasks' links. */
+
     fun delete() {
         actionsOpen = false; actionConfirm = null
         val id = projectId ?: return
@@ -617,19 +601,25 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         edit(projectId, "status") { put("status", status) }
     }
 
-    /** RN's Flow Mode pick (#1429): the mode tapped, as a target state; the mode already shown sends nothing. */
+
     fun setFlowMode(mode: String) {
         val fields = flowModeEdit(flowMode(), mode) ?: return
         edit(projectId, "flowMode") { for (name in fields.keys()) put(name, fields.get(name)) }
     }
 
-    /** RN's section manager flow button: the other of what the row shows, as a target state; the manager reads again once idle. */
+
     fun setSectionFlow(sectionId: String, shownSequential: Boolean) =
         edit(projectId, "sectionFlow") { put("sectionId", sectionId).put("sequential", !shownSequential) }
 
     fun setScope(scope: String) = edit(projectId, "scope") { put("scope", scope) }
 
-    /** An area of the picker (null: No area). */
+
+    fun move(projectId: String, direction: String, order: List<String>) =
+        edit(projectId, "move", refused = { shell.showToast(t("common.notice"), t("projects.moveProjectFailed"), "error") }) {
+            put("direction", direction).put("order", JSONArray(order))
+        }
+
+
     fun setArea(area: JSONObject?) {
         areaPicker = null
         edit(projectId, "area") { put("areaId", area?.getString("id") ?: JSONObject.NULL) }
@@ -640,18 +630,18 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         edit(projectId, "color") { put("colorOverride", color ?: JSONObject.NULL) }
     }
 
-    /** A tag chip: the tag on or off, as the chip shows the other. */
+
     fun setTag(tag: String, present: Boolean) {
         if (tag.isBlank()) return
         edit(projectId, "tag") { put("tag", tag).put("present", present) }
     }
 
-    /** The picker's +: adds the typed tag; one the project already has stays (dd 2026-10-04; RN fixed the same way). */
+
     fun addTag(tag: String) {
         setTag(tag, present = true)
     }
 
-    /** The typed notes, stored once the field lets go (RN's blur and end of editing). */
+
     fun commitNotes() {
         val text = notesDraft ?: return
         if (text == storedNotes()) { notesDraft = null; return }
@@ -663,10 +653,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         edit(projectId, "notes") { put("text", text) }
     }
 
-    /**
-     * A date field's new value: the picked `yyyy-MM-dd`, or null to clear it. A review date is an instant: core takes the picked
-     * day at the hour and minute of the picker's [opened] instant, as RN's Android picker answers it (projectReviewPickerValue).
-     */
+
     fun setDate(field: String, day: String?, opened: String? = null) {
         datePicker = null
         edit(projectId, "date") { put("field", field).put("value", day ?: JSONObject.NULL).put("opened", opened ?: JSONObject.NULL) }
@@ -686,7 +673,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         edit(projectId, "sectionDelete") { put("sectionId", sectionId) }
     }
 
-    /** Move up or down from the order the manager shows: core moves it only from that order. */
+
     fun moveSection(sectionId: String, direction: String) {
         val order = JSONArray().apply { sections?.menuObjects("sections")?.forEach { put(it.getString("id")) } }
         edit(projectId, "sectionMove") { put("sectionId", sectionId).put("direction", direction).put("order", order) }
@@ -696,12 +683,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
     private val writes = WriteQueue<FailedAction> { action, done -> start(action, done) }
     private var pumping = false
 
-    /**
-     * One edit of [projectId]: the user's intent (its request UUID, the field, the new value) is journaled at once, on this
-     * thread, before anything else (CoreHost.journalAhead), so a death at any later step leaves it for the boot's replay. Its
-     * send waits its turn in order (another action, an owed retry); none is dropped. Core's runProjectEdit reads the project as
-     * it is then, prepares and commits, preparing again if a sync lands between the steps.
-     */
+
     private fun edit(projectId: String?, kind: String, answer: ((JSONObject) -> Unit)? = null, refused: ((String) -> Unit)? = null,
                      fields: JSONObject.() -> Unit = {}): String? {
         val id = projectId ?: return null
@@ -716,7 +698,7 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         return requestId
     }
 
-    /** Starts the next send when the shell is free; looks again shortly while one waits. */
+
     private fun pump() {
         writes.pump()
         if (!writes.waiting || pumping) return
@@ -724,16 +706,16 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         main.postDelayed({ pumping = false; pump() }, 250)
     }
 
-    /** [action]'s send (its journal entry is already on disk); a failure owes its exact retry. False while it cannot start. */
+
     private fun start(action: FailedAction, done: () -> Unit): Boolean {
         if (shell.busy || shell.failedAction != null) return false
         return shell.tryPerform(action, finished = done) { runtime -> answered(action, sent(runtime, action)) }
     }
 
-    /** The failure banner's Try again: the owed edit, exactly as first sent. */
+
     private fun send(action: FailedAction) = shell.perform(action) { runtime -> answered(action, sent(runtime, action)) }
 
-    /** [action]'s send; core's refusal (STALE_REVISION: nothing written, nothing owed) shows the action's failure line, then goes on. */
+
     private fun sent(runtime: CoreHost, action: FailedAction): JSONObject = try {
         runtime.menuCommand(action.kind, action.title)
     } catch (failure: Exception) {
@@ -745,18 +727,18 @@ class ProjectDetailsModel(private val shell: InboxViewModel) : FilterSheetHost {
         throw failure
     }
 
-    /** [action] is done: its journal entry goes, and the screen gets the reply it waits for (on the main thread). */
+
     private fun answered(action: FailedAction, reply: JSONObject) {
         shell.acknowledged(action)
         refusals.remove(action.id)
-        // The action still holds busy here: its follow-up (openProject) waits until it settles, or perform would drop it.
+
         answers.remove(action.id)?.let { answer -> shell.ui { shell.menu.whenIdle { answer(reply) } } }
     }
 
     fun retry(action: FailedAction) = send(action)
 }
 
-/** RN's status palette (buildProjectStatusPalette): text, background, border. */
+
 @Composable
 private fun statusPalette(status: String?): Triple<Color, Color, Color> {
     val theme = LocalTheme.current
@@ -769,7 +751,7 @@ private fun statusPalette(status: String?): Triple<Color, Color, Color> {
     }
 }
 
-/** RN's reviewContainer: the card background with a rule below, 16 by 12 inside. */
+
 @Composable
 private fun DetailsBlock(vertical: Int = 12, tag: String? = null, content: @Composable () -> Unit) {
     val c = LocalTheme.current.colors
@@ -781,7 +763,7 @@ private fun DetailsBlock(vertical: Int = 12, tag: String? = null, content: @Comp
 private fun DetailsLabel(text: String, modifier: Modifier = Modifier) =
     Text(text, style = rnText(14, 600), color = LocalTheme.current.colors.text, modifier = modifier)
 
-/** RN's smallButton: a bordered 12/700 label in [color]. */
+
 @Composable
 internal fun SmallButton(label: String, enabled: Boolean, tag: String? = null, color: Color = LocalTheme.current.colors.tint,
                          modifier: Modifier = Modifier, onClick: () -> Unit) {
@@ -792,7 +774,7 @@ internal fun SmallButton(label: String, enabled: Boolean, tag: String? = null, c
         .then(if (tag != null) Modifier.testTag(tag) else Modifier).padding(horizontal = 10.dp, vertical = 6.dp))
 }
 
-/** RN's help button: a 30 square with help-circle-outline. */
+
 @Composable
 private fun HelpButton(label: String, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -803,13 +785,13 @@ private fun HelpButton(label: String, onClick: () -> Unit) {
     }
 }
 
-/** RN's projectMetadataRow: the label and a value button (with a clear button when [clear] is set). */
+
 @Composable
 private fun MetadataRow(label: String, value: String, enabled: Boolean, tag: String, divider: Boolean, clear: (() -> Unit)? = null, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
     BoxWithConstraints(Modifier.fillMaxWidth().then(if (divider) Modifier.padding(top = 8.dp).hairline(c.border, top = true).padding(top = 8.dp) else Modifier)) {
-    // RN's value button is at most 68% of the row.
+
     val most = maxWidth * 0.68f
     Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
         DetailsLabel(label, Modifier.padding(end = 12.dp))
@@ -832,15 +814,10 @@ private fun MetadataRow(label: String, value: String, enabled: Boolean, tag: Str
     }
 }
 
-/**
- * RN's Details toggle (project-details-toggle) and, open, its panel, as the project list's first items (RN's list header): Status
- * with its menu, Type and its help, Sequential Scope, Sections with Manage, Area and Tags, Notes (edit, preview, expand),
- * Attachments, and the Start, Due and Review dates. An archived project's controls are off, and its notes show as the preview.
- * Each block is its own item, so the list keeps a focused field in view as the keyboard opens.
- */
+
 fun LazyListScope.projectDetailsItems(model: InboxViewModel, projectId: String, detail: ProjectDetail?) {
     val metadata = detail?.metadata?.takeIf { detail.projectId == projectId } ?: return
-    // RN's GettingStartedActions, above the Details toggle in the list header of a Getting Started project.
+
     detail.gettingStarted?.let { actions -> item(key = "getting-started") { GettingStartedActions(model, actions) } }
     item(key = "details") { DetailsToggle(model, detail, metadata) }
     if (!model.projectDetails.open) return
@@ -853,7 +830,7 @@ fun LazyListScope.projectDetailsItems(model: InboxViewModel, projectId: String, 
     item(key = "details-dates") { DetailsDates(model, detail, metadata) }
 }
 
-/** RN's Details toggle: the chevron, Details, and core's summary while folded; it reads the raw values the panel needs. */
+
 @Composable
 private fun DetailsToggle(model: InboxViewModel, detail: ProjectDetail, metadata: JSONObject) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -873,7 +850,7 @@ private fun DetailsToggle(model: InboxViewModel, detail: ProjectDetail, metadata
     }
 }
 
-/** Status with RN's status menu, and Type with its help. */
+
 @Composable
 private fun DetailsStatus(model: InboxViewModel, detail: ProjectDetail, metadata: JSONObject) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -913,12 +890,12 @@ private fun DetailsStatus(model: InboxViewModel, detail: ProjectDetail, metadata
                 help = t("projects.projectTypeHelpLabel") to "${t("projects.projectTypeHelpText")}\n\n${t("projects.perSectionTooltip")}"
             }
         }
-        // RN's Flow Mode choices (#1429): one tap stores that mode, never the other of two.
+
         Choices(PROJECT_FLOW_MODES, flowMode(), archived, enabled && flowMode() != null, "project-flow-mode-", ::setFlowMode)
     }
 }
 
-/** RN's sequentialScopeOptions row: equal buttons, the [current] one tinted; [onPick] gets the tapped value. */
+
 @Composable
 private fun Choices(choices: List<Pair<String, String>>, current: String?, archived: Boolean, enabled: Boolean, tagPrefix: String, onPick: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -935,7 +912,7 @@ private fun Choices(choices: List<Pair<String, String>>, current: String?, archi
     }
 }
 
-/** Sequential Scope: its help and the two choices. */
+
 @Composable
 private fun DetailsScope(model: InboxViewModel, detail: ProjectDetail, metadata: JSONObject) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -952,7 +929,7 @@ private fun DetailsScope(model: InboxViewModel, detail: ProjectDetail, metadata:
     }
 }
 
-/** Sections: Manage (Add Section while none) and core's sections as pills. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailsSections(model: InboxViewModel, detail: ProjectDetail, metadata: JSONObject) = with(model.projectDetails) {
@@ -974,7 +951,7 @@ private fun DetailsSections(model: InboxViewModel, detail: ProjectDetail, metada
     }
 }
 
-/** Area and Tags: each opens its picker. */
+
 @Composable
 private fun DetailsArea(model: InboxViewModel, detail: ProjectDetail, metadata: JSONObject) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -987,7 +964,7 @@ private fun DetailsArea(model: InboxViewModel, detail: ProjectDetail, metadata: 
     }
 }
 
-/** The Start, Due and Review dates, each with Clear while set. */
+
 @Composable
 private fun DetailsDates(model: InboxViewModel, detail: ProjectDetail, metadata: JSONObject) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -1002,7 +979,7 @@ private fun DetailsDates(model: InboxViewModel, detail: ProjectDetail, metadata:
     }
 }
 
-/** RN's notes card: ▸/▾ Notes, then Edit or Preview and the expand button; the field (stored on leaving it) or core's preview. */
+
 @Composable
 private fun ProjectNotes(model: InboxViewModel, projectId: String, archived: Boolean) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -1024,7 +1001,7 @@ private fun ProjectNotes(model: InboxViewModel, projectId: String, archived: Boo
                 modifier = Modifier.weight(1f).clickable(role = Role.Button) { if (notesExpanded) notesPreview = false; notesExpanded = !notesExpanded }
                     .testTag("project-notes-toggle").padding(vertical = 8.dp))
             if (notesExpanded) {
-                // RN previews the unsaved draft: switching stores nothing.
+
                 SmallButton(t(if (notesPreview) "markdown.edit" else "markdown.preview"), !archived, "project-notes-mode") { notesPreview = !notesPreview }
                 val expand = t("markdown.expand")
                 Box(Modifier.padding(start = 8.dp).size(30.dp).fade(if (archived) 0.5f else 1f).clickable(enabled = !archived, role = Role.Button) { notesFullscreen = true }
@@ -1043,7 +1020,7 @@ private fun ProjectNotes(model: InboxViewModel, projectId: String, archived: Boo
     if (notesFullscreen && !archived) NotesFullscreen(model, model.projects?.title(projectId).orEmpty(), link)
 }
 
-/** The notes field: the typed draft over core's text, stored when it loses focus (RN's onBlur and onEndEditing). */
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 private fun NotesField(model: InboxViewModel, modifier: Modifier, shape: RoundedCornerShape, size: Int, inner: Int, storeOnBlur: () -> Boolean) = with(model.projectDetails) {
@@ -1051,14 +1028,14 @@ private fun NotesField(model: InboxViewModel, modifier: Modifier, shape: Rounded
     val placeholder = t("projects.notesPlaceholder")
     var focused by remember { mutableStateOf(false) }
     val value = notesDraft ?: storedNotes()
-    // The field stays in view while typing, as the keyboard opens and the text grows.
+
     val reveal = remember { BringIntoViewRequester() }
     val keyboard = WindowInsets.isImeVisible
     LaunchedEffect(focused, keyboard, value.length) { if (focused) { delay(150); reveal.bringIntoView() } }
     BasicTextField(value, { notesDraft = it }, enabled = raw != null && !model.busy && model.failedAction == null,
         textStyle = rnText(size, 400, if (size == 16) 24 else null).copy(color = c.text), cursorBrush = SolidColor(c.tint),
         modifier = modifier.bringIntoViewRequester(reveal).semantics { contentDescription = t("project.notes") }.testTag("project-notes-input").onFocusChanged { state ->
-            // Leaving the field stores the notes (RN's onBlur), except for the preview of the unsaved draft.
+
             if (focused && !state.isFocused && storeOnBlur()) commitNotes()
             focused = state.isFocused
         },
@@ -1070,7 +1047,7 @@ private fun NotesField(model: InboxViewModel, modifier: Modifier, shape: Rounded
         })
 }
 
-/** RN's ExpandedMarkdownEditor: close at the left (stores the notes), the title, the edit/preview switch, and the field or preview. */
+
 @Composable
 private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONObject) -> Unit) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -1090,13 +1067,13 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
                     .clickable(role = Role.Button) { editing = !editing }.semantics { contentDescription = modeLabel },
                     contentAlignment = Alignment.Center) { Icon(if (editing) Lucide.Eye else Lucide.Pencil, null, tint = c.tint, modifier = Modifier.size(18.dp)) }
             }
-            // RN's expanded editor opens with the keyboard up and its Markdown toolbar over it (MarkdownToolbar.kt).
+
             val draft = remember { MarkdownDraft(notesDraft ?: storedNotes()) }
             draft.sync(notesDraft ?: storedNotes())
             val store = { text: String -> notesDraft = text }
             if (editing) {
                 val shape = RoundedCornerShape(12.dp)
-                // Leaving the field stores the notes (RN's onBlur), as the inline notes field does.
+
                 MarkdownInput(draft, store, raw != null && !model.busy && model.failedAction == null, t("projects.notesPlaceholder"), t("project.notes"),
                     rnText(16, 400, 24).copy(color = c.text), Modifier.padding(16.dp).fillMaxWidth().weight(1f).testTag("project-notes-input"),
                     { field -> Box(Modifier.fillMaxSize().clip(shape).background(c.inputBg).rnBorder(1.dp, c.border, shape).padding(16.dp)) { field() } },
@@ -1116,7 +1093,7 @@ private fun NotesFullscreen(model: InboxViewModel, title: String, follow: (JSONO
     }
 }
 
-/** One area picker row: the area's dot (none for No area) and its name; a tap stores it. */
+
 @Composable
 private fun AreaRow(model: InboxViewModel, label: String, area: JSONObject?) {
     val c = LocalTheme.current.colors
@@ -1127,10 +1104,7 @@ private fun AreaRow(model: InboxViewModel, label: String, area: JSONObject?) {
     }
 }
 
-/**
- * RN's overlay (projects-screen.styles overlay): the whole screen dimmed, the card centered 20 in; Back closes it, and so does a
- * tap outside where RN's overlay is a Pressable. Drawn over the screens, so its tags are resource IDs on their own.
- */
+
 @Composable
 private fun Overlay(dismiss: () -> Unit, outsideCloses: Boolean, content: @Composable () -> Unit) {
     BackHandler(onBack = dismiss)
@@ -1139,7 +1113,7 @@ private fun Overlay(dismiss: () -> Unit, outsideCloses: Boolean, content: @Compo
         contentAlignment = Alignment.Center) { content() }
 }
 
-/** RN's pickerCard over RN's overlay: a 16-padded bordered card with a 16/700 title. */
+
 @Composable
 private fun PickerCard(title: String, dismiss: () -> Unit, tag: String, content: @Composable () -> Unit) {
     val theme = LocalTheme.current
@@ -1154,7 +1128,7 @@ private fun PickerCard(title: String, dismiss: () -> Unit, tag: String, content:
     }
 }
 
-/** RN's project overlays: the area and tag pickers, the date picker, the section manager, and the help Alert. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
@@ -1200,7 +1174,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
                 verticalAlignment = Alignment.CenterVertically) {
                 val label = t("taskEdit.tagsLabel")
                 BasicTextField(tagDraft, { tagDraft = it }, singleLine = true, textStyle = rnText(14, 400).copy(color = c.text), cursorBrush = SolidColor(c.tint),
-                    // RN: Done only ends editing; + adds the typed tag.
+
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.None, autoCorrectEnabled = false, imeAction = ImeAction.Done),
                     keyboardActions = KeyboardActions(onDone = { focus.clearFocus() }),
                     modifier = Modifier.weight(1f).padding(vertical = 8.dp).semantics { contentDescription = label }.testTag("project-tag-input"),
@@ -1227,7 +1201,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
     sections?.let { options -> SectionManager(model, options) }
     if (actionsOpen) ProjectActionsSheet(model)
     if (viewOptionsOpen) ViewOptionsSheet(model)
-    // RN's TaskList filter sheet on the project's filter view; Back leaves a picker page first.
+
     listFilterSheet?.let { open ->
         model.project?.listFilters?.let { view ->
             BackHandler { if (open.has("page")) dialogPage(null) else closeFilters() }
@@ -1242,7 +1216,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
     }
     convert?.let { options -> ConvertSheet(model, options) }
     actionConfirm?.let { action ->
-        // RN's Alert before Cancel project and Delete, with its words.
+
         val cancel = action == "cancel"
         val confirm = t(if (cancel) "projects.cancel" else "common.delete")
         AlertDialog(onDismissRequest = { actionConfirm = null },
@@ -1253,10 +1227,7 @@ fun ProjectDetailsDialogs(model: InboxViewModel) = with(model.projectDetails) {
     }
 }
 
-/**
- * RN's project actions sheet (ProjectDetailModal's ProjectOptionsModal under the title's "..."): Duplicate, Complete (with RN's
- * archive help) or Reactivate, Cancel project and Delete. Back closes it; a tap outside does nothing, as RN's.
- */
+
 @Composable
 private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -1275,7 +1246,7 @@ private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetai
             val listShape = RoundedCornerShape(10.dp)
             Column(Modifier.fillMaxWidth().clip(listShape).rnBorder(1.dp, c.border, listShape)) {
                 ProjectOptionRow(SettingsIonicons.CopyOutline, t("projects.duplicate"), "project-duplicate-button", idle) { duplicate() }
-                // Offered when core says the project can become a section; else shown off with core's reason, as RN's.
+
                 convertRow?.let { row ->
                     ProjectOptionRow(Ionicons.FolderOpenOutline, row.getString("label"), "project-convert-to-section-button",
                         idle && row.getBoolean("eligible"), row.menuText("blocked")) { startConvert() }
@@ -1293,10 +1264,7 @@ private fun ProjectActionsSheet(model: InboxViewModel) = with(model.projectDetai
     }
 }
 
-/**
- * RN's ProjectToSectionModal: the destinations core allows (a radio list) and the section name, then Next shows the preview with
- * the new section's name, and Convert sends it (Back returns). Core's preview lines and refusals, in the app language.
- */
+
 @Composable
 private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -1330,7 +1298,7 @@ private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(mode
                         Text(lines.getString(0), style = rnText(14, 400), color = c.text)
                         if (convertConfirm) Text(shown.getString("named"), style = rnText(14, 400), color = c.text)
                         for (index in 1 until lines.length()) {
-                            // RN's destination-color line leads with the destination's color dot (the fourth line from the end).
+
                             if (index == lines.length() - 4) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(12.dp).clip(CircleShape).background(shown.menuText("color")?.let(::coreColorOrNull) ?: Color.Transparent).rnBorder(1.dp, c.border, CircleShape))
                                 Text(lines.getString(index), style = rnText(14, 400), color = c.secondaryText)
@@ -1351,7 +1319,7 @@ private fun ConvertSheet(model: InboxViewModel, options: JSONObject) = with(mode
     }
 }
 
-/** RN's linkModalButton: a 14/700 label, half faded while off. */
+
 @Composable
 private fun ConvertButton(label: String, enabled: Boolean, tag: String? = null, onClick: () -> Unit) {
     Text(label, style = rnText(14, 700), color = LocalTheme.current.colors.text, modifier = Modifier.fade(if (enabled) 1f else 0.5f).clip(RoundedCornerShape(10.dp))
@@ -1359,10 +1327,7 @@ private fun ConvertButton(label: String, enabled: Boolean, tag: String? = null, 
         .padding(horizontal = 10.dp, vertical = 8.dp))
 }
 
-/**
- * RN's view options sheet (ProjectOptionsModal titled More options): Filters with the active count, Sort with the current choice
- * (off on a filed project, with RN's Reactivate hint), and Show completed / Hide completed (not on a filed project).
- */
+
 @Composable
 private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
@@ -1380,7 +1345,7 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
             }
             val listShape = RoundedCornerShape(10.dp)
             Column(Modifier.fillMaxWidth().clip(listShape).rnBorder(1.dp, c.border, listShape)) {
-                // RN's Filters row first: the active count as its value, washed while any filter is on.
+
                 model.project?.listFilters?.getJSONObject("filters")?.let { filters ->
                     val active = filters.optInt("activeCount")
                     ProjectOptionRow(Ionicons.FilterOutline, t("filters.label"), "project-view-filter-option", idle,
@@ -1395,7 +1360,7 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
                     val on = controls.getBoolean("showCompleted")
                     ProjectOptionRow(if (on) SettingsIonicons.EyeOutline else SettingsIonicons.EyeOffOutline, controls.getString("label"), "project-view-completed-option",
                         idle, selected = on) { viewOptionsOpen = false; model.showProjectCompleted(!on) }
-                    // RN's Reorder (Done while on): kept but off under a custom sort, with core's "Available when Sort is Default".
+
                     if (controls.optBoolean("hasReorderTargets") || reorderMode) {
                         val off = customSort && !reorderMode
                         ProjectOptionRow(if (reorderMode) Ionicons.CheckmarkCircleOutline else Ionicons.ListOutline,
@@ -1408,11 +1373,7 @@ private fun ViewOptionsSheet(model: InboxViewModel) = with(model.projectDetails)
     }
 }
 
-/**
- * RN's reorder mode (TaskList's project reorder list): the bar (Project order, or Task order without sections, and Done), then one
- * flat list in core's order where section headings are fixed rows, so a task dragged past a heading lands in that section. A task's
- * handle drags it at once (RN's onPressIn); TalkBack moves it one row up or down. Real sections keep RN's up and down arrows.
- */
+
 @Composable
 internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = with(model.projectDetails) {
     val theme = LocalTheme.current
@@ -1433,7 +1394,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                 contentAlignment = Alignment.Center) { Text(done, style = rnText(13, 700), color = c.onTint) }
         }
         val listState = rememberLazyListState()
-        // RN's #765: Task order opens on the task the user was looking at, once, when core's order first shows it (not the first row).
+
         val anchor = remember { viewedTaskId }
         var anchored by remember { mutableStateOf(false) }
         LaunchedEffect(items) {
@@ -1442,17 +1403,17 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
             val index = items.indexOfFirst { it.getString("type") == "task" && it.getJSONObject("row").getString("id") == anchor }
             if (index > 0) listState.scrollToItem(index)
         }
-        // The order shown: core's, or a move made just now until core's next read (DraggableFlatList shows a drop at once).
+
         var local by remember(view) { mutableStateOf<List<JSONObject>?>(null) }
         val shown = local ?: items
-        // FlatList keeps its scroll offset when its rows change. Compose would follow the first visible key instead, and scroll
-        // a row moved above it out of sight.
+
+
         val seen = remember { arrayOfNulls<List<JSONObject>>(1) }
         SideEffect {
             if (seen[0] != null && seen[0] !== shown) listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
             seen[0] = shown
         }
-        // A drop or TalkBack's move: the row at [from] shown at [to] at once, and core's prepared move after the row before it.
+
         val moveRow = { from: Int, to: Int ->
             val moved = shown[from]
             val next = shown.toMutableList().apply { removeAt(from); add(to.coerceIn(0, size), moved) }
@@ -1463,13 +1424,13 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                 else JSONObject().put("type", "task").put("id", row.getJSONObject("row").getString("id"))
             })
         }
-        // The drag in progress, as DraggableFlatList holds it: the row's slot and height, and its top in the list as the finger moves.
+
         var dragFrom by remember { mutableIntStateOf(-1) }
         var dragSize by remember { mutableFloatStateOf(0f) }
         var dragTop by remember { mutableFloatStateOf(0f) }
         val target = if (dragFrom < 0) -1 else dropTarget(listState.layoutInfo, dragFrom, dragTop, dragSize)
-        // DraggableFlatList's autoscroll (autoscrollThreshold 80, autoscrollSpeed 120): while the row is near an edge the list
-        // scrolls one step, larger the nearer the edge, and the next once it lands.
+
+
         val threshold = with(LocalDensity.current) { 80.dp.toPx() }
         val speed = with(LocalDensity.current) { 120.dp.toPx() }
         LaunchedEffect(dragFrom >= 0) {
@@ -1491,7 +1452,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
             val inset = 12.dp.toPx()
             val handle = 44.dp.toPx()
             val gap = 8.dp.toPx()
-            // The handle lifts its row at once (RN's onPressIn), before the list can take the touch as a scroll.
+
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 val hit = listState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
@@ -1521,7 +1482,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
         }) {
             LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 24.dp)) {
                 itemsIndexed(shown, key = { _, item -> reorderKey(item) }) { index, item ->
-                    // DraggableFlatList's live preview: the rows between the lifted row's slot and the drop slot step aside by its height.
+
                     val shift by animateFloatAsState(when {
                         dragFrom < 0 || index == dragFrom -> 0f
                         dragFrom < index && index <= target -> -dragSize
@@ -1534,13 +1495,13 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                         val sectionId = item.menuText("sectionId")
                         Row(placed.fillMaxWidth().padding(start = 6.dp, end = 6.dp, top = 10.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically) {
-                            // RN's title block: the title, then its task count.
+
                             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(title.uppercase(), style = rnText(13, 700, letterSpacing = 0.6f), color = if (item.optBoolean("muted")) c.secondaryText else c.text,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).semantics { heading() })
                                 Text(item.optInt("count").toString(), style = rnText(11, 600), color = c.secondaryText)
                             }
-                            // RN's arrows only on a real section (a string sectionId), never on the No section row.
+
                             val real = sectionId
                             val position = real?.let(sectionIds::indexOf) ?: -1
                             if (real != null && position >= 0 && sectionIds.size > 1) {
@@ -1559,8 +1520,8 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                     } else {
                         val row = item.getJSONObject("row")
                         val title = row.getString("title")
-                        // TalkBack's Move up passes a task, or a heading that is not the first row: above the first heading a task
-                        // would leave every section.
+
+
                         val canUp = index > 0 && (shown[index - 1].getString("type") == "task" || index - 1 > 0)
                         val moves = listOfNotNull(
                             CustomAccessibilityAction(t("projects.moveUp")) { if (enabled) moveRow(index, index - 1); enabled }.takeIf { canUp },
@@ -1573,7 +1534,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
                     }
                 }
             }
-            // The lifted row under the finger, over the list (its own slot stays empty while the rows around it step aside).
+
             if (dragFrom >= 0) shown.getOrNull(dragFrom)?.takeIf { it.getString("type") == "task" }?.let { item ->
                 ReorderTaskRow(item.getJSONObject("row"), true, Modifier.padding(horizontal = 12.dp).offset { IntOffset(0, dragTop.roundToInt()) }
                     .fade(0.92f), Modifier)
@@ -1582,7 +1543,7 @@ internal fun ProjectReorderList(model: InboxViewModel, modifier: Modifier) = wit
     }
 }
 
-/** A task row in reorder mode: RN's card (title and status) and its 44-dp drag handle, RN's fixed 80-dp row. */
+
 @Composable
 private fun ReorderTaskRow(row: JSONObject, active: Boolean, modifier: Modifier, handleModifier: Modifier) {
     val c = LocalTheme.current.colors
@@ -1603,10 +1564,7 @@ private fun ReorderTaskRow(row: JSONObject, active: Boolean, modifier: Modifier,
 private fun reorderKey(item: JSONObject): String =
     if (item.getString("type") == "section") "section:${item.getString("id")}" else "task:${item.getJSONObject("row").getString("id")}"
 
-/**
- * DraggableFlatList's drop slot for the row lifted from [from], [size] tall, its top at [top] in the viewport: it passes each row
- * whose middle its far edge crosses. Rows outside the viewport count by their side of it.
- */
+
 private fun dropTarget(info: LazyListLayoutInfo, from: Int, top: Float, size: Float): Int {
     val visible = info.visibleItemsInfo
     val first = visible.firstOrNull()?.index ?: return from
@@ -1622,7 +1580,7 @@ private fun dropTarget(info: LazyListLayoutInfo, from: Int, top: Float, size: Fl
     return from + after - before
 }
 
-/** RN's ProjectOptionRow: a 32-dp icon tile, the label (and its description), a hairline under it. */
+
 @Composable
 private fun ProjectOptionRow(icon: ImageVector, label: String, tag: String, enabled: Boolean, description: String? = null, danger: Boolean = false,
                              value: String? = null, selected: Boolean = false, onClick: () -> Unit) {
@@ -1643,7 +1601,7 @@ private fun ProjectOptionRow(icon: ImageVector, label: String, tag: String, enab
     }
 }
 
-/** RN's ProjectSectionManagerModal: Add Section, the editor, and each section with Move up, Move down, Edit and Delete. */
+
 @Composable
 private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(model.projectDetails) {
     val theme = LocalTheme.current
@@ -1723,7 +1681,7 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
                                     }
                                 }
                                 Spacer(Modifier.size(2.dp))
-                                // RN's Flow Mode button, only while the project is Per section (#1429): Parallel or Sequential, a tap the other.
+
                                 if (!section.isNull("sequential")) {
                                     val sequential = section.getBoolean("sequential")
                                     val shown = t(if (sequential) "projects.sequential" else "projects.parallel")
@@ -1749,14 +1707,11 @@ private fun SectionManager(model: InboxViewModel, options: JSONObject) = with(mo
     }
 }
 
-/**
- * RN's project header title (ProjectDetailModal's title TextInput): edited in place and stored, trimmed, on Done or when it loses
- * focus; a blank title stores nothing. Read-only for an archived project.
- */
+
 @Composable
 fun ProjectTitleField(model: InboxViewModel, stored: String, archived: Boolean, modifier: Modifier) = with(model.projectDetails) {
     val c = LocalTheme.current.colors
-    // The typed title is the model's (a close stores it); once core's title equals it, the field shows core's again.
+
     LaunchedEffect(stored, titleDraft) { if (titleDraft == stored) titleDraft = null }
     LaunchedEffect(projectId) { sawTitle(stored) }
     val text = titleDraft ?: stored
@@ -1771,15 +1726,12 @@ fun ProjectTitleField(model: InboxViewModel, stored: String, archived: Boolean, 
         })
 }
 
-/**
- * Writes in order, each kept until [start] takes it: one runs at a time, and one [start] cannot begin yet (it answers false)
- * stays first in line. [start] calls its `done` once the write ended.
- */
+
 internal class WriteQueue<T>(private val start: (T, () -> Unit) -> Boolean) {
     private val items = ArrayDeque<T>()
     private var running = false
 
-    /** Whether a write waits to start. */
+
     val waiting: Boolean get() = !running && items.isNotEmpty()
 
     fun add(item: T) {
@@ -1798,29 +1750,20 @@ internal class WriteQueue<T>(private val start: (T, () -> Unit) -> Boolean) {
     }
 }
 
-/**
- * The title a commit stores: only text the user typed ([typed] is null until then), trimmed, not blank, and not the stored title
- * as saved (trimmed, as RN compares it since 0f4ac36ec). Outer spaces in the stored title never read as a rename.
- */
+
 internal fun titleToStore(typed: String?, stored: String?): String? =
     typed?.trim()?.takeIf { it.isNotEmpty() && it != stored?.trim() }
 
-/** What a title commit compares with: the title last journaled here, else the title at open (RN's base), else core's stored one. */
+
 internal fun titleBase(sent: String?, opened: String?, stored: String?): String? = sent ?: opened ?: stored
 
-/**
- * The edits leaving a project stores (RN's title end of editing and notes blur on close): a typed title, trimmed, when not
- * blank and not core's; typed notes, exactly, when not core's. In order: the title, then the notes.
- */
+
 internal fun editsOnLeave(title: String?, storedTitle: String?, notes: String?, storedNotes: String?): List<Pair<String, String>> = buildList {
     titleToStore(title, storedTitle)?.let { add("projectRename" to it) }
     if (notes != null && storedNotes != null && notes != storedNotes) add("projectNotes" to notes)
 }
 
-/**
- * Which read replies still apply: each read takes a ticket for its kind, and its reply applies only while that ticket is the
- * kind's newest and the session it was taken in is still open. [close] ends the session: another project, or the screen left.
- */
+
 internal class ReplyGuard {
     data class Ticket(val session: Int, val kind: String, val number: Int)
 
@@ -1835,22 +1778,19 @@ internal class ReplyGuard {
     fun close() { session += 1 }
 }
 
-/** RN's Flow Mode choices in its order (ProjectDetailModal.tsx, #1429): the mode and its label key. */
+
 internal val PROJECT_FLOW_MODES = listOf("parallel" to "projects.parallel", "sequential" to "projects.sequential", "perSection" to "projects.perSection")
 
-/** A Flow Mode tap's edit fields: the [picked] mode as a target state, or null when it is the mode [shown] (RN's plan is null then). */
+
 internal fun flowModeEdit(shown: String?, picked: String): JSONObject? = if (shown == picked) null else JSONObject().put("mode", picked)
 
-/** A Project details edit as journaled: its request UUID, project, field kind, and the field's new value (core's NativeProjectEdit). */
+
 internal fun projectEdit(requestId: String, projectId: String, kind: String, fields: JSONObject): JSONObject =
     JSONObject().put("requestId", requestId).put("projectId", projectId).put("kind", kind).apply {
         for (name in fields.keys()) put(name, fields.get(name))
     }
 
-/**
- * RN's GettingStartedActions (components/GettingStartedActions.tsx): core's workflow line, Capture to Inbox, Open Inbox and Open
- * Focus (each closes the project first, as RN's project sheet closes), and the guide link in the app language.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun GettingStartedActions(model: InboxViewModel, view: JSONObject) {
@@ -1888,10 +1828,10 @@ private fun GettingStartedActions(model: InboxViewModel, view: JSONObject) {
     }
 }
 
-/** A guide link's label as a link span, so TalkBack names it a link as RN's accessibilityRole="link" does (Compose has no link Role). */
+
 internal fun guideLink(label: String, tint: Color, open: () -> Unit) =
     buildAnnotatedString { withLink(LinkAnnotation.Clickable("guide", TextLinkStyles(SpanStyle(color = tint))) { open() }) { append(label) } }
 
-/** RN's GettingStartedActions draws Plus and ExternalLink at lucide's default stroke 2 (Lucide's are the capture button's and the windows'). */
+
 private val GettingStartedPlus = lucide("Plus", "M5 12h14", "M12 5v14")
 private val GuideExternalLink = lucide("ExternalLink", "M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6")

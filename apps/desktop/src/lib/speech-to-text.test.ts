@@ -163,11 +163,7 @@ describe('resolveSpeechCapture', () => {
         expect(mismatched.config.parseModel).toBeUndefined();
     });
 
-    // Regression guard for the divergence in #886-era QuickAddModal: the "can I
-    // record?" gate and the "can I transcribe?" gate both call this function with
-    // the same settings snapshot, so they can no longer disagree. Before the fix,
-    // QuickAddModal re-derived the record gate by hand and never resolved a model,
-    // so the two computations could drift independently.
+
     it('is deterministic for a fixed settings snapshot, so the record gate and transcribe gate cannot disagree', async () => {
         aiConfigMocks.loadAIKey.mockResolvedValue('secret-key');
         const settings = { speechToText: { enabled: true, provider: 'openai' as const } };
@@ -180,8 +176,7 @@ describe('resolveSpeechCapture', () => {
         expect(recordGate.config).toEqual(transcribeGate.config);
     });
 
-    // #930: a self-hosted OpenAI-compatible transcription server usually has
-    // no key, so a configured base URL substitutes for one — openai only.
+
     it('is ready with a custom OpenAI base URL and no key', async () => {
         const result = await resolveSpeechCapture({
             speechToText: { enabled: true, provider: 'openai', baseUrl: 'http://localhost:8000/v1' },
@@ -283,8 +278,7 @@ describe('processAudioCapture openai transcription against a custom base URL', (
         expect(init.headers.Authorization).toBe('Bearer secret-key');
     });
 
-    // gpt-transcribe-generation models take a `languages` array; earlier
-    // models keep the singular `language` field (#984).
+
     it('sends languages[] for gpt-transcribe and language for earlier models', async () => {
         await processAudioCapture(audio, {
             provider: 'openai',

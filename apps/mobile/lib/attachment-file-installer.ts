@@ -8,11 +8,6 @@ import {
 } from '@mindwtr/core/mobile-attachment-installer';
 import { logInfo } from './app-log';
 
-// The installer's policy — argument checks, result parsing and File Sync's publication
-// reservations — lives in core (`packages/core/src/mobile-attachment-installer.ts`) so the
-// native app reuses the same Kotlin installer under the same rules. This module binds it to the
-// Expo native module, AsyncStorage and the app log; the core object is made on first use, and
-// the native module is loaded on first call.
 
 export { AttachmentFileInstallerUnavailableError };
 export type {
@@ -41,17 +36,16 @@ const mobileAttachmentInstaller = (): MobileAttachmentInstaller => {
 
 type Installer = MobileAttachmentInstaller;
 
-/** Recover only exact private publication namespaces previously reserved in
- * device-local state. The shared folder is deliberately never scanned. */
+
 export const recoverFileSyncAttachmentPublications: Installer['recoverFileSyncAttachmentPublications'] = (...args) => (
   mobileAttachmentInstaller().recoverFileSyncAttachmentPublications(...args)
 );
-/** Persist exact ownership before native code creates the private stage. */
+
 export const reserveFileSyncAttachmentPublication: Installer['reserveFileSyncAttachmentPublication'] = (...args) => (
   mobileAttachmentInstaller().reserveFileSyncAttachmentPublication(...args)
 );
-/** Bind the durable reservation to the exact fully-written inode before native
- * publication. Recovery never deletes an unclaimed or replaced pathname. */
+
+
 export const claimFileSyncAttachmentPublication: Installer['claimFileSyncAttachmentPublication'] = (...args) => (
   mobileAttachmentInstaller().claimFileSyncAttachmentPublication(...args)
 );
@@ -64,21 +58,21 @@ export const abandonFileSyncAttachmentPublication: Installer['abandonFileSyncAtt
 export const retainFileSyncAttachmentPublicationForInvalidTarget: Installer['retainFileSyncAttachmentPublicationForInvalidTarget'] = (...args) => (
   mobileAttachmentInstaller().retainFileSyncAttachmentPublicationForInvalidTarget(...args)
 );
-/** Clear bounded-collision history only after the canonical target has been
- * independently verified as the requested immutable generation. */
+
+
 export const clearFileSyncAttachmentPublicationRecovery: Installer['clearFileSyncAttachmentPublicationRecovery'] = (...args) => (
   mobileAttachmentInstaller().clearFileSyncAttachmentPublicationRecovery(...args)
 );
 export const installAttachmentFileGeneration: Installer['installAttachmentFileGeneration'] = (...args) => (
   mobileAttachmentInstaller().installAttachmentFileGeneration(...args)
 );
-/** Hash a managed canonical attachment in native code without materializing its
- * bytes in JS. */
+
+
 export const hashAttachmentFileGeneration: Installer['hashAttachmentFileGeneration'] = (...args) => (
   mobileAttachmentInstaller().hashAttachmentFileGeneration(...args)
 );
-/** Publish an immutable File Sync generation from a verified same-directory
- * stage with create-no-replace semantics. */
+
+
 export const publishImmutableAttachmentFileGeneration: Installer['publishImmutableAttachmentFileGeneration'] = (...args) => (
   mobileAttachmentInstaller().publishImmutableAttachmentFileGeneration(...args)
 );

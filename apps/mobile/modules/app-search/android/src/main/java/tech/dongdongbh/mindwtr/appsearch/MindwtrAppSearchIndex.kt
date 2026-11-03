@@ -24,16 +24,10 @@ private const val PROP_DUE_DATE = "dueDate"
 private const val PROP_PARENT_ID = "parentId"
 private const val PROP_DEEP_LINK = "deepLink"
 
-// ListenableFuture.addListener(Runnable, Executor) is part of the base
-// interface, so a same-thread executor avoids pulling in Guava's `Futures`
-// utility class (and its full jar) just to attach a completion callback.
+
 private val directExecutor = Executor { it.run() }
 
-/**
- * TS-facing shape for a single document to index. Mirrors
- * `apps/mobile/lib/app-search-projection.ts`'s `AppSearchDoc` — kept as a
- * loosely-typed map here because that is what crosses the Expo bridge.
- */
+
 data class MindwtrAppSearchDoc(
   val id: String,
   val kind: String,
@@ -62,12 +56,7 @@ data class MindwtrAppSearchDoc(
   }
 }
 
-/**
- * Owns the single process-wide AppSearch session and schema for the
- * disposable-projection secondary index described in #1017. AppSearch
- * failures here must never propagate into a core-data mutation path — every
- * public entry point reports success/failure only to its own caller.
- */
+
 object MindwtrAppSearchIndex {
   fun isSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
@@ -129,7 +118,7 @@ object MindwtrAppSearchIndex {
     }
   }
 
-  /** Runs [action] once the session exists and the schema is registered; reports failures via [onError]. */
+
   private fun withReadySession(context: Context, onError: (Throwable) -> Unit, action: (AppSearchSession) -> Unit) {
     val future = getSession(context)
     future.addListener({
@@ -178,9 +167,8 @@ object MindwtrAppSearchIndex {
       val putFuture = session.putAsync(request)
       putFuture.addListener({
         try {
-          // Partial per-document failures live in the batch result and are
-          // intentionally not surfaced as a hard error: a single malformed
-          // document must never block the rest of the index update.
+
+
           putFuture.get()
           onDone(Result.success(Unit))
         } catch (error: Throwable) {
@@ -209,7 +197,7 @@ object MindwtrAppSearchIndex {
     }
   }
 
-  /** Wipes every document this app has indexed — used on toggle-off and before a full reindex. */
+
   fun wipeAll(context: Context, onDone: (Result<Unit>) -> Unit) {
     withReadySession(context, onError = { onDone(Result.failure(it)) }) { session ->
       val searchSpec = SearchSpec.Builder()

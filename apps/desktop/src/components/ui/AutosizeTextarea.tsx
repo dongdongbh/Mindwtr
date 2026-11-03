@@ -43,10 +43,8 @@ export const AutosizeTextarea = forwardRef<HTMLTextAreaElement, AutosizeTextarea
         const value = String(props.value ?? '');
         const previousValue = previousValueRef.current;
         previousValueRef.current = value;
-        // Typing only adds text, so the box can only grow. Skip the height reset
-        // there: it relayouts and repaints the whole editor on every keystroke,
-        // which WebKitGTK paints slowly inside the Focus card (#1454).
-        // ponytail: a same-length edit that removes a line keeps the old height until the next deletion.
+
+
         const canOnlyGrow = previousValue !== null && value !== previousValue && value.length >= previousValue.length;
         if (!canOnlyGrow) node.style.height = 'auto';
         const nextHeight = Math.max(nextMinHeight, Math.min(node.scrollHeight, maxHeight));

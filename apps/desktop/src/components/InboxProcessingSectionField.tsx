@@ -13,11 +13,7 @@ type InboxProcessingSectionFieldProps = {
     labelClassName?: string;
 };
 
-/**
- * The task editor's Section picker for Inbox processing: shown only once the
- * chosen project has sections (#1461). The draft clears the section when the
- * project changes, so a stale section can never ride along.
- */
+
 export function InboxProcessingSectionField({
     t,
     project,

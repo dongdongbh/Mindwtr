@@ -28,13 +28,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's Someday/Maybe (components/views/someday-view.tsx) on core's getSomedayView: core's stats with the filter summary
- * chip (its X clears the filters) and RN's list menu (Filters, Sort, Group, Details, New section…, all core's), the
- * parked projects, core's headings with their Add task, core's rows (their detail parts when Details is on) whose status
- * menu offers Move to section… (a long-press starts selection mode, core's bulk bar with its own Move to section…), the
- * parked projects inside their section groups when core groups by section (#1319), and core's empty state.
- */
+
 @Composable
 fun SomedayList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -67,9 +61,9 @@ fun SomedayList(model: InboxViewModel) = with(model.menu) {
                 val row = item.row
                 when {
                     row != null -> TaskRowItem(model, row, status = RowStatus.Icon, details = details, actions = bulkRow(row))
-                    // A parked project in its section, before the section's tasks (#1319); RN's sectionProjectRow adds 8 below.
+
                     item.type == "project" -> Box(Modifier.padding(bottom = 8.dp)) {
-                        ParkedProject(model, item.json.getJSONObject("project"), item.json.getString("activateLabel"))
+                        ParkedProject(model, item.json.getJSONObject("project"), item.json.getString("activateLabel"), view.getJSONObject("text").getString("moveToSection"))
                     }
                     else -> Heading(model, item.json)
                 }
@@ -79,7 +73,7 @@ fun SomedayList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's group heading (TaskListView): the title at 13/700, muted for "No section", and core's Add task for a section. */
+
 @Composable
 private fun Heading(model: InboxViewModel, heading: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -97,7 +91,7 @@ private fun Heading(model: InboxViewModel, heading: JSONObject) = with(model.men
     }
 }
 
-/** RN's removable FilterChip beside the stats: core's "Filters · N" on the tint; its X (core's remove label) clears the filters. */
+
 @Composable
 private fun SummaryChip(chip: JSONObject, enabled: Boolean, onClear: () -> Unit) {
     val c = LocalTheme.current.colors

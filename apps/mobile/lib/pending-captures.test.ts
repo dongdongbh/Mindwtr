@@ -23,7 +23,7 @@ const appLogMocks = vi.hoisted(() => ({
     logWarn: vi.fn(async () => undefined),
 }));
 vi.mock('./app-log', () => appLogMocks);
-// The device store that keeps the last queued command applied to each task.
+
 const deviceStorage = vi.hoisted(() => {
     const items = new Map<string, string>();
     return {
@@ -47,7 +47,7 @@ import {
 } from './pending-captures';
 import { flushPendingTaskActionSave } from './pending-capture-persistence';
 
-// The capture-shaped tests read capture fields; narrow once here.
+
 const parseCapture = (raw: string) => parsePendingCapture(raw) as PendingCapture | null;
 const WATCH_AUDIO_ID = '11111111-1111-4111-8111-111111111111';
 const ANDROID_AUDIO_ID = '22222222-2222-4abc-8def-222222222222';
@@ -264,8 +264,8 @@ describe('parsePendingCapture', () => {
             startDate: '2026-08-01T09:30:00',
         }));
         expect(capture?.dueDate).toBe('2026-08-14');
-        // The Shortcut's Date parameter always carries a time; it must collapse
-        // to the local calendar day so it never arms a start reminder (#755).
+
+
         expect(capture?.startDate).toBe('2026-08-01');
     });
 
@@ -310,7 +310,7 @@ describe('buildPendingCaptureTaskProps', () => {
         );
         expect(props.dueDate).toBe('2026-08-14');
         expect(props.startTime).toBe('2026-08-01');
-        // #1452: a start date files the default Inbox into Next; a chosen or contextual status wins.
+
         expect(props.status).toBe('next');
         expect(buildPendingCaptureTaskProps({ id: 'a', title: 'T', tags: [], startDate: '2026-08-01', status: 'inbox' }, []).status).toBe('inbox');
         expect(buildPendingCaptureTaskProps({ id: 'a', title: 'T', tags: [], startDate: '2026-08-01', defaultStatus: 'someday' }, []).status).toBe('someday');
@@ -328,9 +328,7 @@ describe('ingestPendingCaptures', () => {
         fileSystemMocks.readAsStringAsync.mockResolvedValue(JSON.stringify(body));
     };
 
-    // Typed so `addTask.mock.calls[0]` destructures as [title, props] instead
-    // of an empty tuple (vi.fn() with a zero-arg implementation infers no
-    // parameters).
+
     const addTaskMock = () => vi.fn(async (_title: string, _props?: Partial<Task>) => ({ id: 'task-1' }));
 
     beforeEach(() => {
@@ -459,7 +457,7 @@ describe('ingestPendingCaptures', () => {
         oneFile(`${captureId}.json`, {
             kind: 'text', id: captureId, title: 'Dictated once', source: 'android-capture-intent',
         });
-        // First pass creates the task but the queue delete fails, so the file replays.
+
         fileSystemMocks.deleteAsync.mockRejectedValueOnce(new Error('disk busy'));
         const created: Task[] = [];
         const addTask = vi.fn(async (title: string, _props?: Partial<Task>, options?: { captureId: string }) => {
@@ -513,7 +511,7 @@ describe('ingestPendingCaptures', () => {
         expect(updateTask).toHaveBeenCalledWith('tapped', { status: 'done', completedAt: '2026-09-14T08:30:00.000Z' });
         expect(updateTask).toHaveBeenCalledWith('skewed', { status: 'done' });
         expect(updateTask).toHaveBeenCalledWith('garbled', { status: 'done' });
-        // The Watch writes no completedAt; its command is created at the tap.
+
         expect(updateTask).toHaveBeenCalledWith('watched', { status: 'done', completedAt: '2026-09-15T07:15:00.000Z' });
     });
 
@@ -897,8 +895,7 @@ describe('ingestPendingCaptures', () => {
         expect(outcomes).toEqual(['completed', 'already-done', 'terminal']);
     });
 
-    // A task changed after a queued command was made keeps its newer state. A command
-    // replayed after its own queue delete failed is such a command: its write landed.
+
     it('never lets a replayed older Watch defer or check-off undo a later change', async () => {
         const files = new Map<string, Record<string, unknown>>([
             ['a.json', { kind: 'defer', id: 'd1', taskId: 'deferred', startDate: '2026-09-20', createdAt: '2026-09-10T10:00:00.000Z', source: 'apple-watch' }],
@@ -907,7 +904,7 @@ describe('ingestPendingCaptures', () => {
         ]);
         fileSystemMocks.readDirectoryAsync.mockImplementation(async () => [...files.keys()]);
         fileSystemMocks.readAsStringAsync.mockImplementation(async (uri: string) => JSON.stringify(files.get(uri.split('/').pop()!)));
-        // The first pass's deletes of a.json and c.json fail after their writes landed.
+
         const failDelete = new Set(['a.json', 'c.json']);
         fileSystemMocks.deleteAsync.mockImplementation(async (uri: string) => {
             const name = uri.split('/').pop()!;
@@ -932,7 +929,7 @@ describe('ingestPendingCaptures', () => {
         expect(tasks[0].startTime).toBe('2026-09-21');
         expect([...files.keys()]).toEqual(['a.json', 'c.json']);
         expect(tasks[1].status).toBe('done');
-        // The user reopens the checked-off task before the next drain.
+
         await storeUpdate('reopened', { status: 'next' });
         storeUpdate.mockClear();
         appLogMocks.logInfo.mockClear();
@@ -953,8 +950,7 @@ describe('ingestPendingCaptures', () => {
         ]);
     });
 
-    // A load, a sync or an in-app edit after the tap never makes a queued command stale:
-    // the store's updatedAt says nothing about which command came last.
+
     it('applies a widget check-off to a task a load promoted after the tap', async () => {
         oneFile('c.json', { kind: 'complete', id: 'c1', taskId: 'promoted', completedAt: '2026-09-10T09:00:03.000Z', source: 'android-widget' });
         const tasks = [{ id: 'promoted', title: 'Promoted', status: 'next', updatedAt: '2026-09-10T10:00:00.000Z' } as Task];
@@ -1005,13 +1001,13 @@ describe('ingestPendingCaptures', () => {
             people: [], settings: emptySettings, flushPendingSave: vi.fn(async () => undefined),
         };
 
-        // Killed between the record and the delete.
+
         fileSystemMocks.deleteAsync.mockRejectedValueOnce(new Error('killed before the delete'));
         expect(await ingestPendingCaptures(deps)).toBe(0);
         expect(deviceStorage.setItem).toHaveBeenCalledOnce();
         expect(storeUpdate).toHaveBeenCalledOnce();
 
-        // The user reopens the task; the replay of the recorded command leaves it open.
+
         tasks[0].status = 'next';
         expect(await ingestPendingCaptures(deps)).toBe(1);
         expect(storeUpdate).toHaveBeenCalledOnce();
@@ -1020,7 +1016,7 @@ describe('ingestPendingCaptures', () => {
     });
 
     it('removes a check-off whose record write failed, so a task reopened before the next drain stays open', async () => {
-        // The queue folder as the file system holds it: a delete removes the file.
+
         const files = new Map([['c.json', JSON.stringify({ kind: 'complete', id: 'c2', taskId: 'open', completedAt: new Date(Date.now() - 1000).toISOString(), source: 'android-widget' })]]);
         fileSystemMocks.readDirectoryAsync.mockImplementation(async () => [...files.keys()]);
         fileSystemMocks.readAsStringAsync.mockImplementation(async (uri: string) => files.get(uri.split('/').pop()!)!);
@@ -1035,12 +1031,12 @@ describe('ingestPendingCaptures', () => {
             people: [], settings: emptySettings, flushPendingSave: vi.fn(async () => undefined),
         };
 
-        // The check-off is stored and saved; the record write fails (the app keeps running).
+
         deviceStorage.setItem.mockRejectedValueOnce(new Error('storage full'));
         expect(await ingestPendingCaptures(deps)).toBe(0);
         expect(tasks[0].status).toBe('done');
 
-        // The user reopens the task before the next drain: the check-off never applies again.
+
         tasks[0].status = 'next';
         await ingestPendingCaptures(deps);
         expect(storeUpdate).toHaveBeenCalledOnce();
@@ -1701,7 +1697,7 @@ describe('ingestPendingCaptures', () => {
             audioPath: `file:///data/Documents/watch-audio/${WATCH_AUDIO_ID}.wav`,
             source: 'apple-watch',
         });
-        // The first pass saves the task, then the queue delete fails, as a kill would leave it.
+
         fileSystemMocks.deleteAsync.mockRejectedValueOnce(new Error('killed before the delete'));
         const created: Task[] = [];
         const addTask = vi.fn(async (title: string, _props?: Partial<Task>, options?: { captureId: string }) => {
@@ -1823,8 +1819,8 @@ describe('ingestPendingCaptures', () => {
 
         expect(ingested).toBe(1);
         const [title, props] = addTask.mock.calls[0] as [string, Partial<Task>];
-        // Cleanup off keeps ordinary text as typed; it never keeps a token the
-        // parser already turned into a field.
+
+
         expect(title).toBe('Buy milk');
         expect(props.dueDate).toBe('2026-07-24');
         expect(props.contexts).toContain('@errands');
@@ -1839,8 +1835,8 @@ describe('ingestPendingCaptures', () => {
         await ingestPendingCaptures({ addTask, updateTask, addProject, projects: [], areas: [], tasks: [], people, settings: emptySettings });
 
         const [title, props] = addTask.mock.calls[0] as [string, Partial<Task>];
-        // Without the people list the parser takes only the first word, so this
-        // capture used to create a second person called "Jim" (see #895).
+
+
         expect(props.assignedTo).toBe('Jim Smith');
         expect(title).toBe('Chase invoice');
     });
@@ -1904,8 +1900,8 @@ describe('ingestPendingCaptures', () => {
     });
 
     it('resolves relative dates against the capture time, not the drain time', async () => {
-        // Queued on Monday 2026-07-13; "friday" must mean that week's Friday
-        // no matter when the app next foregrounds and drains the queue.
+
+
         oneFile('a.json', { id: 'a', title: 'Buy milk /due:friday', createdAt: '2026-07-13T12:00:00' });
         const addTask = addTaskMock();
 
@@ -1951,9 +1947,8 @@ describe('ingestPendingCaptures', () => {
                 ? { id: 'a', title: 'First' }
                 : { id: 'b', title: 'Second' },
         ));
-        // Assembly reads settings.gtd while building parse options; a throw
-        // there stands in for any unexpected error inside assembly, which must
-        // degrade to the verbatim capture instead of aborting the drain.
+
+
         const poisonedSettings = Object.defineProperty({}, 'gtd', {
             get() { throw new Error('boom'); },
         }) as AppData['settings'];

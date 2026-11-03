@@ -12,12 +12,12 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 
-/** RN's share module's fallbacks (#1117) and the stager's own bounds: six files, a streamed copy capped at core's 50 MiB. */
+
 class SharedFileStagerTest {
     @get:Rule val folder = TemporaryFolder()
     private val entry = "0f8fad5b-d9cb-469f-a165-70867728950e"
 
-    /** A provider: each URI's bytes, name, size and type, null where the provider leaves them out; [opened] counts reads. */
+
     private class Provider(val files: Map<String, Triple<ByteArray?, String?, String?>>, val declared: Map<String, Long> = emptyMap()) : SharedFileStager.Source {
         val opened = mutableListOf<String>()
         override fun open(uri: String): InputStream? { opened += uri; return files[uri]?.first?.let { ByteArrayInputStream(it) } }
@@ -25,7 +25,7 @@ class SharedFileStagerTest {
         override fun size(uri: String) = declared[uri] ?: files[uri]?.first?.size?.toLong()
         override fun mimeType(uri: String) = files[uri]?.third
         override fun ownProvider(authority: String) = authority == "own.app"
-        /** The authority as ContentResolver opens it, decoded (java.net.URI decodes as Android's Uri does, and refuses a `\`). */
+
         override fun authority(uri: String): String? = runCatching { java.net.URI(uri).authority }.getOrNull()
     }
 
@@ -69,12 +69,12 @@ class SharedFileStagerTest {
 
     @Test
     fun aFileOverTheCapIsStoppedThereAndReportedTooLarge() {
-        // Declared too large: never read.
+
         val big = Provider(mapOf("content://p/big" to Triple(ByteArray(1), "big.mov", "video/mp4")), declared = mapOf("content://p/big" to 60L * 1024 * 1024))
         val declared = stager(big).stage(entry, listOf("content://p/big")).getJSONObject(0)
         assertTrue(declared.getLong("size") > SharedFileStager.MAX_BYTES)
         assertTrue(big.opened.isEmpty())
-        // Sizeless and endless: the copy stops one byte past the cap.
+
         val endless = object : InputStream() { override fun read() = 7; override fun read(b: ByteArray, off: Int, len: Int) = len.also { b.fill(7, off, off + len) } }
         val out = ByteArrayOutputStream()
         assertEquals(SharedFileStager.MAX_BYTES + 1, SharedFileStager.copyCapped(endless, out))
@@ -83,7 +83,7 @@ class SharedFileStagerTest {
 
     @Test
     fun anotherSchemeOrThisAppsOwnProviderIsNeverOpened() {
-        // A hostile share naming this app's own files: file:// (opened in this process) or this app's own provider.
+
         val uris = listOf("file:///data/user/0/tech.dongdongbh.mindwtr/files/mindwtr.db", "content://own.app/logs/mindwtr.log", "android.resource://x/1", "content://p/1")
         val provider = Provider(uris.associateWith { Triple("secret".toByteArray(), "mindwtr.db", "application/octet-stream") })
         val staged = stager(provider).stage(entry, uris)
@@ -93,8 +93,8 @@ class SharedFileStagerTest {
 
     @Test
     fun aUserPrefixOnThisAppsOwnAuthorityIsStillRefused() {
-        // ContentResolver drops `<user>@` before it opens the provider, so the check compares what follows the last `@`; a
-        // real cross-profile share (`10@` another app's provider) still opens, and an empty authority is refused.
+
+
         val uris = listOf("content://0@own.app/files/mindwtr.db", "content://10@own.app/x", "content://0@/x", "content://10@p/1")
         val provider = Provider(uris.associateWith { Triple("secret".toByteArray(), "x.db", "application/octet-stream") })
         val staged = stager(provider).stage(entry, uris)
@@ -104,8 +104,8 @@ class SharedFileStagerTest {
 
     @Test
     fun anEncodedOrEscapedAuthorityIsRefusedBeforeItIsOpened() {
-        // ContentResolver opens the decoded authority, which ends at `\`: an encoded `@` or `.`, an encoded letter, or a
-        // backslash would hide this app's own provider from a check of the raw text.
+
+
         val uris = listOf("content://0%40own.app/x", "content://own%2Eapp/x", "content://%6Fwn.app/x", "content://own.app\\x/y", "content://own.app:80/x", "content://p/1")
         val provider = Provider(uris.associateWith { Triple("secret".toByteArray(), "x.db", "application/octet-stream") })
         val staged = stager(provider).stage(entry, uris)
@@ -132,18 +132,18 @@ class SharedFileStagerTest {
 
     @Test
     fun aStandInThatCannotBeWrittenIsUnreadableNotAFailedStaging() {
-        // A file declared over the cap gets an empty stand-in; where that write fails, the file reads as unreadable.
+
         val provider = Provider(mapOf("content://p/big" to Triple(ByteArray(1), "big.mov", "video/mp4")), declared = mapOf("content://p/big" to 60L * 1024 * 1024))
         val dir = java.io.File(folder.root, entry).apply { mkdirs() }
-        java.io.File(dir, "0").mkdirs() // the stand-in's name is taken by a folder
+        java.io.File(dir, "0").mkdirs()
         val file = stager(provider).stage(entry, listOf("content://p/big")).getJSONObject(0)
         assertNull(file.text("path"))
     }
 
     @Test
     fun aClearedCacheLeavesTheEntryToStageAgain() {
-        // The system cleared the cache before the entry opened: no list, so the router stages again (a gone grant then reads as
-        // unreadable files, and core says so); a cleared copy under a kept list fails core's copy, which core counts skipped.
+
+
         val provider = Provider(mapOf("content://p/1" to Triple("a".toByteArray(), "a.txt", "text/plain")))
         stager(provider).stage(entry, listOf("content://p/1"))
         java.io.File(folder.root, entry).deleteRecursively()

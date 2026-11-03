@@ -9,7 +9,7 @@ type TaskEditorAiMenuProps = {
     t: (key: string) => string;
 };
 
-/** Trigger for the two AI actions, rendered inside the editor's title row. */
+
 export function TaskEditorAiMenu({ ai, t }: TaskEditorAiMenuProps) {
     const { aiEnabled, isAIWorking, handleAIClarify, handleAIBreakdown } = ai;
     const [aiMenuOpen, setAiMenuOpen] = useState(false);
@@ -91,7 +91,7 @@ type TaskEditorAiPanelsProps = {
     t: (key: string) => string;
 };
 
-/** Copilot, error, breakdown and clarify panels, stacked under the title row. */
+
 export function TaskEditorAiPanels({ ai, timeEstimatesEnabled, t }: TaskEditorAiPanelsProps) {
     const {
         aiEnabled,

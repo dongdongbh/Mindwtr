@@ -8,10 +8,7 @@
     android:orientation="vertical"
     android:padding="20dp">
 
-    <!-- The Background choice shares the title line so the list keeps its
-         height in a short window (landscape with the keyboard open). The
-         title keeps its width; the choice takes the rest and its long
-         option names never push the title out. -->
+
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -97,7 +94,7 @@
         android:gravity="end|center_vertical"
         android:orientation="horizontal">
 
-        <!-- Focus only (#1468). It shares the Save line, so a short window keeps the list's height. -->
+
         <CheckBox
             android:id="@+id/mindwtr_widget_configure_available"
             android:layout_width="0dp"

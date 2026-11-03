@@ -4,7 +4,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** A reminder's Done and Snooze, and a reschedule, as CoreWork jobs: after recovery and the drain, through core's journaled commands. */
+
 class ReminderJobTest {
     private val events = mutableListOf<String>()
     private var recovered = true
@@ -47,7 +47,7 @@ class ReminderJobTest {
         assertEquals(CoreJob.Outcome.Retry, run(CoreJob.REMINDER_DONE, mapOf("requestId" to "r1", "taskId" to "t1")))
         doneFailure = null
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.REMINDER_DONE, mapOf("requestId" to "r1", "taskId" to "t1")))
-        // Every try sends the same request, so core's receipt makes the write happen once.
+
         assertEquals(2, events.count { it == "done r1 t1" })
     }
 
@@ -58,7 +58,7 @@ class ReminderJobTest {
     }
 
     @Test fun snoozeSendsTheTapTimeWithItsRequestAndLeavesTheAlarmToTheEngine() {
-        // The engine makes the alarm against core's native state (planReminderSnooze), once per request; the job makes none itself.
+
         val details = JSONObject().put("title", "Pay rent").put("snooze_interval", 10).toString()
         assertEquals(CoreJob.Outcome.Success, run(CoreJob.REMINDER_SNOOZE, mapOf("requestId" to "r2", "requestedAt" to "1790000000000", "details" to details)))
         assertEquals(listOf("boot", "recover", "drain", "snooze r2 1790000000000 Pay rent", "widgets"), events)
@@ -74,8 +74,7 @@ class ReminderJobTest {
         assertEquals(listOf("boot", "recover", "drain", "reminders rebuild", "widgets"), events)
     }
 
-    // A receiver's job reaches CoreWork durably (DurableQueue): the notification goes, and the receiver's process may end, only
-    // once WorkManager stored the job.
+
     private fun queueWith(queue: ((Throwable?) -> Unit) -> Unit) = DurableQueue.run(queue,
         done = { events += "dismiss" }, finish = { events += "finish" }, failed = { events += "failed ${it.message}" })
 

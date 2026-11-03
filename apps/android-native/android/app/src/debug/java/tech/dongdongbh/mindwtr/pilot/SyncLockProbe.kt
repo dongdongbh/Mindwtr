@@ -7,17 +7,10 @@ import android.os.Bundle
 import android.util.Log
 import tech.dongdongbh.mindwtr.syncfilelock.SyncFileLockCore
 
-/**
- * Debug builds only (scripts/check-file-sync-device.mjs): File Sync's folder lock, taken and dropped from the shell. The
- * app's own process runs [SyncLockProbe] (the production lock code, SyncFileLockCore, as HostSyncLock runs it); the
- * `:lockholder` process runs [SyncLockHolder], the second holder. Extras: `op` = hold (uri), revalidate (count), release,
- * or revoke (uri: the folder's persisted grant is released, as a user's revoke in Android's settings). Each answer is one
- * logcat line, `Native Android sync lock probe process=<main|holder> op=<op> outcome=<held|revalidated|released|revoked|refused>
- * code=<the refusal's code>`.
- */
+
 open class SyncLockProbe : Activity() {
     private companion object {
-        /** One lease per process, kept while the process lives (the activity finishes at once). */
+
         var token: String? = null
         var core: SyncFileLockCore? = null
     }
@@ -48,7 +41,7 @@ open class SyncLockProbe : Activity() {
     }
 }
 
-/** [SyncLockProbe] in the `:lockholder` process: another process of the same app, as RN's lock refuses it. */
+
 class SyncLockHolder : SyncLockProbe() {
     override val processName = "holder"
 }

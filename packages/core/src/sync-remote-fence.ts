@@ -2,8 +2,7 @@ import { logInfo } from './logger';
 
 export const SYNC_REMOTE_MUTATION_FENCE_NAME = '.mindwtr-sync-fence-v1.json';
 
-/** Minimum verified lease lifetime immediately before a provider mutation.
- * It covers the bounded 30-second request plus a small scheduling margin. */
+
 export const SYNC_REMOTE_MUTATION_REQUEST_HORIZON_MS = 35_000;
 
 
@@ -12,29 +11,29 @@ export type SyncRemoteMutationFencePurpose = 'ordinary-sync' | 'encryption-trans
 export type SyncRemoteMutationFenceSnapshot = {
     bytes: Uint8Array | null;
     version: string | null;
-    /** Provider/server time from the response's HTTP Date header. Client wall clocks are not
-     * trusted for expiry because skew could otherwise make a crashed lease permanent. */
+
+
     serverNowMs: number | null;
 };
 
 export type SyncRemoteMutationFencePort = {
     read(): Promise<SyncRemoteMutationFenceSnapshot>;
-    /** `null` is create-only; a version replaces exactly that observed generation. */
+
     write(bytes: Uint8Array, expectedVersion: string | null): Promise<void>;
     remove(expectedVersion: string): Promise<void>;
     isConflict(error: unknown): boolean;
 };
 
 export type SyncRemoteMutationFenceLease = {
-    /** Set when acquisition reclaimed a lease whose holder stopped renewing. */
+
     readonly reclaimedFrom?: SyncRemoteMutationFenceHolder | null;
-    /** Revalidates ownership and renews when less than `minRemainingMs` remains. */
+
     assertHeld(minRemainingMs?: number): Promise<void>;
     renew(): Promise<void>;
-    /** Best-effort delay until this lease's last server-observed expiry. Used
-     *  only to schedule cleanup after a conditional release request fails. */
+
+
     retryAfterMs(): number;
-    /** Conditional and peer-safe. A failed release leaves only a bounded, expiring lease. */
+
     release(): Promise<void>;
 };
 
@@ -44,10 +43,8 @@ type SyncRemoteMutationFenceRecord = {
     ownerId: string;
     purpose: SyncRemoteMutationFencePurpose;
     expiresAt: number;
-    /** Liveness advertisement (absent on records from older clients): the
-     * holder's renewal cadence and the server time of its last write. A waiter
-     * that sees no renewal for several cadences may reclaim the lease by CAS
-     * instead of waiting out `expiresAt`. */
+
+
     heartbeatMs?: number;
     renewedAt?: number;
 };
@@ -56,8 +53,8 @@ export type SyncRemoteMutationFenceHolder = {
     ownerId: string;
     leaseId: string;
     purpose: SyncRemoteMutationFencePurpose;
-    /** Server-observed remaining life. A live holder renews at ttl/3, so a few
-     * seconds left means the holder died and the lease is about to lapse. */
+
+
     remainingMs: number;
 };
 
@@ -98,23 +95,18 @@ export const isSyncRemoteMutationFenceError = (error: unknown): boolean => (
 const FENCE_SCHEMA = 1;
 const MIN_TTL_MS = 10_000;
 const MAX_TTL_MS = 15 * 60_000;
-/** Provider Date headers can move slightly between frontends. Anything farther
- *  into the future than a legal maximum lease plus this tolerance cannot have
- *  been written by a conforming client and must not permanently block sync. */
+
+
 const MAX_FUTURE_EXPIRY_TOLERANCE_MS = 60_000;
 const MAX_RECORD_BYTES = 4_096;
 const DEFAULT_ACQUIRE_ATTEMPTS = 4;
-/** Renewal cadence advertised in the record. Decoupled from the TTL so a dead
- * holder is detected by missed heartbeats (seconds), not by lease expiry
- * (minutes); the TTL stays the safety backstop for older clients' records. */
+
+
 const DEFAULT_HEARTBEAT_MS = 20_000;
 const ABANDONED_AFTER_MISSED_HEARTBEATS = 3;
 const ABANDONED_JITTER_MARGIN_MS = 5_000;
 
-// Constructed per call, not once at module scope: on React Native the global
-// TextDecoder only exists after Expo's winter runtime installs it, which is
-// later than the first import of this module — a module-scope instance threw
-// "Property 'TextDecoder' doesn't exist" before the app could boot.
+
 const encodeUtf8 = (text: string): Uint8Array => new TextEncoder().encode(text);
 const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 
@@ -131,9 +123,7 @@ const isImpossibleFutureExpiry = (expiresAt: number, serverNowMs: number): boole
     expiresAt - serverNowMs > MAX_TTL_MS + MAX_FUTURE_EXPIRY_TOLERANCE_MS
 );
 
-/** A holder that advertises a heartbeat and has not renewed for several of
- * them is presumed dead. Records without the advertisement (older clients)
- * can only be waited out. */
+
 const isAbandonedRecord = (record: SyncRemoteMutationFenceRecord, serverNowMs: number): boolean => {
     if (typeof record.heartbeatMs !== 'number' || record.heartbeatMs <= 0) return false;
     if (typeof record.renewedAt !== 'number') return false;
@@ -185,8 +175,8 @@ const parseRecord = (bytes: Uint8Array): SyncRemoteMutationFenceRecord => {
         throw new SyncRemoteMutationFenceUnavailableError('Remote sync mutation fence record is malformed');
     }
     const parsedRecord = record as SyncRemoteMutationFenceRecord;
-    // Liveness fields are optional and advisory: anything malformed is
-    // dropped rather than rejecting a record an older client wrote.
+
+
     if (typeof parsedRecord.heartbeatMs !== 'number' || !Number.isFinite(parsedRecord.heartbeatMs) || parsedRecord.heartbeatMs < 0) {
         delete parsedRecord.heartbeatMs;
     }
@@ -213,11 +203,7 @@ type AcquireSyncRemoteMutationFenceOptions = {
     leaseId?: string;
 };
 
-/**
- * Acquires the one remote mutation lease shared by ordinary sync and encryption transitions.
- * Every mutation-capable compatible client must honor this record; a marker cannot constrain
- * legacy clients that never read it, so artifact CAS/final inventory checks remain required.
- */
+
 export async function acquireSyncRemoteMutationFence(
     port: SyncRemoteMutationFencePort,
     options: AcquireSyncRemoteMutationFenceOptions,
@@ -263,9 +249,8 @@ export async function acquireSyncRemoteMutationFence(
                 if (!isAbandonedRecord(current, serverNowMs)) {
                     throw new SyncRemoteMutationFenceBusyError(current.expiresAt - serverNowMs, holder);
                 }
-                // Presumed dead: fall through to a CAS write over its exact
-                // version. A holder that was merely paused loses that race (or
-                // fails its next ownership check) and aborts before mutating.
+
+
                 reclaimedFrom = holder;
             }
         } else if (snapshot.version !== null) {
@@ -318,9 +303,8 @@ export async function acquireSyncRemoteMutationFence(
 
     let currentVersion = acquiredVersion;
     let lastKnownRemainingMs = acquiredRemainingMs;
-    // The timer keeps the configured heartbeatMs cadence. Only the advertised
-    // interval grows, and never shrinks, so a later renewal cannot truncate an
-    // in-flight mutation horizon already promised to the caller.
+
+
     let advertisedHeartbeatMs = heartbeatMs;
     const monotonicNow = (): number => (
         typeof performance !== 'undefined' && typeof performance.now === 'function'

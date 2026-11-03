@@ -5,13 +5,12 @@ import vm from 'node:vm';
 import { build } from 'esbuild';
 import { lazyChrono } from '../scripts/lazy-chrono.mjs';
 
-// The native bundle loads chrono-node per locale on first parse (scripts/lazy-chrono.mjs): no chrono-node module may run while
-// the bundle starts, and quick-add must parse core's frozen corpus exactly as the static import did.
+
 const corpus = resolve(import.meta.dir, '../../../packages/core/src/quick-add-chrono-corpus.json');
 
 describe('lazy chrono-node in the native bundle', () => {
     it('runs no chrono-node module at boot, then parses the frozen corpus unchanged', async () => {
-        // Counts every chrono-node module's first run, as the module trace would.
+
         const countChrono = {
             name: 'count-chrono',
             setup(builder: Parameters<typeof lazyChrono.setup>[0]) {

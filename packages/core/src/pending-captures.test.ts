@@ -12,9 +12,6 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import { runSyncStoreSave } from './store-write-gate';
 import type { AppData, Task } from './types';
 
-// React Native's own tests (apps/mobile/lib/pending-captures.test.ts) replay every
-// branch through the React Native binding. These drive core's drain over fake ports
-// and a real store: what the native app's runner will call.
 
 const CAPTURE_ID = '0b6f1c4e-7a3d-4c55-9e21-4f7a8a1d2c01';
 const INTENT_ID = '5c2e9d10-3b4a-4f6e-8d7c-1a2b3c4d5e6f';
@@ -31,7 +28,7 @@ const task = (id: string, props: Partial<Task> = {}): Task => ({
     ...props,
 } as Task);
 
-/** A queue directory in memory. `failDelete` names files whose next delete throws, as a kill before the delete would leave them. */
+
 function fakeQueue(files: Record<string, unknown>) {
     const stored = new Map(Object.entries(files).map(([name, body]) => [name, typeof body === 'string' ? body : JSON.stringify(body)]));
     const failDelete = new Set<string>();
@@ -50,9 +47,9 @@ function fakeQueue(files: Record<string, unknown>) {
     return { port, stored, failDelete };
 }
 
-// Each test's own storage, so a late save from an earlier test cannot land in it.
+
 let saved: () => AppData;
-// The device's record of applied commands, kept across a test's drains and restarts.
+
 let lastApplied: PendingCaptureRecordPort;
 
 async function openStore(tasks: Task[]) {
@@ -73,7 +70,7 @@ async function openStore(tasks: Task[]) {
     await useTaskStore.getState().fetchData({ silent: true });
 }
 
-/** As after process death: the store forgets memory and loads what was saved. */
+
 async function restartStore() {
     await flushPendingSave();
     useTaskStore.setState({ _allTasks: [], _allProjects: [], _allSections: [], _allAreas: [], _allPeople: [], settings: {} });
@@ -252,7 +249,7 @@ describe('drainPendingCaptureQueue', () => {
         expect(queue.stored.size).toBe(0);
         expect(saved().tasks).toHaveLength(4);
 
-        // The same files again, as when the writer or a restore replays them.
+
         const replay = fakeQueue(items);
         const before = storeData();
         expect(await drainPendingCaptureQueue(storeDeps(replay.port))).toBe(4);
@@ -358,7 +355,7 @@ describe('drainPendingCaptureQueue', () => {
                 kind: 'audio', id: AUDIO_ID, source: 'android-quick-capture',
                 audioPath: `file:///data/files/quick-capture-audio/${AUDIO_ID}.wav`,
             },
-            // An audio item whose path a host would refuse is kept too: only the host can judge it.
+
             'bad-audio.json': { kind: 'audio', id: 'not-a-uuid', audioPath: 'file:///etc/passwd', source: 'android-quick-capture' },
             'timer.json': { kind: 'pomodoro', id: 'p1', action: 'start', taskId: 'open', source: 'apple-watch' },
             'z.json': { id: 'shortcut-1', title: 'Still drained' },

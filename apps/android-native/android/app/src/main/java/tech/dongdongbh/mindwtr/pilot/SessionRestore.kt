@@ -2,13 +2,7 @@ package tech.dongdongbh.mindwtr.pilot
 
 import org.json.JSONObject
 
-/**
- * RN's last-screen restore (#842; RN's lib/session-restore.ts, core's session-restore.ts, pass O2b): the screen on show, as
- * RN's route path and params, for core to store under `mindwtr:session:lastRoute` in RN's RKStorage (so an RN user who
- * upgrades within the window resumes too). Core decides what is stored and what a cold start reopens; this only names the
- * screen. Null: a screen RN never records (Settings, the review flows, Mind Sweep, a widget list, the global search), so the
- * previous snapshot stays and a death there resumes the screen beneath.
- */
+
 data class LastRoute(val pathname: String, val params: JSONObject = JSONObject())
 
 fun lastRouteOf(
@@ -36,7 +30,7 @@ fun lastRouteOf(
         MenuScreen.Board -> LastRoute("/board")
         MenuScreen.SavedSearch -> savedSearchId?.let { LastRoute("/saved-search/$it") }
         MenuScreen.Settings, MenuScreen.Weekly, MenuScreen.Daily, MenuScreen.MindSweep, MenuScreen.WidgetList -> null
-        // RN's Menu tab: this app's More sheet over the tabs.
+
         null -> if (sheetOpen) LastRoute("/menu") else when (screen) {
             Screen.Focus -> LastRoute("/focus")
             Screen.Inbox -> LastRoute("/inbox")

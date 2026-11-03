@@ -26,11 +26,8 @@ type BuildProjectGroupsInput = {
     orderedAreas: Area[];
     areaFilter: AreaFilterSelection;
     tagFilter: ProjectTagFilter;
-    /**
-     * Starred projects first inside each area group (#1263). Only for a list the
-     * user cannot drag: a drag list must show the stored `order`, or a starred
-     * project dragged lower jumps back and drops land in the wrong place.
-     */
+
+
     pinFocused?: boolean;
 };
 
@@ -117,11 +114,20 @@ export function buildProjectGroups({
     };
 }
 
-/**
- * Move up or Move down in a shown area group (#1263): the project swaps places with its shown neighbour.
- * A list with starred projects pinned on top only moves a project past one with the same star state.
- * Returns the area's stored order with the two swapped, for reorderProjects, or null at an edge.
- */
+
+const canSwapProjects = (project: Project | undefined, neighbour: Project | undefined): boolean =>
+    Boolean(project && neighbour) && (project!.isFocused === true) === (neighbour!.isFocused === true)
+    && (project!.areaId ?? undefined) === (neighbour!.areaId ?? undefined);
+
+
+export function getProjectMoveOptions(group: ProjectAreaGroup): Array<{ up: boolean; down: boolean }> {
+    return group.projects.map((project, index) => ({
+        up: canSwapProjects(project, group.projects[index - 1]),
+        down: canSwapProjects(project, group.projects[index + 1]),
+    }));
+}
+
+
 export function planProjectMove(
     group: ProjectAreaGroup,
     projects: Project[],
@@ -131,9 +137,8 @@ export function planProjectMove(
     const index = group.projects.findIndex((project) => project.id === projectId);
     const project = group.projects[index];
     const neighbour = project ? group.projects[index + (direction === 'up' ? -1 : 1)] : undefined;
-    if (!project || !neighbour || (project.isFocused === true) !== (neighbour.isFocused === true)) return null;
+    if (!project || !neighbour || !canSwapProjects(project, neighbour)) return null;
     const areaId = project.areaId ?? undefined;
-    if ((neighbour.areaId ?? undefined) !== areaId) return null;
     const orderedIds = projects
         .filter((candidate) => !candidate.deletedAt && (candidate.areaId ?? undefined) === areaId)
         .sort((a, b) => projectOrder(a) - projectOrder(b) || a.title.localeCompare(b.title))

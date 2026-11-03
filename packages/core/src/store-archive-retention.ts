@@ -14,12 +14,11 @@ type Context = {
     flushPendingSave: () => Promise<void>;
 };
 
-// R-2: a device that was offline must not purge before it has merged the remote, or a
-// restore made on another device loses to the fresh purge tombstone. Session-scoped on purpose.
+
 let syncCompletedThisSession = false;
 let deferralLogged = false;
 
-/** Called by the shared sync cycle once it has read and merged (or confirmed unchanged) the remote. */
+
 export const markArchiveRetentionSyncCompleted = (): void => { syncCompletedThisSession = true; };
 export const isArchiveRetentionSyncCompleted = (): boolean => syncCompletedThisSession;
 export const resetArchiveRetentionSyncForTests = (): void => {
@@ -84,7 +83,7 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
         let changed = false;
         let deferred = false;
         set((state) => {
-            // Automatic calls before hydration or during an editor/save failure are safe no-ops.
+
             if (!canWrite(state)) {
                 skipped = 'not-ready';
                 return state;
@@ -115,7 +114,7 @@ export const createArchiveRetentionActions = ({ set, debouncedSave, flushPending
             const projects = backfill.projects.map((project) => projectIds.has(project.id)
                 ? compactPurgedProjectForLocalStorage({ ...project, deletedAt: now, purgedAt: now, updatedAt: now,
                     rev: nextRevision(project.rev), revBy: device.deviceId }) : project);
-            // Purging archived rows can leave their tokens unused (a Project-only tag), so keep them saved.
+
             const changedPairs = <T>(before: T[], after: T[]) => after.flatMap((row, index) =>
                 row !== before[index] ? [{ before: before[index], after: row }] : []);
             const settings = retainTaxonomyEffects(settingsWithPurgedParentAttachmentDeletes(device.settings,

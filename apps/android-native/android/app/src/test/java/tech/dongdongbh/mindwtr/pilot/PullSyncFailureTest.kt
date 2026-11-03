@@ -3,10 +3,7 @@ package tech.dongdongbh.mindwtr.pilot
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/**
- * A pull down to sync whose host call fails (a timeout, a stopped engine) ends as core's own failure does (manual-pull-sync.ts's
- * catch, RN's useManualPullSync): the error bar and RN's "Sync failed" toast with the error's message.
- */
+
 class PullSyncFailureTest {
     @Test fun aHostFailureShowsRnsSyncFailedToast() {
         val outcome = pullSyncFailure("Sync failed", IllegalStateException("TIMEOUT: core did not answer"))

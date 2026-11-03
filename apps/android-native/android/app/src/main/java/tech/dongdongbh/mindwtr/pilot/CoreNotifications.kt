@@ -18,57 +18,45 @@ import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 import java.util.UUID
 
-/**
- * A notification as RN shows one (react-native-alarm-notification's sendNotification, patched), from core's details
- * (buildImmediateNotificationDetails, or a reminder alarm's buildReminderAlarmDetails; host-entry adds the channel's name). Kotlin
- * reads the details; it decides none.
- */
+
 internal object CoreNotifications {
-    /** Core's REMINDER_NOTIFICATION_CHANNEL. */
+
     const val REMINDER_CHANNEL = "mindwtr_reminders_v2"
-    /** A tap's payload for MainActivity: the notification's data as JSON, which core routes (EntryPoints.kt, routeNotificationOpen). */
+
     const val EXTRA_OPEN = "tech.dongdongbh.mindwtr.notificationOpen"
 
-    /** The alarm a reminder notification was posted for: a tagged reminder shares its slot's id, so the alarm rides in its extras. */
+
     private const val EXTRA_ALARM_ID = "tech.dongdongbh.mindwtr.reminderAlarmId"
 
-    /** The id every tagged reminder posts under, beside its tag (core's getReminderNotificationTag: one per task). */
+
     private const val REMINDER_SLOT_ID = 1
-    /** Android enqueues notify asynchronously; its active snapshot may still name the previous alarm. Guarded by the reminder lock. */
+
     private val reminderOwners = mutableMapOf<String, Int>()
 
-    /** Posts [details] now; false when Android drops it (no notification permission, Android 13+). */
+
     fun post(context: Context, details: JSONObject): Boolean {
-        // RN's notification ID: the send time in seconds.
+
         val id = (System.currentTimeMillis() / 1000).toInt()
         val builder = builder(context, id, details, details.getString("channelName")) ?: return false
         context.getSystemService(NotificationManager::class.java).notify(id, builder.build())
         return NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
-    /** The id every Pomodoro alert posts under, beside its tag (core's alarm identity), so each alert is its own notification. */
+
     private const val POMODORO_SLOT_ID = 2
 
-    /**
-     * A Pomodoro completion alert (core's buildPomodoroAlarmDetails with the channel's name) under its tag [identifier], stamped with
-     * its phase's end (`data.endsAtMs`, dd's choice 2026-10-22): one shown late reads "2 h ago" in the tray, never as a phase that
-     * just ended. RN's library patch (alarm-pomodoro-when) stamps RN's the same way.
-     */
+
     fun postPomodoro(context: Context, identifier: String, details: JSONObject) {
         val builder = builder(context, POMODORO_SLOT_ID, details, details.optString("channelName")) ?: return
         details.optJSONObject("data")?.optString("endsAtMs")?.toLongOrNull()?.let { builder.setWhen(it).setShowWhen(true) }
         context.getSystemService(NotificationManager::class.java).notify(identifier, POMODORO_SLOT_ID, builder.build())
     }
 
-    /** A delivered Pomodoro alert leaves the tray (core's plan cancelled it). */
+
     fun cancelPomodoro(context: Context, identifier: String) =
         context.getSystemService(NotificationManager::class.java).cancel(identifier, POMODORO_SLOT_ID)
 
-    /**
-     * A fired reminder alarm (core's NativeReminderAlarm with the channel's name) under the alarm's id, as RN's AlarmReceiver posts
-     * it: with buttons, Complete (a task reminder only), Snooze and Dismiss, with RN's labels and icons. Done and Snooze each carry a
-     * request UUID made now, so every tap on this notification is the same request.
-     */
+
     fun postReminder(context: Context, alarm: JSONObject) {
         val id = alarm.getInt("id")
         val details = alarm.getJSONObject("details")
@@ -86,8 +74,8 @@ internal object CoreNotifications {
             builder.addAction(android.R.drawable.ic_lock_idle_alarm, "DISMISS", broadcast(action(ReminderActionReceiver.DISMISS)))
         }
         builder.addExtras(Bundle().apply { putInt(EXTRA_ALARM_ID, id) })
-        // A tagged reminder replaces the one its task shows (and alerts again) instead of stacking one notification per
-        // occurrence: a task's start, due and due-time repeats share the tag. An untagged one posts under the alarm's id.
+
+
         val tag = details.optString("tag")
         val manager = context.getSystemService(NotificationManager::class.java)
         synchronized(ReminderAlarms.LOCK) {
@@ -98,13 +86,10 @@ internal object CoreNotifications {
         }
     }
 
-    /** The alarm a shown reminder notification belongs to (the one shown in its task's slot), by the id it was posted for. */
+
     fun reminderAlarmId(shown: StatusBarNotification): Int = shown.notification.extras.getInt(EXTRA_ALARM_ID, shown.id)
 
-    /**
-     * Removes what alarm [id] put in the tray: a notification under its own id, or its task's slot while [id] is still the reminder
-     * shown there. A reminder that a later one of its task replaced is gone already, and the later one stays.
-     */
+
     fun cancelReminder(context: Context, id: Int): Unit = synchronized(ReminderAlarms.LOCK) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.cancel(id)
@@ -127,10 +112,7 @@ internal object CoreNotifications {
         Log.i(CoreHost.TAG, "Native Android reminder slot releaseCheck=v1.3.5/native-reminder-replacement operation=cancelled taggedRemoved=$taggedRemoved")
     }
 
-    /**
-     * RN's notification for [details] under [id]: RN's title (the app's name when empty) and text (none: nothing is posted), icon,
-     * color, sound, and a tap that opens the app with the notification's data for core to route. Null when RN would post nothing.
-     */
+
     private fun builder(context: Context, id: Int, details: JSONObject, channelName: String): NotificationCompat.Builder? {
         val channel = details.optString("channel").ifEmpty { return null }
         val message = details.optString("message").ifEmpty { return null }
@@ -156,7 +138,7 @@ internal object CoreNotifications {
             }
     }
 
-    /** RN's reminder channel as RN makes it at start (NotificationOpenIntentsModule.ensureReminderChannel), once; its light in core's color. */
+
     private fun ensureChannel(context: Context, id: String, name: String, color: Int?) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

@@ -269,7 +269,7 @@ describe('list view models', () => {
     });
 
     it('changes only the edited Someday section: every other entry stays as stored, in stored order', () => {
-        // Entries this build cannot show (a newer app's shapes) are kept, not dropped.
+
         const future = { id: 'f', title: '', order: 0.5, color: 'teal' } as unknown as ViewSectionDefinition;
         const folder = { kind: 'folder', children: ['b'] } as unknown as ViewSectionDefinition;
         const b = { id: 'b', title: 'B', order: 1, icon: 'book' } as ViewSectionDefinition;
@@ -288,7 +288,7 @@ describe('list view models', () => {
         expect(removed).toEqual([future, a, folder, c]);
         removed.forEach((entry, index) => expect(entry).toBe([future, a, folder, c][index]));
 
-        // Moving C up swaps it with B; A, and the entries it cannot show, stay as stored.
+
         const moved = moveSomedaySection(stored, 'c', -1)!;
         expect(moved).toEqual([{ ...b, order: 2 }, future, a, folder, { ...c, order: 1 }]);
         [1, 2, 3].forEach((index) => expect(moved[index]).toBe(stored[index]));
@@ -329,9 +329,7 @@ describe('selectDeferredProjects', () => {
     const homeArea = { id: 'area-home', name: 'Home', order: 0 } as Area;
     const areaById = new Map<string, Area>([[homeArea.id, homeArea]]);
 
-    // The predicate React Native's Someday and Waiting screens each carried before the
-    // extraction. Comparing against it, rather than iterating the helper, catches the
-    // helper quietly accepting a different set.
+
     const legacySelectDeferredProjects = (
         projects: Project[],
         status: 'someday' | 'waiting',

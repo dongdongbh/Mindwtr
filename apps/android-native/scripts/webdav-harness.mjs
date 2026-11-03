@@ -1,14 +1,13 @@
-// A WebDAV folder in memory for the device checks and the native bundle's tests (sync-harness.mjs re-exports it). Kept apart
-// from sync-harness.mjs, whose second device loads node:sqlite, which Bun's test runner cannot resolve.
+
+
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 
 export const serveWebdav = ({ port, username, password, open = false }) => new Promise((ready) => {
     const files = new Map();
     let version = 0;
-    // `requests`: every request as it arrived; `authorized`: only those that carried the folder's user and password.
-    // `delayMs`: every answer waits that long (a slow server). `holdWrites`: while it is a promise, a write of a sync document
-    // waits for it and then fails with 503 (the write never landed); `heldAt` holds when each held write arrived (ms).
+
+
     const state = { files, requests: [], authorized: [], failWrites: 0, down: false, delayMs: 0, weakEtags: false, holdWrites: null, heldAt: [] };
     const authorized = (req) => open || req.headers.authorization === `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`;
     const server = createServer((req, res) => {
@@ -16,7 +15,7 @@ export const serveWebdav = ({ port, username, password, open = false }) => new P
         req.on('data', (chunk) => chunks.push(chunk));
         req.on('end', () => setTimeout(() => {
             const body = Buffer.concat(chunks);
-            // A folder is stored and logged without its trailing slash; PROPFIND lists it with one, as real servers do.
+
             const path = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/(.)\/+$/, '$1');
             state.requests.push(`${req.method} ${path}`);
             const answer = (status, headers = {}, data = '') => {
@@ -79,7 +78,7 @@ export const serveWebdav = ({ port, username, password, open = false }) => new P
     server.listen(port, '127.0.0.1', () => ready({ server, state, close: () => new Promise((done) => server.close(done)) }));
 });
 
-/** The sync document the WebDAV folder holds now, parsed; null when there is none. */
+
 export const webdavDocument = (dav, folder) => {
     const file = dav.state.files.get(`${folder}/data.json`);
     return file && !file.dir ? JSON.parse(file.body.toString('utf8')) : null;

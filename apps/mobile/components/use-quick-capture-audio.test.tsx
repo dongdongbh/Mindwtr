@@ -147,8 +147,8 @@ vi.mock('expo-file-system', () => ({
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const { mockCore } = await import('../test-support/mock-core');
-  // Only the id and clock are pinned, so attachment names stay deterministic;
-  // `buildTaskUpdatesFromSpeechResult` runs for real.
+
+
   return mockCore(importOriginal, () => ({}), {
     generateUUID: coreMocks.generateUUID,
     safeFormatDate: (_value: Date | string, format: string) => {
@@ -395,9 +395,8 @@ describe('useQuickCaptureAudio', () => {
     });
 
     expect(speechMocks.transcribeLocalWhisper).not.toHaveBeenCalled();
-    // Core's default 'smart' field strategy puts a short transcript (<=15 words)
-    // in the title. The stub this suite used to carry always wrote `description`,
-    // so this line asserted behaviour the app does not have.
+
+
     expect(storeMocks.updateTask).toHaveBeenCalledWith('task-1', { title: 'Buy milk' });
     expect(handleClose).toHaveBeenCalledOnce();
     expect(fileMocks.delete).toHaveBeenCalledWith(expect.stringMatching(/^file:\/\/\/document\/audio-captures\//));
@@ -405,9 +404,8 @@ describe('useQuickCaptureAudio', () => {
   });
 
   it('shows a notice and never starts the recorder when speech-to-text is unconfigured', async () => {
-    // Reporter scenario (#886): STT was never enabled/configured. The voice button must
-    // surface a translated notice pointing at Settings and keep the sheet open, instead of
-    // showing a recording indicator and then silently aborting.
+
+
     storeMocks.state.settings = unconfiguredSettings;
 
     await act(async () => {
@@ -430,8 +428,7 @@ describe('useQuickCaptureAudio', () => {
     expect(handleClose).not.toHaveBeenCalled();
   });
 
-  // RN voice bug 1: a stored Whisper model path whose file is gone was read as speech ready: the sheet recorded m4a, Whisper
-  // refused it, and the task saved as a plain audio note with no notice. Readiness now checks the model file, as the format does.
+
   it('reads a Whisper model whose file is gone as speech not set up: a notice, no recording, and a log line', async () => {
     speechMocks.ensureWhisperModelPathForConfigAsync.mockResolvedValue({
       exists: false,
@@ -523,8 +520,7 @@ describe('useQuickCaptureAudio', () => {
         await flushPromises();
       });
 
-      // The preferred Audio input requests one automatic start for this open
-      // capture. A configuration warning must not re-arm the same request.
+
       expect(toastMock.showToast).toHaveBeenCalledTimes(1);
       expect(audioMocks.requestRecordingPermissionsAsync).not.toHaveBeenCalled();
 
@@ -536,8 +532,7 @@ describe('useQuickCaptureAudio', () => {
       expect(toastMock.showToast).toHaveBeenCalledTimes(1);
       expect(appLogMock.logInfo).toHaveBeenCalledTimes(1);
 
-      // The one-shot guard belongs only to automatic scheduling. A user can
-      // still retry manually after configuring speech or dismissing a warning.
+
       await act(async () => {
         await latest?.startRecording();
         await flushPromises();
@@ -982,7 +977,7 @@ describe('useQuickCaptureAudio', () => {
     expect(fileMocks.delete).not.toHaveBeenCalledWith(managedAttachmentUri);
   });
 
-  // Voice V3 review N11 (both apps): a late transcript never replaces a title the user typed after the save.
+
   it('keeps a title typed after the save when the transcript arrives later', async () => {
     speechMocks.startWhisperRealtimeCapture.mockRejectedValue(new Error('realtime unavailable'));
     const pendingTranscription = deferred<string>();

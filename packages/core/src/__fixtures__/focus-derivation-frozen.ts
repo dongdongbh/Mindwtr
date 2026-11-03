@@ -1,17 +1,6 @@
-/**
- * The Focus derivation exactly as it stood before the performance patch on
- * branch `perf/focus-derivation` (main @ 627223ed6). It is the reference the
- * parity test compares the live derivation against: if the two ever disagree on
- * membership, order or any field, the patch changed behaviour and the test
- * fails.
- *
- * It is a frozen COPY on purpose. Every helper the old code reached through a
- * module-private name is copied here too, so a later edit to `task-utils.ts`
- * cannot quietly move the reference as well. Nothing outside the tests imports
- * this file.
- *
- * Do not "fix" or tidy anything in here. It is meant to be the old code.
- */
+
+
+
 import { isDueForReview, safeParseDate, safeParseDueDate } from '../date';
 import { createTaskFilterPredicate } from '../saved-filters';
 import {
@@ -39,16 +28,10 @@ type FrozenFocusListContext = FocusListContext & {
 
 export const DEFAULT_FOCUS_SORT_BY: SortField = 'default';
 
-// --- copies of task-utils' module-private helpers ---------------------------
 
 const textCollator = new Intl.Collator();
 
-/**
- * `applyFilter` as it stood before the patch: no short cut for empty criteria,
- * so every task ran every check. The live one now skips those checks when the
- * criteria ask for nothing, and the frozen derivation must not inherit that or
- * the A/B benchmark would measure the patch against itself.
- */
+
 const frozenApplyFilter = <T extends Task>(
     tasks: readonly T[],
     criteria: FilterCriteria | undefined,
@@ -256,7 +239,6 @@ export function frozenSortFocusNextActions(
     });
 }
 
-// --- the old focus-sections.ts ----------------------------------------------
 
 export function frozenGetTodayBounds(now: Date): { startOfToday: Date; endOfToday: Date } {
     return {
@@ -385,8 +367,7 @@ export function frozenDeriveFocusTaskLists(pools: FocusPools, ctx: FrozenFocusLi
     };
 }
 
-// Focus #1281 manually changes only the presentation order in this frozen
-// reference. Pool membership and task ordering within each section stay frozen.
+
 export function frozenBuildFocusTaskSections(
     lists: Pick<FocusTaskLists, 'focusedTasks' | 'schedule' | 'reviewDue' | 'nextActions' | 'upcoming'>,
     translate: (key: string) => string | undefined,

@@ -154,8 +154,7 @@ vi.mock('./ProjectNotesSection', () => ({
     ),
 }));
 
-// The workspace now reads store data/actions through useProjectWorkspaceStore.
-// Tests seed that hook instead of passing store slices as props.
+
 const storeHolder = vi.hoisted(() => ({ current: null as unknown }));
 vi.mock('./useProjectWorkspaceStore', () => ({
     useProjectWorkspaceStore: () => storeHolder.current,
@@ -267,8 +266,7 @@ const defaultProps: ProjectWorkspaceProps = {
     taskDragEndRef: { current: null },
 };
 
-// Store keys the workspace now reads through useProjectWorkspaceStore; render
-// helpers route these overrides to the seeded store instead of to props.
+
 const STORE_OVERRIDE_KEYS = new Set([
     'projects', 'sections', 'allSections', 'areas', 'allTasks', 'undoNotificationsEnabled',
     'addSection', 'updateSection', 'deleteSection', 'reorderSections', 'reorderProjectTasks',
@@ -300,7 +298,7 @@ const makeStore = (overrides: Record<string, unknown> = {}) => {
         batchUpdateTasks: vi.fn(),
         setHighlightTask: vi.fn(),
         allTokens: [] as string[],
-        // Mirrors getDerivedState().tasksByProjectId in prod: the project's tasks.
+
         selectedProjectTasks: allTasks,
         sortedAreas: [],
         areaById: new Map(),
@@ -318,7 +316,7 @@ const splitOverrides = (overrides: Record<string, unknown>) => {
     const props: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(overrides)) {
         if (key === 'selectedProject') {
-            // The workspace derives selectedProject from projects + selectedProjectId.
+
             store.projects = [value];
             continue;
         }
@@ -414,7 +412,7 @@ describe('ProjectWorkspace Select mode', () => {
         fireEvent.click(getByTestId('project-start-date-set'));
         expect(updateProject).toHaveBeenCalledWith('project-1', { startDate: '2026-10-05' });
 
-        // Clearing the field has to erase the stored date, not write an empty string.
+
         fireEvent.click(getByTestId('project-start-date-clear'));
         expect(updateProject).toHaveBeenLastCalledWith('project-1', { startDate: undefined });
     });
@@ -430,7 +428,7 @@ describe('ProjectWorkspace Select mode', () => {
             });
             fireEvent.click(getByRole('button', { name: 'Details' }));
             fireEvent.click(getByTestId('project-tags-type'));
-            // A sync save holds the gate while the tags are committed, then publishes another device's tag.
+
             const finish = holdSyncSave(() => useTaskStore.setState({ _allProjects: [{ ...tagged, rev: 3, tagIds: ['#a', '#remote'] }] }));
             fireEvent.click(getByTestId('project-tags-commit'));
             await act(finish);
@@ -516,7 +514,7 @@ describe('ProjectWorkspace Select mode', () => {
         expect(updateSection).toHaveBeenCalledWith('prep', { isSequential: true });
         perSection.unmount();
 
-        // Stored choices stay on the sections but nothing shows outside Per section mode.
+
         const sequential = renderWorkspace({
             selectedProject: { ...project, isSequential: true, perSectionFlow: true },
             sections: [book, prep], allSections: [book, prep],
@@ -836,9 +834,8 @@ describe('ProjectWorkspace Select mode', () => {
         vi.useFakeTimers();
         const highlightedTask = task('task-1', 'Highlighted task');
         const scrollIntoView = vi.fn();
-        // The row is "not mounted yet" until the flag flips: both the scroll
-        // retry and the focus retry (#1014) query for it, so the mock is
-        // state-based rather than call-count-based.
+
+
         let rowMounted = false;
         const fakeRow = {
             scrollIntoView,
@@ -1041,8 +1038,7 @@ describe('ProjectWorkspace Select mode', () => {
         expect(updateProject).toHaveBeenCalledWith('project-1', { taskSortBy: 'due' });
     });
 
-    // Project.taskSortBy syncs; older clients erase a project sort they do not know,
-    // so Priority stays a shared-list sort only (#1415).
+
     it('never offers the shared-list-only Priority sort for a project', () => {
         renderWorkspace({ allTasks: sortSampleTasks() });
         openToolbarSelect('Sort');

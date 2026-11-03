@@ -25,10 +25,10 @@ const resultFor = (request: AIRequestTimeoutRequest, changed: boolean): AIReques
 const validResult = (value: unknown, request: AIRequestTimeoutRequest): value is AIRequestTimeoutResult => record(value)
     && exact(value, ['value', 'changed']) && value.changed === true && value.value === request.value;
 
-/** Private synced scalar writes. Never activates the AI factory or migrates credentials. */
+
 export function createNativeAIRequestTimeoutMethods(deps: { readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>> }) {
-    // A getData race can advance the adapter's accepted epoch. Only a new explicit host load restores authority.
+
     let retired = false;
     const read = async (current: () => void): Promise<NativeHostResult<{ adapter: ReturnType<typeof getStorageAdapter>; authority: PreparedAreaAuthority }>> => {
         if (retired) return fail('STALE_REVISION', 'AI timeout owner is retired; reload before editing');
@@ -143,13 +143,13 @@ export function createNativeAIRequestTimeoutMethods(deps: { readiness: () => Nat
                 return { ok: true, value: { kind: 'noop', result: resultFor(request, false) } };
             const prepared = detach<PreparedAIRequestTimeout>({ version: 1, request });
             if (!prepared || !preparedOf({ request, prepared })) return fail('INVALID_INPUT', 'AI timeout journal exceeds the bound');
-            // Another preparation can publish this UUID while the durable read awaits.
+
             const latestIdentity = receipts.checkIdentity(request.requestId, key);
             if (!latestIdentity.ok) return latestIdentity;
             const latest = authorizations.get(request.requestId);
             if (latest && latest.payload !== key) return fail('INVALID_INPUT', 'Request ID already belongs to another action');
-            // The private native facade admits one intent. Retain only applied snapshots
-            // that can still own an uncertain save; cancelled unapplied plans need no raw data.
+
+
             for (const [id, previous] of authorizations) {
                 if (id !== request.requestId && !previous.authority.saveBoundary) authorizations.delete(id);
             }

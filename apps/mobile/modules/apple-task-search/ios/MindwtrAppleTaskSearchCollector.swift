@@ -77,9 +77,7 @@ actor MindwtrAppleTaskSearchResultCollector<QueryToken: Hashable & Sendable> {
         )
     }
 
-    /// Checks the exact observed revision and query-token completion state and
-    /// closes the collector in one actor operation. A newly delivered partial
-    /// reply changes the revision/completion state and makes the caller retry.
+
     func finishIfCompleteAndUnchanged(expectedRevision: Int) -> [[String: String]]? {
         guard acceptingResults,
               revision == expectedRevision,

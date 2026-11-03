@@ -8,11 +8,11 @@ type Props = {
     t: (key: string) => string;
     onOpen: (projectId: string) => void;
     onReactivate: (projectId: string) => void;
-    /** Shows "Move to section…" when given (Someday section grouping, #1319). */
+
     onMoveToSection?: (projectId: string) => void;
 };
 
-/** A project parked in Someday or Waiting: open it, move it to a section, or reactivate it. */
+
 export function DeferredProjectRow({ project, area, t, onOpen, onReactivate, onMoveToSection }: Props) {
     return (
         <div className="flex w-full items-center justify-between gap-3 rounded-md border border-border/60 bg-background px-3 py-2">

@@ -149,8 +149,7 @@ async function loadCachedIcsEventsForCalendar(
     return { calendarColor, categoryInfo, events };
 }
 
-// Feeds the compressed bytes in small slices so one slice can inflate to at
-// most ~16 MiB (deflate tops out near 1032:1) before the running total is checked.
+
 const GUNZIP_INPUT_SLICE_BYTES = 16 * 1024;
 
 function gunzipWithinLimit(bytes: Uint8Array, limitBytes: number): Uint8Array {
@@ -179,9 +178,8 @@ async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<str
         if (!isTauriRuntime()) {
             throw new Error('Local calendar files require the desktop app.');
         }
-        // Read through our own command, not the fs plugin: the plugin's scope
-        // check canonicalizes first, which fails outright on virtual volumes
-        // such as rclone/WinFSP mounts.
+
+
         return await invokeNative<string>('read_external_calendar_file', { url });
     }
 
@@ -190,9 +188,8 @@ async function fetchTextWithTimeout(url: string, timeoutMs: number): Promise<str
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), timeoutMs);
         try {
-            // The HTTP plugin adds `Origin: tauri://localhost` unless it is sent empty,
-            // and some feed gateways answer any Origin with 403 (#1309). Feeds are
-            // plain downloads, so drop it the way curl and the mobile app do.
+
+
             const res = await (tauriFetch ?? fetch)(url, {
                 method: 'GET',
                 headers: { Origin: '' },
@@ -237,9 +234,8 @@ export async function fetchExternalCalendarEvents(
     ]);
 
     const icsSources: ExternalCalendarSourceResult[] = [];
-    // A feed split by CATEGORIES is represented by its category calendars, so
-    // the subscription itself drops out of the visible list once nothing is
-    // left on it.
+
+
     const splitCalendarIds = new Set<string>();
     const warnings: string[] = [];
     for (const [index, result] of icsResults.entries()) {

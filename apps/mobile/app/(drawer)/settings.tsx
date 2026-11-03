@@ -39,7 +39,7 @@ import {
 import { useSettingsLocalization, useSettingsScrollContent } from '@/components/settings/settings.hooks';
 import { SandboxSettingsScreen } from '@/components/settings/sandbox-settings-screen';
 
-// The menu's icons by the names core's settings menu model uses.
+
 const MENU_ICONS: Record<SettingsMenuIcon, LucideIcon> = {
     Monitor, ListChecks, Layers, Bell, RefreshCw, Database, Settings2, Info, Sparkles, CalendarDays,
 };
@@ -151,7 +151,7 @@ function PersonalSettingsPage() {
         );
     }
 
-    // Rows, order, badges and the search come from core's settings menu model.
+
     const menu = buildSettingsMenu({
         t,
         query: search,

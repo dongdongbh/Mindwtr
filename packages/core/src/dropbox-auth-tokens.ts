@@ -1,7 +1,5 @@
-// Dropbox credential storage and access-token refresh for the mobile apps. The token bundle
-// is one JSON string in the platform keystore (`when-unlocked`); a bundle left in the old
-// plaintext key-value location is moved into the keystore on first read. Without a keystore
-// the bundle lives in memory for this process only.
+
+
 
 import type { SyncSecretStoragePort, SyncSecretVault } from './sync-secret-storage';
 import type { SyncKeyValueStoragePort } from './sync-storage-keys';
@@ -56,13 +54,13 @@ export type DropboxTokenStore = {
     clearDropboxTokens(): Promise<void>;
     isDropboxConnected(): Promise<boolean>;
     refreshDropboxAccessToken(clientId: string, refreshToken: string, fetcher?: typeof fetch): Promise<DropboxAuthTokens>;
-    /** Resolve an access token from an explicit credential bundle without touching storage. */
+
     getValidDropboxAccessTokenForTokens(
         clientId: string,
         tokens: DropboxAuthTokens,
         fetcher?: typeof fetch,
     ): Promise<DropboxAccessTokenResolution>;
-    /** Force-refresh an explicit credential bundle without promoting it to storage. */
+
     forceRefreshDropboxAccessTokenForTokens(
         clientId: string,
         tokens: DropboxAuthTokens,
@@ -70,7 +68,7 @@ export type DropboxTokenStore = {
     ): Promise<DropboxAccessTokenResolution>;
     getValidDropboxAccessToken(clientId: string, fetcher?: typeof fetch): Promise<string>;
     forceRefreshDropboxAccessToken(clientId: string, fetcher?: typeof fetch): Promise<string>;
-    /** Revoke an explicit token bundle without reading or clearing durable credentials. */
+
     revokeDropboxTokens(clientId: string, tokens: DropboxAuthTokens, fetcher?: typeof fetch): Promise<void>;
     disconnectDropbox(clientId: string, fetcher?: typeof fetch): Promise<void>;
 };
@@ -79,7 +77,7 @@ export type DropboxTokenStoreDeps = {
     storage: SyncKeyValueStoragePort;
     secrets: SyncSecretStoragePort;
     vault: SyncSecretVault;
-    /** The default fetcher for token requests when a call passes none. */
+
     fetch: typeof fetch;
     now?: () => number;
 };
@@ -242,7 +240,7 @@ export const createDropboxTokenStore = ({
                 },
             });
         } catch {
-            // Disconnect must still remove the local candidate when revoke is offline.
+
         }
     };
 

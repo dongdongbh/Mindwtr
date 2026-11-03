@@ -28,8 +28,7 @@ public final class MindwtrSceneDelegate: UIResponder, UIWindowSceneDelegate {
             return
         }
 
-        // Reuse the placeholder retained for Expo Dev Launcher, then give it
-        // scene-local geometry. A reconnect reuses the existing root/window.
+
         let sceneWindow = appDelegate.window ?? UIWindow()
         sceneWindow.windowScene = windowScene
         sceneWindow.frame = windowScene.coordinateSpace.bounds
@@ -79,8 +78,8 @@ public final class MindwtrSceneDelegate: UIResponder, UIWindowSceneDelegate {
         openURLContexts URLContexts: Set<UIOpenURLContext>
     ) {
         guard let appDelegate = UIApplication.shared.delegate as? AppDelegate else { return }
-        // Never coalesce by URL string: two independent system deliveries must
-        // remain two independent React Native Linking events.
+
+
         for context in URLContexts {
             _ = appDelegate.mindwtrForwardWarmURL(
                 context.url,
@@ -150,10 +149,8 @@ public final class MindwtrSceneDelegate: UIResponder, UIWindowSceneDelegate {
         appDelegate: AppDelegate
     ) -> MindwtrSceneDeliveryKind {
         if let response = connectionOptions.notificationResponse {
-            // A scene-based cold launch receives this response here instead of
-            // through a synthetic UNUserNotificationCenter delegate callback.
-            // RNAlarm remains the single owner of action side effects and holds
-            // the normalized payload until the normal root handler is ready.
+
+
             RnAlarmNotification.didReceive(
                 response,
                 cacheForColdStart: true
@@ -196,8 +193,8 @@ public final class MindwtrSceneDelegate: UIResponder, UIWindowSceneDelegate {
         appDelegate: AppDelegate
     ) {
         if let response = connectionOptions.notificationResponse {
-            // Reconnect is a live delivery. Use RNAlarm's existing non-caching
-            // entrypoint so its event reaches JS once and cannot replay later.
+
+
             RnAlarmNotification.didReceive(response)
             appDelegate.mindwtrRecordSceneDiagnostic(
                 stage: "warmDelivery",
@@ -237,7 +234,7 @@ public final class MindwtrSceneDelegate: UIResponder, UIWindowSceneDelegate {
         var options: [UIApplication.OpenURLOptionsKey: Any] = [
             .openInPlace: context.options.openInPlace,
         ]
-        // `annotation` is `Any?`; storing it directly would box the optional.
+
         if let annotation = context.options.annotation {
             options[.annotation] = annotation
         }

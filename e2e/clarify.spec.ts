@@ -27,13 +27,13 @@ test('quick processing keeps each new title visible after fresh captures', async
         expect((await title.boundingBox())!.y).toBeLessThan(0);
         await next.click();
         await expect(title).not.toHaveValue(previousTitle);
-        // A delayed list reveal used to undo the processing card's initial scroll.
+
         await page.waitForTimeout(500);
         await expect(title).toBeInViewport({ ratio: 1 });
     }
 });
 
-/** Each guided step is identified by its own label before its choice is made. */
+
 const chooseAtStep = async (page: Page, step: string, choice: string) => {
     const main = page.getByRole('main');
     await expect(main.getByText(step, { exact: true })).toBeVisible();
@@ -64,15 +64,14 @@ test('clarifies an inbox capture into a project next action', async ({ page }) =
     await chooseAtStep(page, 'Contexts', 'Next (No context)');
     await chooseAtStep(page, 'Assign to a project?', PROJECT_TITLE);
 
-    // Clarifying the last capture ends the session and empties the Inbox.
+
     await expect(page.locator('[data-task-id]', { hasText: TASK_TITLE })).toHaveCount(0);
     await expect(page.getByRole('button', { name: /Process Inbox/ })).toHaveCount(0);
 
     await page.goto('/?view=next');
     await expect(page.locator('[data-task-id]', { hasText: TASK_TITLE })).toBeVisible();
 
-    // The Next list hides the project badge unless row details are on, so the
-    // project choice is read back from the persisted document instead.
+
     const clarified = await page.evaluate((title: string) => {
         const raw = window.localStorage.getItem('mindwtr-data');
         const tasks = raw ? (JSON.parse(raw).tasks as Array<Record<string, string>>) : [];

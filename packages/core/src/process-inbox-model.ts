@@ -54,12 +54,6 @@ import type {
     TimeEstimate,
 } from './types';
 
-/**
- * React Native's Process Inbox, without React: the step sequence, each step's
- * choices, the draft a user edits while clarifying, the suggestions, the store
- * writes each decision becomes, and the labels. The mobile modal and the native
- * host contract both run on these functions.
- */
 
 type Translate = (key: string) => string;
 
@@ -79,15 +73,15 @@ export type ProcessInboxActionabilityChoice = 'actionable' | 'later' | 'incubate
 export type ProcessInboxTwoMinuteChoice = 'yes' | 'no';
 export type ProcessInboxExecutionChoice = 'defer' | 'delegate';
 export type ProcessInboxScheduleField = 'startTime' | 'dueDate' | 'reviewAt';
-/** Which decision landed: it picks the Undo toast wording. */
+
 export type ProcessInboxCommitted = 'trash' | Extract<TaskStatus, 'next' | 'waiting' | 'someday' | 'reference' | 'done'>;
 
-/** The answers given so far for the task on screen. */
+
 export type ProcessInboxAnswers = {
     actionability: ProcessInboxActionabilityChoice | null;
     twoMinute: ProcessInboxTwoMinuteChoice | null;
     execution: ProcessInboxExecutionChoice | null;
-    /** "More than one step?" was answered for this task. */
+
     oneActionAnswered: boolean;
 };
 
@@ -102,19 +96,13 @@ type FlowPlan = Pick<ProcessInboxPlan, 'twoMinuteEnabled' | 'twoMinuteFirst'> & 
     visibleFields: Pick<ProcessInboxPlan['visibleFields'], 'project'>;
 };
 
-// ---------------------------------------------------------------------------
-// The queue and the title parser
 
-/**
- * The processing queue: Inbox items plus Someday items whose return date has
- * come, in store order. Not the area-filtered visible tasks: the queue is global.
- */
 export function selectProcessInboxQueue(tasks: readonly Task[], projects: readonly Project[], now: Date = new Date()): Task[] {
     const projectById = new Map(projects.map((project) => [project.id, project]));
     return selectProcessInboxCandidates(tasks, (task) => isTaskVisibleInInbox(task, { projectById }), now);
 }
 
-/** The processing title's quick-add parser, with the store's known tokens, people, projects and areas. */
+
 export function createProcessInboxTitleParser(input: {
     settings: AppSettings | undefined;
     tasks: Task[];
@@ -126,15 +114,13 @@ export function createProcessInboxTitleParser(input: {
     return (title) => parseProcessInboxTitleInput(title, { projects: input.projects, areas: input.areas, parseOptions });
 }
 
-// ---------------------------------------------------------------------------
-// Steps
 
 export function getProcessInboxEntryStep(mode: ProcessInboxMode, plan: FlowPlan): ProcessInboxStep {
     if (mode === 'quick') return 'decisions';
     return plan.twoMinuteEnabled && plan.twoMinuteFirst ? 'twoMinute' : 'actionable';
 }
 
-/** One question per screen. Quick mode replaces only the entry screen. */
+
 export function resolveProcessInboxStep(
     answers: ProcessInboxAnswers,
     mode: ProcessInboxMode,
@@ -164,7 +150,7 @@ export function isProcessInboxTerminalStep(step: ProcessInboxStep): boolean {
     return step === 'someday' || step === 'later' || step === 'incubate' || step === 'waiting' || step === 'file';
 }
 
-/** The destination the step's File it button commits, for the Undo toast. */
+
 export function getProcessInboxTerminalOutcome(step: ProcessInboxStep): ProcessInboxCommitted {
     if (step === 'waiting') return 'waiting';
     return step === 'incubate' || step === 'someday' ? 'someday' : 'next';
@@ -197,10 +183,7 @@ export function chooseProcessInboxExecution(
     return { ...answers, execution: choice };
 }
 
-/**
- * Step back to an earlier question: clearing one answer clears everything the
- * flow derived from it, so the next step can never be reached out of order.
- */
+
 export function clearProcessInboxDecision(
     answers: ProcessInboxAnswers,
     level: 'actionability' | 'twoMinute' | 'execution',
@@ -214,15 +197,15 @@ export function clearProcessInboxDecision(
     };
 }
 
-/** Quick mode answers the whole tree in one tap and lands on the follow-up, if any. */
+
 export function chooseQuickProcessInboxDestination(
     answers: ProcessInboxAnswers,
     destination: 'next' | 'project' | 'later' | 'delegate',
     plan: FlowPlan,
 ): ProcessInboxAnswers {
     if (destination === 'later') return chooseProcessInboxActionability(answers, 'later', plan);
-    // Every choice skips the one-action question; picking Project already
-    // answered it, so the caller starts the project split (#1445).
+
+
     return {
         actionability: 'actionable',
         twoMinute: 'no',
@@ -231,7 +214,7 @@ export function chooseQuickProcessInboxDestination(
     };
 }
 
-/** The Back button. `cancelProjectConversion` asks the caller to drop the project split. */
+
 export function backProcessInboxStep(
     answers: ProcessInboxAnswers,
     mode: ProcessInboxMode,
@@ -256,14 +239,12 @@ export function backProcessInboxStep(
     return { answers: clearProcessInboxDecision(answers, level, plan), cancelProjectConversion: false };
 }
 
-// ---------------------------------------------------------------------------
-// The task's starting values and the decision's store write
 
 export type ProcessInboxTaskDefaults = {
     title: string;
     description: string;
     projectId: string | null;
-    /** The project section; only with a project (#1461). */
+
     sectionId: string | null;
     areaId: string | null;
     contexts: string[];
@@ -273,12 +254,12 @@ export type ProcessInboxTaskDefaults = {
     assignedTo: string;
     timeEstimate: TimeEstimate | undefined;
     somedaySectionId: string | undefined;
-    /** "More options" starts open when the capture already carries any detail. */
+
     showAdvancedOptions: boolean;
     dates: Record<ProcessInboxScheduleField, { value: string | null; dateOnly: boolean }>;
 };
 
-/** `defaultAreaId` (resolveDefaultNewTaskAreaId) fills the area of a capture that has neither a project nor an area (#1445). */
+
 export function getProcessInboxTaskDefaults(task: Task | null | undefined, defaultAreaId?: string | null): ProcessInboxTaskDefaults {
     const dateDefault = (value: string | undefined) => ({
         value: value || null,
@@ -289,8 +270,8 @@ export function getProcessInboxTaskDefaults(task: Task | null | undefined, defau
         description: task?.description ?? '',
         projectId: task?.projectId ?? null,
         sectionId: task?.projectId ? (task.sectionId ?? null) : null,
-        // Keep an area assigned while the task sat in the Inbox; a project home
-        // outranks the direct area (container exclusivity).
+
+
         areaId: task?.projectId ? null : (task?.areaId ?? defaultAreaId ?? null),
         contexts: task?.contexts ?? [],
         tags: task?.tags ?? [],
@@ -324,11 +305,7 @@ export function getProcessInboxDefaultScheduleTime(settings: AppSettings | undef
     return normalizeClockTimeInput(settings?.gtd?.defaultScheduleTime) || '';
 }
 
-/**
- * A picked date as the store value. Only the calendar day survives: a time the
- * user picked ("HH:mm"), else the default schedule time, unless the date is
- * date-only, replaces any clock time.
- */
+
 export function formatProcessInboxScheduleValue(
     value: Date | string,
     dateOnly: boolean,
@@ -378,7 +355,7 @@ export type ProcessInboxParsedTitle = { title: string; props: Partial<Task>; inv
 
 export type ProcessInboxSelection = {
     projectId: string | null;
-    /** The section picked inside `projectId`. Omit it to leave the task's section to the store's project-change rule. */
+
     sectionId?: string | null;
     areaId: string | null;
     contexts: string[];
@@ -402,10 +379,7 @@ export type PreparedProcessInboxCommit =
     | { ok: false; reason: 'later-start-required' }
     | { ok: true; event: ProcessInboxWorkflowEvent; taskUpdates: Partial<Task> | undefined };
 
-/**
- * Turn the draft into the decision's store write: the parsed title's tokens,
- * the picked fields, the dates the user touched, and the destination policy.
- */
+
 export function prepareProcessInboxCommit(input: {
     task: Task;
     plan: ProcessInboxPlan;
@@ -452,9 +426,8 @@ export function prepareProcessInboxCommit(input: {
     }
     const dirty = input.dirtyScheduleFields;
     const clearStaleReviewAt = options.clearStaleReviewAt && !edits?.explicitDateFields.reviewAt && !dirty.has('reviewAt');
-    // The picked section belongs to the picked project. It is written only when
-    // there is a section to set or one to clear, and dropped when the decision or
-    // a typed +Project files the task under another project (#1461).
+
+
     const sectionId = selection.sectionId || undefined;
     const writesSection = Object.prototype.hasOwnProperty.call(selection, 'sectionId')
         && Boolean(sectionId || task.sectionId)
@@ -506,7 +479,7 @@ export type ProcessInboxCommitKind =
     | 'next'
     | 'skip';
 
-/** Each destination's decision and the draft values it carries. */
+
 export function buildProcessInboxDecisionRequest(
     kind: ProcessInboxCommitKind,
     input: {
@@ -577,7 +550,7 @@ export type ProcessInboxProjectConversion =
         extraActions: Array<{ draftValue: string; title: string }>;
     };
 
-/** "Yes, make it a project": the project to find or create and the actions to add to it. */
+
 export function prepareProcessInboxProjectConversion(input: {
     task: Task;
     parsedTitle: string;
@@ -607,17 +580,13 @@ export function prepareProcessInboxProjectConversion(input: {
     };
 }
 
-/** Drop one committed extra action, so a retry cannot add it twice. */
+
 export function removeProcessInboxExtraAction(drafts: readonly string[], draftValue: string): string[] {
     const committedIndex = drafts.indexOf(draftValue);
     return committedIndex < 0 ? [...drafts] : drafts.filter((_, index) => index !== committedIndex);
 }
 
-/**
- * The project split's action rows. Enter on the next action, or on the last
- * filled row, opens a new row; Add always does; each row has its own Remove.
- * Each value is the whole list after that control, or null when it does nothing.
- */
+
 export function getProcessInboxConversionRows(nextAction: string, extraActions: readonly string[]): {
     add: string[];
     submitNextAction: string[] | null;
@@ -635,7 +604,7 @@ export function getProcessInboxConversionRows(nextAction: string, extraActions: 
     };
 }
 
-/** Typing in one action row. */
+
 export function replaceProcessInboxExtraAction(extraActions: readonly string[], index: number, value: string): string[] {
     return extraActions.map((current, currentIndex) => (currentIndex === index ? value : current));
 }
@@ -650,7 +619,7 @@ export function startProcessInboxProjectConversion(input: {
     return { convertToProject: true, nextActionDraft: input.nextActionDraft.trim() || baseTitle, projectId: null, projectSearch: '' };
 }
 
-/** A project chip: picking a project home drops a direct area and ends a project split. */
+
 export function selectProcessInboxProject(projectId: string | null): {
     convertToProject: false;
     projectId: string | null;
@@ -660,7 +629,7 @@ export function selectProcessInboxProject(projectId: string | null): {
     return { convertToProject: false, projectId, ...(projectId ? { areaId: null } : {}), projectSearch: '' };
 }
 
-/** The project search's submit: pick the exact match, or create the typed project. */
+
 export function resolveProcessInboxProjectSearchSubmit(
     search: string,
     exactMatch: Project | undefined,
@@ -677,14 +646,12 @@ export function resolveProcessInboxProjectSearchSubmit(
     return { type: 'create', title, color: DEFAULT_PROJECT_COLOR, props: areaId ? { areaId } : undefined };
 }
 
-// ---------------------------------------------------------------------------
-// Suggestions
 
 export const PROCESS_INBOX_SUGGESTION_LIMIT = 6;
 export const PROCESS_INBOX_PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 export const PROCESS_INBOX_ENERGY_LEVEL_OPTIONS: TaskEnergyLevel[] = ['low', 'medium', 'high'];
 
-/** Contexts and tags in use, most recently used first. */
+
 export function getProcessInboxTokenPools(tasks: Task[]): { contexts: string[]; tags: string[] } {
     const pool = (selector: (task: Task) => string[] | undefined, prefix: string) => (
         collectTaskTokenUsage(tasks, selector, { prefix })
@@ -694,7 +661,7 @@ export function getProcessInboxTokenPools(tasks: Task[]): { contexts: string[]; 
     return { contexts: pool((task) => task.contexts, '@'), tags: pool((task) => task.tags, '#') };
 }
 
-/** Words from the title, note and token input that hint at a context or tag. */
+
 export function getProcessInboxSuggestionTerms(title: string, description: string, tokenInput: string): string[] {
     const raw = `${title} ${description} ${tokenInput}`.toLowerCase();
     const parts = raw
@@ -705,10 +672,7 @@ export function getProcessInboxSuggestionTerms(title: string, description: strin
     return Array.from(new Set(parts)).slice(0, 10);
 }
 
-/**
- * Copilot token ranking: drop what is already selected, float the tokens the
- * typed terms hint at, keep the rest in pool order behind them.
- */
+
 export function rankProcessInboxTokenSuggestions(
     pool: readonly string[],
     selected: Iterable<string>,
@@ -728,7 +692,7 @@ export function rankProcessInboxTokenSuggestions(
 
 export type ProcessInboxTokenVisibility = { contexts: boolean; tags: boolean };
 
-/** Matches for the token being typed, from the visible kinds. */
+
 export function getProcessInboxTokenSuggestions(input: {
     tokenInput: string;
     pools: { contexts: readonly string[]; tags: readonly string[] };
@@ -757,11 +721,7 @@ export function toggleProcessInboxToken(list: readonly string[], token: string):
 
 type TokenLists = { contexts: string[]; tags: string[] };
 
-/**
- * The token input's Add. `kind` is how a surface that shows contexts and tags
- * separately says which one an unprefixed entry belongs to; without it the
- * prefix decides. Returns null when there is nothing to add.
- */
+
 export function addProcessInboxToken(input: TokenLists & {
     tokenInput: string;
     kind?: 'context' | 'tag';
@@ -786,7 +746,7 @@ export function addProcessInboxToken(input: TokenLists & {
     return { contexts: input.contexts, tags: input.tags };
 }
 
-/** A suggestion chip. Returns null when the chip does nothing (hidden kind, or a context already picked). */
+
 export function applyProcessInboxTokenSuggestion(input: TokenLists & {
     token: string;
     visible: ProcessInboxTokenVisibility;
@@ -800,10 +760,7 @@ export function applyProcessInboxTokenSuggestion(input: TokenLists & {
     return { contexts: [...input.contexts, token], tags: input.tags };
 }
 
-/**
- * A contexts or tags input's lists. Typed matches show once, above the ranked
- * suggestions; an unprefixed entry belongs to the one kind on screen.
- */
+
 export function getProcessInboxTokenSection(input: {
     showContexts: boolean;
     showTags: boolean;
@@ -814,7 +771,7 @@ export function getProcessInboxTokenSection(input: {
     suggestions: string[];
     contextSuggestions: string[];
     tagSuggestions: string[];
-    /** A literal placeholder, or null for the translated generic one. */
+
     placeholder: '@home' | '#deep-work' | null;
     addKind: 'context' | 'tag' | undefined;
 } {
@@ -830,7 +787,7 @@ export function getProcessInboxTokenSection(input: {
     };
 }
 
-/** A similar task's second line: its status, then its project. */
+
 export function formatProcessInboxSimilarTaskMeta(t: Translate, task: Pick<Task, 'status'>, projectTitle: string | undefined): string {
     const status = tFallback(t, `status.${task.status}`, task.status);
     return projectTitle ? `${status} • ${projectTitle}` : status;
@@ -844,7 +801,7 @@ export function getProcessInboxPersonSuggestions(
     return getPersonSuggestionNames(people as Person[], tasks, value, PROCESS_INBOX_SUGGESTION_LIMIT);
 }
 
-/** The project picker: the selected area's projects, or every match for the search. */
+
 export function getProcessInboxProjectChoices(
     projects: Project[],
     areaId: string | null,
@@ -874,7 +831,7 @@ export function getProcessInboxSimilarTasks(
     return { tasks, projectTitles };
 }
 
-/** Which sections the plan shows. Contexts and tags ride their own rows. */
+
 export function getProcessInboxSections(plan: Pick<ProcessInboxPlan, 'visibleFields' | 'showProjectStep' | 'showScheduleFields'>) {
     const fields = plan.visibleFields;
     return {
@@ -885,8 +842,6 @@ export function getProcessInboxSections(plan: Pick<ProcessInboxPlan, 'visibleFie
     };
 }
 
-// ---------------------------------------------------------------------------
-// Messages
 
 export function formatProcessInboxProgressLabel(t: Translate, current: number, total: number): string {
     const taskLabel = t('common.tasks');
@@ -894,11 +849,7 @@ export function formatProcessInboxProgressLabel(t: Translate, current: number, t
     return `${Math.max(0, current)}/${total} ${taskLabel}`;
 }
 
-/**
- * Filed and skipped tasks stay counted when conversion or another capture
- * grows the queue. Visited tasks also count a conversion whose new actions
- * arrive in the same publication as the original task leaves the Inbox.
- */
+
 export function getProcessInboxProgress(
     previous: { total: number; processed: number },
     remaining: number,
@@ -930,7 +881,7 @@ export type ProcessInboxNotice = {
     tone: 'warning' | 'error';
     title: string;
     message: string;
-    /** Set when the toast stays longer than the default. */
+
     durationMs?: number;
 };
 
@@ -965,7 +916,7 @@ export function getProcessInboxNotice(
     }
 }
 
-/** The hand-off message the delegate step shares. */
+
 export function buildProcessInboxDelegateRequest(input: {
     title: string;
     description: string;
@@ -988,7 +939,7 @@ export function buildProcessInboxDelegateRequest(input: {
     return { subject: `Delegation: ${title}`, message };
 }
 
-/** Everything a decision may change, so Undo can put the task back exactly. */
+
 export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
     return {
         title: task.title,
@@ -1015,6 +966,7 @@ export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
         suppressMindwtrReminders: task.suppressMindwtrReminders,
         repeatReminderMinutes: task.repeatReminderMinutes,
         dueReminderLeadMinutes: task.dueReminderLeadMinutes,
+        startReminderLeadMinutes: task.startReminderLeadMinutes,
         showFutureRecurrence: task.showFutureRecurrence,
         isFocusedToday: task.isFocusedToday,
         focusOrder: task.focusOrder,
@@ -1025,10 +977,7 @@ export function buildProcessInboxUndoRestoreUpdates(task: Task): Partial<Task> {
     };
 }
 
-// ---------------------------------------------------------------------------
-// The draft as plain JSON, and the one commit path both clients run
 
-/** A calendar day, `yyyy-MM-dd` in local time; `time` is a clock time ("HH:mm") the user picked (#1445). */
 export type ProcessInboxDateValue = { date: string; dateOnly: boolean; useDefaultTime?: boolean; time?: string } | null;
 export type ProcessInboxDateField = ProcessInboxScheduleField | 'followUp';
 
@@ -1036,7 +985,7 @@ export type ProcessInboxDraft = {
     title: string;
     description: string;
     projectId: string | null;
-    /** The project section; present once one is picked or the task has one (#1461). */
+
     sectionId?: string | null;
     areaId: string | null;
     projectSearch: string;
@@ -1057,7 +1006,7 @@ export type ProcessInboxDraft = {
     extraActions: string[];
     somedaySectionId: string | null;
     showAdvancedOptions: boolean;
-    /** Date controls the user touched: their value is explicit input, even when hidden. */
+
     dirtyScheduleFields: ProcessInboxScheduleField[];
 };
 
@@ -1096,10 +1045,7 @@ export function createProcessInboxDraft(task: Task, defaultAreaId?: string | nul
     };
 }
 
-/**
- * RN's reloadEditedTask (#1445): after the full task editor saved the item, the draft takes the saved task again (as RN's
- * primeTaskState), and the step's own drafts stay: who it waits on, the follow-up, the project conversion and its actions.
- */
+
 export function reloadProcessInboxDraft(draft: ProcessInboxDraft, task: Task, defaultAreaId?: string | null): ProcessInboxDraft {
     return {
         ...createProcessInboxDraft(task, defaultAreaId),
@@ -1117,12 +1063,12 @@ const pendingDate = (value: ProcessInboxDateValue): ProcessInboxPendingDate => (
         ...(value.time ? { time: value.time } : {}) } : { value: null, dateOnly: false }
 );
 
-/** The collapsed capture card's plain-text, 200 UTF-16-code-unit preview. */
+
 export function getProcessInboxNotePreview(description: string): string {
     return stripMarkdown(description).trim().slice(0, 200);
 }
 
-/** RN's day picker discards the picked time before handing the date to its controller. */
+
 export function normalizeProcessInboxPickedDate(date: Date): Date {
     const next = new Date(date);
     next.setHours(9, 0, 0, 0);
@@ -1137,12 +1083,12 @@ export type ProcessInboxDraftEdit =
     | { type: 'setEnergyLevel'; value: TaskEnergyLevel | null }
     | { type: 'setTimeEstimate'; value: TimeEstimate | null }
     | { type: 'setSomedaySection'; value: string | null }
-    /** A section of the draft's project; ignored without a project. */
+
     | { type: 'setSection'; value: string | null }
     | { type: 'setArea'; value: string | null }
     | { type: 'selectProject'; value: string | null }
     | { type: 'toggleContext'; value: string }
-    /** Adds a context unless the draft has it (Clarify's suggestion). */
+
     | { type: 'addContext'; value: string }
     | { type: 'toggleTag'; value: string }
     | { type: 'addToken'; kind?: 'context' | 'tag' }
@@ -1150,7 +1096,7 @@ export type ProcessInboxDraftEdit =
     | { type: 'setDate'; field: ProcessInboxDateField; value: string | null }
     | { type: 'setPickedDate'; field: ProcessInboxDateField; day: string }
     | { type: 'setDateOnly'; field: ProcessInboxDateField; value: boolean }
-    /** A clock time ("HH:mm") from the time picker; the row stops being date-only (#1445). */
+
     | { type: 'setTime'; field: ProcessInboxDateField; value: string }
     | { type: 'toggleAdvancedOptions' };
 
@@ -1160,7 +1106,7 @@ const markDirty = (draft: ProcessInboxDraft, field: ProcessInboxDateField): Proc
         : [...draft.dirtyScheduleFields, field]
 );
 
-/** One edit to the draft, as the mobile controls apply it. Returns the same draft when the edit does nothing. */
+
 export function applyProcessInboxDraftEdit(
     draft: ProcessInboxDraft,
     edit: ProcessInboxDraftEdit,
@@ -1189,7 +1135,7 @@ export function applyProcessInboxDraftEdit(
         case 'selectProject': {
             const { convertToProject, projectId, areaId, projectSearch } = selectProcessInboxProject(edit.value);
             return { ...draft, convertToProject, projectId, projectSearch, ...(areaId === null ? { areaId } : {}),
-                // A section belongs to its project: another project starts without one.
+
                 ...(draft.sectionId && projectId !== draft.projectId ? { sectionId: null } : {}) };
         }
         case 'toggleContext':
@@ -1215,7 +1161,7 @@ export function applyProcessInboxDraftEdit(
             }, plan);
         }
         case 'setDate': {
-            // A new day keeps the row's picked time, as RN's date setters do.
+
             const time = draft[edit.field]?.time;
             return {
                 ...draft,
@@ -1269,7 +1215,7 @@ export type ProcessInboxCommitResult =
     | { ok: true; session: ProcessInboxSession; draft: ProcessInboxDraft }
     | {
         ok: false;
-        /** Null when nothing was said (a project that could not be created without an error). */
+
         reason: ProcessInboxNoticeReason | null;
         notice: ProcessInboxNotice | null;
         draft: ProcessInboxDraft;
@@ -1285,7 +1231,7 @@ const thrownMessage = (error: unknown): string | undefined => {
     return undefined;
 };
 
-/** Apply RN's draft selections and touched-date rules before preparing a decision. */
+
 export function prepareProcessInboxDraftDecision(
     ctx: Pick<ProcessInboxCommitContext<ProcessInboxCandidate>, 'task' | 'draft' | 'plan' | 'settings' | 'parseTitle'>,
     decision: ProcessInboxDecision,
@@ -1353,11 +1299,7 @@ async function writeProcessInboxDecision<Candidate extends ProcessInboxCandidate
     }
 }
 
-/**
- * Commit one destination for the task on screen, exactly as the mobile modal
- * does, and advance the session when the write lands. The returned draft
- * drops extra actions that were already added, so a retry cannot repeat them.
- */
+
 export async function commitProcessInboxDecision<Candidate extends ProcessInboxCandidate>(
     kind: ProcessInboxCommitKind | 'convert',
     ctx: ProcessInboxCommitContext<Candidate>,
@@ -1406,9 +1348,8 @@ export async function commitProcessInboxDecision<Candidate extends ProcessInboxC
             conversion.newProjectProps,
         );
         if (!project) return { ok: false, reason: null, notice: null, draft };
-        // Extra actions are independent durable writes. Commit and drop each one
-        // before moving the original Inbox task, so retry cannot lose or
-        // duplicate actions already saved.
+
+
         for (const { draftValue, title } of conversion.extraActions) {
             const result = await ctx.actions.addTask(title, { status: 'inbox', projectId: project.id });
             if (result.success === false) {
@@ -1437,8 +1378,6 @@ export async function commitProcessInboxDecision<Candidate extends ProcessInboxC
     }
 }
 
-// ---------------------------------------------------------------------------
-// The step view a native client renders
 
 export type ProcessInboxChoiceId =
     | 'actionable'
@@ -1458,7 +1397,7 @@ export type ProcessInboxChoiceId =
     | 'createProject'
     | 'back';
 
-/** An option the user taps: the edit to send, or the choice to commit. */
+
 export type ProcessInboxViewOption = {
     label: string;
     selected: boolean;
@@ -1473,14 +1412,12 @@ export type ProcessInboxViewDateRow = {
     display: string;
     dateOnly: boolean;
     clear: ProcessInboxViewOption | null;
-    /** The date-only / default-time switch, shown with a default schedule time or a picked time. */
+
     timeMode: ProcessInboxViewOption | null;
-    /** Supply the calendar day (yyyy-MM-dd). */
+
     pick: Pick<Extract<ProcessInboxDraftEdit, { type: 'setPickedDate' }>, 'type' | 'field'>;
-    /**
-     * RN's clock button once a day is set: the picked time or "Add time" as its label, the picker's start (the picked time,
-     * else the default schedule time, else 09:00), and the edit to send with the picked "HH:mm" as its value (#1445).
-     */
+
+
     time: { label: string; hour: number; minute: number; edit: Pick<Extract<ProcessInboxDraftEdit, { type: 'setTime' }>, 'type' | 'field'> } | null;
     quickDates: ProcessInboxViewOption[];
 };
@@ -1510,7 +1447,7 @@ export type ProcessInboxStepView = {
     question: string | null;
     hint: string | null;
     choices: ProcessInboxStepChoice[];
-    /** The bottom commit button's label; absent when the step commits from its choices. */
+
     fileIt: string | null;
     capture: {
         title: string;
@@ -1530,9 +1467,9 @@ export type ProcessInboxStepView = {
         conversion: {
             nextActionLabel: string;
             nextAction: string;
-            /** Enter in the next action field; null when it does nothing. */
+
             nextActionSubmit: ProcessInboxDraftEdit | null;
-            /** Typing in row i sends `{ type: 'setExtraAction', index: i, value }`. */
+
             rows: Array<{ value: string; submit: ProcessInboxDraftEdit | null; remove: ProcessInboxDraftEdit }>;
             addAction: { label: string; edit: ProcessInboxDraftEdit };
             removeActionLabel: string;
@@ -1543,7 +1480,7 @@ export type ProcessInboxStepView = {
         areas: ProcessInboxViewOption[];
         search: { label: string; placeholder: string; value: string; createLabel: string | null } | null;
         projects: ProcessInboxViewOption[];
-        /** The chosen project's sections, "No section" first; absent when it has none (#1461). */
+
         sections?: { label: string; options: ProcessInboxViewOption[] };
     } | null;
     somedaySections: { label: string; options: ProcessInboxViewOption[] } | null;
@@ -1559,7 +1496,7 @@ export type ProcessInboxStepView = {
         request: { subject: string; message: string };
     } | null;
     contexts: ProcessInboxViewTokens | null;
-    /** On the file step, the project row comes before the contexts row (Start later keeps contexts first). */
+
     projectFirst: boolean;
     moreOptions: {
         label: string;
@@ -1599,13 +1536,13 @@ const DATED_QUICK_DATES = ALL_QUICK_DATES.filter((preset) => preset !== 'no_date
 export type ProcessInboxStepChoice = {
     id: ProcessInboxChoiceId;
     label: string;
-    /** Icon key: done, project, later, delegate, someday, incubate, reference or trash. */
+
     icon: string | null;
-    /** Shown apart, in the danger color (Trash). */
+
     danger: boolean;
 };
 
-/** The step's question, hint and buttons. Terminal steps have none; they commit with File it. */
+
 export function getProcessInboxStepPrompt(
     step: ProcessInboxStep,
     plan: Pick<ProcessInboxPlan, 'twoMinuteEnabled' | 'visibleFields'>,
@@ -1679,7 +1616,7 @@ export type ProcessInboxViewInput = {
     settings: AppSettings | undefined;
     tasks: Task[];
     projects: Project[];
-    /** Live sections; the file step offers the chosen project's sections. */
+
     sections?: readonly Section[];
     areas: Area[];
     people: readonly Person[];
@@ -1689,7 +1626,7 @@ export type ProcessInboxViewInput = {
     now: Date;
 };
 
-/** Everything the mobile step shows for this state, as plain JSON with no policy left to apply. */
+
 export function buildProcessInboxStepView(input: ProcessInboxViewInput): ProcessInboxStepView {
     const { draft, plan, t, mode } = input;
     const tf = (key: string, fallback: string) => tFallback(t, key, fallback);
@@ -1924,7 +1861,7 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                 edit: { type: 'set', field: 'assignedTo', value: name },
             })) : [],
         } : null,
-        // Contexts stay on the step itself; tags ride the disclosure.
+
         tags: draft.showAdvancedOptions && step === 'file' && fields.tags ? tokenRow('tag') : null,
     });
 
@@ -1991,20 +1928,20 @@ export function buildProcessInboxStepView(input: ProcessInboxViewInput): Process
                 who: draft.delegateWho,
             }),
         } : null,
-        // Start later lands in Next, where contexts decide when it shows; RN's step puts them above the project (#1445).
+
         contexts: (step === 'file' || step === 'later') && fields.contexts ? tokenRow('context') : null,
         projectFirst: plan.projectFirst && step !== 'later',
         moreOptions: step === 'waiting' || step === 'file' ? moreOptions() : null,
     };
 }
 
-/** Where the step's choice leads: a new flow state, or a destination to commit. */
+
 export type ProcessInboxChoiceOutcome =
     | { type: 'flow'; answers: ProcessInboxAnswers; draft: ProcessInboxDraft }
     | { type: 'commit'; kind: ProcessInboxCommitKind | 'convert'; committed: ProcessInboxCommitted | null }
     | { type: 'invalid' };
 
-/** The step's buttons, as the mobile step flow wires them. */
+
 export function answerProcessInboxStep(input: {
     choice: string;
     answers: ProcessInboxAnswers;
@@ -2049,13 +1986,13 @@ export function answerProcessInboxStep(input: {
             return { type: 'invalid' };
         case 'decisions':
             if (choice === 'done' && plan.twoMinuteEnabled) return commit('complete', 'done');
-            // "I'll do it" opens the file step, as guided mode and desktop do, so the capture can be organized first (#1445).
-            // It is a single action, so it drops a project split that Back kept.
+
+
             if (choice === 'next') {
                 return flow(chooseQuickProcessInboxDestination(answers, choice, plan),
                     { ...draft, convertToProject: false, nextAction: '', extraActions: [] });
             }
-            // Project opens the project setup at once: the one-action question would ask again (#1445).
+
             if (choice === 'project' && plan.visibleFields.project) {
                 return flow(chooseQuickProcessInboxDestination(answers, choice, plan), startProjectSplit());
             }
@@ -2080,9 +2017,9 @@ export function answerProcessInboxStep(input: {
         default:
             break;
     }
-    // Terminal steps.
+
     if (step === 'file' && draft.convertToProject) {
-        // The conversion card carries its own commit, with no Undo toast.
+
         return choice === 'createProject' ? commit('convert', null) : { type: 'invalid' };
     }
     if (choice !== 'fileIt') return { type: 'invalid' };

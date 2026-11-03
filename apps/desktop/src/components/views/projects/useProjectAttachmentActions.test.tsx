@@ -18,8 +18,7 @@ vi.mock('../../../lib/runtime', () => ({
     isTauriRuntime: vi.fn(() => false),
 }));
 
-// The privacy lock's dialog bookkeeping (its own invoke calls) is tested in
-// app-lock.test.ts; here the picker runs as-is so the invoke assertions stay exact.
+
 vi.mock('../../../lib/app-lock', async (importOriginal) => ({
     ...(await importOriginal<typeof import('../../../lib/app-lock')>()),
     withMindwtrDialog: <T,>(run: () => Promise<T>) => run(),
@@ -54,7 +53,7 @@ describe('useProjectAttachmentActions', () => {
         useTaskStore.setState(initialTaskState, true);
     });
 
-    /** The hook writes through the store: [updateProject] is the store write it reaches. */
+
     const setup = (selectedProject: Project | undefined = baseProject, updateProject = vi.fn()) => {
         useTaskStore.setState({ _allProjects: selectedProject ? [selectedProject] : [], updateProject });
         const params: Parameters<typeof useProjectAttachmentActions>[0] = {

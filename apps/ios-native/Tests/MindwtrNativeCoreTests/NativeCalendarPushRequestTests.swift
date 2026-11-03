@@ -185,7 +185,7 @@ final class NativeCalendarPushRequestTests: XCTestCase {
         }
         var boundary = nested
         boundary["calendarIds"] = Array(repeating: String(repeating: "é", count: 512), count: 1024)
-        // The collection's aggregate still must fit the closed outer frame.
+
         invalid(try json(["op": "read", "request": boundary]))
         boundary["calendarIds"] = Array(repeating: "calendar", count: 1024)
         XCTAssertNoThrow(try NativeCalendarPushRequest(json: json(["op": "read", "request": boundary])))

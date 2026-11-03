@@ -75,7 +75,7 @@ export function SettingsGmailCaptureSection({ isTauri, showSaved }: Props) {
     };
 
     const connect = () => runOperation('connect', async (current) => {
-        // Reconnect retires the old account immediately, even if consent is cancelled.
+
         setConfig((previous) => previous && ({ ...previous, connected: false, account: null, accountId: null, labelId: null, enabled: false }));
         setLabels([]);
         setLabelId('');
@@ -94,7 +94,7 @@ export function SettingsGmailCaptureSection({ isTauri, showSaved }: Props) {
     });
 
     const save = () => runOperation('save', async (current) => {
-        // Native configuration disables import before it validates the selected label.
+
         setConfig((previous) => previous && ({ ...previous, enabled: false }));
         const next = await configureGmailCapture(labelId, true);
         if (current !== generation.current) return;

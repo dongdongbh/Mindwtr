@@ -61,7 +61,7 @@ on:
 
 permissions:
   contents: read
-  # SignPath reads the unsigned-binaries artifact through the workflow token.
+
   actions: read
 
 concurrency:
@@ -82,7 +82,7 @@ jobs:
     name: Windows Release
     timeout-minutes: 120
     concurrency:
-      # A job must not acquire its parent workflow's tag lock (#1197).
+
       group: ${{ (inputs.run_msstore || inputs.run_msstore_flight || github.event_name == 'push') && 'msstore-production' || format('release-windows-build-{0}', inputs.tag || github.ref_name) }}
       cancel-in-progress: false
     outputs:
@@ -92,32 +92,32 @@ jobs:
       VITE_DROPBOX_APP_KEY: ${{ vars.VITE_DROPBOX_APP_KEY || secrets.VITE_DROPBOX_APP_KEY }}
       VITE_FEEDBACK_ENDPOINT_URL: ${{ vars.VITE_FEEDBACK_ENDPOINT_URL || 'https://feedback.mindwtr.app' }}
       VITE_DONATION_PROMPT_ENABLED: "true"
-      # Hoisted so step-level `if` can gate on their presence (secrets context
-      # is unavailable in step conditions).
+
+
       SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
       SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.tag || github.event.inputs.tag || github.ref }}
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7
 
       - name: Cache Rust artifacts
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
         with:
           workspaces: apps/desktop/src-tauri
 
       - name: Setup Node.js
-        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 22
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version-file: ".bun-version"
 
@@ -206,43 +206,32 @@ jobs:
         timeout-minutes: 30
         shell: pwsh
         run: |
-          # rust-cache can restore whisper-rs-sys build dirs whose CMake cache
-          # still has AVX2 enabled. Clear them so the GGML_* env below applies.
+
+
           if (Test-Path apps/desktop/src-tauri/target) {
             Get-ChildItem -Path apps/desktop/src-tauri/target -Recurse -Directory -Filter 'whisper-rs-sys-*' |
               Where-Object { $_.Parent.Name -eq 'build' } |
               Remove-Item -Recurse -Force
           }
           cd apps/desktop
-          # Stop at the loose mindwtr.exe. Bundling is a separate step below so
-          # Authenticode signing can run in between: the NSIS installer embeds
-          # its own copy of the exe, and a copy baked in before signing stays
-          # unsigned on every machine that installs it.
+
+
+
+
           bunx tauri build --no-bundle
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_ANALYTICS_HEARTBEAT_URL: ${{ secrets.ANALYTICS_HEARTBEAT_URL }}
           VITE_ANALYTICS_RELEASE_VERSION: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
-          # Bundled whisper must run on AVX-only CPUs (pre-Haswell, e.g. i7-3770).
-          # ggml's portable default still enables AVX2/FMA, which crashes those
-          # machines with 0xc000001d. whisper-rs-sys forwards GGML_* to CMake. (#1008)
+
+
           GGML_NATIVE: "OFF"
           GGML_AVX2: "OFF"
           GGML_FMA: "OFF"
           GGML_F16C: "OFF"
           GGML_BMI2: "OFF"
 
-      # Authenticode signing via SignPath Foundation (#965). Runs only after
-      # SIGNPATH_SIGNING_ENABLED is explicitly set to true and the SignPath
-      # secrets are present. Until the project certificate is active, official
-      # builds continue through the existing unsigned release path.
-      #
-      # Two rounds, and the order matters. Round 1 signs the app exe BEFORE the
-      # installer is bundled, so the copy the installer extracts to Program
-      # Files carries a signature; it also feeds the portable ZIP and the MSIX
-      # layout. Round 2 signs the installer wrapper itself, which only exists
-      # after bundling. Each round is a separate SignPath submission, so
-      # release-signing asks for two approvals per release.
+
       - name: Stage unsigned app binary for signing
         id: stage-unsigned-exe
         if: ${{ vars.SIGNPATH_SIGNING_ENABLED == 'true' && github.repository == 'dongdongbh/Mindwtr' && env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != '' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '' || github.event.inputs.tag != '') }}
@@ -254,7 +243,7 @@ jobs:
       - name: Upload unsigned app binary
         id: upload-unsigned-exe
         if: ${{ steps.stage-unsigned-exe.outcome == 'success' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: windows-unsigned-exe
           path: signing-unsigned-exe/*
@@ -263,19 +252,19 @@ jobs:
 
       - name: Submit SignPath signing request for the app binary
         if: ${{ steps.stage-unsigned-exe.outcome == 'success' }}
-        uses: SignPath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2.2
+        uses: SignPath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
           project-slug: Mindwtr
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}
-          # Single-file config (zip -> pe-file mindwtr.exe). Pinned so the
-          # project default can never silently decide what gets signed.
+
+
           artifact-configuration-slug: initial
           github-artifact-id: ${{ steps.upload-unsigned-exe.outputs.artifact-id }}
           wait-for-completion: true
-          # release-signing requires manual approval in the SignPath UI;
-          # give the approver half an hour before the build fails.
+
+
           wait-for-completion-timeout-in-seconds: "1800"
           output-artifact-directory: signing-signed-exe
 
@@ -288,8 +277,8 @@ jobs:
           $policy = "${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}"
           $sig = Get-AuthenticodeSignature $exePath
           if ($null -eq $sig.SignerCertificate) { throw "Not signed: $exePath" }
-          # The test certificate does not chain to a trusted root, so only
-          # release-signing insists on a fully valid chain.
+
+
           if ($policy -eq 'release-signing' -and $sig.Status -ne 'Valid') {
             throw "Signature status $($sig.Status) on $exePath"
           }
@@ -333,14 +322,14 @@ jobs:
         run: |
           $nsisPath = "${{ steps.current-installer.outputs.installer_path }}"
           New-Item -ItemType Directory -Force -Path signing-unsigned-installer | Out-Null
-          # Stable name so the SignPath artifact configuration never has to
-          # track version-suffixed file names.
+
+
           Copy-Item -LiteralPath $nsisPath -Destination "signing-unsigned-installer/mindwtr-setup.exe"
 
       - name: Upload unsigned installer
         id: upload-unsigned-installer
         if: ${{ steps.stage-unsigned-installer.outcome == 'success' }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: windows-unsigned-installer
           path: signing-unsigned-installer/*
@@ -349,13 +338,13 @@ jobs:
 
       - name: Submit SignPath signing request for the installer
         if: ${{ steps.stage-unsigned-installer.outcome == 'success' }}
-        uses: SignPath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd # v2.2
+        uses: SignPath/github-action-submit-signing-request@b9d91eadd323de506c0c81cf0c7fe7438f3360fd
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
           organization-id: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
           project-slug: Mindwtr
           signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}
-          # Single-file config (zip -> pe-file mindwtr-setup.exe).
+
           artifact-configuration-slug: windows-installer
           github-artifact-id: ${{ steps.upload-unsigned-installer.outputs.artifact-id }}
           wait-for-completion: true
@@ -370,11 +359,11 @@ jobs:
           Copy-Item -LiteralPath "signing-signed-installer/mindwtr-setup.exe" -Destination $nsisPath -Force
           $policy = "${{ vars.SIGNPATH_SIGNING_POLICY || 'release-signing' }}"
 
-          # Unpack the installer and check the exe it will drop in Program
-          # Files. Signing the wrapper alone satisfies SmartScreen on the
-          # download but leaves the installed binary unsigned, which is what
-          # antivirus heuristics actually flag (#110). This assertion is the
-          # only thing that stops that regressing silently.
+
+
+
+
+
           $extractDir = "installer-payload-check"
           Remove-Item -Recurse -Force $extractDir -ErrorAction SilentlyContinue
           $sevenZip = if (Test-Path "C:\Program Files\7-Zip\7z.exe") {
@@ -383,7 +372,7 @@ jobs:
             (Get-Command 7z -ErrorAction Stop).Source
           }
           & $sevenZip x $nsisPath "-o$extractDir" -y | Out-Null
-          # 7-Zip exits 1 on non-fatal warnings; only 2+ is a real failure.
+
           if ($LASTEXITCODE -gt 1) { throw "Failed to unpack $nsisPath (7z exit $LASTEXITCODE)" }
           $payload = Get-ChildItem -LiteralPath $extractDir -Recurse -Filter mindwtr.exe |
             Select-Object -First 1
@@ -457,7 +446,7 @@ jobs:
           Get-ChildItem release-artifacts
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: release-windows
           path: release-artifacts/*
@@ -493,7 +482,7 @@ jobs:
 
       - name: Preserve Microsoft Store package
         if: steps.version.outputs.store_package == 'true'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: msstore-package-${{ steps.version.outputs.tag }}
           path: mindwtr_${{ steps.version.outputs.version }}_x64.msix
@@ -511,7 +500,7 @@ jobs:
 
       - name: Preserve Microsoft Store flight archive
         if: inputs.run_msstore_flight
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: msstore-flight-payload-${{ steps.version.outputs.tag }}
           path: ${{ runner.temp }}/msstore-flight.zip
@@ -659,10 +648,10 @@ jobs:
             return $text -match '(?i)(InvalidState|CommitStarted|PreProcessing|Certification|InCertification|PendingCommit|InProgress|Pending[\s_-]*Submission|Another\s+submission|already\s+.*submission)'
           }
 
-          # An open package rollout is not a busy store: waiting never clears it,
-          # so this release must fail instead of reporting success with no Store
-          # update. Checked before $isStoreBusy, whose pattern also matches the
-          # rollout refusal.
+
+
+
+
           $isRolloutOpen = {
             param([string]$text)
             if ([string]::IsNullOrWhiteSpace($text)) { return $false }
@@ -671,8 +660,8 @@ jobs:
 
           $rolloutOpenMessage = 'Microsoft Store refused the submission because the previous package rollout is still open. Finalize or halt it first (see docs/development/store-rollouts.md), then rerun this workflow.'
 
-          # PowerShell keeps the HTTP status in Exception.Message and the Store's
-          # own reason in ErrorDetails.Message; both are needed to classify one.
+
+
           function Get-StoreErrorText {
             param([System.Management.Automation.ErrorRecord]$ErrorRecord)
             $details = ''
@@ -1115,7 +1104,7 @@ jobs:
 
               $normalized = $Text -replace "`r`n?", "`n"
 
-              # Fix hard wraps that split short words (e.g., Lo\ncal-First) and CJK punctuation/characters.
+
               $normalized = [System.Text.RegularExpressions.Regex]::Replace(
                 $normalized,
                 '([A-Za-zÀ-ÖØ-öø-ÿ]{1,2})\n([a-zà-öø-ÿ])',
@@ -1127,7 +1116,7 @@ jobs:
                 '$1$2'
               )
 
-              # Convert single line breaks to spaces, while preserving paragraph breaks and bullet lines.
+
               $normalized = [System.Text.RegularExpressions.Regex]::Replace(
                 $normalized,
                 '(?<!\n)\n(?!\n|[•*\-]|\d+[.)]\s)',

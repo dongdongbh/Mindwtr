@@ -21,7 +21,7 @@ const logStartupLine = (line: string): void => {
             (maybeHook as (message: string, level: number) => void)(line, 1);
             return;
         } catch {
-            // Fall back to console logging.
+
         }
     }
     console.info(line);
@@ -31,7 +31,7 @@ export const markCoreStartupPhase = (phase: string, extra?: Record<string, unkno
     if (!isStartupProfilingEnabled()) return;
     const nowMs = Date.now();
     const extraPayload = serializeExtra(extra);
-    // Keep same tag/format so mobile benchmark parser can aggregate seamlessly.
+
     logStartupLine(`[${STARTUP_TAG}] phase=${phase} wallMs=${nowMs}${extraPayload}`);
 };
 

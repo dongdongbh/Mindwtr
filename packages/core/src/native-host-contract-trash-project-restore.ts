@@ -58,7 +58,7 @@ const validRawArea = (value: unknown, id: string): value is Area => {
 
 const unique = (rows: { id: string }[]) => new Set(rows.map((row) => row.id)).size === rows.length;
 
-/** Pure validation of the frozen effect before Swift opens SQLite for replay. */
+
 const readPrepared = (input: unknown): NativeTrashProjectRestoreEnvelope | null => {
     const envelope = detach<Record<string, unknown>>(input);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

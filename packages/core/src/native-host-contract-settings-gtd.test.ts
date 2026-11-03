@@ -11,15 +11,7 @@ import { DEFAULT_TASK_EDITOR_ORDER } from './task-editor-layout';
 import type { AppSettings, Area } from './types';
 import { generateUUID } from './uuid';
 
-/**
- * The frozen React Native GTD settings screens (gtd-settings-parity.fixtures.json,
- * captured by apps/mobile/components/settings/gtd-settings-screen.parity.test.tsx),
- * replayed through the native host contract. The replay plays the native screen:
- * it keeps the screen's own state (text drafts, open groups, the field sheet, the
- * area picker), reads the view, sends each control's edit, stores what the
- * contract says to store on the device, and lays the view out in the order React
- * Native draws it.
- */
+
 type Screen = 'gtd' | 'gtd-archive' | 'gtd-capture' | 'gtd-inbox' | 'gtd-pomodoro' | 'gtd-review' | 'gtd-task-editor';
 type Device = { language?: string; storage?: Record<string, string>; exactAlarm?: { relevant: boolean; allowed: boolean } };
 type Scenario = { name: string; screen: Screen; settings: string; device: Device; actions: [string, ...unknown[]][] };
@@ -42,8 +34,6 @@ const value = <T,>(result: NativeHostResult<T>): T => {
 };
 const normalize = (entry: unknown): unknown => JSON.parse(JSON.stringify(entry, (_key, item) => (item === undefined ? '<undefined>' : item)));
 
-// ---------------------------------------------------------------------------
-// The store: the fixture's data, with settings writes recorded as the harness records them.
 
 const writes: unknown[][] = [];
 let realUpdateSettings: ((...args: unknown[]) => Promise<unknown>) | null = null;
@@ -85,8 +75,6 @@ async function openHost(language = 'en'): Promise<Host> {
     return host;
 }
 
-// ---------------------------------------------------------------------------
-// The native screen.
 
 type Control = { label: string; selected: boolean; disabled: boolean; press: () => Promise<void> };
 type Switch = { label: string; value: boolean; flip: () => Promise<void> };
@@ -103,7 +91,7 @@ function gtdDriver(host: Host, scenario: Scenario) {
     const read = () => value(host.getGtdSettings({ taskOpenMode: storage.get(OPEN_MODE_KEY) ?? null }));
 
     let view = read();
-    // Screen state.
+
     let scheduleDraft = view.hub.defaultScheduleTime.value;
     let minutes = { ...view.pomodoro.minutes };
     let noticeShown = false;
@@ -112,7 +100,7 @@ function gtdDriver(host: Host, scenario: Scenario) {
     let expandedKey = view.taskEditor.expandedResetKey;
     let expanded: Record<string, boolean> = { ...view.taskEditor.initiallyExpanded };
 
-    /** Sends an edit and stores what the contract says to store on the device. */
+
     const send = async (edit: GtdSettingsEdit) => {
         const result = await host.setGtdSetting({ requestId: generateUUID(), edit });
         if (!result.ok) return result;
@@ -123,7 +111,7 @@ function gtdDriver(host: Host, scenario: Scenario) {
         }
         return result;
     };
-    /** Re-reads the view and applies React Native's effects on the screen state. */
+
     const refresh = () => {
         const before = view;
         view = read();
@@ -201,7 +189,7 @@ function gtdDriver(host: Host, scenario: Scenario) {
                 if (pomodoro.enable || !controls) {
                     const enable = pomodoro.enable!;
                     drawn.texts.push(enable.label);
-                    // The button's text is tinted.
+
                     drawn.controls.push(control(enable.label, async () => { value(await send(enable.edit)); }, true));
                     return drawn;
                 }
@@ -212,7 +200,7 @@ function gtdDriver(host: Host, scenario: Scenario) {
                     ...(notice ? [notice.label, notice.description, notice.actionLabel] : []),
                 );
                 if (notice) drawn.controls.push(control(notice.actionLabel, () => undefined, true));
-                // Turning an auto-start on shows the notice once per visit, after the write.
+
                 const autoStart = (toggle: GtdSettingsToggle) => toggleSwitch(toggle, (changed) => {
                     if (changed && !toggle.value && !noticeShown) {
                         noticeShown = true;
@@ -313,7 +301,7 @@ function gtdDriver(host: Host, scenario: Scenario) {
                 sheet.order.label, sheet.order.moveUp.label, sheet.order.moveDown.label, sheet.doneLabel,
             ],
             controls: [
-                // A chip's text is tinted while it is the field's section.
+
                 ...(sheet.sections ? optionControls(sheet.sections.options) : []),
                 move(sheet.order.moveUp),
                 move(sheet.order.moveDown),
@@ -458,7 +446,7 @@ describe('native host contract: Settings › GTD', () => {
         expect(value(host.getGtdSettings({ taskOpenMode: 'sideways' })).taskEditor.openMode.options.find((option) => option.selected)?.value).toBe('automatic');
         const menu = value(host.getSettingsMenu());
         expect(menu.groups.flat().filter((row) => row.enabled).map((row) => row.id)).toEqual(['general', 'gtd', 'manage', 'notifications', 'sync', 'data', 'advanced', 'about']);
-        // Settings › Advanced opens its AI screen (pass C1) and its Calendar screen (pass C3).
+
         expect(menu.advanced.rows.filter((row) => row.enabled).map((row) => row.id)).toEqual(['ai', 'calendar']);
     });
 
@@ -520,11 +508,11 @@ describe('native host contract: Settings › GTD', () => {
         const written = writes.length;
         expect(written).toBe(edits.length);
         const settings = useTaskStore.getState().settings;
-        // New request IDs on a new host: every write finds its value already stored.
+
         await run(await openHost());
         expect(writes).toHaveLength(written);
         expect(useTaskStore.getState().settings).toBe(settings);
-        // A preset or a reset twice: the second writes nothing.
+
         const host = await openHost();
         for (const edit of [{ type: 'taskEditorPreset', value: 'full' }, { type: 'taskEditorReset' }] as GtdSettingsEdit[]) {
             expect(value(await host.setGtdSetting({ requestId: generateUUID(), edit })).changed).toBe(true);
@@ -582,13 +570,13 @@ describe('native host contract: Settings › GTD', () => {
             expect(retried).toMatchObject({ ok: true, value: { changed: true, deviceWrites: [] } });
             expect(writes).toHaveLength(1);
             check((saveData.mock.lastCall?.[0] as { settings: AppSettings }).settings);
-            // A lost reply repeats the request: no write, no save.
+
             const saves = saveData.mock.calls.length;
             expect(await run()).toEqual(retried);
             expect(saveData).toHaveBeenCalledTimes(saves);
         });
 
-        // A device-only edit writes nothing to the store, so a failing disk cannot fail it.
+
         it('setGtdSetting: task open mode (device only)', async () => {
             freezeClock();
             const saveData = vi.fn().mockResolvedValue(undefined);

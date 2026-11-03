@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const ruOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "До начала",
     "attachments.webUploadRequiresCloud": "Для загрузки из браузера нужна синхронизация с собственным облачным сервером.",
     "attachments.webUploadEncrypted": "Для загрузки из браузера нужно отключить шифрование синхронизации.",
     "attachments.webUploadOffline": "В автономном режиме нельзя загружать файлы.",
@@ -783,6 +784,7 @@ export const ruOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Убедитесь, что у каждого активного проекта есть следующее действие.',
         'review.projectsHint': 'Рассмотрите каждый проект. Есть ли у него хотя бы одно конкретное следующее действие? Если нет, добавьте его сейчас. Отмечайте завершенные проекты как выполненные.',
         'review.hasNextAction': 'Имеет следующее действие',
+    'review.projectDeferred': 'Запланировано',
         'review.needsAction': 'Требует действий',
         'review.noActiveTasks': 'Нет активных задач',
         'review.somedayStep': 'Когда-нибудь/Может быть',
@@ -1514,7 +1516,7 @@ export const ruOverrides: Record<string, string> = {
         'settings.externalCalendarUrlPlaceholder': 'https://example.com/calendar.ics',
         'settings.webdavUrlPlaceholder': 'https://example.com/remote.php/dav/files/<username>/mindwtr',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'Разгрузка головы',
         'mindSweep.title': 'Разгрузка головы',
         'mindSweep.intro': 'Пройдитесь по нескольким спискам подсказок и записывайте всё, что приходит в голову. Не фильтруйте и не сортируйте — каждая запись попадёт во «Входящие», разберёте позже.',

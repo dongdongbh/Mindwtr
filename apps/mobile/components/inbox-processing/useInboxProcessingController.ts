@@ -152,7 +152,7 @@ export function useInboxProcessingController({
   const [processingSession, setProcessingSession] = useState<ProcessInboxSession>(
     () => createProcessInboxSession(),
   );
-  // The answers so far; core derives the step, its choices and the write from them.
+
   const [answers, setAnswers] = useState<ProcessInboxAnswers>(INITIAL_PROCESS_INBOX_ANSWERS);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
   const [newContext, setNewContext] = useState('');
@@ -183,7 +183,7 @@ export function useInboxProcessingController({
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showDueDatePicker, setShowDueDatePicker] = useState(false);
   const [showReviewDatePicker, setShowReviewDatePicker] = useState(false);
-  // A clock time ("HH:mm") the user picked per date row; it wins over the default schedule time (#1445).
+
   const [pendingTimes, setPendingTimes] = useState<Partial<Record<ProcessInboxDateField, string>>>({});
   const [timePickerField, setTimePickerField] = useState<ProcessInboxDateField | null>(null);
   const [isAIWorking, setIsAIWorking] = useState(false);
@@ -202,7 +202,7 @@ export function useInboxProcessingController({
   const processingScrollRef = useRef<any>(null);
   const hasInitialized = useRef(false);
   const processInboxPlan = useMemo(() => resolveProcessInboxPlan(settings), [settings]);
-  // Read at prime time only: a settings change must not re-prime (and reset) the open draft.
+
   const defaultAreaIdRef = useRef<string | null>(null);
   defaultAreaIdRef.current = resolveDefaultNewTaskAreaId(settings, areas) ?? null;
   const { projectFirst, referenceEnabled } = processInboxPlan;
@@ -254,8 +254,8 @@ export function useInboxProcessingController({
 
   const { areaById } = useVisibleTaskContext();
   const inboxTasks = useMemo(
-    // Not `visibleTasks`: the queue is the process-inbox candidate set, which
-    // has its own status rule on top of the shared visibility predicate.
+
+
     () => selectProcessInboxQueue(tasks, projects),
     [projects, tasks],
   );
@@ -390,8 +390,8 @@ export function useInboxProcessingController({
     () => (selectedProjectId ? projects.find((project) => project.id === selectedProjectId) ?? null : null),
     [projects, selectedProjectId],
   );
-  // The chosen project's sections (#1461). A picked section counts only while it
-  // sits in the chosen project, so changing the project can never carry it along.
+
+
   const projectSections = useMemo(
     () => getProjectSectionsForView(currentProject, sections),
     [currentProject, sections],
@@ -404,7 +404,7 @@ export function useInboxProcessingController({
     [areas, selectedAreaId],
   );
 
-  // Expanding More options appends fields below the current step.
+
   const scrollProcessingToRevealedStep = useCallback(() => {
     requestAnimationFrame(() => {
       processingScrollRef.current?.scrollToEnd?.({ animated: true });
@@ -437,8 +437,8 @@ export function useInboxProcessingController({
   }, []);
 
   const primeTaskState = useCallback((task: Task | null | undefined) => {
-    // The task the draft is filled from: the base its save merges against. currentTask follows the live store, so a
-    // sync that lands before the decision would read as the draft's own change.
+
+
     processingBaseRef.current = task ?? null;
     const defaults = getProcessInboxTaskDefaults(task, defaultAreaIdRef.current);
     const { startTime, dueDate, reviewAt } = defaults.dates;
@@ -481,7 +481,7 @@ export function useInboxProcessingController({
     setProcessingDescription(defaults.description);
   }, [resetTitleFocus]);
 
-  // Clearing a row or making it date-only drops its picked time, so the default time comes back.
+
   const setPendingStartDateFromControl = useCallback((value: Date | null) => {
     dirtyScheduleFieldsRef.current.add('startTime');
     useDefaultStartTimeRef.current = false;
@@ -528,7 +528,7 @@ export function useInboxProcessingController({
     setDelegateFollowUpDateOnly(value);
     if (value) setPendingTimes(withoutPendingTime('followUp'));
   }, []);
-  // A time from the time picker: the row stops being date-only and counts as user input, like a picked date.
+
   const setPendingTimeFromControl = useCallback((field: ProcessInboxDateField, picked: Date) => {
     if (field !== 'followUp') dirtyScheduleFieldsRef.current.add(field);
     if (field === 'startTime') useDefaultStartTimeRef.current = false;
@@ -647,7 +647,7 @@ export function useInboxProcessingController({
     [areas, people, projects, settings, tasks],
   );
 
-  /** The draft as plain values, the shape core commits. */
+
   const buildDraft = useCallback((): ProcessInboxDraft => {
     const dateValue = (date: Date | null, dateOnly: boolean, useDefaultTime = false, time?: string) => (
       date ? { date: safeFormatDate(date, 'yyyy-MM-dd'), dateOnly,
@@ -711,10 +711,7 @@ export function useInboxProcessingController({
     showAdvancedOptions,
   ]);
 
-  /**
-   * A step button. Moves between questions here; a destination comes back as a
-   * `commit` outcome for the step flow to run through `runCommit`.
-   */
+
   const answerStep = useCallback((choice: string, mode: ProcessInboxMode): ProcessInboxChoiceOutcome => {
     if (!currentTask) return { type: 'invalid' };
     const outcome = answerProcessInboxStep({
@@ -738,17 +735,15 @@ export function useInboxProcessingController({
     return outcome;
   }, [answers, buildDraft, currentTask, parseProcessingTitle, processInboxPlan, scrollProcessingToTop]);
 
-  // Returns whether the decision was committed, so the presentation can hold
-  // its completion feedback (haptic, Undo toast) until it lands.
+
   const runCommit = useCallback(async (kind: ProcessInboxCommitKind | 'convert'): Promise<boolean> => {
     if (!currentTask) return false;
     if (kind === 'convert') {
       if (projectConversionInFlightRef.current) return false;
       projectConversionInFlightRef.current = true;
     }
-    // The draft is saved field by field onto the row as stored when the write is admitted (base: the task the draft
-    // was filled from), so a field, tag or context another device synced since stays. Attachments merge the same way,
-    // which appends the title's /link: attachments to the latest list. Fields nobody changed are written as before.
+
+
     const base = processingBaseRef.current?.id === currentTask.id ? processingBaseRef.current : currentTask;
     const updateTaskKeepingAttachments: typeof updateTask = (id, updates) => saveTaskDraftOntoLatest(id, base, updates, {
       write: updateTask,
@@ -769,7 +764,7 @@ export function useInboxProcessingController({
         t,
       });
       if (!result.ok) {
-        // Extra actions already added are dropped, so a retry cannot repeat them.
+
         setExtraActionDrafts(result.draft.extraActions);
         if (result.error !== undefined) {
           void logWarn('Failed to create project from mobile inbox processing', {
@@ -787,9 +782,8 @@ export function useInboxProcessingController({
         }
         return false;
       }
-      // Opening the next item primes all of its state. Nothing may reset state
-      // after this: it would clear the next item's dates, and filing that item
-      // would then erase them.
+
+
       if (!activateProcessingSession(result.session)) {
         handleClose();
       }
@@ -816,8 +810,7 @@ export function useInboxProcessingController({
     updateTask,
   ]);
 
-  // Capture the task generation before a decision runs. Toasts keep this exact
-  // receipt, so a later decision cannot redirect an older queued Undo action.
+
   const createDecisionUndoReceipt = useCallback((kind: InboxDecisionUndoKind): InboxDecisionUndoReceipt | null => {
     if (!currentTask) return null;
     return {
@@ -840,7 +833,7 @@ export function useInboxProcessingController({
         );
         return;
       }
-      // Refused (STALE_REVISION) when another device changed the task since; the toast says so.
+
       const result = receipt.kind === 'discarded'
         ? await restoreTask(receipt.taskId)
         : await restoreTaskSnapshot(receipt.taskId, receipt.restoreUpdates);
@@ -848,7 +841,7 @@ export function useInboxProcessingController({
         showProcessingError(getActionFailureMessage(result));
       }
     } catch (error) {
-      // undoTaskCompletion throws its STALE_REVISION refusal.
+
       showProcessingError(getUnknownErrorMessage(error));
     }
   }, [restoreTask, showProcessingError]);
@@ -886,8 +879,7 @@ export function useInboxProcessingController({
     setNewContext('');
   }, [selectedContexts, selectedTags]);
 
-  // `kind` is how a surface that shows contexts and tags separately says which
-  // one an unprefixed entry belongs to; without it the prefix decides.
+
   const addCustomContextMobile = useCallback((kind?: 'context' | 'tag') => {
     applyTokenLists(addProcessInboxToken({
       tokenInput: newContext,
@@ -934,10 +926,7 @@ export function useInboxProcessingController({
     await runCommit('skip');
   }, [runCommit]);
 
-  // After the full task editor closes: refill the draft from the saved task, so the screen shows the editor's
-  // changes and filing does not write the draft's older values back (#1445). The user stays on the step they
-  // were on, with its own answers kept. A task that left the Inbox is dropped by the queue, which moves on to
-  // the next item.
+
   const reloadEditedTask = useCallback(() => {
     const base = processingBaseRef.current;
     const latest = base ? useTaskStore.getState()._tasksById?.get(base.id) : undefined;
@@ -1188,7 +1177,7 @@ export function useInboxProcessingController({
     try {
       apiKey = await loadAIKey(aiProvider);
     } catch (error) {
-      // An unreadable keystore fails like a request, never as an unhandled rejection.
+
       void logWarn('Inbox processing failed', {
         scope: 'inbox',
         extra: { error: redactAIError(error, '', settings).message },

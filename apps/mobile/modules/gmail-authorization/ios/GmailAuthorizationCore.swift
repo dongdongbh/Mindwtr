@@ -90,7 +90,7 @@ struct GmailAuthorizationConfiguration {
         }
         var url = URLComponents(string: api + relative.path)!
         url.queryItems = query.isEmpty ? nil : query
-        // URLComponents leaves '+' literal, but Google's query decoder treats it as a space.
+
         url.percentEncodedQuery = url.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let result = url.url else { throw GmailAuthorizationFailure.config }
         return result
@@ -210,7 +210,7 @@ actor GmailAuthorizationClient {
     private func invalidate() -> UInt64 {
         generation &+= 1
         refreshing = false
-        // Cancelling a sent revoke cannot stop its server-side effect on a later grant.
+
         if !revoking { http.cancel() }
         return generation
     }

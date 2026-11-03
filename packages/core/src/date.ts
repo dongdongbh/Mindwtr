@@ -80,9 +80,8 @@ const LOCALE_TAG_BY_LANGUAGE: Record<Language, string> = {
     ru: 'ru-RU',
     ja: 'ja-JP',
     fr: 'fr-FR',
-    // Brazilian, to match the date-fns locale above. Portuguese has one entry in
-    // the language list, so both formatting paths have to pick the same regional
-    // conventions; this one was previously 'pt-PT' while date-fns used ptBR.
+
+
     pt: 'pt-BR',
     pl: 'pl-PL',
     cs: 'cs-CZ',
@@ -97,14 +96,14 @@ const LOCALE_TAG_BY_LANGUAGE: Record<Language, string> = {
     uk: 'uk-UA',
 };
 
-/** What `configureDateFormatting` takes: the user's date settings, language and device locale. */
+
 export type DateFormattingConfig = {
     language?: string | null;
     dateFormat?: string | null;
     calendarSystem?: string | null;
     timeFormat?: string | null;
     systemLocale?: string | null;
-    /** Device-local Gregorian short-date pattern from the platform, never a stored task format. */
+
     systemDateFormat?: string | null;
 };
 type ResolvedDateFormatting = {
@@ -127,14 +126,14 @@ let activeConfig: Readonly<DateFormattingConfig> = {};
 
 const normalizeLocaleTag = (value?: string | null): string => String(value || '').trim().replace(/_/g, '-');
 
-/** Only the numeric UTS #35 date fields shared by Foundation and date-fns are accepted. */
+
 export function normalizeSystemDateFormat(value: unknown): string | undefined {
     if (typeof value !== 'string' || !value || value.length > 128) return undefined;
     const tokens = value.match(/y{1,4}|M{1,2}|d{1,2}|'(?:[^']|'')*'|[^A-Za-z']+/g);
     if (!tokens || tokens.join('') !== value) return undefined;
     const fields = tokens.filter((token) => /^[yMd]/.test(token));
     if (fields.length !== 3 || !['y', 'M', 'd'].every((field) => fields.some((token) => token[0] === field))) return undefined;
-    // A leading two-digit year is ambiguous to quick-add's existing numeric-date parser.
+
     if (fields[0] === 'yy') return undefined;
     return value;
 }
@@ -255,7 +254,7 @@ export function normalizeTimeFormatSetting(value?: string | null): TimeFormatSet
     return 'system';
 }
 
-// CLDR weekData firstDay: regions not listed here start the week on Monday.
+
 const SUNDAY_FIRST_REGIONS = new Set([
     'AG', 'AS', 'BD', 'BR', 'BS', 'BT', 'BW', 'BZ', 'CA', 'CO', 'DM', 'DO', 'ET',
     'GT', 'GU', 'HK', 'HN', 'ID', 'IL', 'IN', 'JM', 'JP', 'KE', 'KH', 'KR', 'LA',
@@ -274,20 +273,15 @@ function regionWeekStart(region: string): WeekStartSetting {
     return 'monday';
 }
 
-// The device locale a native host sent (its runtime has no Intl or navigator locale); null elsewhere.
+
 let hostSystemLocale: string | null = null;
 
-/** A native host sets the device locale it reads from the platform; React Native and desktop never call this. */
+
 export function setHostSystemLocale(locale: string | null): void {
     hostSystemLocale = typeof locale === 'string' && locale.trim() ? locale.trim() : null;
 }
 
-/**
- * Week start inferred from the device locale, so calendars look right without
- * a setting. Uses Intl week info when the runtime provides it and falls back
- * to CLDR region data parsed from the locale tag. A native host's locale
- * (setHostSystemLocale) comes before the runtime's.
- */
+
 export function getSystemWeekStart(localeInput?: string | null): WeekStartSetting {
     let locale = typeof localeInput === 'string' && localeInput.trim() ? localeInput.trim() : (hostSystemLocale ?? '');
     if (!locale) {
@@ -312,7 +306,7 @@ export function getSystemWeekStart(localeInput?: string | null): WeekStartSettin
         const region = intlLocale.maximize?.().region ?? intlLocale.region;
         if (region) return regionWeekStart(region.toUpperCase());
     } catch {
-        // Fall through to plain locale-tag parsing below.
+
     }
     const match = locale.match(/[-_]([A-Za-z]{2})(?:[-_]|$)/);
     if (match) return regionWeekStart(match[1].toUpperCase());
@@ -321,7 +315,7 @@ export function getSystemWeekStart(localeInput?: string | null): WeekStartSettin
 
 export type WeekStartPreference = WeekStartSetting | 'system';
 
-/** The stored preference, for settings UIs: explicit day or 'system'. */
+
 export function normalizeWeekStartPreference(value?: string | null): WeekStartPreference {
     const normalized = String(value || '').trim().toLowerCase();
     if (normalized === 'monday') return 'monday';
@@ -330,7 +324,7 @@ export function normalizeWeekStartPreference(value?: string | null): WeekStartPr
     return 'system';
 }
 
-/** The resolved week start: explicit setting wins, otherwise the device locale decides. */
+
 export function normalizeWeekStartSetting(value?: string | null): WeekStartSetting {
     const preference = normalizeWeekStartPreference(value);
     if (preference !== 'system') return preference;
@@ -416,7 +410,7 @@ export function resolveDateLocaleTag(params: {
     let systemLocale = normalizeLocaleTag(params.systemLocale);
     try {
         if (systemLocale) {
-            // WebKitGTK can report POSIX values such as "C", which Intl rejects.
+
             if (typeof Intl.getCanonicalLocales === 'function') Intl.getCanonicalLocales(systemLocale);
             else new Intl.DateTimeFormat(systemLocale);
         }
@@ -471,13 +465,12 @@ export function configureDateFormatting(params: DateFormattingConfig = {}): void
     setDefaultOptions({ locale: active.locale });
 }
 
-/** The configuration `configureDateFormatting` last applied ({} before the first call). */
+
 export function getDateFormattingConfig(): Readonly<DateFormattingConfig> {
     return activeConfig;
 }
 
-// The one test for "does this locale put the day before the month": format a
-// date whose day and month cannot be confused and see which number comes first.
+
 const isDayFirstLocale = (locale: Locale): boolean => {
     try {
         const sample = format(new Date(2001, 10, 22), 'P', { locale });
@@ -489,38 +482,24 @@ const isDayFirstLocale = (locale: Locale): boolean => {
     }
 };
 
-/**
- * Whether ambiguous slash dates ("10/8") read day-first under the active date
- * format. Explicit dmy says yes; mdy and ymd say no; System derives it from
- * the resolved locale's short-date order (#1006).
- */
+
 export function isActiveDateFormatDayFirst(): boolean {
     if (active.dateFormat === 'dmy') return true;
     if (active.dateFormat === 'mdy' || active.dateFormat === 'ymd') return false;
     return isDayFirstLocale(active.locale);
 }
 
-/**
- * The same day-first answer for a locale tag, with no configured state behind
- * it. A headless context — the widget payload written by a background sync,
- * where `configureDateFormatting` never ran — must reach the app's answer, and
- * that means this repo's region table (en-ZA is day-first here, CLDR disagrees)
- * rather than a second rule of its own (#1242).
- */
+
 export function isLocaleDateDayFirst(systemLocale?: string | null, fallback: Language = 'en'): boolean {
     return isDayFirstLocale(resolveLocaleFromSystem(systemLocale, fallback));
 }
 
-/** The app language quick-add's locale date parsing is keyed off (#1059). */
+
 export function getActiveLanguage(): Language {
     return active.language;
 }
 
-/**
- * Wide and abbreviated month names for a language, read off the same
- * date-fns locale table `configureDateFormatting` uses — so quick-add's
- * bare-month-name skip doesn't need its own copy of the locale map (#1059).
- */
+
 export function getMonthNamesForLanguage(language: Language): string[] {
     const locale = DATE_LOCALE_BY_LANGUAGE[language];
     if (!locale?.localize) return [];
@@ -529,23 +508,15 @@ export function getMonthNamesForLanguage(language: Language): string[] {
         const monthIndex = month as Parameters<Locale['localize']['month']>[0];
         for (const width of ['wide', 'abbreviated'] as const) {
             names.push(locale.localize.month(monthIndex, { width }));
-            // Declining languages inflect months inside a date ("января" in
-            // Russian) differently from the standalone default above; chrono
-            // matches the inflected forms too, so both belong in the set.
+
+
             names.push(locale.localize.month(monthIndex, { width, context: 'formatting' }));
         }
     }
     return names;
 }
 
-/**
- * Safely formats a date string, handling undefined, null, or invalid dates.
- * 
- * @param dateStr - The date string to format (e.g. ISO string) or Date object
- * @param formatStr - The format string (date-fns format)
- * @param fallback - Optional fallback string (default: '')
- * @returns Formatted date string or fallback
- */
+
 export function safeFormatDate(
     dateStr: string | Date | undefined | null,
     formatStr: string,
@@ -554,7 +525,7 @@ export function safeFormatDate(
     return formatDateWith(active, dateStr, formatStr, fallback);
 }
 
-/** `safeFormatDate` under an explicit configuration, leaving the configured one alone. */
+
 export function createDateFormatter(config: DateFormattingConfig, options?: { jalaliMonthNames?: boolean }): DateFormatter {
     const formatting = resolveDateFormatting(config);
     return (dateStr, formatStr, fallback = '') => formatDateWith(formatting, dateStr, formatStr, fallback, options);
@@ -704,26 +675,12 @@ export function getCalendarDayOfMonth(
 const shortWeekdayLabelsCache = new Map<string, string[]>();
 function formatWeekdayLabels(locale: string | undefined, width: 'short' | 'narrow'): string[] {
     const formatter = new Intl.DateTimeFormat(locale, { weekday: width });
-    // Sunday 2023-01-01 plus `day`, built in the CURRENT time zone on each call: a Date made
-    // once at module load keeps the load-time zone, so after a zone change it formats as
-    // Saturday and every label shifts by a day.
+
+
     return Array.from({ length: 7 }, (_, day) => formatter.format(new Date(2023, 0, 1 + day)));
 }
 
-/**
- * Locale-appropriate weekday labels for a fixed-width 7-column header
- * (calendar mini-picker, week view). Index 0 is Sunday, so a caller with a
- * `Date` can index by `date.getDay()`, and a caller rendering its own
- * week-start rotation can index by `(weekStartIndex + i) % 7`.
- *
- * `Intl.DateTimeFormat`'s "short" weekday form is not translated by us — it's
- * whatever CLDR calls abbreviated for that locale, and for some locales
- * (pt-PT, ar, pl, vi, hi) that is too wide for a 7-column grid, or even the
- * full word (#929). Strip trailing periods, and if a label is still over
- * three characters, truncate every label to three graphemes — unless that
- * truncation makes two labels collide (ar, vi), in which case fall back to
- * `weekday: 'narrow'` for the whole set instead.
- */
+
 export function getShortWeekdayLabels(locale?: string): string[] {
     const cacheKey = locale ?? '';
     const cached = shortWeekdayLabelsCache.get(cacheKey);
@@ -741,14 +698,7 @@ export function getShortWeekdayLabels(locale?: string): string[] {
     return labels;
 }
 
-/**
- * The exact shape every timestamp core stamps has (`new Date().toISOString()`),
- * and the one the engine parses natively. `parseISO` accepts a much wider
- * grammar and walks it by hand, which cost two thirds of the whole derived-state
- * rebuild at a few thousand tasks (#766). Anything that does not match this —
- * date-only values above all, whose local-midnight handling lives below — falls
- * through to the general path unchanged.
- */
+
 const ISO_INSTANT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -757,28 +707,24 @@ function isGregorianLeapYear(year: number): boolean {
     return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
-// month is 1-indexed, matching the pattern's capture group.
+
 function isValidCalendarDate(year: number, month: number, day: number): boolean {
     if (month < 1 || month > 12) return false;
     const max = month === 2 && isGregorianLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1];
     return day >= 1 && day <= max;
 }
 
-/**
- * Safely parses a date string to a Date object.
- * Returns null if invalid.
- */
+
 export function safeParseDate(dateStr: string | undefined | null): Date | null {
     if (!dateStr) return null;
     try {
         const instantMatch = ISO_INSTANT_PATTERN.exec(dateStr);
-        // `Date.parse` rolls calendar-invalid instants like 2023-02-30 into
-        // a neighboring day instead of rejecting them; reject them here,
-        // cheaply, before taking the fast path.
+
+
         if (instantMatch && isValidCalendarDate(Number(instantMatch[1]), Number(instantMatch[2]), Number(instantMatch[3]))) {
             const parsed = Date.parse(dateStr);
-            // A NaN here means the engine declined a string this pattern
-            // accepted; the general path below still gets its turn.
+
+
             if (Number.isFinite(parsed)) return new Date(parsed);
         }
         const hasTimezone = /Z$|[+-]\d{2}:?\d{2}$/.test(dateStr);
@@ -788,8 +734,8 @@ export function safeParseDate(dateStr: string | undefined | null): Date | null {
                 const year = Number(match[1]);
                 const month = Number(match[2]) - 1;
                 const day = Number(match[3]);
-                // `new Date(y, m, d)` rolls 2024-02-31 into March 2 rather than
-                // rejecting it, same trap as the instant fast path above.
+
+
                 if (!isValidCalendarDate(year, month + 1, day)) return null;
                 const hour = match[4] ? Number(match[4]) : 0;
                 const minute = match[5] ? Number(match[5]) : 0;
@@ -812,17 +758,13 @@ export function safeParseDate(dateStr: string | undefined | null): Date | null {
     }
 }
 
-/**
- * Returns true if the provided date string includes an explicit time component.
- */
+
 export function hasTimeComponent(dateStr: string | undefined | null): boolean {
     if (!dateStr) return false;
     return /[T\s]\d{2}:\d{2}/.test(dateStr);
 }
 
-/**
- * Parses a due date string. If no time component is present, treat it as end-of-day.
- */
+
 export function safeParseDueDate(dateStr: string | undefined | null): Date | null {
     const parsed = safeParseDate(dateStr);
     if (!parsed) return null;
@@ -832,10 +774,7 @@ export function safeParseDueDate(dateStr: string | undefined | null): Date | nul
     return parsed;
 }
 
-/**
- * Returns true when the review date is set and due at or before the provided time.
- */
-// Clock: a review instant. A Focus model boundary: FOCUS_MODEL_CLOCK_READERS and getFocusModelValidUntil (focus-sections.ts).
+
 export function isDueForReview(reviewAt: string | Date | undefined | null, now: Date = new Date()): boolean {
     if (!reviewAt) return false;
     const date = typeof reviewAt === 'string' ? safeParseDate(reviewAt) : reviewAt;

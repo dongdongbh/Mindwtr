@@ -1,20 +1,6 @@
-// Mind Sweep, saved search, Focus picker search and Bulk organize create check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-sweep-saved-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays). A saved search and a task with two contexts are needed,
-// which the app cannot make, so the script stops the app once and, through core's own store on a host copy of the database, adds
-// this run's Next task (75 + run id + 1: two contexts) and a saved search for the run id, first in the list (named 75 + run id + 0).
-// Then it checks against core's own views on copies: (a) Mind Sweep adds two captures (75…2, 75…3) once each, as Inbox tasks under
-// their request UUIDs; the second under an injected failed commit stores nothing and its exact retry stores it once; (b) rotation and
-// process death keep the sweep's step and captures; (c) the saved search opens from the More sheet with core's rows, and its Delete,
-// after core's question, deletes it once; (d) Focus's contexts picker search finds core's match only; (e) Bulk organize creates an
-// area (75…4) from its picker and Apply stores it on the selected task in one write. An injected failure left owed when the check
-// stops is settled on exit through the app's Try again (MINDWTR_CHECK_THROW_AFTER_INJECT=1 stops it there on purpose, to prove
-// that cleanup), and a cleanup that cannot settle it says so. It changes no setting; it touches only the development package (it refuses any other APK), never launches over another app,
-// leaves the app on its Inbox tab, restores rotation and clears its debug properties on exit. Leave the device on its home screen.
-// It needs host `bun`. Prune earlier runs' tasks, area and saved search with check-projects-device.mjs --prune-old.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -46,7 +32,7 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/sweep-saved-check');
 const coreSrc = resolve(app, '../../packages/core/src');
 const { en } = await import(resolve(coreSrc, 'i18n/locales/en.ts'));
-// Digits only: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const names = {
     query: `75${run}`, search: `75${run}0`, task: `75${run}1`, captures: [`75${run}2`, `75${run}3`], area: `75${run}4`,
@@ -60,7 +46,7 @@ const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 const commands = (operation, outcome = 'saved') => device.logs(pid(), TAG).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes(`"operation":"${operation}"`) && line.includes(`"outcome":"${outcome}"`)).length;
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = (name = 'db') => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -69,11 +55,8 @@ const pullDatabase = (name = 'db') => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/**
- * Core on a copy: `inject` adds this run's task and saved search through core's store and checkpoints the WAL; `views` prints what
- * the check compares with: the Inbox's Mind Sweep label, the first two cue lists' titles, this run's tasks and area as stored, the
- * saved search (stored, and core's screen for it), and core's Focus contexts matching the run id.
- */
+
+
 const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, flushPendingSave, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -125,7 +108,7 @@ const core = (mode, db = pullDatabase()) => JSON.parse(execFileSync('bun', ['-e'
 `], { encoding: 'utf8', maxBuffer: 64 << 20, env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify(names), CHECK_SEARCH: injected?.search ?? '' } })
     .trim().split('\n').pop());
 
-// ---- UI (core's English) ----
+
 const onInbox = (nodes) => !tagged(nodes, 'menu-screen') && tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes));
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const inSweep = (nodes) => Boolean(tagged(nodes, 'mind-sweep'));
@@ -134,7 +117,7 @@ const captured = (nodes) => nodes.filter((node) => (node['resource-id'] ?? '').e
 const rowTitles = (nodes) => taskRows(nodes).sort((a, b) => box(a)[1] - box(b)[1]).map((node) => node.text);
 const selectedCount = (nodes) => Number(nodes.map((node) => new RegExp(`^(\\d+) ${en['bulk.selected']}$`).exec(node.text ?? '')?.[1]).find(Boolean) ?? NaN);
 const all = en['common.all'];
-/** The clickable around a node reading [label] (a dialog's title can read the same word as its button). */
+
 const clickableAround = (nodes, label) => {
     const area = (node) => { const [l, t, r, b] = box(node); return (r - l) * (b - t); };
     for (const labelNode of nodes.filter((node) => node.text === label || node['content-desc'] === label)) {
@@ -153,7 +136,7 @@ const hideKeyboard = async () => {
     sh('input keyevent KEYCODE_BACK');
     await waitFor('the keyboard to close', () => !/mInputShown=true/.test(sh('dumpsys input_method')), 5_000);
 };
-/** Types [text] into the field [node] (its end focused first) and waits until the field tagged [tag] reads it. */
+
 const typeInto = async (node, tag, text) => {
     await device.focusAtEnd(node ?? fail(`no field ${tag}`));
     requireAppFront();
@@ -185,25 +168,22 @@ const rotateKeeps = async (done, description) => {
     sh('settings put system user_rotation 0');
     return waitFor(`${description} in portrait`, done, 20_000);
 };
-/** Mind Sweep's Add for [title]: typed, Add waits for core's view of the text, then [expected]. */
+
 const sweepAdd = async (title, expected, description) => {
     await typeInto(tagged(await screen(), 'mind-sweep-input'), 'mind-sweep-input', title);
     const add = await waitFor('Add enabled for the text', (current) => tagged(current, 'mind-sweep-add')?.enabled === 'true', 10_000);
     return tapExpecting(tagged(add, 'mind-sweep-add'), expected, description);
 };
 
-/** The request a dead process or a failed save left on disk (MenuModel's create path). */
+
 const pendingOnDisk = () => sh(`run-as ${PKG} ls no_backup/menu 2>/dev/null || true`).split(/\s+/).includes('pending');
-/** An injected failure whose exact retry is still owed: named while it is, so cleanup can settle it. */
+
 let owed = null;
-/**
- * Cleanup for a check that stopped between a failure's injection and its retry: the fault cleared, that exact request sent again
- * through the app's Try again (after process death the app sends it itself), until the retry lock and the request on disk are gone.
- * A cleanup that cannot settle it says so loudly and fails the run.
- */
+
+
 const settleOwed = async () => {
     if (!owed) return;
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
     try {
         if (front().includes(`${home}/`)) device.launch(ACTIVITY);
         for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -226,9 +206,9 @@ const settleOwed = async () => {
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
     await settleOwed();
-    // Leave the app on its Inbox tab: the other checks start there.
+
     try {
         for (let step = 0; step < 5 && front().includes(`${PKG}/`); step += 1) {
             const nodes = await screen();
@@ -238,11 +218,11 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
 let injected;
@@ -254,7 +234,7 @@ try {
     const beforeInstall = front();
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
-    // Boot once (this build's schema), stop, add this run's task and saved search through core's store, and put the database back.
+
     device.launch(ACTIVITY);
     requireAppFront();
     sh('settings put system accelerometer_rotation 0');
@@ -272,7 +252,7 @@ try {
     let seen = core('views');
     check(seen.tasks[names.task].length === 1 && seen.searches === 1, `core stores ${names.task} (Next, two contexts) and the saved search ${names.search}`);
 
-    // (a) Mind Sweep from the Inbox: Start, then two captures; the second under a failed commit, stored once by its exact retry.
+
     let nodes = await device.settle(await device.toTop());
     nodes = await tapExpecting(withDescription(nodes, seen.sweep) ?? fail(`no "${seen.sweep}" on the Inbox`), inSweep, 'Mind Sweep');
     nodes = await tapExpecting(tagged(nodes, 'mind-sweep-start') ?? fail('no Start'), (current) => groupTitle(current) === seen.groups[0], 'the first cue list');
@@ -297,7 +277,7 @@ try {
     check(first.length === 1 && second.length === 1 && first[0].status === 'inbox' && second[0].status === 'inbox' && second[0].id === pending.id.toLowerCase(),
         `(a) both captures are Inbox tasks, once each; the retried one under its request UUID`);
 
-    // (b) Next, then rotation and process death keep the step; Back shows the first cue list's two captures.
+
     await hideKeyboard();
     nodes = await tapExpecting(tagged(await screen(), 'mind-sweep-next') ?? fail('no Next'), (current) => groupTitle(current) === seen.groups[1], 'the second cue list');
     await rotateKeeps((current) => groupTitle(current) === seen.groups[1], 'the second cue list');
@@ -307,7 +287,7 @@ try {
     check(true, '(b) rotation and process death keep the sweep\'s step and its captures');
     await tapExpecting(tagged(nodes, 'mind-sweep-close') ?? fail('no Close'), onInbox, 'Close');
 
-    // (c) The saved search from the More sheet: core's rows; Delete, after core's question, deletes it once.
+
     nodes = await tapExpecting(tab(await screen(), en['tab.menu']) ?? fail('no Menu tab'), sheetOpen, 'the More sheet');
     nodes = await device.settle(nodes);
     nodes = await tapExpecting(withDescription(nodes, names.search) ?? fail(`no saved search ${names.search} in the More sheet`),
@@ -322,7 +302,7 @@ try {
     await waitFor('the delete', () => commands('savedSearchDelete') === deletes + 1, 10_000);
     check(core('views').searches === 0, '(c) Delete, after core\'s question, deleted the saved search in one write');
 
-    // (d) Focus's contexts picker: its search finds core's match only.
+
     seen = core('views');
     check(JSON.stringify(seen.tokens) === JSON.stringify([names.context]), `core's Focus contexts matching ${names.query}: ${names.context}`);
     nodes = await tapExpecting(tab(await screen(), en['tab.next']) ?? fail('no Focus tab'), (current) => tabSelected(current, en['tab.next']), 'Focus');
@@ -339,7 +319,7 @@ try {
     nodes = await tapExpecting(button(await screen(), en['common.back']) ?? fail('no Back'), (current) => Boolean(withDescription(current, `${en['filters.contexts']}: ${all}`)), 'the sheet');
     await tapExpecting(button(nodes, en['common.done']) ?? fail('no Done'), (current) => !focusSheet(current), 'the sheet to close');
 
-    // (e) Bulk organize on the first capture: its area picker creates this run's area, and Apply stores it in one write.
+
     nodes = await tapExpecting(tab(await screen(), en['tab.inbox']), onInbox, 'the Inbox tab');
     nodes = await device.reveal(names.captures[0], 60);
     await device.settle(nodes);

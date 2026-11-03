@@ -5,7 +5,7 @@ import UIKit
 import MindwtrNativeCore
 import UserNotifications
 
-/// One immutable process snapshot, shared by startup and future early native response capture.
+
 enum NativeAppLaunch {
     static let arguments = ProcessInfo.processInfo.arguments
     static let selection: Result<NativeLaunchSelection, Error> = {
@@ -44,7 +44,7 @@ enum NativeAppLaunch {
     }
 }
 
-/// One pre-host owner; a failed open is retried only by a later explicit capture or startup.
+
 actor NativeNotificationResponses {
     struct Diagnostic: Sendable {
         let action: String
@@ -74,7 +74,7 @@ actor NativeNotificationResponses {
               try await capture(response) != nil else { throw CocoaError(.coderInvalidValue) }
         record(.open, outcome: "captured")
         await MainActor.run {
-            // The fixture must capture while More is open, rather than win a close/capture race.
+
             precondition(NativeAppModel.shared.morePresented)
             NativeAppModel.shared.requestNotificationResponses()
         }
@@ -216,7 +216,7 @@ struct MindwtrNativeApp: App {
     }
 }
 
-/// Device authentication only; the shared core owns the saved setting and its writes.
+
 @MainActor
 final class AppLockController: ObservableObject {
     @Published private(set) var enabled: Bool?
@@ -231,7 +231,7 @@ final class AppLockController: ObservableObject {
     private var successfulAuthenticationGeneration: Int?
     private var privacyCovers: [UIView] = []
 #if DEBUG && targetEnvironment(simulator)
-    // Configured only after CoreModel validates an isolated UUID test library.
+
     var testOutcomes: [String] = []
 #endif
     var concealed: Bool { enabled == nil || locked }
@@ -275,14 +275,14 @@ final class AppLockController: ObservableObject {
         let previous = phase
         phase = next
         if next == .active {
-            // Remove after SwiftUI has reconciled the locked tree, including any presented sheets.
+
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.phase == .active else { return }
                 self.privacyCovers.forEach { $0.removeFromSuperview() }
                 self.privacyCovers.removeAll()
             }
         }
-        // The system prompt makes the app inactive. Actual backgrounding cancels it.
+
         if next == .background {
             authenticationGeneration += 1
             context?.invalidate()
@@ -318,7 +318,7 @@ final class AppLockController: ObservableObject {
 #if DEBUG && targetEnvironment(simulator)
         if !testOutcomes.isEmpty {
             let outcome = testOutcomes.removeFirst()
-            // Exercise the system-prompt inactive/active exception without invoking biometrics.
+
             sceneChanged(.inactive)
             await Task.yield()
             sceneChanged(.active)
@@ -367,7 +367,7 @@ private struct AppLockRoot: View {
     @Environment(\.scenePhase) private var phase
     @Environment(\.colorScheme) private var scheme
     private var palette: AppPalette { AppPalette(theme: model.theme, system: scheme) }
-    // Match RN AppState: refresh the initial snapshot until a lifecycle event supersedes it.
+
     private var applicationActive: Bool {
         observedApplicationActive ?? (UIApplication.shared.applicationState == .active)
     }

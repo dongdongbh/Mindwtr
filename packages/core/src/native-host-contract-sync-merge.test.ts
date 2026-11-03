@@ -5,10 +5,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import type { AppData, Task } from './types';
 import { generateUUID } from './uuid';
 
-// RN f06e5d1f9 and 2093d9f1d: a save merges the draft onto the task as stored now, so a change another device
-// synced while the editor or Process Inbox was open stays, and the user's own edit stays too. The native contract
-// refused such a save (STALE_REVISION), and the editor's Retry then dropped the user's edit. A host opts in with
-// `mergeSyncedChanges`; without it the contract refuses as before.
+
 const T0 = '2026-09-01T00:00:00.000Z';
 const editTask = (): Task => ({
     id: 'edit', title: 'Opened', status: 'next', contexts: ['@old'], tags: ['#old'], description: 'Before',
@@ -24,13 +21,13 @@ describe('native saves keep a change synced while the draft was open', () => {
     let durable: AppData;
     let host: ReturnType<typeof createNativeHostContract>;
     const stored = (id: string) => useTaskStore.getState()._tasksById.get(id)!;
-    // Another device's change, as a sync save lands it: a newer revision from another writer.
+
     const syncedChange = async (id: string, updates: Partial<Task>) => {
         await flushPendingSave();
         durable = { ...durable, tasks: durable.tasks.map((item) => (item.id === id
             ? { ...item, ...updates, rev: (item.rev ?? 0) + 5, revBy: 'desktop', updatedAt: '2026-09-02T00:00:00.000Z' }
             : item)) };
-        // The store reloads the saved rows, as a sync save's publish does.
+
         await useTaskStore.getState().fetchData({ throwOnError: true });
     };
 
@@ -79,8 +76,7 @@ describe('native saves keep a change synced while the draft was open', () => {
         }));
     });
 
-    // Review of a55450375: the editor normalizes a stored tag (`work` → `#work`) without changing it; another device adds
-    // `#x`. The token merge then has nothing to write, and the save must leave the stored tags as they are.
+
     it('keeps a tag another device added when the editor only normalized the stored tags', async () => {
         await flushPendingSave();
         durable = { ...durable, tasks: durable.tasks.map((item) => (item.id === 'edit' ? { ...item, tags: ['work'] } : item)) };
@@ -110,7 +106,7 @@ describe('native saves keep a change synced while the draft was open', () => {
             .toMatchObject({ ok: true });
         expect(host.getInboxProcessingStep({ sessionId, taskId: 'inbox-a', step: 'later', edit: { type: 'setPickedDate', field: 'startTime', day: '2026-10-05' } }))
             .toMatchObject({ ok: true });
-        // Another device files a context on the item while the user is still on the Later step.
+
         await syncedChange('inbox-a', { contexts: ['@synced'] });
         return host.commitInboxProcessingStep({ sessionId, taskId: 'inbox-a', step: 'later', decision: { choice: 'fileIt' }, requestId: generateUUID() });
     };

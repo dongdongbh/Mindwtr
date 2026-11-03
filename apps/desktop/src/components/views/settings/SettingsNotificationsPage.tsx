@@ -152,10 +152,10 @@ export function SettingsNotificationsPage({
                     <p className="text-xs text-muted-foreground mt-1">{t.weeklyReviewDesc}</p>
                 </div>
 
-                {/* The group above carries the `weeklyReview` search key. */}
-                {/* Not gated on notificationsEnabled: the weekly review nudge fires
-                    independent of the task-reminder master switch, so its own toggle must
-                    stay operable even when that switch is off (matches mobile). */}
+                {                                                            }
+                {
+
+                                                                                   }
                 <SettingRow settingsKey={null} title={t.weeklyReview}>
                     <Switch
                         checked={weeklyReviewEnabled}

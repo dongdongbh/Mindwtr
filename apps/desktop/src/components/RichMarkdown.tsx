@@ -100,8 +100,7 @@ function CodeBlock({ children, className, ...props }: any) {
     );
 }
 
-// Markdown parsing runs during render; a bad regex or plugin failure on one
-// task's notes must degrade to plain text, not take down the whole view.
+
 class MarkdownFallbackBoundary extends Component<{ markdown: string; children: ReactNode }, { failed: boolean }> {
     state = { failed: false };
 
@@ -136,10 +135,10 @@ export function RichMarkdown({ markdown, attachments }: { markdown: string; atta
                     const id = /^mindwtr:\/\/attachment\/([a-zA-Z0-9-]+)$/.exec(src || '')?.[1];
                     const attachment = id && attachments?.find((item) => item.id === id);
                     const uri = attachment ? resolveAttachmentOpenTarget(attachment.uri) : '';
-                    // Browsers strip leading controls before resolving URLs; reject them before classification.
+
                     // eslint-disable-next-line no-control-regex
                     const hasControlCharacters = /[\u0000-\u001f\u007f]/.test(`${attachment ? attachment.uri : ''}${uri}`);
-                    // Only task-owned files render; remote image URLs stay blocked to avoid tracking.
+
                     if (!attachment || attachment.deletedAt || attachment.kind !== 'file'
                         || !isImageAttachment(attachment)
                         || hasControlCharacters

@@ -46,7 +46,7 @@ const token = (project: Project, selectedField: NativeProjectDateField): NativeP
 const result = (request: NativeProjectDateRequest): NativeProjectDateResult =>
     ({ id: request.projectId, field: request.field, value: request.value });
 
-/** Legacy null date fields may be in a live pre-hydration row; preserve them in the frozen scope. */
+
 const validDateProject = (value: unknown, projectId: string): value is Project => {
     if (!record(value) || !rawDate(value.startDate ?? null) || !rawDate(value.dueDate ?? null)) return false;
     return validProject({ ...value, startDate: value.startDate ?? undefined,
@@ -74,7 +74,7 @@ const readRequest = (value: unknown): NativeProjectDateRequest | null => {
         && iso(expected.updatedAt) ? input as NativeProjectDateRequest : null;
 };
 
-/** Pure cold-journal validation before SQL or a mutable store check. */
+
 const readPrepared = (value: unknown): NativePreparedProjectDate | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

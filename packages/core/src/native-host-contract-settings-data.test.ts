@@ -6,7 +6,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import type { AppSettings } from './types';
 import { generateUUID } from './uuid';
 
-/** Settings › Data's Diagnostics card (RN's SyncDiagnosticsCard and toggleDebugLogging) through the native host contract. */
+
 const value = <T,>(result: NativeHostResult<T>): T => {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
     return result.value;
@@ -81,7 +81,7 @@ describe('native host contract: Settings › Data', () => {
         await flushPendingSave();
         expect(saved?.settings.diagnostics).toEqual({ loggingEnabled: true, kept: 'yes' });
         expect(enabledLines()).toEqual([{ level: 'info', message: 'Debug logging enabled', scope: 'diagnostics', force: true }]);
-        // The exact retry and a second switch to on write nothing and log nothing.
+
         expect(value(await host.setDataSetting({ requestId, edit }))).toEqual({ changed: true, deviceWrites: [] });
         expect(value(await host.setDataSetting({ requestId: generateUUID(), edit }))).toEqual({ changed: false, deviceWrites: [] });
         expect(enabledLines()).toHaveLength(1);

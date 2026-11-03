@@ -178,8 +178,7 @@ describe('buildTaskUpdatesFromSpeechResult', () => {
         expect(plan.updates.title).toBe('Buy [AAA] batteries');
     });
 
-    // A date with no clock time must stay date-only: a stored time schedules a
-    // reminder and makes the task due at that minute instead of end of day.
+
     const speechPlan = (result: { dueDate?: string; startTime?: string }) => buildTaskUpdatesFromSpeechResult(
         {
             title: 'Audio Note',

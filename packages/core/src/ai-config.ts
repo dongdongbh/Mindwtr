@@ -58,7 +58,7 @@ export async function saveAIKeyToStorage(storage: KeyValueStorageAsync, provider
     await storage.setItem(key, value);
 }
 
-/** A provider's key in the keystore: the storage key with only [A-Za-z0-9._-] (`mindwtr-ai-key_<provider>`). */
+
 export const getAIKeySecretName = (provider: AIProviderId): string => getAIKeyStorageKey(provider).replace(/[^A-Za-z0-9._-]/g, '_');
 
 export type AIKeyStore = {
@@ -66,13 +66,7 @@ export type AIKeyStore = {
     save(provider: AIProviderId, value: string): Promise<void>;
 };
 
-/**
- * The mobile apps' AI keys (React Native's ai-config.ts, and the native host): the platform
- * keystore under getAIKeySecretName, written `when-unlocked`. A key found in the old plaintext
- * key-value slot (getAIKeyStorageKey) moves into the keystore on first read, and the plaintext
- * copy is removed. When the keystore is unsupported a key lives in memory for this process only
- * (the vault), and is never written in plaintext. Sandbox mode reads and writes nothing.
- */
+
 export function createAIKeyStore({ storage, secrets, vault }: {
     storage: KeyValueStorageAsync;
     secrets: Pick<SyncSecretStoragePort, 'getItem' | 'setItem' | 'deleteItem'>;
@@ -145,9 +139,7 @@ const resolveOpenAIEndpoint = (baseUrl?: string): string | undefined => {
     return `${normalized}${OPENAI_CHAT_COMPLETIONS_PATH}`;
 };
 
-// The user pastes a root ending in /v1 (the convention the chat base-URL
-// field already teaches) — never guess at /v1 if they left it off, that is
-// their server's shape, not ours to invent.
+
 export const resolveOpenAITranscribeEndpoint = (baseUrl?: string): string => {
     const trimmed = String(baseUrl || '').trim();
     if (!trimmed) return OPENAI_TRANSCRIBE_URL;
@@ -159,10 +151,7 @@ export const resolveOpenAITranscribeEndpoint = (baseUrl?: string): string => {
     return `${normalized}${OPENAI_TRANSCRIBE_PATH}`;
 };
 
-// gpt-transcribe-generation models take a `languages` array (multipart field
-// `languages[]`); earlier models (whisper-1, gpt-4o-*-transcribe) take a
-// singular `language`. Desktop and mobile both build this form, so the choice
-// lives once here.
+
 export const openAITranscribeLanguageFieldName = (model: string): 'languages[]' | 'language' => (
     model.startsWith('gpt-transcribe') ? 'languages[]' : 'language'
 );
@@ -224,7 +213,7 @@ export function buildAIConfig(settings: AppData['settings'], apiKey: string): AI
     };
 }
 
-/** Whether the AI provider needs an API key: every one but OpenAI at an OpenAI-compatible endpoint; none in sandbox mode. */
+
 export function isAIKeyRequired(settings: AppData['settings'] | undefined): boolean {
     if (isSandboxMode()) return false;
     const config = buildAIConfig(settings ?? {}, '');

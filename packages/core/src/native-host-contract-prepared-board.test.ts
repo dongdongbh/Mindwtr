@@ -194,7 +194,7 @@ describe('native prepared Board actions', () => {
         await useTaskStore.getState().deleteTask('n-draft');
         await flushPendingSave();
         const landed = clone(useTaskStore.getState()._allTasks);
-        // Native startup invokes this pure check even for a terminal cleanup journal.
+
         expect(value(createNativeHostContract().validatePreparedBoardAction({ request: legacy.request, prepared: legacy })))
             .toEqual(legacy.result);
         expect(value(await commit(await restart(), legacy))).toEqual(legacy.result);
@@ -259,7 +259,7 @@ describe('native prepared Board actions', () => {
         } else if (dependency === 'boardOrder') {
             await useTaskStore.getState().updateTask('n-rent', { boardOrder: prepared.before.boardOrder! + 1 });
         } else {
-            // Simulate an incoming container tombstone without altering the source row.
+
             useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((project) => project.id === prepared.before.projectId
                 ? { ...project, deletedAt: fixture.now, rev: (project.rev ?? 0) + 1 } : project) }));
             await useTaskStore.getState().persistSnapshot();

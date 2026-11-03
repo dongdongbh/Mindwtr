@@ -5,8 +5,8 @@ import { LanguageProvider } from '../contexts/language-context';
 import { useUiStore } from '../store/ui-store';
 import { GlobalSearch } from './GlobalSearch';
 import { registerTaskEditExitRequest } from './Task/task-edit-session';
-// Not re-exported from the core barrel; see focused-count-selector.test.ts
-// for why the relative path (not a re-export) is used here.
+
+
 import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
 
 const initialTaskState = useTaskStore.getState();
@@ -135,9 +135,7 @@ describe('GlobalSearch', () => {
         else expect(searchAll).not.toHaveBeenCalled();
     });
 
-    // Tripwire for #957: the panel ran past the bottom of a short window with the
-    // filter panel open and nothing to scroll. jsdom cannot measure layout, so pin
-    // the three declarations the fix depends on instead.
+
     it('bounds the dialog height and keeps the filter and result regions scrollable', async () => {
         render(
             <LanguageProvider>
@@ -150,8 +148,7 @@ describe('GlobalSearch', () => {
             await vi.advanceTimersByTimeAsync(50);
         });
 
-        // role="dialog" sits on the Dialog panel itself; the scrim around it is
-        // presentational.
+
         const panel = screen.getByRole('dialog');
         expect(panel.className).toContain('max-h-[76vh]');
 
@@ -167,8 +164,7 @@ describe('GlobalSearch', () => {
             expect(region.className).toContain('min-h-0');
         }
 
-        // …and the empty-results hint gives its ~100px to the filter panel rather
-        // than making it scroll while nothing is on screen below it (#957).
+
         expect(screen.queryByText('Type to search...')).not.toBeInTheDocument();
 
         await act(async () => {
@@ -178,9 +174,7 @@ describe('GlobalSearch', () => {
         expect(screen.getByText('Type to search...')).toBeInTheDocument();
     });
 
-    // Queries are operators and partial words; macOS WebKit applied system
-    // auto-capitalization to the query input when nothing declared otherwise
-    // (#1019). jsdom cannot exercise the OS behavior, so pin the declarations.
+
     it('declares the query input off-limits to OS autocorrect and auto-capitalization', async () => {
         render(
             <LanguageProvider>
@@ -474,8 +468,7 @@ describe('GlobalSearch', () => {
         expect(screen.getByRole('button', { name: 'Due date: Tomorrow' })).toBeInTheDocument();
     });
 
-    // Opened over the Done or Archived view, search must find the finished
-    // tasks the user is looking at — hiding them there read as broken (#1019).
+
     it('includes finished tasks from the start when opened with that default', async () => {
         render(
             <LanguageProvider>
@@ -542,9 +535,9 @@ describe('GlobalSearch', () => {
         expect(screen.queryByText('Include Done and Archived tasks')).not.toBeInTheDocument();
     });
 
-    // Closing mid-composition unmounts the input before compositionend, so the
-    // composing flag must not survive into the next open and swallow typing,
-    // Enter and the arrow keys there.
+
+
+
     it('keeps Escape for the IME and answers typing and arrows after a reopen that cut off a composition', async () => {
         const searchAll = vi.fn(async (value: string) => ({
             tasks: tasks.filter((task) => task.title.toLowerCase().includes(value.toLowerCase())),
@@ -582,9 +575,9 @@ describe('GlobalSearch', () => {
         expect(rows()[1]).toHaveClass('bg-accent');
     });
 
-    // A project workspace never lists archived tasks and hides done ones unless
-    // that project has them switched on, so routing a finished task there sent
-    // the user to a page that could not show it (#991).
+
+
+
     describe('routing a task that belongs to a project', () => {
         const projectTask: Task = {
             id: 'project-task',
@@ -640,8 +633,7 @@ describe('GlobalSearch', () => {
         });
     });
 
-    // A bare date on a search row cannot say whether it is a deadline or a
-    // record of when the work finished (#991).
+
     describe('result dates', () => {
         const base: Task = {
             id: 'seed',
@@ -687,7 +679,7 @@ describe('GlobalSearch', () => {
                 await vi.advanceTimersByTimeAsync(200);
                 await Promise.resolve();
             });
-            // Done and Archived are filtered out of search by default.
+
             await act(async () => {
                 fireEvent.click(screen.getByRole('button', { name: 'Filters' }));
                 await vi.advanceTimersByTimeAsync(50);
@@ -703,7 +695,7 @@ describe('GlobalSearch', () => {
 
             const label = `Completed ${safeFormatDate(completedAt, 'Pp')}`;
             expect(rowFor('Zeta done').textContent).toContain(label);
-            // A status gate that only checks 'done' misses archived (#968).
+
             expect(rowFor('Zeta archived').textContent).toContain(label);
             expect(rowFor('Zeta cancelled').textContent)
                 .toContain(`Cancelled ${safeFormatDate(completedAt, 'Pp')}`);
@@ -717,7 +709,7 @@ describe('GlobalSearch', () => {
                 .toContain(`Due ${safeFormatDate('2099-01-01', 'P')}`);
             expect(within(rowFor('Zeta due')).getByText(/^Due /).className)
                 .toContain('text-muted-foreground');
-            // Red is reserved for a date that has passed (#640).
+
             expect(within(rowFor('Zeta overdue')).getByText(/^Due /).className)
                 .toContain('text-destructive');
         });
@@ -726,17 +718,13 @@ describe('GlobalSearch', () => {
             await searchZeta();
 
             expect(rowFor('Zeta plain').textContent).not.toMatch(/Due|Completed/);
-            // Finished with nothing to report: no fallback to the due date.
+
             expect(rowFor('Zeta unstamped').textContent).not.toMatch(/Due|Completed/);
         });
     });
 });
 
-// PERF-01: the closed search dialog is mounted at the app root and used to
-// call getDerivedState() unconditionally in its render body, so every task
-// write paid the full derived-state rebuild (12ms at 5k tasks, see plan
-// 073) for an overlay nobody could see. The gate is `isOpen ? getDerivedState()
-// : EMPTY_SEARCH_DERIVED` in GlobalSearch.tsx.
+
 describe('GlobalSearch closed-overlay derived-state gating (PERF-01)', () => {
     const BASE_ISO = '2026-05-01T09:00:00.000Z';
     const bigTasks: Task[] = Array.from({ length: 7_000 }, (_, index) => ({
@@ -781,11 +769,7 @@ describe('GlobalSearch closed-overlay derived-state gating (PERF-01)', () => {
         expect(profile?.derivedRebuildCount).toBe(0);
     });
 
-    // Canary proving the profiler actually catches this regression class:
-    // the pre-fix render body read getDerivedState() every render regardless
-    // of isOpen. Subscribing that exact shape directly (rather than through
-    // the component) shows the write above would have failed loudly had the
-    // gate been missing (red first).
+
     it('rebuilds when a listener reads getDerivedState() unconditionally (old shape)', async () => {
         const unsubscribe = useTaskStore.subscribe((state) => state.getDerivedState());
         beginNotifyProfile();

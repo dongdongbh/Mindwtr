@@ -8,8 +8,7 @@ public struct NativeBackupExport: Sendable, Identifiable {
     public let url: URL
 }
 
-/// Each share owns a different file. A later export never replaces bytes being shared.
-/// All filesystem names except the strictly checked core filename are native-owned.
+
 final class NativeBackupExportFile {
     private let root: URL
     private var owned: [UUID: (parent: Int32, directory: Int32, name: String)] = [:]
@@ -71,15 +70,14 @@ final class NativeBackupExportFile {
 
     func discard(_ id: UUID) {
         guard let file = owned.removeValue(forKey: id) else { return }
-        // Never recurse or follow links, including on a failed write.
+
         Darwin.unlinkat(file.directory, file.name, 0)
         Darwin.close(file.directory)
         Darwin.unlinkat(file.parent, "backup-export-" + id.uuidString.lowercased(), AT_REMOVEDIR)
         Darwin.close(file.parent)
     }
 
-    /// Startup only, after CoreHost has acquired this library's exclusive host lock.
-    /// An interrupted share cannot still have a live owner at that point.
+
     func discardInterruptedExports() throws {
         guard owned.isEmpty else { return }
         let parent = try openRoot()
@@ -91,7 +89,7 @@ final class NativeBackupExportFile {
             guard directory >= 0 else { continue }
             defer { Darwin.close(directory) }
             let children = try names(directory)
-            // Refuse unknown content; never recurse, follow a link, or remove another file family.
+
             guard children.allSatisfy({ Self.isBackupName($0) }), children.allSatisfy({ child in
                 var info = stat()
                 return Darwin.fstatat(directory, child, &info, AT_SYMLINK_NOFOLLOW) == 0

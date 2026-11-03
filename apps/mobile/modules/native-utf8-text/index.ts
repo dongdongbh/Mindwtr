@@ -2,7 +2,7 @@ import { requireOptionalNativeModule } from 'expo-modules-core';
 import { Platform } from 'react-native';
 
 export interface NativeUtf8TextNative {
-    /** Strict UTF-8 text of a base64 body, as TextDecoder would give it; null when the bytes are not valid UTF-8. */
+
     decodeBase64Utf8(base64: string): string | null;
 }
 

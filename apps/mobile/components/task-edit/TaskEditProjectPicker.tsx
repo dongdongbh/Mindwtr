@@ -74,7 +74,7 @@ export function TaskEditProjectPicker({
         () => getProjectChoiceState(projects, projectQuery, allProjects ?? projects),
         [allProjects, projectQuery, projects],
     );
-    // Active projects first, then Someday / Waiting under a heading (#1467); matches are grouped the same way.
+
     const areas = useTaskStore((state) => state.areas);
     const projectGroups = useMemo(() => groupProjectsForPicker(filteredProjects, areas), [areas, filteredProjects]);
 

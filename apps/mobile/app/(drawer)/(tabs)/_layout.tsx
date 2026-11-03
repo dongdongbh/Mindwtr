@@ -305,8 +305,8 @@ function MoreNavigationSheet({
       animateOpen();
       return;
     }
-    // A live resize must update the hiding distance and bounds without replaying
-    // the entrance animation or leaving the menu at a cached screen position.
+
+
     sheetTranslateY.setValue(0);
   }, [animateOpen, hiddenTranslateY, sheetTranslateY, visible]);
 
@@ -318,7 +318,7 @@ function MoreNavigationSheet({
 
   if (!visible) return null;
 
-  // Destinations, order, labels and icons come from core, shared with the native host.
+
   const menu = buildMoreMenuModel({ quickAccessView, savedSearches, t });
   const primaryItems = menu.primary.map(toMoreDestination);
   const secondaryItems = menu.utilities.map(toMoreDestination);
@@ -342,8 +342,8 @@ function MoreNavigationSheet({
             {
               backgroundColor: tc.cardBg,
               borderColor: tc.border,
-              // Keep the rounded Android surface opaque through its final
-              // pixel instead of exposing the screen at the tab-bar seam.
+
+
               borderBottomColor: constrainedSheetStyle ? tc.border : tc.cardBg,
               bottom: 0,
               transform: [{ translateY: sheetTranslateY }],
@@ -634,7 +634,7 @@ export default function TabLayout() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const adaptiveWindow = useAdaptiveWindow();
-  // The root layout's provider, which presents capture as a pushed route.
+
   const { openQuickCapture: openRouteQuickCapture } = useQuickCapture();
   const settings = useTaskStore((state) => state.settings);
   const { selectedAreaIdForNewTasks } = useMobileAreaFilter();
@@ -650,7 +650,7 @@ export default function TabLayout() {
   const tabItemTopOffset = Platform.OS === 'ios' ? 0 : -2;
   const tabBarHeight = 66 + tabBarBottomInset;
   const iconLift = 0;
-  // Undo toasts must sit above the tab bar, not on top of it (#1044).
+
   useToastBottomOffset(adaptiveWindow.isExpanded ? 0 : tabBarHeight + tabBarBottomOffset);
   const [captureState, setCaptureState] = useState<{
     visible: boolean;
@@ -683,8 +683,8 @@ export default function TabLayout() {
       openRequestId: current.openRequestId + 1,
       initialValue: recovered.initialValue,
       initialProps: recovered.initialProps,
-      // A recreation must not restart a recording or duplicate an intent-owned
-      // capture. The recovered sheet returns as an editable text draft.
+
+
       autoRecord: false,
     }));
   }, []);
@@ -737,18 +737,15 @@ export default function TabLayout() {
 
   const openQuickCapture = useCallback((options?: QuickCaptureOptions) => {
     setTabCaptureRecoveryEnabled(true);
-    // A capture that promises to return somewhere (project quick add, #938)
-    // needs a real route change: its caller dismisses UI and restores it on
-    // the focus event when capture pops. The tab sheet opens in place — no
-    // blur, no focus — so returnTo captures go through the root capture
-    // screen instead of stranding the caller on its base screen.
+
+
     if (options?.returnTo) {
       openRouteQuickCapture({ ...options, initialProps: withSelectedArea(options.initialProps) });
       return;
     }
     beginCaptureProfile();
     setCaptureState((prev) => {
-      // Repeated system entry points resume the sheet without resetting its draft.
+
       if (options?.preserveDraft && prev.visible) return prev;
       return {
         visible: true,
@@ -806,11 +803,8 @@ export default function TabLayout() {
 
   const iconTint = tc.tabIconSelected;
   const inactiveTint = tc.tabIconDefault;
-  // Material 3: capture is Mindwtr's most important action, so the FAB uses the
-  // high-emphasis M3 FAB role (primary/onPrimary) rather than the deliberately
-  // subdued primaryContainer — keeping it the visual top of the action hierarchy.
-  // Other primary buttons stay primaryContainer (canonical). Non-Material themes
-  // keep today's primary tint + 10px radius. M3 also applies the "large" radius.
+
+
   const captureBg = tokens.isMaterial && tokens.roles ? tokens.roles.primary : tc.tint;
   const captureFg = tokens.isMaterial && tokens.roles ? tokens.roles.onPrimary : tc.onTint;
   const captureRadius = tokens.isMaterial ? tokens.shape.large : 10;

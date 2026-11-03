@@ -29,8 +29,8 @@ describe('Android context/tag widget selection', () => {
         ];
         const focusFilter = { criteria: { contexts: ['@home'] }, sortBy: 'default' as const };
         const chosenLists = (lists: Record<string, unknown>) => Object.keys(lists).filter((id) => /^(context|tag|filter):/.test(id)).sort();
-        // A list for every label made each refresh grow with the number of labels (#1399). A list the
-        // chooser picks shows under its name, empty, until the app's next publication builds it.
+
+
         const unplaced = buildAndroidWidgetPublication(source, 'en', { listSelections: [], focusFilter });
         expect(chosenLists(unplaced.lists)).toEqual([]);
         expect(ids(unplaced.contexts!)).toEqual(['context:@desk', 'context:@desk/deep', 'context:@home']);

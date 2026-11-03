@@ -1,18 +1,6 @@
-/**
- * React Native's Inbox tab (its TaskList toolbar, groups, filters and chips, and
- * the screen's own Process and Mind Sweep entries), replayed against the frozen
- * parity fixture that core's Inbox model and the native host contract are tested
- * against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit or stash every other change first, then run
- *   MINDWTR_CAPTURE_INBOX_VIEW=1 MINDWTR_CAPTURE_INBOX_VIEW_COMMIT=$(git rev-parse HEAD) bunx vitest run components/task-list/inbox-view-parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code, so the provenance always names the code that ran.
- * Each scenario renders the real screen with the real core store and the real
- * list header, drives it through its own controls and handlers, and records what
- * a user sees and what the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -121,8 +109,6 @@ vi.mock('../list-overflow-menu', () => ({
   ListOverflowMenu: (props: any) => React.createElement('ListOverflowMenu', props),
 }));
 
-// ---------------------------------------------------------------------------
-// Inputs
 
 export const TIME_ZONE = 'America/New_York';
 export const NOW = '2026-09-24T14:00:00.000Z';
@@ -167,7 +153,7 @@ const tasks: Task[] = [
   task('n-a', 'Draft launch post', 'next', '19', { projectId: 'p-launch', contexts: ['@phone'] }),
   task('d-a', 'Filed taxes', 'done', '15', { completedAt: '2026-09-23T10:00:00.000Z' }),
 ];
-/** Plain inbox captures for the Process count at 99 and 100. */
+
 const extraTasks: Task[] = Array.from({ length: 100 }, (_, index) => {
   const n = String(index + 1).padStart(3, '0');
   return task(`x-${n}`, `Capture ${n}`, 'inbox', String(1 + (index % 28)).padStart(2, '0'));
@@ -192,9 +178,9 @@ export type InboxViewAction =
 export type InboxViewScenario = {
   name: string;
   settings: string;
-  /** Task ids left out of the store for this scenario. */
+
   omit?: string[];
-  /** How many of `extraTasks` join the store. */
+
   extra?: number;
   actions: InboxViewAction[];
 };
@@ -252,8 +238,6 @@ export const scenarios: InboxViewScenario[] = [
   { name: 'inbox: 100 tasks', settings: 'base', omit: INBOX_IDS, extra: 100, actions: [['filter', 'search', 'Capture 00']] },
 ];
 
-// ---------------------------------------------------------------------------
-// Harness
 
 const t = (key: string) => english.strings[key] ?? key;
 const writeLog: unknown[] = [];
@@ -315,7 +299,7 @@ const renderElement = (element: unknown): ReactTestRenderer | null => {
   });
   return renderer;
 };
-/** A button as a user meets it: what a screen reader says, what it shows, and whether it reads as selected. */
+
 const buttonOf = (node: ReactTestInstance) => [
   node.props.accessibilityLabel ?? null,
   textOf(node),
@@ -335,7 +319,7 @@ const observe = (root: ReactTestInstance) => {
   const sheet = hostOf(root, 'TaskFilterSheet')[0];
   const { options, selections } = sheet.props;
   const observation = {
-    // A task row ends with whether it opens read-only (its project was archived or deleted).
+
     items: (flat.props.data as Record<string, any>[]).map((item) => (item.type === 'section'
       ? ['section', item.id, item.title, item.count, item.muted === true, item.collapsible === true, item.collapsed === true]
       : ['task', item.task.id, item.groupId ?? null, rowOf(flat, item).interactionDisabled === true])),
@@ -349,10 +333,10 @@ const observe = (root: ReactTestInstance) => {
       filterActiveCount: header.props.filterActiveCount,
       hasActiveFilters: header.props.hasActiveFilters,
       chips: header.props.activeFilterChips.map((chip: { id: string; label: string; excluded?: boolean }) => [chip.id, chip.label, chip.excluded === true]),
-      // The direct controls, the Mind Sweep pill, the chips and their Clear, in screen order.
+
       buttons: headerButtons.map(buttonOf),
     },
-    // Process Inbox, or Mind Sweep promoted when the Inbox is empty.
+
     primary: hostOf(root, 'TouchableOpacity').filter((node) => !headerButtons.includes(node)).map(buttonOf),
     scope: scope ? hostOf(scope.root, 'Text').map(textOf).filter(Boolean) : [],
     empty: { message: emptyElement.props.message, hint: emptyElement.props.hint ?? null, actionLabel: emptyElement.props.actionLabel ?? null },
@@ -383,7 +367,7 @@ async function openAndReadModal(root: ReactTestInstance, open: () => void, title
   return modal;
 }
 
-/** The sort and group sheets' choices: [value, label, selected] and [label, selected]. */
+
 async function listOptions(root: ReactTestInstance) {
   const header = () => byName(root, 'TaskListHeader')[0];
   const sortModal = await openAndReadModal(root, header().props.onOpenSort, t('sort.label'));
@@ -443,7 +427,7 @@ async function runAction(root: ReactTestInstance, action: InboxViewAction) {
       await act(async () => { selections().setMatchMode(action[1], action[2]); });
       return;
     case 'clearChip': {
-      // The header's chip, as a user taps it.
+
       const chip = header().props.activeFilterChips.find((entry: { id: string }) => entry.id === action[1]);
       if (!chip) throw new Error(`No chip ${action[1]}`);
       await act(async () => { chip.onPress(); });
@@ -475,7 +459,7 @@ async function runScenario(scenario: InboxViewScenario) {
   const root = renderer.root;
   const snapshot = () => normalize(observe(root)) as Record<string, unknown>;
 
-  // Token options are only built while the filter sheet is open; keep it open.
+
   await act(async () => { byName(root, 'TaskListHeader')[0].props.onOpenFilters(); });
   const observations: Record<string, unknown>[] = [];
   const first = snapshot();
@@ -495,10 +479,7 @@ async function runScenario(scenario: InboxViewScenario) {
   return observations;
 }
 
-/**
- * The commit a recapture runs at. It must be declared, equal HEAD, and the checkout
- * must hold no other change than this harness and its fixture.
- */
+
 function captureProvenance() {
   const git = (...args: string[]) => execFileSync('git', args, { cwd: new URL('.', import.meta.url).pathname, encoding: 'utf8' });
   const head = git('rev-parse', 'HEAD').trim();
@@ -520,7 +501,7 @@ function captureProvenance() {
 describe('React Native Inbox parity fixture', () => {
   const originalTz = process.env.TZ;
   beforeAll(async () => {
-    // Some screens rely on the app's automatic JSX runtime; the test transform may emit classic calls.
+
     (globalThis as { React?: typeof React }).React = React;
     process.env.TZ = TIME_ZONE;
     vi.useFakeTimers({ toFake: ['Date'] });

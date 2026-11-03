@@ -3,7 +3,7 @@ import CryptoKit
 import Foundation
 import UserNotifications
 
-/// Pure conversion of the core schedule intent; publication and durable ownership live elsewhere.
+
 enum NativePomodoroRequest {
     struct Identity: Equatable, Sendable {
         let namespace: String

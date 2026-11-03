@@ -37,7 +37,7 @@ describe('sync-encryption diagnostics helpers', () => {
         expect(syncEncryptionSaltPrefix('AB'.repeat(16))).toBe('abababab');
         expect(syncEncryptionSaltPrefix(undefined)).toBe('-');
         expect(syncEncryptionSaltPrefix(new Uint8Array(0))).toBe('-');
-        // Not hex: refuse rather than print whatever was handed in.
+
         expect(syncEncryptionSaltPrefix('correct horse battery')).toBe('-');
     });
 
@@ -58,7 +58,7 @@ describe('sync-encryption diagnostics helpers', () => {
         expect(label).not.toContain('alice');
         expect(label).not.toContain('dav.example.com');
 
-        // Same location, same label — the whole point is comparing two scopes in one log.
+
         expect(syncEncryptionScopeLabel(fileScope)).toBe(syncEncryptionScopeLabel(fileScope));
         expect(syncEncryptionScopeLabel(fileScope)).not.toBe(syncEncryptionScopeLabel('["file","/other/data.json"]'));
         expect(syncEncryptionScopeLabel(null)).toBe('-');
@@ -82,8 +82,8 @@ describe('sync-encryption diagnostics helpers', () => {
 });
 
 describe('sync-encryption diagnostics field maps', () => {
-    // The trap this test exists for: core's log sanitizer redacts any field whose NAME
-    // contains "key", so a field called `hasKey` would reach every log as "[redacted]".
+
+
     it('keeps the material flag readable where a "key"-named field would be redacted', () => {
         expect(sanitizeLogContext({ hasKey: 'true' })?.hasKey).toBe('[redacted]');
         expect(buildSyncEncryptionStateExtra({
@@ -169,10 +169,8 @@ describe('sync-encryption diagnostics field maps', () => {
     });
 
     it('scrubs a credentialed URL out of a foreign error message before clamping it', () => {
-        // The typed SyncEncryption*Error messages are fixed strings, but the transition
-        // wrappers log the message of ANY thrown error, and that line is written with `force`.
-        // `sanitizeLogContext` already scrubs http(s) userinfo on the way out; any OTHER
-        // scheme reaches the log untouched unless this builder scrubs it first.
+
+
         const extra = buildSyncEncryptionTransitionExtra({
             kind: 'enable',
             backend: 'webdav',

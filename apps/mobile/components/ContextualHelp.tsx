@@ -11,7 +11,7 @@ type Props = {
     tc: Pick<ThemeColors, 'secondaryText' | 'filterBg' | 'tint' | 'danger'>;
 };
 
-/** The (?) control that sits in a section header and toggles that section's help text. */
+
 export function ContextualHelpButton({ topic, t, tc, expanded, onPress }: Props & { expanded: boolean; onPress: () => void }) {
     return (
         <Pressable accessibilityRole="button" accessibilityState={{ expanded }}
@@ -23,7 +23,7 @@ export function ContextualHelpButton({ topic, t, tc, expanded, onPress }: Props 
     );
 }
 
-/** The help text shown under the section header, with a link to the guide. */
+
 export function ContextualHelpBody({ topic, t, tc }: Props) {
     const { language } = useLanguage();
     const [error, setError] = useState(false);

@@ -42,10 +42,7 @@ const dataMetadataCache = new Map<string, DataMetadataCacheEntry>();
 const validatedDataCache = new Map<string, DataFileIdentity>();
 const parsedDataCache = new Map<string, ParsedDataCacheEntry>();
 
-// The app-data caches are process-local and are valid only when callers respect
-// the cloud write lock. Cross-process deployments are still safe because every
-// cache hit is rechecked against the file's stat identity after atomic rename;
-// uncoordinated writers can defeat that invariant and are unsupported.
+
 const getDataFileIdentity = (filePath: string): DataFileIdentity | null => {
     try {
         const stat = lstatSync(filePath);
@@ -140,13 +137,7 @@ export const loadAppData = (filePath: string): AppData => {
     return data;
 };
 
-/**
- * Same cache as loadAppData, but for write paths that must not treat "the document
- * exists but couldn't be read" as an empty namespace (see loadAppDataForWriteUncached
- * in server-storage.ts). A cache hit already proves the file parsed cleanly on a
- * previous read, so only an actual cache miss touches disk through the discriminated
- * loader.
- */
+
 export const loadAppDataForWrite = (filePath: string): AppDataForWriteResult => {
     const identity = getDataFileIdentity(filePath);
     const cached = parsedDataCache.get(filePath);
@@ -165,13 +156,7 @@ export const loadAppDataForWrite = (filePath: string): AppDataForWriteResult => 
     return result;
 };
 
-/**
- * Guards every namespace-data read (REST reads/writes, search, the calendar feed) against
- * a namespace file that exists but can't be read/parsed (EIO/EACCES/corrupt JSON): that
- * must 500, never silently fall back to an empty document — a write path would then save
- * the empty document over the real data, and a read path would serve empty results as if
- * the namespace were genuinely empty.
- */
+
 export const loadAppDataOrError = (filePath: string): AppData | { error: Response } => {
     const result = loadAppDataForWrite(filePath);
     if (result.state === 'unreadable') {

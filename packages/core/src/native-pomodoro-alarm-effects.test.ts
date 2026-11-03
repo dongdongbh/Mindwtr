@@ -133,7 +133,7 @@ describe('native Pomodoro alarm effect ownership', () => {
         expect(decode(result.writeAhead)).toEqual({ version: 1, libraries: [oldLibrary, { scope, alarm: receipt(scheduleIntent(), 'attempted') }] });
         expect(decode(result.published)).toEqual({ version: 1, libraries: [oldLibrary, { scope, alarm: receipt() }] });
         expect(result.after).toBe(rawState(receipt()));
-        // A crash before native verifies removals must still find the old scope for another cleanup turn.
+
         for (const retained of [result.writeAhead, result.published]) {
             const retry = plan({ raw: retained, pending: [oldPending, foreign], delivered: [oldDelivered, foreign] });
             expect(retry.cancelPending).toEqual([oldPending]); expect(retry.cancelDelivered).toEqual([oldDelivered]);
@@ -177,9 +177,8 @@ describe('native Pomodoro alarm effect ownership', () => {
 });
 
 describe('native Android Pomodoro alarms (delivery ledger)', () => {
-    // Android's receiver records each alert it shows before posting it, and Kotlin reports those as delivered even after a
-    // dismissal: an occurrence in neither inventory was never shown, so it is shown now, as RN's boot receiver and immediate
-    // path do, but never more than 24 h late (RN's discardStaleOneShot).
+
+
     const android = { deliveryLedger: true as const, lateLimitMs: 24 * 60 * 60 * 1000 };
 
     it.each(['attempted', 'confirmed'] as const)('shows a %s occurrence that is due and in neither inventory', (status) => {
@@ -312,7 +311,7 @@ describe('native Pomodoro same-owner dispatch refresh', () => {
             { scope, alarm: { ...receipt(attempt, 'attempted'), immediate: true } }, other] });
         expect(decode(result.published)).toEqual({ version: 1, libraries: [prior,
             { scope, alarm: { ...receipt(attempt), immediate: true } }, other] });
-        // The planner still declines another immediate attempt after a crash or missing inventory.
+
         expect(plan({ intent, raw: result.writeAhead, nowMs: intent.observedAtMs }).schedule).toBeNull();
     });
 

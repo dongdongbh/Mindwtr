@@ -20,8 +20,7 @@ import {
     type PomodoroState,
 } from './pomodoro';
 
-// Bounded reference to the previous elapsed-second algorithm. Large catch-up
-// cases below use worked expectations, never this oracle.
+
 const advanceByTicks = (
     state: PomodoroState,
     durations: PomodoroDurations,
@@ -126,8 +125,8 @@ describe('pomodoro helpers', () => {
             isRunning: true,
             completedFocusSessions: 4,
         };
-        // Default auto-start stops after one phase, so the old Infinity behavior
-        // fails promptly here instead of hanging the test process.
+
+
         for (const elapsedSeconds of [NaN, Infinity, -Infinity]) {
             expect(advancePomodoroState(state, DEFAULT_POMODORO_DURATIONS, elapsedSeconds)).toEqual({
                 state,
@@ -188,9 +187,8 @@ describe('pomodoro helpers', () => {
     });
 
     it('catches up a century from a partial focus with exact count, residual and last event', () => {
-        // 100 Julian years contain exactly 1,753,200 classic 25/5 cycles.
-        // Seven seconds finish the partial focus; one additional second runs
-        // the break after those cycles, leaving 299 seconds on that break.
+
+
         expect(advancePomodoroState({
             phase: 'focus', remainingSeconds: 7, isRunning: true, completedFocusSessions: 4,
         }, DEFAULT_POMODORO_DURATIONS, 3_155_760_008, {
@@ -268,7 +266,7 @@ describe('pomodoro helpers', () => {
         const nextDay = sanitizePomodoroSessionHistory(stored, 0, '2026-08-18');
         expect(nextDay.completedTodayFocusSessions).toBe(0);
         expect(nextDay.totalCompletedFocusSessions).toBe(9);
-        // Display-time guard: a stale in-memory history reads as zero too.
+
         expect(getPomodoroFocusSessionsCompletedToday(stored, '2026-08-18')).toBe(0);
     });
 
@@ -294,7 +292,7 @@ describe('pomodoro helpers', () => {
         });
         expect(previous.totalCompletedFocusSessions).toBe(2);
 
-        // A session credited after midnight lands on the new day's count.
+
         const rolled = recordPomodoroFocusSessions(previous, 'task-1', 1, '2026-08-18');
         expect(rolled.completedTodayFocusSessions).toBe(1);
         expect(rolled.totalCompletedFocusSessions).toBe(3);

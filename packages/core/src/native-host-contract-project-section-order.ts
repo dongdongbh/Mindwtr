@@ -52,7 +52,7 @@ const readRequest = (value: unknown): NativeProjectSectionOrderRequest | null =>
     return input as NativeProjectSectionOrderRequest;
 };
 
-/** Pure journal validation before SQLite or mutable state inspection. */
+
 const readPrepared = (value: unknown): NativePreparedProjectSectionOrder | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -101,7 +101,7 @@ export function createProjectSectionOrderMethods(deps: {
     revision: () => string;
 }) {
     return {
-        /** iOS reads each row's four keys exactly; Android's Menu read passes [sectionFlow] for each row's flow (#1429). */
+
         getProjectSectionOrderOptions(input: { projectId: string; sectionFlow?: true }): NativeHostResult<{
             revision: string; project: { id: string; title: string; status: Project['status'] };
             canReorder: boolean; sections: Array<{ id: string; title: string;
@@ -119,7 +119,7 @@ export function createProjectSectionOrderMethods(deps: {
             const ids = new Set(shown.map((row) => row.id));
             if (ids.size !== shown.length) return fail('STALE_REVISION', 'Section IDs are ambiguous');
             const canReorder = parent.status !== 'archived' && shown.length > 1;
-            // RN's manager rows offer each section's flow only while the project is Per section (#1429).
+
             const perSection = getProjectFlowMode(parent) === 'perSection';
             const value = { revision: deps.revision(),
                 project: { id: parent.id, title: parent.title, status: parent.status }, canReorder,

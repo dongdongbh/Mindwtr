@@ -122,8 +122,8 @@ const createExpoAudioRecorder = (): ExpoAudioRecorder => {
     : Platform.OS === 'android'
       ? preset.android
       : preset.web;
-  // Expo exports the native constructor through AudioModule at runtime, while
-  // eslint-plugin-import cannot follow the generated native-module shape.
+
+
   // eslint-disable-next-line import/namespace
   return new AudioModule.AudioRecorder({
     extension: preset.extension,
@@ -155,7 +155,7 @@ const releaseRecordingOnTeardown = async (recording: RecordingState) => {
   try {
     await recording.stop();
   } catch {
-    // Teardown is best-effort; the session is already invalid and cannot own UI errors.
+
   }
   void recording.result.catch(() => undefined);
   return recording.file;
@@ -354,8 +354,7 @@ export function useQuickCaptureAudio({
     };
   }, [isSpeechSettingsLeaseCurrent, onWarn, resolveWhisperModelAsync, settings.ai?.speechToText, visible]);
 
-  // Core's rules (quick-capture-audio.ts) on this app's store.
-  // titleAtSave: the task's title when it saved, so a title typed meanwhile stays (voice V3 review N11).
+
   const applySpeechResult = useCallback((taskId: string, result: SpeechToTextResult, titleAtSave?: string): Promise<SpeechApplyResult> => (
     applySpeechResultInStore(taskId, result, useTaskStore, { titleAtSave })
   ), []);
@@ -389,9 +388,8 @@ export function useQuickCaptureAudio({
     );
     const runStart = async () => {
       try {
-        // Voice capture is speech-to-text: if no model/key is configured, transcription can
-        // never run. Resolve it under the current capture-session lease so a dismissed start
-        // cannot toast, record, or clear state belonging to the next sheet.
+
+
         const guardSettings = selectQuickCaptureSettings(settings, useTaskStore.getState().settings);
         const guardRuntime = resolveSpeechToTextRuntimeSettings(guardSettings.ai?.speechToText);
         const guardApiKey = guardRuntime.provider === 'whisper'
@@ -413,7 +411,7 @@ export function useQuickCaptureAudio({
           whisperModelReady: guardRuntime.provider === 'whisper' ? Boolean(guardWhisper?.exists) : false,
         });
         if (!speechConfigured) {
-          // RN voice bug 1: a stored model whose file is gone is not ready (it recorded m4a Whisper then refused, with no notice).
+
           if (guardRuntime.provider === 'whisper' && guardRuntime.enabled && guardRuntime.modelPath && !guardWhisper?.exists) {
             void logInfo('Quick capture Whisper model file missing', {
               scope: 'capture',

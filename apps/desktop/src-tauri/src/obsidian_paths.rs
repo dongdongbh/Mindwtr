@@ -89,10 +89,6 @@ pub(crate) fn join_obsidian_vault_path(
     Ok(joined)
 }
 
-/// Re-asserts containment after the join. `normalize_obsidian_relative_path`
-/// rejects `..` textually, but a symlinked folder inside the vault still
-/// resolves outside it. Checks the deepest component that exists, since the
-/// target note (and its folder) may be about to be created.
 fn assert_inside_obsidian_vault(vault_path: &str, joined: &Path) -> Result<(), String> {
     let vault_root = Path::new(vault_path)
         .canonicalize()
@@ -114,9 +110,6 @@ fn assert_inside_obsidian_vault(vault_path: &str, joined: &Path) -> Result<(), S
     }
 }
 
-/// Whether a renderer-supplied vault path is the one the app has persisted.
-/// Every Obsidian write and the filesystem-scope grant are bound to it, so a
-/// renderer cannot name an arbitrary folder as "the vault".
 pub(crate) fn matches_configured_vault_path(configured: Option<&str>, requested: &str) -> bool {
     let Some(configured) = configured.map(str::trim).filter(|value| !value.is_empty()) else {
         return false;

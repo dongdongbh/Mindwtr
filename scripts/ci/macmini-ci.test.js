@@ -186,7 +186,7 @@ const archiveFixture = () => {
   const source = join(fixture.repo, 'apps/mobile/ios/Mindwtr.xcworkspace/generated');
   mkdirSync(join(source, '..'), { recursive: true }); writeFileSync(source, 'preserved evidence'); preserved.push(source);
   for (const path of ['node_modules/dependency', 'apps/mobile/node_modules/dependency']) preserved.push(join(fixture.repo, path));
-  // A mid-job phase must not invoke startup checkout cleanup or Watchman.
+
   for (const command of ['git', 'watchman']) writeFileSync(join(fixture.root, 'bin', command), `#!/bin/sh\ntouch "$HOME/${command}-called"\nexit 1\n`, { mode: 0o755 });
   const runArchive = (before = archiveMinimumKiB, after = archiveMinimumKiB, extra = {}) => fixture.run(before, after,
     { MINDWTR_NATIVE_CACHE: current, ...extra }, ['before-archive']);

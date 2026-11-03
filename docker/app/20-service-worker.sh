@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-# Keep both originals outside the web root so changing modes survives restarts.
+
 case "${MINDWTR_PWA_ENABLED:-true}" in
     true) worker=/opt/mindwtr/sw-pwa.js ;;
     false) worker=/opt/mindwtr/sw-online.js ;;

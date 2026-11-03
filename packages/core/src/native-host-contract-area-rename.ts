@@ -107,7 +107,7 @@ const revisionsAdvance = <T extends { rev?: number }>(pairs: Array<{ before: T; 
     pairs.every(({ before, after }) => typeof after.rev === 'number' && after.rev > (before.rev ?? 0)
         && after.rev <= MAX_SYNC_REVISION);
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedAreaRename | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

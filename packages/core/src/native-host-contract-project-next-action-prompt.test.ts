@@ -7,12 +7,7 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import type { AppData, Project, Section, Task } from './types';
 import { generateUUID } from './uuid';
 
-/**
- * Native Android's project next-action prompt (RN's project-next-action-prompt.tsx and ProjectNextActionPromptModal.tsx), one
- * test per RN fix it ports: b98ced27a (the prompt), 8fedf16e2 (#874 Complete project), 321443606 (#859 quick-add text),
- * 16ebbfe79 (#911 a sequential section's prompt), 9dea771b5 (Save & edit), e7735a51e (titles inserted literally), f34284f8c
- * (the shared quick-add options), d25316cf9 (#1429 a Per section project's sequential section).
- */
+
 const value = <T,>(result: NativeHostResult<T>): T => {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
     return result.value;
@@ -38,7 +33,7 @@ async function openHost(data: Partial<AppData>) {
         getData: async () => JSON.parse(JSON.stringify(saved)),
         saveData: async (next) => { saved = JSON.parse(JSON.stringify(next)); },
     });
-    // Each test loads its own library: the previous one's rows must not count as rows a save would drop.
+
     useTaskStore.setState({ error: null, persistenceFailure: null, isLoading: false, editLockCount: 0,
         tasks: [], _allTasks: [], projects: [], _allProjects: [], sections: [], _allSections: [] } as never);
     await useTaskStore.getState().fetchData({ throwOnError: true });
@@ -170,7 +165,7 @@ describe('native host contract: project next-action prompt', () => {
         expect((await complete(host, 'last'))?.description).toBe('Choose or add the next action for Cost $& {{section}}.');
     });
 
-    // Correction pass (review N3, N5).
+
     const add = (host: Host, prompt: { taskId: string; projectId: string; sectionId: string | null }, text: string, requestId = generateUUID()) =>
         host.runProjectNextAction({ requestId, taskId: prompt.taskId, action: 'add', text, openAfterSave: false,
             projectId: prompt.projectId, sectionId: prompt.sectionId });
@@ -183,7 +178,7 @@ describe('native host contract: project next-action prompt', () => {
         });
         const prompt = (await complete(host, 'last'))!;
         expect(prompt).toMatchObject({ projectId: 'project', sectionId: 'one' });
-        // A sync moves the completed task to another project before the user taps Add.
+
         await useTaskStore.getState().updateTask('last', { projectId: 'other', sectionId: 'elsewhere' });
         const added = value(await add(host, prompt, 'Next in one'));
         expect(stored(added.id)).toMatchObject({ projectId: 'project', sectionId: 'one' });

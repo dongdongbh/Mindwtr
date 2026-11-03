@@ -142,8 +142,7 @@ describe('TaskEditHeader', () => {
     const saveButton = tree.root.findByProps({ accessibilityLabel: 'Save' });
     const closeButton = tree.root.findByProps({ accessibilityLabel: 'Close' });
 
-    // Save keeps its word: a first-time user must be able to tell which
-    // control commits the draft. Close is the X icon on the left.
+
     expect(saveButton.findAllByType(Text).map((node) => node.props.children)).toEqual(['Save']);
     expect(closeButton.findAllByType(Text)).toHaveLength(0);
     act(() => saveButton.props.onPress());

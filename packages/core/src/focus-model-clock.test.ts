@@ -4,20 +4,14 @@ import { FOCUS_MODEL_CLOCK_READERS, getFocusModelValidUntil } from './focus-sect
 import { splitTodayTasksByStartTime } from './task-utils';
 import type { AppSettings, Project, Task } from './types';
 
-// The native Focus model is built once and kept until getFocusModelValidUntil's instant (native-host-contract.ts focusSections).
-// Here, minute by minute, a model kept that way must equal one built fresh: across two midnights, New York's spring-forward and
-// fall-back, and every start, due-soon and review instant of a randomized store (also 1 ms either side of each).
 
-// The full sweep (48 h minute by minute, every control state, every threshold, 5,000 tasks) runs on demand:
-// MINDWTR_FOCUS_SWEEP=full, a few minutes; run it on a change to a clock predicate. The suite runs 6 h around the spring-forward
-// night, two control states, 500 tasks.
 const FULL = process.env.MINDWTR_FOCUS_SWEEP === 'full';
 const TASKS = FULL ? 5000 : 500;
 
 const ZONE = 'America/New_York';
 const MINUTE = 60_000;
 
-// A seeded generator (mulberry32): the same store on every run.
+
 const random = (seed: number) => () => {
     seed = (seed + 0x6d2b79f5) | 0;
     let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
@@ -29,18 +23,15 @@ const pad = (value: number) => String(value).padStart(2, '0');
 const localDay = (at: Date) => `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 const localDateTime = (at: Date, second = 0) => `${localDay(at)}T${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(second)}`;
 
-/**
- * Dates clustered over [from, to): date-only, local date-times, and UTC instants, as stored values come. `timedOnly`: local
- * date-times 17 s past a minute, so no value lands on a midnight and only the midnight boundary covers the day turning.
- */
+
 function store(from: number, to: number, seed: number, timedOnly = false): { tasks: Task[]; projects: Project[] } {
     const next = random(seed);
     const pick = <T,>(values: readonly T[]) => values[Math.floor(next() * values.length)];
-    // Half inside the swept window (its thresholds), half within 3 days either side (the days around it).
+
     const instant = () => (next() < 0.5
         ? new Date(from + Math.floor(next() * (to - from) / MINUTE) * MINUTE)
         : new Date(from - 3 * 24 * 60 * MINUTE + Math.floor(next() * (to - from + 6 * 24 * 60 * MINUTE) / MINUTE) * MINUTE));
-    // Due dates partly 30 days out, so their due-soon thresholds (due less the window) fall inside the sweep.
+
     const DUE_SOON = 30 * 24 * 60 * MINUTE;
     const date = (shift = 0) => {
         const at = new Date(instant().getTime() + shift);
@@ -74,7 +65,7 @@ function store(from: number, to: number, seed: number, timedOnly = false): { tas
     return { tasks, projects };
 }
 
-/** Everything the native contract reads from a model, with tasks and projects as their ids (the later-today split apart). */
+
 const observe = (value: unknown): string => JSON.stringify(value, (_key, item) => {
     if (item instanceof Map) return [...item.entries()];
     if (item instanceof Set) return [...item];
@@ -134,7 +125,7 @@ describe('the native Focus model kept until its next-change instant', () => {
         const data = store(from, to, 1);
         const [, state, extra] = states[0];
         const rebuilds = sweep({ ...data, settings: extra, state }, minutes(from, to));
-        // The cache is used: far fewer builds than minutes.
+
         expect(rebuilds).toBeLessThan(minutes(from, to).length / 2);
     }, 240_000);
 
@@ -151,9 +142,9 @@ describe('the native Focus model kept until its next-change instant', () => {
         const to = new Date(2026, 10, 1, 4, 0).getTime();
         const data = store(from, to, 2);
         sweep({ ...data, settings: extra, state }, minutes(from, to));
-        // Every instant a predicate reads within the window, 1 ms before, at and after it.
+
         const edges = new Set<number>();
-        // The suite takes every fourth instant; the full sweep all of them.
+
         let seen = 0;
         const add = (value: string | undefined, shift = 0) => {
             const at = (value ? new Date(value.length === 10 ? `${value}T00:00:00` : value).getTime() : NaN) - shift;
@@ -167,8 +158,7 @@ describe('the native Focus model kept until its next-change instant', () => {
         sweep({ ...data, settings: extra, state }, [...edges].sort((a, b) => a - b));
     }, 240_000);
 
-    // The sweep proves today's predicates; this catches a new one. Every function the build reads the clock in (the `now` it is
-    // given, Date.now(), a new Date() of now) must be in FOCUS_MODEL_CLOCK_READERS, whose boundaries getFocusModelValidUntil covers.
+
     it('reads the clock only in functions whose boundary getFocusModelValidUntil covers', () => {
         process.env.TZ = ZONE;
         const RealDate = Date;
@@ -179,7 +169,7 @@ describe('the native Focus model kept until its next-change instant', () => {
             const name = /at (?:[\w$.]+\.)?([\w$<>]+) \(/.exec(frame)?.[1] ?? frame.trim();
             readers.set(name, what);
         };
-        // The build's `now`: every read of it is recorded with the core function that made it.
+
         class Now extends RealDate {}
         for (const method of ['getTime', 'valueOf', 'getFullYear', 'getMonth', 'getDate', 'getDay', 'getHours', 'getMinutes', 'getSeconds',
             'getMilliseconds', 'getTimezoneOffset', 'toISOString', 'toJSON'] as const) {
@@ -218,7 +208,7 @@ describe('the native Focus model kept until its next-change instant', () => {
             Error.stackTraceLimit = stackLimit;
         }
         expect([...readers.keys()].filter((name) => !Object.hasOwn(FOCUS_MODEL_CLOCK_READERS, name))).toEqual([]);
-        // The guard sees the readers: the build does read the clock.
+
         expect(readers.size).toBeGreaterThan(3);
     }, 120_000);
 });

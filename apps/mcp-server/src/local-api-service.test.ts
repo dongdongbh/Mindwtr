@@ -134,9 +134,7 @@ describe('desktop Local API task reads', () => {
     expect((await service.listTasks({ projectId: 'project-1' })).map((row) => row.id)).toEqual(['next']);
   });
 
-  // The native filter (local_api.rs filter_tasks) runs before the Node filter, so it may only ever drop tasks the
-  // Node filter drops too. Same queries, same data: a server that ignores the parameters (the old full fetch) and
-  // one that applies them the way Rust does must give identical results.
+
   test('server-side filtering returns exactly what the full fetch returned', async () => {
     const rows = [...tasks, task('blank-deleted', { deletedAt: '' }), task('focused-done', { status: 'done', isFocusedToday: true }),
       task('focused-deleted', { isFocusedToday: true, deletedAt: iso }), task('numeric-focus', { isFocusedToday: 1 as unknown as boolean })];
@@ -240,7 +238,7 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
     const generated: Record<string, unknown> = { viewSectionIds: { someday: 'books' }, cancelledAt: iso, taskMode: 'task', relativeStartOffset: { amount: -2, unit: 'day' },
       showFutureRecurrence: true, pushCount: 2, checklist: [{ id: 'check-1', title: 'Step', isCompleted: false }],
       textDirection: 'rtl', location: 'Office', areaId: 'area-1', isFocusedToday: true,
-      timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, dueReminderLeadMinutes: 1440, reviewAt: '2026-01-02',
+      timeSpentMinutes: 30, suppressMindwtrReminders: true, reminderPolicy: 'skip', repeatReminderMinutes: 15, dueReminderLeadMinutes: 1440, startReminderLeadMinutes: 15, reviewAt: '2026-01-02',
       order: 2, boardOrder: 3, focusOrder: 4 };
     const { service, calls } = fixture(() => jsonResponse({ task: task() }));
     const createFields = Object.fromEntries(TASK_CREATE_FIELD_NAMES.map((name) => [name, generated[name]]));
@@ -256,11 +254,11 @@ describe('desktop Local API writes and lifecycle envelopes', () => {
   test('task patch is flat and clears nullable tokens with arrays, other fields with null', async () => {
     const { service, calls } = fixture(() => jsonResponse({ task: task() }));
     await service.updateTask({ id: 'task-1', title: 'Rename', status: 'waiting', projectId: null, sectionId: null,
-      tags: null, contexts: null, recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: null });
+      tags: null, contexts: null, recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: null, startReminderLeadMinutes: null });
     expect(calls[0].method).toBe('PATCH');
     expect(calls[0].url).toBe(`${origin}/tasks/task-1`);
     expect(calls[0].body).toEqual({ title: 'Rename', status: 'waiting', projectId: null, sectionId: null,
-      tags: [], contexts: [], recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: 0 });
+      tags: [], contexts: [], recurrence: null, dueDate: null, description: null, priority: null, reviewAt: null, dueReminderLeadMinutes: 0, startReminderLeadMinutes: 0 });
   });
 
   test('completion and restore use dedicated endpoints and deletion reads the actual persisted tombstone', async () => {

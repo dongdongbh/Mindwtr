@@ -45,16 +45,11 @@ import { useFutureStartRevealTick, useLocalDayKey } from '../hooks/useLocalDayKe
 import { runAfterTaskEditExit } from './Task/task-edit-session';
 
 interface GlobalSearchProps {
-    /**
-     * `highlightTaskId` is applied by the caller once `view` is the screen on
-     * display, so the screen being left never scrolls to the task first.
-     */
+
+
     onNavigate: (view: string, itemId?: string, options?: { highlightTaskId?: string }) => void;
-    /**
-     * Start with "Include Done and Archived tasks" already on. Passed when the
-     * search opens over the Done or Archived view — searching there and not
-     * finding the finished task you are looking at reads as broken.
-     */
+
+
     defaultIncludeCompleted?: boolean;
 }
 
@@ -69,11 +64,8 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     const dialogTitleId = useId();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState('');
-    // The query that drives searching. While an IME composition is in
-    // progress (Chinese/Japanese/Korean input), `query` holds the raw
-    // composition text (e.g. the pinyin "niu nai") — searching it flashed
-    // "no results" between every committed character. Search sticks with the
-    // last committed text until the composition ends.
+
+
     const [searchQuery, setSearchQuery] = useState('');
     const isComposingRef = useRef(false);
     const [selectedIndex, setSelectedIndex] = useState(0);
@@ -90,9 +82,8 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     const [duePreset, setDuePreset] = useState<DuePreset>('any');
     const [scope, setScope] = useState<GlobalSearchScope>('all');
     const [ftsResults, setFtsResults] = useState<SearchResults | null>(null);
-    // Which query the current ftsResults answer. FTS answers arrive debounced
-    // and async; merging an answer for an older query in front of the fresh
-    // in-memory results reshuffled the list on every keystroke.
+
+
     const [ftsQuery, setFtsQuery] = useState('');
     const [ftsLoading, setFtsLoading] = useState(false);
     const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -112,10 +103,8 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     );
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
     const projectMap = useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects]);
-    // Search results are SearchTaskResult rows, which deliberately carry no
-    // completedAt — the full task behind the row does (#991). The store
-    // already maintains _tasksById over the same _allTasks array (PERF-03);
-    // no need to rebuild a fresh Map on every render.
+
+
     const taskById = _tasksById;
     const activeAreaFilter = useMemo(
         () => resolveAreaFilterSelection(settings?.filters, areas),
@@ -144,14 +133,14 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         setLocationQuery('');
         setDuePreset('any');
         setScope('all');
-        // A composition cut off by closing never delivers compositionend to the
-        // unmounted input, so a stale flag would swallow keys after reopening.
+
+
         isComposingRef.current = false;
         setIsOpen(true);
         setTimeout(() => inputRef.current?.focus(), 0);
     }, [defaultIncludeCompleted]);
 
-    // Toggle search with Cmd+K / Ctrl+K
+
     useEffect(() => {
         isOpenRef.current = isOpen;
     }, [isOpen]);
@@ -163,7 +152,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                 if (isOpenRef.current) setIsOpen(false);
                 else openSearch();
             }
-            // Escape during IME composition cancels the composition, not the search.
+
             if (e.key === 'Escape' && isOpenRef.current && !isImeComposing(e)) {
                 setIsOpen(false);
             }
@@ -184,9 +173,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         return () => window.removeEventListener('mindwtr:open-search', handleOpen);
     }, [openSearch]);
 
-    // Auto-focus input when opened. Focus immediately so keys typed right
-    // after "/" land in the query instead of nowhere; the delayed retry covers
-    // the portal/animation frame where the first attempt can be swallowed.
+
     useEffect(() => {
         if (isOpen) {
             inputRef.current?.focus();
@@ -240,8 +227,8 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     const allTokens = useMemo(() => {
         if (!isOpen) return selectedTokens;
         if (scope === 'projects') return selectedTokens;
-        // Use the search pipeline's status, area, and visibility rules; keep
-        // token choices independent of the title query and current token picks.
+
+
         const eligible = computeGlobalSearchResults({
             query: '', tasks: _allTasks, projects, areas,
             includeCompleted, includeReference, hideFutureTasks,
@@ -339,11 +326,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         ));
     };
 
-    // A search row never shows a bare date: the label word is what says whether
-    // it is a completion or a deadline, for sighted readers and screen readers
-    // alike (#991). Completion wins for a finished task, and a finished task
-    // with no completedAt shows nothing rather than falling back to its due
-    // date. Red stays reserved for a date that has passed (#640).
+
     const renderResultDate = (result: SearchTaskResult) => {
         const task = taskById.get(result.id);
         if (!task) return null;
@@ -376,7 +359,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         );
     };
 
-    // Keyboard navigation
+
     const handleListKeyDown = (e: React.KeyboardEvent) => {
         if (isComposingRef.current || isImeComposing(e)) return;
         if (e.key === 'ArrowDown') {
@@ -393,11 +376,7 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
         }
     };
 
-    // Keys pressed inside the dialog but outside the query input (after
-    // clicking a result or a filter chip) still drive the search instead of
-    // going dead: arrows/Enter navigate the results, and plain typing
-    // refocuses the query input. A stray Enter here used to fall through to
-    // the task list behind the dialog and act on it.
+
     const handleDialogKeyDown = (e: React.KeyboardEvent) => {
         if (e.target === inputRef.current) return;
         if (
@@ -416,8 +395,8 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
     };
 
     const handleSelect = (result: { type: 'project'; item: SearchProjectResult } | { type: 'task'; item: SearchTaskResult }) => {
-        // Close before the task editor opens its own Save/Discard/Stay dialog;
-        // both dialogs portal to the same z-50 layer and trap focus.
+
+
         setIsOpen(false);
         runAfterTaskEditExit(() => {
             const shouldSwitchToAllAreas = isAreaFilterSelectionActive(activeAreaFilter) && (
@@ -434,11 +413,10 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                 setProjectView({ selectedProjectId: result.item.id });
                 onNavigate('projects', result.item.id);
             } else {
-                // Map task status to appropriate view
+
                 const task = result.item;
-                // A finished task is invisible in its project — the workspace never
-                // lists archived tasks and hides done ones unless the project has
-                // them switched on — so it goes to Done/Archived, which do reveal it.
+
+
                 if (task.projectId && !isTaskFinished(task as Task)) {
                     setProjectView({ selectedProjectId: task.projectId });
                     onNavigate('projects', task.id, { highlightTaskId: task.id });
@@ -551,13 +529,11 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
             labelledBy={dialogTitleId}
             placement="top"
             overlayClassName="pt-[20vh] bg-background/80 backdrop-blur-sm animate-in fade-in-0"
-            // Escape stays with the window listener that also owns Cmd+K.
+
             closeOnEscape={false}
             onKeyDown={handleDialogKeyDown}
-            // Capped so the panel always fits under the 20vh offset above it;
-            // without it an expanded filter panel ran off the bottom of a short
-            // window with nothing to scroll (#957). Every region below the search
-            // input shrinks and scrolls instead of pushing the panel past the cap.
+
+
             panelClassName="max-w-lg max-h-[76vh] animate-in zoom-in-95 duration-100"
         >
             <h2 id={dialogTitleId} className="sr-only">{t('search.title')}</h2>
@@ -566,18 +542,16 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                 <input
                     ref={inputRef}
                     aria-label={t('search.title')}
-                    // Queries are operators and partial words, not prose — the
-                    // OS must not capitalize or "fix" them (macOS WebKit applied
-                    // system auto-capitalization here, #1019).
+
+
                     autoCorrect="off"
                     autoCapitalize="none"
                     spellCheck={false}
                     value={query}
                     onChange={e => {
                         setQuery(e.target.value);
-                        // During an IME composition the value is provisional
-                        // (raw pinyin/kana); search keeps the last committed
-                        // text so the result list doesn't flash empty.
+
+
                         if (!isComposingRef.current) {
                             setSearchQuery(e.target.value);
                             setSelectedIndex(0);
@@ -833,12 +807,10 @@ export function GlobalSearch({ onNavigate, defaultIncludeCompleted = false }: Gl
                     </div>
                 )}
 
-                {/*
-                  * The hint costs ~100px, which the capped panel would otherwise take
-                  * off the filter panel and make it scroll while this region sits
-                  * empty (#957). The search field's own placeholder says the same
-                  * thing, so it only earns its space when the filters are closed.
-                  */}
+                {
+
+
+                    }
                 {!ftsLoading && results.length === 0 && !hasActiveSearch && !filtersOpen && (
                     <div className="text-center py-8 text-muted-foreground text-sm">
                         {t('search.typeToSearch')}

@@ -3,7 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// Bundled JSC ordinary editor policy + actual SQLite + native descriptor jobs.
+
 final class AttachmentOwnedSaveHostTests: XCTestCase {
     private var root: URL!
     private var bundle: URL!
@@ -49,8 +49,8 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
         let rows = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id=?", [taskID]).utf8)) as? [[String: Any]])
         return try XCTUnwrap(rows.first)
     }
-    // Canonicalize SQLite row-object key order only. Embedded JSON columns
-    // remain opaque strings so metadata/attachment serialization stays exact.
+
+
     private func saved() throws -> String { try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks ORDER BY id").utf8))) }
     private func unrelated() throws -> String { try json(NativeJSON.jsonObject(with: Data(sql("SELECT * FROM tasks WHERE id='unrelated'").utf8))) }
     private func record() throws -> NativeAttachmentDraftStore.Record { try XCTUnwrap(store.read()) }
@@ -65,7 +65,7 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
                         [id, "Saved title", "Saved notes", at, at])
         }
         let host = core(faults); _ = try await host.start()
-        // Same full ordinary producer shape used by Task237. No native field policy.
+
         let editedNotes = note ?? notes
         let payload = try json(["version": 2, "taskID": taskID, "tab": "task",
             "touchedBase": ["title": "Saved title", "description": "Saved notes"],
@@ -138,8 +138,8 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path), file: file, line: line)
     }
     private func journalObject() throws -> [String: Any] { try object(String(decoding: Data(contentsOf: journal), as: UTF8.self)) }
-    // Replay deliberately re-persists the pending command. JSONEncoder may
-    // reorder outer keys; argumentsJSON and attempt arguments remain exact.
+
+
     private func journalEvidence() throws -> Data { Data(try json(journalObject()).utf8) }
     private func wrapper(_ command: [String: Any]) throws -> [String: Any] {
         let args = try XCTUnwrap(NativeJSON.jsonObject(with: Data(XCTUnwrap(command["argumentsJSON"] as? String).utf8)) as? [String])
@@ -243,8 +243,8 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
         let faults = HostIOFaults(), host = try await seed(faults), sentinels = try files()
         var lost = false, hostReplyLost = false
         faults.afterSQL = { if $0 == "COMMIT" && !lost { lost = true; throw HostFailure("COMMIT acknowledgment lost") } }
-        // Shared Save can recover the SQL acknowledgement inside this invocation.
-        // Lose its eventual host reply separately, after the actual commit.
+
+
         await boundary(.afterSaveCommit, on: host) { hostReplyLost = true; throw HostFailure("Host acknowledgment lost") }
         _ = await failure({ _ = try await self.save(host) }, confirmed: false)
         XCTAssertTrue(lost); XCTAssertTrue(hostReplyLost); XCTAssertNil(try journalObject()["terminal"])
@@ -475,8 +475,8 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
             await host.close()
             if mode == "stage" {
                 let stage = try XCTUnwrap(URL(string: XCTUnwrap(retained.operations[0].stage?.uri))).deletingLastPathComponent()
-                // Publication already removed the recorded namespace. A new
-                // same-name directory is foreign, never an owned retry stage.
+
+
                 XCTAssertFalse(FileManager.default.fileExists(atPath: stage.path))
                 try FileManager.default.createDirectory(at: stage, withIntermediateDirectories: false)
                 try Data("replacement sentinel".utf8).write(to: stage.appendingPathComponent("sentinel"))
@@ -566,7 +566,7 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
                 _ = try sql("UPDATE tasks SET projectId='archived-owner' WHERE id=?", [taskID])
                 current = core(); _ = try await current.start()
             } else {
-                // Even a new disk-only command cannot be overwritten or thawed.
+
                 try Data("unsettled domain journal".utf8).write(to: journal)
             }
             let before = try saved()
@@ -624,7 +624,7 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
             XCTAssertEqual(try Data(contentsOf: retainedRoot.appendingPathComponent(target.lastPathComponent)), sentinels[target])
         }
         await cold.close()
-        // Restoring the same recorded root inode permits exact terminal cleanup.
+
         try FileManager.default.moveItem(at: retainedRoot, to: managed)
         let restored = core(noTaskWrites()); _ = try await restored.start()
         try released(); XCTAssertEqual(try saved(), after); try sameFiles(sentinels)
@@ -682,8 +682,8 @@ final class AttachmentOwnedSaveHostTests: XCTestCase {
             XCTAssertEqual(try saved(), after); XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes)
             XCTAssertEqual(try Data(contentsOf: retainedJournal), retainedBytes)
             XCTAssertEqual(try Data(contentsOf: editor.url), protectedEditor); XCTAssertEqual(try Data(contentsOf: store.url), protectedSidecar)
-            // Deliberately do not cold-open the FIFO: the unchanged legacy startup
-            // reader is outside this owned-only nonblocking mutation guard.
+
+
             await host.configureAttachmentDraftHost(AttachmentDraftHostHooks())
             try FileManager.default.removeItem(at: journal)
             try FileManager.default.moveItem(at: retainedJournal, to: journal)

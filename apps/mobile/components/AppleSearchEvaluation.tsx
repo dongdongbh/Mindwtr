@@ -17,13 +17,13 @@ import {
 } from '@/modules/apple-task-search';
 
 export type AppleSearchEvaluationProps = {
-  /** Must open this exact, revalidated id through Mindwtr's normal task UI. */
+
   onOpenTask: (taskId: string) => void;
-  /** Existing global-search filter state; semantic matching never changes it. */
+
   filters?: AppleSearchFilters;
 };
 
-/** Development-only #1194 entry point. Keep it beneath MobileAppLockGate. */
+
 export function AppleSearchEvaluation({
   onOpenTask,
   filters = DEFAULT_APPLE_SEARCH_FILTERS,

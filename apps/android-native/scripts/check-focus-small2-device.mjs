@@ -1,18 +1,6 @@
-// Focus pass small-2 check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-focus-small2-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays), captures two Next actions with titles unique to
-// this run through core's quick-add tokens (one starting today at 11 pm, so it sits under Today's "Later today"; one starting
-// tomorrow, so it sits in Upcoming), and checks on Focus: (a) a pull down from the list's top runs exactly one pull down to sync
-// (RN's useManualPullSync, 5bb0ea8f: host-sync.ts logs it once, with core's outcome), and RN's bar shows; (b) a tap on the
-// "Later today" heading folds it (#1444): the run's row leaves and the heading stays; after a force-stop and a new launch it is
-// still folded, and a second tap unfolds it; (c) the Upcoming row's star is enabled (#1277: a future-start Next action can be
-// queued for Focus), its tap is one setTaskFocus write, and a second tap takes the star back. It saves screenshots of the bar
-// and the folded heading in its work folder. It touches only the development package (it refuses any other APK), never
-// launches over another app, leaves the app on its Inbox tab with the run's fold undone, and restores rotation and clears its
-// debug properties on exit. Leave the device on its home screen before running. Run it before 10:30 pm local time.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,7 +29,7 @@ const UI_FILE = '/data/local/tmp/mindwtr-native-dev-ui.xml';
 const PROPS = ['fail_commit', 'delay_before_ms', 'delay_after_ms', 'language'];
 const work = resolve(app, 'android/build/focus-small2-check');
 const { en } = await import(resolve(app, '../../packages/core/src/i18n/locales/en.ts'));
-// Digits for titles: the keyboard guard allows only an English layout, and digits never compose.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const titles = { later: `73${run}1`, upcoming: `73${run}2` };
 const LATER_TODAY = en['agenda.laterToday'];
@@ -59,11 +47,11 @@ const shoot = (name) => {
     console.log(`screenshot - ${resolve(work, `native-${name}.png`)}`);
 };
 
-// ---- UI (core's English) ----
+
 const inPopup = (nodes) => Boolean(tagged(nodes, 'quick-capture'));
 const onTab = (name) => (nodes) => !inPopup(nodes) && !tagged(nodes, 'menu-screen') && tabSelected(nodes, name);
 const rowNode = (nodes, title) => nodes.find((node) => node.text === title && node.class !== 'android.widget.EditText');
-/** Core's Later today heading: TalkBack hears "<title> <count>". */
+
 const laterHeading = (nodes) => nodes.find((node) => new RegExp(`^${LATER_TODAY} \\d+$`).test(node['content-desc'] ?? ''));
 const capture = async (text, shown) => {
     let nodes = await screen();
@@ -79,7 +67,7 @@ const showFocus = async () => {
     if (!tabSelected(nodes, en['tab.next'])) await tapExpecting(tab(nodes, en['tab.next']), onTab(en['tab.next']), 'the Focus tab', 10_000);
     return waitFor('Focus', onTab(en['tab.next']), 30_000);
 };
-/** Opens every Focus section with RN's toggle (a folded section hides its rows and headings). */
+
 const openSections = async () => {
     let nodes = await screen();
     const only = en['agenda.collapseOtherSections'];
@@ -92,7 +80,7 @@ const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 let folded = false;
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
     try {
         if (folded && front().includes(`${PKG}/`)) {
             const heading = await device.revealNode(laterHeading, 'the Later today heading');
@@ -101,11 +89,11 @@ const restore = async () => {
         }
         const nodes = await screen();
         if (front().includes(`${PKG}/`) && tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await tap(tab(nodes, en['tab.inbox']));
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE}`); } catch {                   }
 };
 
 try {
@@ -124,16 +112,16 @@ try {
     sh('settings put system user_rotation 0');
     await waitFor('the Inbox', onTab(en['tab.inbox']), 60_000);
 
-    // Core's quick-add tokens: both Next, one starting at 11 pm today (Later today), one tomorrow (Upcoming).
+
     await capture(`${titles.later}%s/next%s/start:today%s11pm`, `${titles.later} /next /start:today 11pm`);
     await capture(`${titles.upcoming}%s/next%s/start:tomorrow`, `${titles.upcoming} /next /start:tomorrow`);
     await showFocus();
     await openSections();
 
-    // (a) Pull down to sync: one drag down from the list's top, one run.
+
     const pulls = () => lines('Native Android pull to sync');
     let nodes = await device.toTop();
-    // Counted after the scroll to the top, so only this drag's run is counted.
+
     const before = pulls().length;
     const list = mainList(nodes) ?? fail('no Focus list');
     const [x1, y1, x2, y2] = box(list);
@@ -147,7 +135,7 @@ try {
     const ran = pulls().slice(before);
     check(ran.length === 1, `(a) one pull down runs one pull down to sync: ${ran.map((line) => line.slice(line.indexOf('{'))).join(' ')}`);
 
-    // (b) Later today folds, and stays folded after a new process.
+
     const later = await device.revealNode((current) => rowNode(current, titles.later), 'the run\'s Later today row');
     nodes = await screen();
     const heading = laterHeading(nodes);
@@ -166,7 +154,7 @@ try {
     folded = false;
     check(Boolean(rowNode(nodes, titles.later)), '(b) a second tap unfolds it');
 
-    // (c) Upcoming: the future-start Next action's star works.
+
     const star = (current) => {
         const row = rowNode(current, titles.upcoming);
         if (!row) return undefined;

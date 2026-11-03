@@ -13,7 +13,7 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
         setItem: async () => undefined,
     },
 }));
-// The app's own fallback when nothing is stored: the device's language.
+
 vi.mock('@mindwtr/core', async (importOriginal) => ({
     ...await importOriginal<typeof import('@mindwtr/core')>(),
     getSystemDefaultLanguage: () => 'es',

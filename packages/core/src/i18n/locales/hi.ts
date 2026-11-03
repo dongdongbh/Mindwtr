@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const hiOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "शुरू होने से पहले",
     "attachments.webUploadRequiresCloud": "ब्राउज़र से अपलोड करने के लिए स्व-होस्टेड क्लाउड सिंक आवश्यक है।",
     "attachments.webUploadEncrypted": "ब्राउज़र से अपलोड करने के लिए सिंक एन्क्रिप्शन बंद होना चाहिए।",
     "attachments.webUploadOffline": "ऑफ़लाइन रहते हुए फ़ाइलें अपलोड नहीं की जा सकतीं।",
@@ -785,6 +786,7 @@ export const hiOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'सुनिश्चित करें कि प्रत्येक सक्रिय प्रोजेक्ट पर अगली कार्रवाई हो।',
         'review.projectsHint': 'प्रत्येक परियोजना की समीक्षा करें. क्या इसके पास कम से कम एक ठोस अगली कार्रवाई है? यदि नहीं, तो अभी एक जोड़ें. पूर्ण परियोजनाओं को पूर्ण के रूप में चिह्नित करें.',
         'review.hasNextAction': 'अगली कार्रवाई है',
+    'review.projectDeferred': 'निर्धारित',
         'review.needsAction': 'कार्रवाई की जरूरत है',
         'review.noActiveTasks': 'कोई सक्रिय कार्य नहीं',
         'review.somedayStep': 'किसी दिन/शायद',
@@ -1519,7 +1521,7 @@ export const hiOverrides: Record<string, string> = {
         'settings.externalCalendarUrlPlaceholder': 'https://example.com/calendar.ics',
         'settings.webdavUrlPlaceholder': 'https://example.com/remote.php/dav/files/<username>/mindwtr',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'दिमाग़ ख़ाली करें',
         'mindSweep.title': 'दिमाग़ ख़ाली करें',
         'mindSweep.intro': 'कुछ संकेत-सूचियों से गुज़रें और जो भी मन में आए, लिखते जाएँ। न छाँटें, न सजाएँ — हर चीज़ इनबॉक्स में जाएगी, जिसे आप बाद में संभाल सकते हैं।',

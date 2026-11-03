@@ -3,14 +3,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { cn } from '../../../lib/utils';
 
-// The desktop settings rows. Every row emits its own `data-settings-key`, which
-// is what settings search reads to find, reveal and scroll to a setting
-// (settings-search.ts). `settingsKey` is required but nullable rather than
-// optional so that a row cannot be written without deciding whether search can
-// reach it — an omitted attribute was how Manage People stayed unfindable
-// (#884). A non-null key must appear in SETTINGS_SEARCH_PAGE_KEYS
-// (packages/core/src/settings-search-keys.ts); settings-search-coverage.test
-// pins both directions.
+
 type SettingKeyProps = {
     settingsKey: string | null;
     title: ReactNode;
@@ -20,12 +13,12 @@ type SettingKeyProps = {
 };
 
 export type SettingRowProps = SettingKeyProps & {
-    // Rows in a `divide-y` card own their padding; rows in a card that already
-    // pads its content (`p-6 space-y-4`) do not.
+
+
     padded?: boolean;
 };
 
-// Label and description on the left, the control on the right.
+
 export function SettingRow({
     settingsKey,
     title,
@@ -52,8 +45,7 @@ export function SettingRow({
     );
 }
 
-// A setting whose control is too wide to sit beside its label — a text input, a
-// textarea, an input paired with buttons — so it stacks underneath.
+
 export function SettingField({
     settingsKey,
     title,
@@ -73,7 +65,7 @@ export function SettingField({
     );
 }
 
-// The card padded rows sit in, and the heading above it.
+
 export function SettingsCard({ children }: { children: ReactNode }) {
     return (
         <div className="bg-card border border-border rounded-lg divide-y divide-border/50">
@@ -83,11 +75,11 @@ export function SettingsCard({ children }: { children: ReactNode }) {
 }
 
 type SettingsDisclosureCardProps = {
-    // Label key of the settings this card contains, so a search result can
-    // open it before scrolling to the row (see settings-search.ts).
+
+
     sectionKey: string;
-    // A disclosure that only groups searchable child rows can opt out of being
-    // treated as a standalone setting while keeping its reveal section key.
+
+
     settingsKey?: string | null;
     title: string;
     description?: string;
@@ -97,8 +89,7 @@ type SettingsDisclosureCardProps = {
     children: ReactNode;
 };
 
-// A card that is itself the disclosure: title, description and a right-edge
-// chevron, with its rows opening in place underneath.
+
 export function SettingsDisclosureCard({
     sectionKey,
     settingsKey = sectionKey,

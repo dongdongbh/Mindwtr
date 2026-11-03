@@ -298,7 +298,7 @@ const createTasks = (now: Date, content: SandboxContent): Task[] => {
     const previousReadingReviewDate = utcMonthDay(now, 15, 'previous');
     const nextReadingReviewDate = utcMonthDay(now, 15, 'next');
     const seeds: TaskSeed[] = [
-        // Inbox, loose actions, lifecycle examples, and reference material.
+
         { id: 'sandbox-task-inbox-measurements', title: content.tasks.inboxMeasurements, status: 'inbox', contexts: [content.contexts.home], tags: [content.tags.capture] },
         { id: 'sandbox-task-inbox-seed-trays', title: content.tasks.inboxSeedTrays, status: 'inbox', contexts: [content.contexts.errands], tags: [content.tags.garden] },
         { id: 'sandbox-task-inbox-notes', title: content.tasks.inboxNotes, status: 'inbox', contexts: [content.contexts.computer] },
@@ -325,7 +325,7 @@ const createTasks = (now: Date, content: SandboxContent): Task[] => {
         { id: 'sandbox-task-deleted-batteries', title: content.tasks.deletedBatteries, status: 'next', areaId: AREA.home, deletedAt, updatedAt: deletedAt, contexts: [content.contexts.errands] },
         { id: 'sandbox-task-focus-room', title: content.tasks.focusRoom, status: 'next', areaId: AREA.community, priority: 'urgent', energyLevel: 'medium', timeEstimate: '10min', isFocusedToday: true, focusOrder: 0, contexts: [content.contexts.phone], dueDate: utcDateOnly(now, 1) },
 
-        // Spring Community Garden — a parallel project with several sections.
+
         { id: 'sandbox-task-garden-map', title: content.tasks.gardenMap, status: 'done', projectId: PROJECT.garden, sectionId: SECTION.gardenPlan, tags: [content.tags.garden], completedAt: atUtcTime(now, -8, 17) },
         { id: 'sandbox-task-garden-water-access', title: content.tasks.gardenWaterAccess, status: 'waiting', projectId: PROJECT.garden, sectionId: SECTION.gardenPlan, assignedTo: content.people.alex, contexts: [content.contexts.phone], tags: [content.tags.garden], reviewAt: atUtcTime(now, 2, 9), priority: 'high' },
         { id: 'sandbox-task-garden-lumber', title: content.tasks.gardenLumber, status: 'next', projectId: PROJECT.garden, sectionId: SECTION.gardenSupplies, contexts: [content.contexts.computer], tags: [content.tags.garden], priority: 'high', energyLevel: 'medium', timeEstimate: '30min', isFocusedToday: true, focusOrder: 1 },
@@ -352,7 +352,7 @@ const createTasks = (now: Date, content: SandboxContent): Task[] => {
         { id: 'sandbox-task-garden-budget', title: content.tasks.gardenBudget, status: 'waiting', projectId: PROJECT.garden, sectionId: SECTION.gardenPlan, assignedTo: content.people.jordan, tags: [content.tags.garden], reviewAt: utcDateOnly(now, 5) },
         { id: 'sandbox-task-garden-decisions', title: content.tasks.gardenDecisions, status: 'reference', projectId: PROJECT.garden, tags: [content.tags.garden, content.tags.reference], description: content.text.gardenDecisions },
 
-        // Kitchen refresh — order demonstrates project-wide sequential flow.
+
         { id: 'sandbox-task-kitchen-measure', title: content.tasks.kitchenMeasure, status: 'done', projectId: PROJECT.kitchen, sectionId: SECTION.kitchenResearch, tags: [content.tags.home], completedAt: atUtcTime(now, -3, 18), timeSpentMinutes: 22 },
         { id: 'sandbox-task-kitchen-faucet', title: content.tasks.kitchenFaucet, status: 'next', projectId: PROJECT.kitchen, sectionId: SECTION.kitchenResearch, contexts: [content.contexts.computer], tags: [content.tags.home], priority: 'high', energyLevel: 'medium', timeEstimate: '30min', isFocusedToday: true, focusOrder: 2 },
         { id: 'sandbox-task-kitchen-quote', title: content.tasks.kitchenQuote, status: 'waiting', projectId: PROJECT.kitchen, sectionId: SECTION.kitchenBuy, assignedTo: content.people.priya, contexts: [content.contexts.phone], tags: [content.tags.home], reviewAt: atUtcTime(now, 3, 9) },
@@ -360,7 +360,7 @@ const createTasks = (now: Date, content: SandboxContent): Task[] => {
         { id: 'sandbox-task-kitchen-install', title: content.tasks.kitchenInstall, status: 'next', projectId: PROJECT.kitchen, sectionId: SECTION.kitchenInstall, tags: [content.tags.home], priority: 'urgent', energyLevel: 'high', timeEstimate: '2hr', dueDate: utcDateOnly(now, 14) },
         { id: 'sandbox-task-kitchen-wipe', title: content.tasks.kitchenWipe, status: 'next', projectId: PROJECT.kitchen, sectionId: SECTION.kitchenInstall, tags: [content.tags.home], energyLevel: 'medium', timeEstimate: 'custom:75' },
 
-        // Reading — recurring examples include a linked completed occurrence.
+
         { id: 'sandbox-task-reading-chapter', title: content.tasks.readingChapter, status: 'next', projectId: PROJECT.reading, sectionId: SECTION.readingCurrent, contexts: [content.contexts.reading], tags: [content.tags.reading], priority: 'medium', energyLevel: 'medium', timeEstimate: '1hr', isFocusedToday: true, focusOrder: 3, dueDate: utcDateOnly(now, 2) },
         { id: 'sandbox-task-reading-session', title: content.tasks.readingSession, status: 'next', projectId: PROJECT.reading, sectionId: SECTION.readingCurrent, contexts: [content.contexts.library], tags: [content.tags.reading, content.tags.routine], timeEstimate: '30min', dueDate: nextUtcWeekday(now, [2, 6]), recurrence: { rule: 'weekly', strategy: 'strict', seriesId: 'sandbox-series-reading-session', byDay: ['TU', 'SA'], weekStart: 'MO', rrule: 'FREQ=WEEKLY;BYDAY=TU,SA;WKST=MO' } },
         { id: 'sandbox-task-reading-review-previous', title: content.tasks.readingReviewPrevious, status: 'done', projectId: PROJECT.reading, sectionId: SECTION.readingReviews, tags: [content.tags.reading, content.tags.review], completedAt: atUtcDateOnlyTime(previousReadingReviewDate, 19), dueDate: previousReadingReviewDate, recurrence: { rule: 'monthly', strategy: 'strict', seriesId: linkedSeriesId, byMonthDay: [15], count: 6, completedOccurrences: 0, rrule: 'FREQ=MONTHLY;BYMONTHDAY=15;COUNT=6' } },
@@ -369,21 +369,21 @@ const createTasks = (now: Date, content: SandboxContent): Task[] => {
         { id: 'sandbox-task-reading-takeaway', title: content.tasks.readingTakeaway, status: 'next', projectId: PROJECT.reading, sectionId: SECTION.readingCurrent, contexts: [content.contexts.computer], tags: [content.tags.reading], energyLevel: 'high', timeEstimate: '30min' },
         { id: 'sandbox-task-reading-next-book', title: content.tasks.readingNextBook, status: 'someday', projectId: PROJECT.reading, tags: [content.tags.reading, content.tags.someday] },
 
-        // Home maintenance — strict and after-completion schedules coexist.
+
         { id: 'sandbox-task-maintenance-smoke', title: content.tasks.maintenanceSmoke, status: 'next', projectId: PROJECT.maintenance, sectionId: SECTION.maintenanceMonthly, contexts: [content.contexts.home], tags: [content.tags.maintenance], priority: 'high', energyLevel: 'low', timeEstimate: '15min', dueDate: utcDateOnly(now, -2) },
         { id: 'sandbox-task-maintenance-fridge', title: content.tasks.maintenanceFridge, status: 'next', projectId: PROJECT.maintenance, sectionId: SECTION.maintenanceMonthly, contexts: [content.contexts.home], tags: [content.tags.maintenance, content.tags.routine], energyLevel: 'medium', timeEstimate: '1hr', dueDate: utcDateOnly(now, 7), recurrence: { rule: 'monthly', strategy: 'fluid', seriesId: 'sandbox-series-fridge', rrule: 'FREQ=MONTHLY' } },
         { id: 'sandbox-task-maintenance-filter', title: content.tasks.maintenanceFilter, status: 'next', projectId: PROJECT.maintenance, sectionId: SECTION.maintenanceSeasonal, contexts: [content.contexts.home], tags: [content.tags.maintenance], priority: 'medium', energyLevel: 'low', timeEstimate: '10min', startTime: utcDateOnly(now, 10), dueDate: utcDateOnly(now, 13) },
         { id: 'sandbox-task-maintenance-rail', title: content.tasks.maintenanceRail, status: 'next', projectId: PROJECT.maintenance, sectionId: SECTION.maintenanceSeasonal, contexts: [content.contexts.home], tags: [content.tags.maintenance], priority: 'high', energyLevel: 'high', timeEstimate: '2hr', dueDate: atUtcTime(now, 9, 16), repeatReminderMinutes: 30 },
         { id: 'sandbox-task-maintenance-models', title: content.tasks.maintenanceModels, status: 'reference', projectId: PROJECT.maintenance, tags: [content.tags.maintenance, content.tags.reference], description: content.text.maintenanceModels },
 
-        // Neighborhood picnic — Waiting For and checklists are visible together.
+
         { id: 'sandbox-task-picnic-shelter', title: content.tasks.picnicShelter, status: 'waiting', projectId: PROJECT.picnic, sectionId: SECTION.picnicVenue, assignedTo: content.people.alex, contexts: [content.contexts.phone], tags: [content.tags.event], reviewAt: atUtcTime(now, 1, 10), priority: 'urgent' },
         { id: 'sandbox-task-picnic-menu', title: content.tasks.picnicMenu, status: 'next', projectId: PROJECT.picnic, sectionId: SECTION.picnicFood, contexts: [content.contexts.computer], tags: [content.tags.event], energyLevel: 'medium', timeEstimate: '30min', dueDate: utcDateOnly(now, 6) },
         { id: 'sandbox-task-picnic-allergies', title: content.tasks.picnicAllergies, status: 'waiting', projectId: PROJECT.picnic, sectionId: SECTION.picnicFood, assignedTo: content.people.mateo, tags: [content.tags.event], reviewAt: utcDateOnly(now, 4) },
         { id: 'sandbox-task-picnic-plates', title: content.tasks.picnicPlates, status: 'next', projectId: PROJECT.picnic, sectionId: SECTION.picnicFood, contexts: [content.contexts.home], tags: [content.tags.event], taskMode: 'list', checklist: [{ id: 'sandbox-check-plates', title: content.checklist.plates, isCompleted: true }, { id: 'sandbox-check-tools', title: content.checklist.tools, isCompleted: false }, { id: 'sandbox-check-cloths', title: content.checklist.cloths, isCompleted: false }] },
         { id: 'sandbox-task-picnic-weather', title: content.tasks.picnicWeather, status: 'next', projectId: PROJECT.picnic, sectionId: SECTION.picnicVenue, contexts: [content.contexts.computer], tags: [content.tags.event], priority: 'high', timeEstimate: '10min', startTime: atUtcTime(now, 12, 8), dueDate: atUtcTime(now, 12, 9) },
 
-        // Someday and archived project examples.
+
         { id: 'sandbox-task-studio-lamps', title: content.tasks.studioLamps, status: 'someday', projectId: PROJECT.studio, contexts: [content.contexts.computer], tags: [content.tags.creative, content.tags.someday] },
         { id: 'sandbox-task-studio-desk', title: content.tasks.studioDesk, status: 'someday', projectId: PROJECT.studio, tags: [content.tags.creative, content.tags.someday], description: content.text.studioDesk },
         { id: 'sandbox-task-donation-wrap', title: content.tasks.donationWrap, status: 'done', projectId: PROJECT.donation, tags: [content.tags.community], completedAt: archivedProjectAt, projectArchivedAt: archivedProjectAt, statusBeforeProjectArchive: 'next', completedAtBeforeProjectArchive: null, isFocusedTodayBeforeProjectArchive: false },
@@ -392,7 +392,7 @@ const createTasks = (now: Date, content: SandboxContent): Task[] => {
     return seeds.map(makeTask);
 };
 
-/** Build a disposable fictional workspace without copying personal entities or settings. */
+
 export function createSandboxData(options: CreateSandboxDataOptions = {}): AppData {
     const suppliedNow = options.now;
     const now = suppliedNow && Number.isFinite(suppliedNow.getTime())

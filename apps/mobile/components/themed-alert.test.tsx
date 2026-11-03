@@ -36,7 +36,7 @@ const setPlatform = (os: typeof Platform.OS) => {
   Object.defineProperty(Platform, 'OS', { configurable: true, value: os });
 };
 
-// The overlay root is the only Pressable labelled with the alert title.
+
 const findOverlays = (root: ReturnType<typeof create>['root'] | null, title: string) => (
   root ? root.findAllByType(Pressable).filter((node) => node.props.accessibilityLabel === title) : []
 );
@@ -188,7 +188,7 @@ describe('ThemedAlertProvider', () => {
 
     const modal = rendered.root.findByType(Modal);
     expect(modal.props.visible).toBe(true);
-    // The host renders null, so the only overlay is the one inside the modal.
+
     expect(findOverlays(rendered.root, 'Notice')).toHaveLength(1);
     expect(findOverlays(modal, 'Notice')).toHaveLength(1);
   });

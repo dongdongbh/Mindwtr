@@ -6,9 +6,7 @@ import { createMemoryFileSystem, CACHE, DOCUMENTS, MANAGED } from '../../../pack
 import { createNativeAttachments } from './host-attachments';
 import { createHostSafPort, createHostSyncCrypto, createNativeSync } from './host-sync';
 
-// RN's File Sync fix history (rn-fix-inventory.md lines marked "NEW bundle"), each run through native's own binding
-// (createNativeSync) over the host's channels: a provider tree with an `attachments/` folder (HostDocuments.kt), the folder lock
-// (HostSyncLock.kt), the app's private files and installer (HostFiles.kt, HostInstaller.kt) and the crypto calls (HostCrypto.kt).
+
 const globals = globalThis as unknown as Record<string, unknown>;
 const channelGlobals = ['__mindwtrHostPlatform', '__mindwtrDocumentCall', '__mindwtrSyncLockCall', '__mindwtrCryptoCall',
     '__mindwtrFileCall', '__mindwtrInstallerCall', '__mindwtrNative'];
@@ -22,17 +20,17 @@ const DATE = '2026-10-18T00:00:00.000Z';
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const text = (value: string) => new TextEncoder().encode(value);
 
-/** The picked tree (HostDocuments.kt over externalstorage): `path` is relative to the picked folder, `attachments/x` included. */
+
 const provider = (top = 'Mindwtr') => {
     const tree = `content://${AUTHORITY}/tree/primary%3A${encodeURIComponent(top)}`;
     const root = `${tree}/document/primary%3A${encodeURIComponent(top)}`;
     const uriOf = (path: string) => `${tree}/document/${encodeURIComponent(`primary:${top}/${path}`)}`;
     const nodes = new Map<string, { name: string; parent: string; dir: boolean; bytes: Uint8Array }>();
     const ops: string[] = [];
-    /** A fault makes the next matching call throw. */
+
     const faults: { op: string; name?: string; error: Error }[] = [];
     const pauses: { op: string; name?: string; reached: () => void; go: Promise<Error | undefined> }[] = [];
-    /** One-shot: runs `run` when the next `op` arrives. */
+
     const hooks: { op: string; run: () => void }[] = [];
     const children = (uri: string) => [...nodes].filter(([, node]) => node.parent === uri).map(([child, node]) => ({
         uri: child, name: node.name, mime: node.dir ? 'vnd.android.document/directory' : 'application/octet-stream',
@@ -109,7 +107,7 @@ const provider = (top = 'Mindwtr') => {
     const read = (path: string) => nodes.get(uriOf(path))?.bytes;
     const names = (dir = '') => [...nodes.values()].filter((node) => node.parent === (dir ? uriOf(dir) : root)).map((node) => node.name).sort();
     const fail = (op: string, error: Error, name?: string) => { faults.push({ op, name, error }); };
-    /** The next `op` (on a name starting `name`) waits until released: `at` resolves once it waits; `release(error)` fails it. */
+
     const pause = (op: string, name?: string) => {
         let reached!: () => void;
         let release!: (error?: Error) => void;
@@ -121,14 +119,14 @@ const provider = (top = 'Mindwtr') => {
     return { call, nodes, ops, put, read, names, fail, pause, uriOf, root, tree, when: (op: string, run: () => void) => { hooks.push({ op, run }); } };
 };
 
-/** HostSyncLock.kt: one lease per folder at a time; a token is held until released. */
+
 const lock = () => {
     const calls: string[] = [];
     const held = new Set<string>();
     let next = 0;
     let busy = false;
     let releaseError: Error | null = null;
-    /** Scripted answers for the next acquires: 'busy' refuses one as another holder would. */
+
     const script: ('busy' | 'grant')[] = [];
     const call = async (request: Record<string, unknown>) => {
         calls.push(`${request.op}`);
@@ -147,11 +145,11 @@ const lock = () => {
     return { call, calls, held, script, hold: (on = true) => { busy = on; }, failRelease: (error: Error | null) => { releaseError = error; } };
 };
 
-/** The app's private files (HostFiles.kt), with a picked `content://` document read through the provider as expo reads it. */
+
 const appFiles = (folder: ReturnType<typeof provider>) => {
     const memory = createMemoryFileSystem();
     const calls: string[] = [];
-    /** A size the file system reports for a file instead of its bytes' length (an oversized attachment without the bytes). */
+
     const sizes = new Map<string, number>();
     const contentBytes = (uri: string) => {
         const node = folder.nodes.get(uri);
@@ -172,7 +170,7 @@ const appFiles = (folder: ReturnType<typeof provider>) => {
                 case 'readBytesRange': return contentBytes(uri).slice(Number(request.position), Number(request.position) + Number(request.length));
                 case 'copy': memory.put(String(request.to), contentBytes(uri)); return null;
                 case 'sha256File': return digest(contentBytes(uri));
-                // HostFiles refuses to change a picked document: only HostDocuments writes the folder.
+
                 default: throw new Error(`HostFiles refuses ${op} on a content:// document`);
             }
         }
@@ -195,7 +193,7 @@ const appFiles = (folder: ReturnType<typeof provider>) => {
             default: throw new Error(`unexpected file op ${op}`);
         }
     };
-    // HostInstaller.kt (RN's AttachmentFileInstallerCore): a staged download replaces the target only as expected.
+
     const installs: string[] = [];
     const installer = async (request: Record<string, unknown>) => {
         if (request.op === 'hash') {
@@ -210,8 +208,8 @@ const appFiles = (folder: ReturnType<typeof provider>) => {
         const expected = request.expected as { kind: string; sha256?: string };
         const current = memory.read(target);
         installs.push(`${expected.kind} ${target.replace(DOCUMENTS, '')}`);
-        // Absent: a different file at the target is a conflict (the stage is kept), the same bytes are taken as installed.
-        // Present: only the expected local generation is replaced.
+
+
         if (expected.kind === 'absent' ? current && digest(current) !== request.expectedDownloadSha256
             : !current || digest(current) !== expected.sha256) {
             return { status: 'conflict', preservedPath: staged };
@@ -227,7 +225,7 @@ const appFiles = (folder: ReturnType<typeof provider>) => {
     return { memory, calls, files, installer, native, installs, sizes };
 };
 
-/** HostCrypto.kt with a fast stand-in key derivation; AES-GCM stays real (Java's, here node's: the engine has no WebCrypto). */
+
 const cryptoCall = async (request: Record<string, unknown>) => {
     const bytes = (name: string) => request[name] as Uint8Array;
     if (request.op === 'argon2id') {
@@ -257,7 +255,7 @@ const fileAttachment = (id: string, fields: Partial<Attachment> = {}): Attachmen
     createdAt: DATE, updatedAt: DATE, ...fields,
 });
 
-/** Core's follow-up timers from a test's cycles, cleared when it ends so no cycle outlives its test. */
+
 const timers = new Set<ReturnType<typeof setTimeout>>();
 const trackTimers = () => {
     globalThis.setTimeout = ((run: (...args: unknown[]) => void, delay?: number, ...args: unknown[]) => {
@@ -270,7 +268,7 @@ const trackTimers = () => {
 const install = (options: { files?: boolean; others?: string[] } = {}) => {
     trackTimers();
     resetForTests();
-    // A cycle's merged rows stay in core's store; each test starts from an empty one.
+
     core.useTaskStore.setState(core.useTaskStore.getInitialState(), true);
     core.clearIdleSyncCycleSnapshot();
     setLogger(() => undefined);
@@ -278,7 +276,7 @@ const install = (options: { files?: boolean; others?: string[] } = {}) => {
     const folder = provider();
     const others = new Map((options.others ?? []).map((top) => [top, provider(top)]));
     const folderLock = lock();
-    /** The host's pick slot (PendingSyncFolderPick.kt), taken once. */
+
     let pick: Record<string, unknown> | null = null;
     globals.__mindwtrDocumentCall = async (request: Record<string, unknown>, bytes?: Uint8Array) => {
         if (request.op === 'takePick') {
@@ -304,7 +302,7 @@ const install = (options: { files?: boolean; others?: string[] } = {}) => {
     return { folder, others, folderLock, app, picked: (treeUri: string) => { pick = { treeUri }; } };
 };
 
-/** A host over RN's AsyncStorage keys (`stored`), its keystore and the local snapshot (`data`), shared across host instances. */
+
 const host = (stored: Record<string, string>, data: AppData = { tasks: [task('t1', 'mine')], projects: [], sections: [], areas: [], settings: {} },
     shared?: { kv: Map<string, string>; secrets: Map<string, string> }) => {
     const kv = shared?.kv ?? new Map(Object.entries(stored));
@@ -327,8 +325,8 @@ const host = (stored: Record<string, string>, data: AppData = { tasks: [task('t1
         },
         localData: () => ({
             getData: async () => structuredClone(local.current), saveData: async (next) => { local.current = structuredClone(next); },
-            // An Android cycle is sliced (core sync-run.ts): its save needs the read's token; the fake keeps no rows to slice.
-            readTokenOf: () => 'fake-read-token', prepareSaveRows: function* () { /* no rows to prepare */ },
+
+            readTokenOf: () => 'fake-read-token', prepareSaveRows: function* () {                          },
         }),
         networkState: () => ({ isConnected: true, isInternetReachable: true }),
         appendLog: async (entry) => { entries.push(entry); return null; },
@@ -354,7 +352,7 @@ const host = (stored: Record<string, string>, data: AppData = { tasks: [task('t1
 const fileHost = (data?: AppData, path = ROOT) => host({ [SYNC_BACKEND_KEY]: 'file', [SYNC_PATH_KEY]: path }, data);
 const manual = { manual: true } as const;
 const PASS = 'correct horse battery staple';
-/** Another device synced the folder and turned encryption on there; this process then starts as a fresh device. */
+
 const encryptedByPeer = async (data?: AppData) => {
     const peer = fileHost(data);
     expect(await peer.sync.settingsHost.performSync(undefined, manual)).toMatchObject({ success: true });
@@ -365,10 +363,7 @@ const encryptedByPeer = async (data?: AppData) => {
 };
 const writes = (ops: string[]) => ops.filter((op) => /^(write|delete|createFile|makeDirectory|rename) /.test(op));
 
-/**
- * One File attachment pass (core's syncFileAttachments) as createNativeSync binds it: host-attachments.ts over the SAF port, the
- * app's files and the installer, with sync's encryption material. RN's tests drive the same pass (attachment-sync.test.ts).
- */
+
 const pass = (folder: ReturnType<typeof provider>, app: ReturnType<typeof appFiles>, material: core.SyncKeyMaterial | null = null) => {
     const kv = new Map<string, string>();
     const lines: { message: string; extra?: Record<string, unknown> }[] = [];
@@ -437,7 +432,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
     });
 
     describe('the SAF attachment pass', () => {
-        // 135 (download half), 164: pending bytes the folder holds come back through the host's stage copy, never a JS read.
+
         it('restores matching pending SAF bytes through the host\'s stage copy, without reading them into the engine (164)', async () => {
             const { folder, app } = install();
             const bytes = text('recovered');
@@ -453,7 +448,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
             expect(app.memory.read(`${MANAGED}a1.txt`)).toEqual(bytes);
         });
 
-        // 135 (download half), 165: a remote winner installs over the exact stale local generation it replaces.
+
         it('installs a SAF remote winner over the exact stale local generation (165)', async () => {
             const { folder, app } = install();
             const stale = text('stale');
@@ -478,7 +473,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
             const result = one(await pass(folder, app).run(data));
             expect(app.calls).toContain('copy content');
             expect(app.installs).toEqual(['absent attachments/a3.txt']);
-            // The other file is kept and never taken for the attachment.
+
             expect(app.memory.read(`${MANAGED}a3.txt`)).toEqual(other);
             expect(result.localStatus).not.toBe('available');
         });
@@ -523,7 +518,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
 
         it('a plaintext device meeting an encrypted attachment in the folder uploads nothing, and the location stays paused (129)', async () => {
             const { folder, app } = install();
-            // Another device's enable was cut off after it sealed its attachment in place: data.json is still plaintext.
+
             const material = await core.deriveSyncKeyMaterial(PASS, new Uint8Array(16).fill(3), { mKib: 8, t: 1, p: 1 }, createHostSyncCrypto(cryptoCall));
             folder.put('data.json', text(JSON.stringify({ tasks: [], projects: [], sections: [], areas: [], settings: {} })));
             folder.put('attachments/peer.txt', await core.encryptSyncArtifact(text('sealed by a peer'), material));
@@ -536,7 +531,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
             expect(logged('File Sync attachment upload refused: the folder holds encrypted attachments')).toEqual([
                 expect.objectContaining({ context: expect.objectContaining({ releaseCheck: 'v1.3.8/file-partly-encrypted-upload' }) }),
             ]);
-            // The location is marked: the next cycle refuses before any attachment work.
+
             const before = folder.ops.length;
             expect(await sync.settingsHost.performSync(undefined, manual)).toMatchObject({ success: false });
             expect(folder.ops.slice(before).filter((op) => op.includes('attachments') || /^(write|createFile|delete) /.test(op))).toEqual([]);
@@ -549,7 +544,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
             for (let index = 0; index < 260; index += 1) {
                 const bytes = text(`entry ${index}`);
                 folder.put(`attachments/e${String(index).padStart(3, '0')}.txt`, bytes);
-                // Old generations no record names any more sit among them; the first and last entries stay referenced.
+
                 if (index % 5 !== 2) records.push(fileAttachment(`e${String(index).padStart(3, '0')}`, { uri: '', localStatus: 'missing', cloudKey: `attachments/e${String(index).padStart(3, '0')}.txt`, size: bytes.length }));
             }
             app.memory.put(`${MANAGED}a1.txt`, text('new attachment'));
@@ -646,7 +641,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
             const second = host({}, undefined, { kv: first.kv, secrets: first.secrets });
             expect(await second.sync.settingsHost.encryption.getStatus()).toEqual({ state: 'off', incompleteTransition: 'enable' });
             expect(await second.sync.settingsHost.performSync(undefined, manual)).toMatchObject({ success: false });
-            // RN pins no document read or write (sync-service.runtime.test.ts); resolving the folder's path lists it first.
+
             expect(folder.ops.filter((op) => !op.startsWith('listChildren '))).toEqual([]);
         });
 
@@ -667,7 +662,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
             const { sync } = fileHost(withAttachments(fileAttachment('a1')));
             expect(await sync.settingsHost.performSync(undefined, manual)).toMatchObject({ success: false });
             expect(folder.names()).toEqual(['data.json.enc']);
-            // By the document's name (`a1.<hash>.txt`), not a substring: a transition scratch name's random part may hold "a1".
+
             expect(writes(folder.ops).filter((op) => op.split(' ')[1]?.startsWith('a1.'))).toEqual([]);
             expect(folder.ops.some((op) => op.includes('attachments'))).toBe(false);
         });
@@ -681,7 +676,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
             expect(await sync.settingsHost.performSync(undefined, manual)).toMatchObject({ success: true });
             expect(folder.read('attachments/d1.txt')).toEqual(bytes);
             expect(folder.ops.filter((op) => op.startsWith('delete d1'))).toEqual([]);
-            // The cleanup ran: the local copy is gone.
+
             expect(app.memory.read(`${MANAGED}d1.txt`)).toBeUndefined();
             expect(logged('Attachment cleanup freshness guarded').length).toBeGreaterThan(0);
         });
@@ -724,15 +719,15 @@ describe('native Android File Sync: RN fix history through the native binding', 
         sync.start('active');
         await create.at;
         expect(folderLock.held.size).toBe(1);
-        // The app leaves while the cycle uploads an attachment: the triggers abort it (RN's lifecycle abort).
+
         sync.appState('background');
         create.release();
         for (let tries = 0; tries < 200 && cycleLine().length === 0; tries += 1) await new Promise((resolve) => originalSetTimeout(resolve, 5));
-        // Core answers a lifecycle abort as a success that queues a follow-up.
+
         expect(logged('Sync aborted by app lifecycle transition').length).toBe(1);
         expect(cycleLine().length).toBe(1);
         expect(folderLock.held.size).toBe(0);
-        // The aborted upload left nothing behind.
+
         expect(folder.names('attachments')).toEqual([]);
         for (const handle of timers) clearTimeout(handle);
         sync.appState('active');
@@ -743,11 +738,11 @@ describe('native Android File Sync: RN fix history through the native binding', 
 
     it('busy lease, its retry, then an ordinary follow-up: the contention retry budget is restored (168)', async () => {
         const { folder, folderLock } = install();
-        // Core's follow-up waits (5 s for a busy lease, 1 s and more otherwise) run at once here.
+
         const tracked = globalThis.setTimeout;
         globalThis.setTimeout = ((run: () => void, _delay?: number) => tracked(run, 0)) as typeof setTimeout;
         folderLock.script.push('busy', 'grant', 'busy', 'grant');
-        // The retry's cycle meets an edit made while it read the folder: core queues an ordinary follow-up.
+
         folder.when('read', () => core.useTaskStore.setState({ lastDataChangeAt: Date.now() + 60_000 }));
         const { sync } = fileHost();
         expect(await sync.settingsHost.performSync(undefined, {})).toMatchObject({ success: true, fileSyncLockDeferred: 'busy' });
@@ -765,7 +760,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
         const { sync, cycleLine } = fileHost();
         const running = sync.settingsHost.performSync(undefined, manual);
         await write.at;
-        // Core answers an activation probe that overlaps a running cycle with a requeue, at once.
+
         expect(await sync.settingsHost.performSync(undefined, { activationProbe: true })).toMatchObject({ skipped: 'requeued' });
         expect(cycleLine()).toEqual([]);
         write.release(new Error('SAF_DOCUMENT_UNAVAILABLE: the provider went away'));
@@ -775,7 +770,7 @@ describe('native Android File Sync: RN fix history through the native binding', 
 
     it('a host without attachment channels still hashes: an enable needs SHA-256 and the engine has no WebCrypto (P3-12)', async () => {
         const { folder } = install({ files: false });
-        // The engine's crypto (host-polyfills.js): random bytes only.
+
         const webCrypto = globalThis.crypto;
         globalThis.crypto = { getRandomValues: <T extends ArrayBufferView>(array: T) => webCrypto.getRandomValues(array as never) } as unknown as Crypto;
         try {

@@ -6,17 +6,13 @@ import android.content.Context
 import android.net.Uri
 import java.net.URLDecoder
 
-/**
- * A Tasks or Compact widget's background. Transparent drops the panel and picks
- * the text colors itself, light or dark, so the rows stay readable on the
- * wallpaper whatever the app theme is.
- */
+
 enum class WidgetBackground(internal val stored: String?) {
   DEFAULT(null), LIGHT_TEXT("light"), DARK_TEXT("dark");
 
   val isTransparent: Boolean get() = this != DEFAULT
 
-  /** The theme palette whose text this background uses; null draws as the app theme does. */
+
   val textPalette: WidgetPayload.Palette? get() = when (this) {
     DEFAULT -> null
     LIGHT_TEXT -> WidgetPayload.DARK_THEME_PALETTE
@@ -24,19 +20,16 @@ enum class WidgetBackground(internal val stored: String?) {
   }
 }
 
-/**
- * Which list each placed Tasks widget shows (#1173): SharedPreferences `mindwtr_widget_lists`, key = widget id.
- * Also each Tasks or Compact widget's background choice, in `mindwtr_widget_backgrounds`; both stay on the device.
- */
+
 object WidgetListStore {
   const val PREFS_NAME = "mindwtr_widget_lists"
   const val BACKGROUNDS_PREFS_NAME = "mindwtr_widget_backgrounds"
-  /** Widget ids whose Focus adds available actions (#1468); absent = off. */
+
   const val FOCUS_AVAILABLE_PREFS_NAME = "mindwtr_widget_focus_available"
   const val DEFAULT_LIST = "focus"
-  /** Core's WIDGET_FOCUS_AVAILABLE_LIST_ID: Focus plus Next Actions whose start date has arrived. */
+
   const val FOCUS_AVAILABLE_LIST = "focus:available"
-  /** Kept for installed widgets that still carry a project selection. */
+
   const val PROJECT_PREFIX = "project:"
   const val CONTEXT_PREFIX = "context:"
   const val TAG_PREFIX = "tag:"
@@ -63,18 +56,16 @@ object WidgetListStore {
     return if (base == DEFAULT_LIST || grouping !in GROUPINGS) base else "$GROUP_PREFIX$grouping:${Uri.encode(base)}"
   }
 
-  // Core's SIMPLE_ / HIERARCHICAL_TASK_TOKEN_RE: quick-add reads these unaided as typed (`@Todd`, `@person/todd`).
+
   private val PLAIN_CAPTURE_TOKEN = Regex("[\\p{L}\\p{N}_-]+(?:/[\\p{L}\\p{N}_-]+)*")
 
-  // Any other name goes in quick-add's quoted form (`@"Two words"`) when that reads back exactly: no quote
-  // or backslash, single inner spaces only (the parse collapses spacing), and no space before a marker or
-  // slash (`#"x @y"` loses `@y` to the context parse; `/link:` is read before any token).
+
   private fun quotable(value: String): Boolean =
     value.isNotEmpty() && !value.first().isWhitespace() && !value.last().isWhitespace() &&
       value.none { it in "\"\\\u201C\u201D\u201E" || (it.isWhitespace() && it != ' ') } &&
       value.zipWithNext().none { (a, b) -> a == ' ' && (b == ' ' || b in "@#+!%/") }
 
-  /** Capture text for a widget showing one context or tag (#1418), e.g. `@Todd `, `@"Two words" `; empty otherwise. */
+
   fun captureText(listId: String): String {
     val baseListId = baseListId(listId)
     val token = when {
@@ -108,14 +99,14 @@ object WidgetListStore {
     editor.commit()
   }
 
-  /** The payload list this widget draws: its selection, or the Focus variant when it chose available actions. */
+
   fun displayListId(context: Context, appWidgetId: Int): String =
     displayListId(read(context, appWidgetId), focusAvailable(context, appWidgetId))
 
   internal fun displayListId(selection: String, focusAvailable: Boolean): String =
     if (selection == DEFAULT_LIST && focusAvailable) FOCUS_AVAILABLE_LIST else selection
 
-  /** Default until the widget's settings pick another. The first release stored Transparent as `true`: that reads as light text. */
+
   fun background(context: Context, appWidgetId: Int): WidgetBackground =
     when (val stored = context.getSharedPreferences(BACKGROUNDS_PREFS_NAME, Context.MODE_PRIVATE).all[appWidgetId.toString()]) {
       true -> WidgetBackground.LIGHT_TEXT
@@ -136,7 +127,7 @@ object WidgetListStore {
     }
   }
 
-  /** Distinct payload list ids the placed Tasks widgets draw (the Focus variant included). */
+
   fun selections(context: Context): List<String> {
     val manager = AppWidgetManager.getInstance(context) ?: return emptyList()
     return selectionsForProviders(

@@ -44,7 +44,7 @@ const fail = (code: 'INVALID_INPUT' | 'STALE_REVISION' | 'SAVE_FAILED' | 'ACTION
     ({ ok: false, error: { code, message } });
 const invalid = () => fail('INVALID_INPUT', 'A bounded Project file Add request and exact preparation are required');
 
-/** Lexical metadata validation only; native ownership decides whether any URI may be accessed. */
+
 const fileURI = (value: unknown, directory = false): value is string => {
     if (typeof value !== 'string' || !value || value.length > 16_384
         || /[?#\\]/.test(value)) return false;
@@ -81,13 +81,13 @@ const sourceMetadata = (request: NativeProjectFileAddWriteRequest, now: string):
     createdAt: now, updatedAt: now, localStatus: 'available',
     ...('version' in request ? { fileHash: request.sourceSha256 } : {}),
 });
-// Node edit options use the display codec; JSC may expose the raw JSON attachment list.
-// This equivalence is token-only: ownership checks always compare the raw before/after rows.
+
+
 const matchesFrozenToken = (before: Project, expected: NativeProjectAttachmentWriteToken): boolean =>
     same(projectAttachmentWriteToken(before), expected)
     || same(projectAttachmentWriteToken({ ...before, attachments: toAttachments(before.attachments) }), expected);
 
-/** Pure cold-journal reader: no clock, mutable state, policy, file IO or ownership proof. */
+
 const readPrepared = (value: unknown): NativePreparedProjectFileAddWrite | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -139,7 +139,7 @@ const selected = (projects: Project[], projectId: string): Project | undefined =
     return matches.length === 1 ? matches[0] : undefined;
 };
 
-/** Internal Project Add foundation. A native publisher must bind durable intent and byte proof before exposure. */
+
 export function createProjectFileAddWriteMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
     t: () => (key: string) => string;
@@ -203,7 +203,7 @@ export function createProjectFileAddWriteMethods(deps: {
             if ('version' in request) prepared = { ...prepared, attachment: { ...prepared.attachment, fileHash: request.sourceSha256 } };
             const targetURI = request.managedDirectoryURI + getManagedAttachmentFileName(prepared.attachment);
             if (!fileURI(targetURI)) return invalid();
-            // RN persistPreparedPickedAttachment refuses a copy whose URI is unchanged.
+
             if (targetURI === request.picked.uri)
                 return { ok: true, value: { kind: 'refused', result: { message: deps.t()('attachments.fileNotReadable') } } };
             const attachment = { ...prepared.attachment, uri: targetURI };

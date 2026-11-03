@@ -38,7 +38,7 @@ describe('mobile onboarding events', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  // The gate itself is core's (first-run-onboarding.test.ts); this pins the AsyncStorage binding under RN's key.
+
   it('stores dismissal state locally', async () => {
     asyncStorageGetItem.mockResolvedValueOnce('dismissed');
 

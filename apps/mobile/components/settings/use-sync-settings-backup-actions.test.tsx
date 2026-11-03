@@ -195,8 +195,8 @@ describe('useSyncSettingsBackupActions', () => {
     });
 
     it('waits for the encryption posture line to reach the log file before sharing it', async () => {
-        // `Share log` shares the log FILE. A fire-and-forget stamp races the share sheet and
-        // the posture can miss the copy the user hands over (#1056 diagnostics review).
+
+
         let releaseWrite: (() => void) | undefined;
         appLogMocks.logInfo.mockImplementation(() => new Promise<null>((resolve) => {
             releaseWrite = () => resolve(null);
@@ -241,7 +241,7 @@ describe('useSyncSettingsBackupActions', () => {
         });
         await latest?.handleMergeBackup();
 
-        // Nothing is written until the user accepts the confirmation.
+
         expect(dataTransfer.mergeDataFromBackup).not.toHaveBeenCalled();
         const [title, , buttons] = vi.mocked(Alert.alert).mock.calls[0] as [string, string, Array<{ onPress?: () => void }>];
         expect(title).toBe('settings.mergeBackup');
@@ -267,8 +267,7 @@ describe('useSyncSettingsBackupActions', () => {
         expect(dataTransfer.exportCurrentDataBackup).toHaveBeenCalledWith(expect.anything(), 'csv');
     });
 
-    // D3: restore shipped without the undo action every other result path got, while the
-    // release note already promised it.
+
     it('offers Undo on a restore result too', async () => {
         vi.mocked(dataTransfer.pickBackupDocument).mockResolvedValue({ uri: 'file://backup.json', fileName: 'backup.json' });
         vi.mocked(dataTransfer.inspectBackupDocument).mockResolvedValue({
@@ -298,7 +297,7 @@ describe('useSyncSettingsBackupActions', () => {
         expect(dataTransfer.restoreLocalDataSnapshot).toHaveBeenCalledWith('data.2026-08-13T10-00-00.000.snapshot.json');
     });
 
-    // A failed restore, merge or snapshot restore shows the failure's own words, not JavaScript's "Error: " prefix.
+
     it.each(['restore', 'merge', 'snapshot'] as const)('shows a failed %s without the "Error: " prefix', async (kind) => {
         vi.mocked(dataTransfer.pickBackupDocument).mockResolvedValue({ uri: 'file://backup.json', fileName: 'backup.json' });
         vi.mocked(dataTransfer.inspectBackupDocument).mockResolvedValue({
@@ -320,8 +319,7 @@ describe('useSyncSettingsBackupActions', () => {
         expect(showSettingsErrorToast.mock.calls.at(-1)?.[1]).toBe('Local data changed while restoring. Try again.');
     });
 
-    // #Q-03: the result toast carries the rollback, so it dies with the message
-    // instead of leaving a persistent affordance.
+
     it('offers Undo import on the result and restores that exact snapshot', async () => {
         vi.mocked(dataTransfer.pickBackupDocument).mockResolvedValue({ uri: 'file://backup.json', fileName: 'backup.json' });
         vi.mocked(dataTransfer.inspectBackupDocument).mockResolvedValue({
@@ -349,7 +347,7 @@ describe('useSyncSettingsBackupActions', () => {
         vi.mocked(Alert.alert).mockClear();
         await act(async () => { await toast.onAction?.(); });
 
-        // Same destructive confirmation as a manual snapshot restore.
+
         const [undoTitle, , undoButtons] = vi.mocked(Alert.alert).mock.calls[0] as [string, string, Array<{ onPress?: () => void }>];
         expect(undoTitle).toBe('settings.undoImportConfirmTitle');
         expect(dataTransfer.restoreLocalDataSnapshot).not.toHaveBeenCalled();

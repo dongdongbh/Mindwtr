@@ -115,7 +115,7 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
         XCTAssertNil(row.completionToken)
         XCTAssertEqual(row.upcomingLabel, "Starts")
         let utc = calendar("UTC")
-        // A payload cached before the day words existed keeps its published label.
+
         XCTAssertEqual(row.relabeled(days: nil, now: instant("2026-03-07T12:00:00Z"), calendar: utc).dueLabel, "Starts Mar 8, 2026")
         XCTAssertEqual(row.relabeled(days: days, now: instant("2026-03-07T12:00:00Z"), calendar: utc).dueLabel, "Starts Tomorrow")
         XCTAssertEqual(try decode(["dueLabel": "Today"]).relabeled(days: days, now: Date()).dueLabel, "Today")
@@ -135,7 +135,7 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
 
     func testUpcomingLabelsFollowTheNextActionsDayRuleAndRollOverAtLocalMidnight() {
         let utc = calendar("UTC")
-        // Monday 2026-10-26, as in #1455.
+
         let cases = [
             "2026-10-26": "Starts Today", "2026-10-27": "Starts Tomorrow", "2026-10-28": "Starts Wed",
             "2026-11-01": "Starts Sun", "2026-11-02": "Starts 11/2", "2026-10-20": "Starts 10/20",
@@ -147,7 +147,7 @@ final class MindwtrWidgetTaskItemTests: XCTestCase {
         XCTAssertEqual(label("2026-11-02", now: "2026-10-26T12:00:00Z", utc, days: dayFirst), "Starts 2/11")
         XCTAssertEqual(label("2026-10-27", now: "2026-10-26T23:59:59Z", utc), "Starts Tomorrow")
         XCTAssertEqual(label("2026-10-27", now: "2026-10-27T00:00:00Z", utc), "Starts Today")
-        // The day is the device's local day, not UTC's.
+
         XCTAssertEqual(label("2026-10-27", now: "2026-10-26T15:00:00Z", calendar("Asia/Tokyo")), "Starts Today")
     }
 

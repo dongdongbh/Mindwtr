@@ -3,9 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/// Create a security-scoped bookmark for the given file-system path.
-/// Returns a heap-allocated base64-encoded C string on success, or NULL.
-/// The caller must free the result with `mindwtr_macos_free_bookmark_string`.
+
 char *mindwtr_macos_create_security_bookmark(const char *path_cstr) {
     if (!path_cstr) return NULL;
 
@@ -31,10 +29,7 @@ char *mindwtr_macos_create_security_bookmark(const char *path_cstr) {
     return strdup(utf8);
 }
 
-/// Resolve a previously stored security-scoped bookmark (base64-encoded).
-/// On success calls `startAccessingSecurityScopedResource` and returns the
-/// resolved path as a heap-allocated C string.  Returns NULL on failure.
-/// The caller must free the result with `mindwtr_macos_free_bookmark_string`.
+
 char *mindwtr_macos_resolve_security_bookmark(const char *base64_cstr) {
     if (!base64_cstr) return NULL;
 
@@ -76,12 +71,7 @@ char *mindwtr_macos_resolve_security_bookmark(const char *base64_cstr) {
     return strdup(path);
 }
 
-/// Open a bookmarked path with its default app (Finder for a folder). The
-/// security scope lasts only for the hand-off to Launch Services; Finder
-/// does not need it once the open request is accepted.
-/// Returns 1 when opened, 0 when the bookmark is unusable or no longer
-/// points at `expected_path_cstr` (the caller then takes its normal open
-/// path), and -1 when the open itself failed.
+
 int mindwtr_macos_open_security_bookmark(const char *base64_cstr,
                                          const char *expected_path_cstr) {
     if (!base64_cstr || !expected_path_cstr) return 0;
@@ -104,8 +94,7 @@ int mindwtr_macos_open_security_bookmark(const char *base64_cstr,
         return 0;
     }
 
-    // The link may have been edited to another path since the bookmark was
-    // made; the bookmark only vouches for the folder the user picked.
+
     NSString *expected = [[[NSURL
         fileURLWithPath:[NSString stringWithUTF8String:expected_path_cstr]]
         URLByStandardizingPath] path];
@@ -126,7 +115,7 @@ int mindwtr_macos_open_security_bookmark(const char *base64_cstr,
     return opened ? 1 : -1;
 }
 
-/// Free a string returned by the bookmark helper functions.
+
 void mindwtr_macos_free_bookmark_string(char *ptr) {
     free(ptr);
 }

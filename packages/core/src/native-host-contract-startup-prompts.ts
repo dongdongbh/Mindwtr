@@ -1,13 +1,6 @@
-/**
- * The native hosts' startup prompts (React Native's app/_layout.tsx queue): after the validated boot, the host asks which
- * prompt opens now (first-run onboarding, the maintainer announcement, the update reminder or the donation ask; at most one)
- * and reports what the user did with it. Core decides with RN's own descriptors (mobile-startup-prompts.ts) and queue
- * (startup-prompt-run.ts); the host draws the prompt and opens links.
- *
- * Both requests write only RN's device keys (the prompt state, the onboarding and announcement dismissals), never the
- * store: the donation ask's synced record (settings.supportPrompt) is the journaled supportPromptShown, sent by the host with
- * the `shownAt` that `startupPromptAction` returns, as RN writes both with one time.
- */
+
+
+
 import type { AndroidInstallerSource } from './about-settings-model';
 import { ACTIVE_APP_ANNOUNCEMENT, APP_ANNOUNCEMENT_DISMISSED_VALUE, getAnnouncementDismissalStorageKey, type AppAnnouncement } from './announcements';
 import { readMobileOnboardingDismissed, writeMobileOnboardingDismissed } from './first-run-onboarding';
@@ -48,7 +41,7 @@ type Deps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
     t: () => (key: string) => string;
-    /** The app language: Start using Mindwtr seeds Getting Started in it (the journaled gettingStarted command). */
+
     language: () => string;
     host: () => NativeAboutHost | null;
 };
@@ -56,17 +49,17 @@ type Deps = {
 export const NATIVE_STARTUP_PROMPT_IDS = ['onboarding', 'announcement', 'update-reminder', 'donation'] as const;
 export type NativeStartupPromptId = typeof NATIVE_STARTUP_PROMPT_IDS[number];
 
-/** RN's welcome sheet's words (MobileOnboardingFlow and its handlers' toasts), in RN's keys. */
+
 const ONBOARDING_WORDS = ['title', 'subtitle', 'startFreshTitle', 'startFreshDesc', 'startFreshBusy', 'syncTitle', 'syncDesc', 'importTitle',
     'importDescMobile', 'footer', 'skipForNow', 'skip', 'errorNotCreated', 'errorFailed', 'toastNotCreated', 'toastFailed', 'toastReady'] as const;
 
-/** The prompt to open: the welcome sheet with its words and the seed's language, or the announcement window with its words. */
+
 export type NativeStartupPrompt =
     | { id: 'onboarding'; words: Record<typeof ONBOARDING_WORDS[number], string>; language: string }
     | {
         id: Exclude<NativeStartupPromptId, 'onboarding'>;
         announcement: AppAnnouncement;
-        /** The window's dismiss label when the prompt has none, and its close button's label. */
+
         notNow: string;
         closeLabel: string;
     };
@@ -79,14 +72,14 @@ const unavailable = () => fail('ACTION_FAILED', 'Startup prompts are not availab
 
 export function createStartupPromptMethods(deps: Deps) {
     const receipts = createNativeRequestReceipts({ save: deps.save });
-    // The session (this process), as RN's queue keeps it: the prompts already opened, declined or failed, and whether today's
-    // activity was recorded.
+
+
     const retired = new Set<string>();
     let activityRecorded = false;
-    // The update reminder that opened: its dismissal records this version (RN's updateReminderInfo).
+
     let openedUpdateVersion: string | null = null;
     const resolveText = (key: string, fallback: string) => translateWithFallback(deps.t(), key, fallback);
-    /** The open prompt's view: the welcome sheet's words, or the window's announcement and labels in the app language. */
+
     const view = (id: NativeStartupPromptId, updateInfo: MobileUpdateReminderInfo | null, announcement: AppAnnouncement | null): NativeStartupPrompt | null => {
         if (id === 'onboarding') {
             const t = deps.t();
@@ -99,15 +92,12 @@ export function createStartupPromptMethods(deps: Deps) {
         return { id, announcement: translateDonationPromptAnnouncement(resolveText), ...labels };
     };
     const warn = (host: NativeAboutHost, message: string, error: unknown) => {
-        try { host.logWarn(message, error); } catch { /* best effort */ }
+        try { host.logWarn(message, error); } catch {                   }
     };
 
     return {
-        /**
-         * The prompt that opens now, or null. The host asks again after a dismissal, as RN's queue goes on to the next prompt;
-         * a prompt this process already opened, declined or failed is never tried again. The first ask records today's activity
-         * first, as RN does at first paint, so the donation and update rules count this launch.
-         */
+
+
         async beginStartupPrompts(input: unknown): Promise<NativeHostResult<{ prompt: NativeStartupPrompt | null; notice?: string }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -118,20 +108,18 @@ export function createStartupPromptMethods(deps: Deps) {
                 return fail('INVALID_INPUT', 'beginStartupPrompts takes installerSource and donationEnabled');
             }
             if (isSandboxMode()) return { ok: true, value: { prompt: null } };
-            // A debug build's preview (RN's prompt test controls): the prompt's window now, whatever the rules say; it reads and
-            // writes nothing, and the host sends no action for it.
+
+
             if (input.preview !== undefined) {
                 if (typeof input.preview !== 'string' || !PROMPT_IDS.has(input.preview)) return fail('INVALID_INPUT', 'preview takes a prompt id');
-                // RN's update test target (getMobileUpdateTestTarget): none on FOSS, the Play listing for a Play install, the release
-                // page otherwise, and "View release" when the installer is unknown.
-                // A previewed prompt is retired, as RN's hook retires a test prompt it closes: Sync or Import from a previewed
-                // welcome sheet does not reopen it.
+
+
                 retired.add(input.preview);
                 const source = input.installerSource;
                 const target = host.app.isFossBuild ? null
                     : source === 'play-store' ? { label: UPDATE_NOW_ACTION_LABEL, url: `https://play.google.com/store/apps/details?id=${host.app.packageName}` }
                         : { label: source === 'sideload' ? UPDATE_NOW_ACTION_LABEL : VIEW_RELEASE_ACTION_LABEL, url: UPDATE_REMINDER_RELEASES_URL };
-                // RN's test toast when this build gets its updates from its store (FOSS).
+
                 if (input.preview === 'update-reminder' && !target) return { ok: true, value: { prompt: null, notice: 'Updates are managed by this build channel.' } };
                 return { ok: true, value: { prompt: view(input.preview as NativeStartupPromptId, target && {
                     currentVersion: host.app.version, latestVersion: '99.99.99', latestReleasedAt: new Date().toISOString(),
@@ -140,7 +128,7 @@ export function createStartupPromptMethods(deps: Deps) {
             }
             const storage = host.storage;
 
-            // A failed read leaves the snapshot null, which keeps the donation and update prompts out, as in RN.
+
             let promptStateSnapshot: UserPromptState | null = null;
             if (!activityRecorded) {
                 activityRecorded = true;
@@ -151,7 +139,7 @@ export function createStartupPromptMethods(deps: Deps) {
                     outcome = 'failed';
                     warn(host, 'Failed to record local prompt activity', error);
                 }
-                try { host.logInfo('Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome }); } catch { /* best effort */ }
+                try { host.logInfo('Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome }); } catch {                   }
             } else {
                 try {
                     promptStateSnapshot = await readLocalUserPromptState(storage);
@@ -171,12 +159,12 @@ export function createStartupPromptMethods(deps: Deps) {
             let updateInfo: MobileUpdateReminderInfo | null = null;
             const descriptors = buildMobileStartupPromptDescriptors({
                 storage,
-                // The host asks only after its validated boot load.
+
                 dataReady: true,
                 canonicalDataReady: true,
                 mobileOnboardingDismissed,
                 visibleDataCount,
-                // Android has no CloudKit.
+
                 readSyncBackend: async () => coerceSupportedBackend(resolveBackend(await storage.getItem(SYNC_BACKEND_KEY)), false),
                 onSyncBackendReadError: (error) => warn(host, 'Failed to read the sync backend for onboarding', error),
                 updateReminderAllowed,
@@ -192,17 +180,13 @@ export function createStartupPromptMethods(deps: Deps) {
                 onLog: (error, context) => warn(host, `Startup prompt failed: ${context.id} ${context.phase}`, error),
             });
             if (!id) return { ok: true, value: { prompt: null } };
-            // Set by the update descriptor's present(), which TypeScript cannot see from here.
+
             const opened = updateInfo as MobileUpdateReminderInfo | null;
             if (id === 'update-reminder' && opened) openedUpdateVersion = opened.latestVersion;
             return { ok: true, value: { prompt: view(id as NativeStartupPromptId, opened, ACTIVE_APP_ANNOUNCEMENT) } };
         },
 
-        /**
-         * What the user did with the open prompt: `dismiss` (Not now, close, Back, Skip, or a finished Start), `act` (its button)
-         * or `shown` (the donation window became visible). Writes RN's device keys as RN's handlers do; a failed write is logged,
-         * never refused. `shown` answers the time it recorded, for the journaled supportPromptShown.
-         */
+
         async startupPromptAction(input: unknown): Promise<NativeHostResult<{ shownAt: string | null }>> {
             const host = deps.host();
             if (!host) return unavailable();
@@ -232,10 +216,7 @@ export function createStartupPromptMethods(deps: Deps) {
             return { ok: true, value: { shownAt: null } };
         },
 
-        /**
-         * The donation ask's synced record (#1237, RN's updateSettings of supportPrompt when the window shows), journaled with
-         * the time `startupPromptAction` returned, so a replay writes the same value and the other installs skip the ask.
-         */
+
         async supportPromptShown(input: unknown): Promise<NativeHostResult<{ changed: boolean }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

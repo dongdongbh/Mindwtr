@@ -11,7 +11,7 @@ interface TokenPickerModalProps {
     tokens: string[];
     placeholder?: string;
     allowCustomValue?: boolean;
-    /** Let the user pick several tokens at once (used by the bulk remove flows). */
+
     multiSelect?: boolean;
     confirmLabel: string;
     cancelLabel: string;
@@ -94,7 +94,7 @@ export function TokenPickerModal({
                     onChange={(event) => {
                         const value = event.target.value;
                         setQuery(value);
-                        // In multi-select the field only filters; picks come from the chips.
+
                         if (multiSelect) return;
                         if (!allowCustomValue) {
                             const exactMatch = tokens.find((token) => token.toLowerCase() === value.trim().toLowerCase());

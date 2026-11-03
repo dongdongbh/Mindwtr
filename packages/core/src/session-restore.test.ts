@@ -32,8 +32,7 @@ describe('shouldRestoreLastView', () => {
     });
 });
 
-// The last-screen snapshot moved from React Native (pass O2a): its text and its parse stay byte-identical to RN's, frozen
-// from RN's lib/session-restore.ts before the move (session-restore-parity.fixtures.json), and its fix history is pinned here.
+
 describe('last-screen snapshot (moved from React Native)', () => {
     const NOW = frozen.now;
     it('stores and reads exactly what React Native stored and read', () => {
@@ -43,7 +42,7 @@ describe('last-screen snapshot (moved from React Native)', () => {
         for (const read of frozen.reads) expect(parseRestorableLastRoute(read.raw, read.nowMs), String(read.raw)).toEqual(read.result);
     });
 
-    // cad4bd6ed: a transient screen keeps the previous snapshot (nothing to store); a restorable one round-trips.
+
     it('round-trips a restorable screen and stores nothing for a transient one', () => {
         expect(parseRestorableLastRoute(buildLastRouteSnapshot('/someday', undefined, null, NOW), NOW)).toEqual({ pathname: '/someday' });
         for (const transient of ['/capture-modal', '/settings', '/review-flow', '/global-search']) {
@@ -51,7 +50,7 @@ describe('last-screen snapshot (moved from React Native)', () => {
         }
     });
 
-    // 921c7c103: the open project comes back even when the route has no param; the route's own param wins.
+
     it('carries the open project from the screen when the route has none', () => {
         expect(parseRestorableLastRoute(buildLastRouteSnapshot('/projects', undefined, 'p-open', NOW), NOW))
             .toEqual({ pathname: '/projects', params: { projectId: 'p-open' } });
@@ -60,14 +59,14 @@ describe('last-screen snapshot (moved from React Native)', () => {
         expect(parseRestorableLastRoute(buildLastRouteSnapshot('/inbox', undefined, 'p-open', NOW), NOW)).toEqual({ pathname: '/inbox' });
     });
 
-    // f1b1d6255: History reopens on its Done or Archived tab; any other value is dropped.
+
     it('reopens History on its tab and drops other tab values', () => {
         expect(parseRestorableLastRoute(buildLastRouteSnapshot('/history', { tab: 'archived' }, null, NOW), NOW))
             .toEqual({ pathname: '/history', params: { tab: 'archived' } });
         expect(parseRestorableLastRoute(buildLastRouteSnapshot('/history', { tab: 'trash' }, null, NOW), NOW)).toEqual({ pathname: '/history' });
     });
 
-    // eaa1458b3 through the snapshot: the window is 25 minutes, measured from the stored time.
+
     it('ages out after the restore window', () => {
         const stored = buildLastRouteSnapshot('/waiting', undefined, null, NOW);
         expect(parseRestorableLastRoute(stored, NOW + SESSION_RESTORE_WINDOW_MS)).toEqual({ pathname: '/waiting' });

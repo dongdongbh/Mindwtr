@@ -4,8 +4,7 @@ import {
   type SyncBackend as CoreSyncBackend,
 } from '@mindwtr/core';
 
-// The classification and path rules live in core (mobile-sync-utils.ts) so the native app
-// classifies a sync failure and reads a sync path exactly as this app does.
+
 export {
   classifySyncFailure,
   coerceSupportedBackend,

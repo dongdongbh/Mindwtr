@@ -1,8 +1,6 @@
-// The mobile apps' automatic sync triggers: what the app does on resume, on leaving the
-// foreground, on a data change and on a CloudKit change, the per-backend pacing, the
-// app-state dedupe, and when an automatic failure is worth a log line and a warning. It moved
-// here from React Native's `hooks/root-layout/use-root-layout-sync-effects.ts` so the native
-// app triggers sync by the same rules. The pacing itself is core's `createAutoSyncController`.
+
+
+
 import { createAutoSyncController, type AutoSyncCadence, type AutoSyncController } from './auto-sync-controller';
 import { NativeAttachmentCleanupUnconfirmedError } from './native-attachment-cleanup';
 
@@ -12,17 +10,14 @@ export type MobileAutoSyncCadence = AutoSyncCadence & {
 
 const AUTO_SYNC_BACKEND_CACHE_TTL_MS = 5_000;
 const APP_STATE_TRIGGER_DEDUPE_MS = 1_000;
-// Auto-sync pacing adapts to how long cycles actually take on this device/dataset:
-// period = cycle duration T + idle gap, and share = T / period is the fraction of
-// time sync occupies the JS thread. Gap = 9T (capped) makes period = 10T, so a
-// continuously-editing device spends ~10% of its time syncing instead of ~33%
-// at gap = 2T (#766).
+
+
 const ADAPTIVE_SYNC_DURATION_MULTIPLIER = 9;
 const MAX_ADAPTIVE_SYNC_INTERVAL_MS = 5 * 60_000;
-// Same base and ceiling as the desktop auto-sync controller.
+
 const AUTO_SYNC_FAILURE_COOLDOWN_MS = 60_000;
 const MAX_AUTO_SYNC_FAILURE_COOLDOWN_MS = 10 * 60_000;
-/** The same failure is logged and shown again only after this long. */
+
 const AUTO_SYNC_FAILURE_REPORT_REPEAT_MS = 10 * 60 * 1000;
 const BACKGROUND_HOLD_RELEASE_CHECK = 'v1.3.7/ios-background-sync-hold';
 export const MOBILE_AUTO_SYNC_CADENCE_FILE: MobileAutoSyncCadence = {
@@ -44,7 +39,7 @@ export const MOBILE_AUTO_SYNC_CADENCE_OFF: MobileAutoSyncCadence = {
   foregroundMinIntervalMs: 60_000,
 };
 
-/** File Sync is far cheaper to leave alone than a remote backend; sync off barely paces. */
+
 export const getMobileAutoSyncCadence = (backend: string): MobileAutoSyncCadence => {
   if (backend === 'file') return MOBILE_AUTO_SYNC_CADENCE_FILE;
   if (backend === 'webdav' || backend === 'cloud' || backend === 'cloudkit') return MOBILE_AUTO_SYNC_CADENCE_REMOTE;
@@ -57,33 +52,32 @@ type SyncStoreSnapshot = {
 };
 
 export type MobileSyncTriggerPorts = {
-  /** The app state when the host mounted ('active', 'background', 'inactive'). */
+
   initialAppState: string;
   performSync(): Promise<{ success: boolean; error?: string }>;
   abortSync(): unknown;
   flushPendingSave(): Promise<void>;
-  /** Schedules or cancels the platform's periodic background job for the current config. */
+
   reconcileBackgroundSync(): void;
   readStoredBackend(): Promise<string | null>;
-  /** The stored backend value as a backend this device supports (CloudKit only where present). */
+
   resolveSupportedBackend(raw: string | null): string;
-  /** The sync payload fingerprint (core's `getInMemorySyncChangeFingerprint`); may throw. */
+
   getSyncChangeFingerprint(): string | null;
   isLikelyOfflineSyncError(error: string): boolean;
   classifySyncFailure(error: string): string;
   reportError(error: unknown): void;
   logWarn(message: string, context: { scope: string; extra: Record<string, string> }): unknown;
-  /** Receives only the pacing lines tagged for release diagnostics; absent means none are logged. */
+
   logInfo?(message: string, context: { scope: string; extra: Record<string, string> }): unknown;
-  /** A local change is waiting to upload (true) or a successful cycle covered it (false); the badge shows pending. */
+
   onLocalChangePendingChange?(pending: boolean): void;
-  /** Show the user one warning for an automatic sync failure, by its classification. */
+
   showSyncIssue(classification: string): void;
-  /** iOS: asks the OS to keep the app running in the background (#1432). Returns the release, or null
-   *  when the platform has none. `onExpire` runs once if the OS ends the time first; the platform has
-   *  already let go by then. */
+
+
   holdBackgroundExecution?(onExpire: () => void): (() => void) | null;
-  /** Resolves once no sync cycle is running or queued, follow-ups included. */
+
   waitForSyncIdle?(): Promise<void>;
 };
 
@@ -101,15 +95,14 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
   let lastAppStateSyncTriggerAt = -APP_STATE_TRIGGER_DEDUPE_MS;
   let controller: AutoSyncController | null = null;
   let cleanupFailure: NativeAttachmentCleanupUnconfirmedError | null = null;
-  // A local change is pending while a data change is newer than the start of the last
-  // successful cycle (#1431). The sequence numbers store changes; the fingerprint a
-  // successful cycle started from lets a write that left the payload as uploaded clear it.
+
+
   let localChangeSeq = 0;
   let coveredLocalChangeSeq = 0;
   let uploadedFingerprint: string | null = null;
   let publishedLocalChangePending = false;
-  // A cycle that spans an abort request was cut short and uploaded nothing for sure, even
-  // though the lifecycle abort reports success.
+
+
   let abortRequests = 0;
   const hasPendingLocalChange = () => localChangeSeq > coveredLocalChangeSeq;
   const publishLocalChangePending = () => {
@@ -119,12 +112,10 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
     ports.onLocalChangePendingChange?.(pending);
   };
 
-  // #1432: iOS suspends the app seconds after it leaves the foreground, mid-request. One OS
-  // background hold keeps sync running while work started at (or running after) that moment is
-  // unfinished; it ends once that work and every follow-up the sync service queued settle.
+
   type BackgroundHold = { release: () => void; startedAt: number; work: number; failed: boolean };
   let backgroundHold: BackgroundHold | null = null;
-  // Set when iOS ended a hold early: no new hold until the next foreground, which then syncs.
+
   let backgroundHoldExpired = false;
   const endBackgroundHold = (hold: BackgroundHold, outcome: 'completed' | 'failed' | 'expired' | 'aborted') => {
     if (backgroundHold !== hold) return;
@@ -140,17 +131,17 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
     });
   };
   const runHoldingBackground = <T>(source: 'app-left' | 'background-cycle', work: () => Promise<T>): Promise<T> => {
-    // With sync off a cycle returns at once; no hold, no log lines on every app switch.
+
     const syncOff = syncBackendCache.readAt > 0 && syncBackendCache.backend === 'off';
     if (!backgroundHold && !backgroundHoldExpired && !syncOff && ports.holdBackgroundExecution) {
       let taken: BackgroundHold | null = null;
       const release = ports.holdBackgroundExecution(() => {
         if (!taken || backgroundHold !== taken) return;
-        // The foreground already came back: the cycle may finish there.
+
         if (appState !== 'active') {
           backgroundHoldExpired = true;
           abortRequests += 1;
-          // The existing lifecycle abort: the service queues a follow-up, nothing counts as uploaded.
+
           ports.abortSync();
         }
         endBackgroundHold(taken, 'expired');
@@ -220,9 +211,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
     return syncCadence;
   };
 
-  // Device-local bookkeeping (lastSync*, pendingRemoteWrite*, network) is not
-  // part of a sync payload, so the change fingerprint ignores it for free —
-  // no separate strip pass needed.
+
   const readCurrentSyncChangeFingerprint = (): string | null => {
     if (!isActive) return null;
     try {
@@ -267,14 +256,12 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
     if (isActive) ports.showSyncIssue(classification);
   };
 
-  // One controller at a time: the shared pacing machine in core, configured with the mobile
-  // policy switches. An unconfirmed native cleanup permanently stops this runtime;
-  // only the host's exact recovery can release its durable owner.
+
   const getController = (): AutoSyncController => {
     if (controller) return controller;
     controller = createAutoSyncController({
-      // Ordinary failures retain mobile cooldown behavior. A native cleanup fatal
-      // must escape unchanged, after all timers and queued follow-ups are stopped.
+
+
       performSync: async () => {
         requireActiveRuntime();
         const startSeq = localChangeSeq;
@@ -312,19 +299,19 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
         }
       },
       reportError: (_label, error) => reportError(error),
-      // The controller's step-by-step traces stay off on mobile; only release-check lines reach the log.
+
       logInfo: (message, extra) => {
         if (isActive && extra?.releaseCheck) void ports.logInfo?.(message, { scope: 'sync', extra });
       },
       hasPendingLocalChanges: hasPendingLocalChange,
       isRuntimeActive: () => isActive,
       onSyncFailure: reportAutoSyncFailure,
-      // Being offline is not a backend refusing us: no cooldown, no toast.
-      // A failure with no message carries nothing to back off from either.
+
+
       isIgnorableFailure: (error) => !isActive || !error || ports.isLikelyOfflineSyncError(error),
       getCadence: () => syncCadence,
       refreshCadence: refreshSyncCadence,
-      // The fingerprint runs once per quiet period, not per write (#766).
+
       shouldSyncOnDebouncedChange: () => {
         if (!isActive) return false;
         const currentFingerprint = readCurrentSyncChangeFingerprint();
@@ -332,7 +319,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
         const previousFingerprint = lastAutoSyncPayloadFingerprint;
         if (currentFingerprint) {
           lastAutoSyncPayloadFingerprint = currentFingerprint;
-          // A write that left the payload exactly as last uploaded has nothing to upload.
+
           if (currentFingerprint === uploadedFingerprint) {
             coveredLocalChangeSeq = localChangeSeq;
             publishLocalChangePending();
@@ -345,22 +332,21 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
         maxIntervalMs: MAX_ADAPTIVE_SYNC_INTERVAL_MS,
       },
       isSuspended: () => appState !== 'active',
-      // Both preserve mobile's existing pacing exactly: the first-change
-      // debounce applies once per foreground session, and a throttle or
-      // cooldown retry that a newer cycle already overtook is dropped.
+
+
       continuousDebounceUntilSuspend: true,
       skipRetryWhileCycleRunning: true,
       autoFailureCooldownMs: AUTO_SYNC_FAILURE_COOLDOWN_MS,
       maxFailureCooldownMs: MAX_AUTO_SYNC_FAILURE_COOLDOWN_MS,
-      // No foreground heartbeat on mobile; background sync is a platform job,
-      // never a JS timer.
+
+
       periodicSyncIntervalMs: null,
     });
     return controller;
   };
 
   return {
-    /** Starts watching: reads the cadence, reconciles the background job, seeds the fingerprint. */
+
     start(): void {
       if (!isActive) return;
       getController();
@@ -370,12 +356,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
       lastAutoSyncPayloadFingerprint = readCurrentSyncChangeFingerprint();
     },
 
-    // Every trigger routed through here is automatic — app-state changes, CloudKit
-    // change notifications, startup — so every one of them waits out a failure
-    // cooldown. Exempting them let a throttled device fire again on the very next
-    // foreground/background switch, which is how testing across two devices stayed
-    // stuck (#948). The user-facing Sync now button does not come through here; it
-    // calls the sync service directly and still forces a run.
+
     requestSync(minIntervalMs?: number): void {
       if (!isActive) return;
       const activeController = getController();
@@ -390,7 +371,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
         .catch(reportError);
     },
 
-    /** A store update: a finished sync cancels a failure retry; a data change starts the debounce. */
+
     handleStoreChange(state: SyncStoreSnapshot, prevState: SyncStoreSnapshot): void {
       if (!isActive) return;
       const activeController = getController();
@@ -404,23 +385,19 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
           || state.settings?.lastSyncAt !== prevState.settings?.lastSyncAt
         )
       ) {
-        // Manual sync bypasses these triggers, but its successful status
-        // update must still cancel an automatic retry left by a prior
-        // failure.
+
+
         activeController.notifyExternalSyncSuccess();
       }
-      // Cheap check first: the fingerprint reads a small tuple digest, not the
-      // whole dataset, but it still must not run on every store update (#766).
-      // Data writes always bump lastDataChangeAt, so skipping the fingerprint
-      // here is safe.
+
+
       if (state.lastDataChangeAt === prevState.lastDataChangeAt) return;
       localChangeSeq += 1;
       publishLocalChangePending();
       activeController.handleDataChange();
     },
 
-    /** An app state change. Returns 'resumed' when the app came back to the foreground, so the
-     *  host refreshes what it shows; 'left' when it went to the background; otherwise null. */
+
     handleAppStateChange(nextAppState: string): 'resumed' | 'left' | null {
       if (!isActive) return null;
       const activeController = getController();
@@ -461,7 +438,7 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
         const now = Date.now();
         const syncRequested = !shouldDedupeAppStateSyncTrigger(now) && isActive;
         if (syncRequested) markAppStateSyncTrigger(now);
-        // Held even without a new request: the aborted cycle's follow-up still has to run.
+
         void runHoldingBackground('app-left', () => (syncRequested
           ? activeController.requestAutoSync(0, 'app-state-background')
           : Promise.resolve())).catch(reportError);
@@ -475,13 +452,13 @@ export const createMobileSyncTriggers = (ports: MobileSyncTriggerPorts) => {
       void getController().requestAutoSync(0, 'cloudkit').catch(reportError);
     },
 
-    /** True while a local change waits for a successful cycle to upload it (#1431). */
+
     hasPendingLocalChange,
 
-    /** False once disposed or quarantined: the host's foreground work checks it too. */
+
     isRuntimeActive: (): boolean => isActive,
 
-    /** Stops every trigger for good and drops the controller's timers. */
+
     dispose: stopRuntime,
   };
 };

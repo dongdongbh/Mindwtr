@@ -7,13 +7,7 @@ import { SqliteAdapter, type SqliteClient } from './sqlite-adapter';
 import type { AppData, Project, Task } from './types';
 import type { TaskQueryOptions } from './storage';
 
-// This fixture is the single (tasks, query) -> expected ids table shared by every
-// task read-query surface: taskMatchesQuery/buildTaskWhere here, and the desktop
-// local API's Rust filter_tasks (apps/desktop/src-tauri/src/local_api.rs). A case
-// whose query shape the Rust HTTP filter can't express (excludeStatuses lists,
-// projectId, or "hide archived but keep done") carries `rustQuery: null` and is
-// skipped on the Rust side - see that file's fixture-driven test for the mirror
-// of this one.
+
 type TaskQueryFixtureCase = {
     name: string;
     tasks: Task[];
@@ -27,10 +21,7 @@ const fixtureCases = JSON.parse(
     readFileSync(new URL('./task-query.fixtures.json', import.meta.url), 'utf8')
 ) as TaskQueryFixtureCase[];
 
-// Consolidation-law pin (COMMON-20260730.md): a test that just iterates
-// fixtureCases can't catch the fixture shrinking - this independent,
-// hand-written roster fails if a case is deleted from the JSON without also
-// being removed here.
+
 const PINNED_CASE_NAMES = [
     'JS default hides archived but keeps done (core matcher / sqlite-adapter / mobile default)',
     'includeArchived true opts out of default hiding entirely (mcp list_tasks contract)',
@@ -58,9 +49,6 @@ describe('task query fixture (taskMatchesQuery)', () => {
     });
 });
 
-// --- buildTaskWhere, exercised end-to-end through SqliteAdapter.queryTasks ---
-// (per the handoff: "via an in-memory sqlite if cheap" - it is, this mirrors the
-// harness already used by sqlite-adapter.test.ts).
 
 const require = createRequire(import.meta.url);
 type BunStatement = { run: (params?: unknown[]) => unknown; all: (params?: unknown[]) => unknown[] };
@@ -87,9 +75,7 @@ const loadDatabaseCtor = (): DatabaseCtor | null => {
 const RuntimeDatabase = loadDatabaseCtor();
 const describeSqlite = RuntimeDatabase ? describe : describe.skip;
 
-// `describe.skip` above passes silently if no sqlite runtime is found - this bare
-// top-level check fails loudly instead, so the buildTaskWhere half of this fixture
-// can't vanish unnoticed on a runtime that lacks both bun:sqlite and node:sqlite.
+
 it('has a sqlite runtime available to run the buildTaskWhere fixture suite', () => {
     expect(RuntimeDatabase).not.toBeNull();
 });
@@ -136,19 +122,11 @@ describeSqlite('task query fixture (buildTaskWhere via SqliteAdapter.queryTasks)
     it.each(fixtureCases.map((testCase) => [testCase.name, testCase] as const))('%s', async (_name, testCase) => {
         await adapter.saveData(emptyAppData(testCase.tasks, (testCase.containers?.projects ?? []) as Project[]));
         if (testCase.name === 'isFocusedToday false matches unstarred and never-set tasks (NULL-safe)') {
-            // saveData writes toBool(undefined) as 0, never NULL, so this case would pass
-            // even without buildTaskWhere's COALESCE. A pre-migration row is the only real
-            // source of a NULL isFocusedToday column - force one so the case actually
-            // exercises the NULL-safe predicate it's named for.
+
+
             await createClient(db).run("UPDATE tasks SET isFocusedToday = NULL WHERE id = 'missing-focus-1'");
         }
         const rows = await adapter.queryTasks(testCase.query);
         expect(rows.map((task) => task.id).sort()).toEqual([...testCase.expectedIds].sort());
     });
 });
-
-// Mutation-test note (verified manually, not left running): temporarily removing
-// the `excludeStatuses` branch from taskMatchesQuery fails the "excludeStatuses
-// filters an arbitrary status list" case above, and removing the isFocusedToday
-// branch fails both isFocusedToday cases - the roster pin above is what would
-// have caught the fixture itself shrinking instead.

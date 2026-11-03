@@ -30,7 +30,7 @@ final class LegacyRNUpgradeTests: XCTestCase {
 
     func testJSONAheadImportRetainsDataAfterInterruptedMarkerAcknowledgment() async throws {
         let at = "2026-09-20T10:00:00.000Z"
-        // Keep activation's due-Inbox promotion out of this import/replay check.
+
         let live: [String: Any] = ["id": "rn-live", "title": "Unsynced RN task ü 😀", "description": "Keep notes\nline two",
             "status": "next", "tags": ["#tag"], "contexts": ["@home"], "dueDate": "2099-10-01",
             "createdAt": at, "updatedAt": at, "rev": 4, "revBy": "rn-device"]
@@ -64,7 +64,7 @@ final class LegacyRNUpgradeTests: XCTestCase {
         XCTAssertTrue(before.contains("rn-tombstone"))
         XCTAssertTrue(before.contains("2099-10-01"))
         inspect.close()
-        try FileManager.default.removeItem(at: checkpoint) // only this test's injected obstruction
+        try FileManager.default.removeItem(at: checkpoint)
         let retry = try host()
         _ = try await retry.start()
         await retry.close()
@@ -83,8 +83,8 @@ final class LegacyRNUpgradeTests: XCTestCase {
         let afterRows = try after.execute("SELECT id, title, description, dueDate, deletedAt, rev FROM tasks ORDER BY id")
         XCTAssertEqual(try JSONSerialization.jsonObject(with: Data(afterRows.utf8)) as? NSArray,
                        try JSONSerialization.jsonObject(with: Data(before.utf8)) as? NSArray)
-        // The copy's settings move whole into a SQLite with none (core's mergeLegacyJsonCopy): RN's device id stays this
-        // install's, so sync's revBy does not change on the upgrade.
+
+
         let settingsRows = try JSONSerialization.jsonObject(with: Data(try after.execute("SELECT data FROM settings WHERE id = 1").utf8)) as? [[String: Any]]
         let settingsJSON = try XCTUnwrap(settingsRows?.first?["data"] as? String)
         let settings = try JSONSerialization.jsonObject(with: Data(settingsJSON.utf8)) as? [String: Any]
@@ -141,8 +141,8 @@ final class LegacyRNUpgradeTests: XCTestCase {
               try source.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
             throw HostFailure("Preserved RN fixture must be a separate real directory")
         }
-        // Inspect paths only before copying: never open SQLite or the upgrade host
-        // on the preserved source, and never follow a fixture symlink outside it.
+
+
         func entries(_ directory: URL) throws -> [URL] {
             var failed = false
             guard let iterator = files.enumerator(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey],
@@ -185,7 +185,7 @@ final class LegacyRNUpgradeTests: XCTestCase {
             guard let left, let right else { return left == nil && right == nil }
             return (left as? NSObject)?.isEqual(right) == true
         }
-        let originalRows = try snapshotRows() // includes committed pages in the copied WAL
+        let originalRows = try snapshotRows()
         guard originalRows["tasks"]?.isEmpty == false else { throw HostFailure("Preserved RN fixture must contain tasks") }
         let manifestPaths: Set<String> = [
             "Library/Application Support/\(identifier)/RCTAsyncLocalStorage_V1/manifest.json",
@@ -235,9 +235,8 @@ final class LegacyRNUpgradeTests: XCTestCase {
                         continue
                     }
                     var changed = row.keys.filter { !same(row[$0], preserved[$0]) }.sorted()
-                    // Compare preferences as JSON. Normal startup's
-                    // bumpTombstoneCleanupTimestampMigration updates only this
-                    // maintenance receipt; all other settings stay exact.
+
+
                     var settingNames = ""
                     if table == "settings", changed.contains("data"), let old = row["data"] as? String,
                        let new = preserved["data"] as? String,
@@ -255,7 +254,7 @@ final class LegacyRNUpgradeTests: XCTestCase {
                         if names.isEmpty { changed.removeAll { $0 == "data" } }
                         else { settingNames = "; changed setting keys: " + names.joined(separator: ", ") }
                     }
-                    // Only schema/setting names are reported, never stored values.
+
                     XCTAssertTrue(changed.isEmpty, "Preserved RN \(table) changed fields: \(changed.joined(separator: ", "))\(settingNames)")
                 }
             }

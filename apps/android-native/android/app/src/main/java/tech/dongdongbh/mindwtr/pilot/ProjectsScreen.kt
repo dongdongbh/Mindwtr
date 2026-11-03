@@ -1,5 +1,9 @@
 package tech.dongdongbh.mindwtr.pilot
 
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -69,23 +73,23 @@ data class ProjectRow(
     val id: String,
     val title: String,
     val status: String,
-    /** Core's status line text (Completed or Cancelled for a closed project). */
+
     val statusLabel: String,
     val isFocused: Boolean,
     val focusDisabled: Boolean,
     val activeTaskCount: Int,
     val nextActionTitle: String?,
     val focusedWithoutNextAction: Boolean,
-    /** Core's revision of the project as the view showed it; the star sends it. */
+
     val projectRevision: String,
 )
 data class ProjectGroup(val areaId: String?, val areaName: String?, val areaColor: String?, val areaIcon: String?, val projects: List<ProjectRow>)
 
-/** Core's three buckets, in the order the handoff and mobile show them, with mobile's heading key for each. */
+
 val PROJECT_BUCKETS = listOf("active" to "projects.activeSection", "deferred" to "projects.deferredSection", "archived" to "projects.closed")
 
-/** Core's getProjects reply. Groups, areas, rows, and counts stay exactly as core sent them. */
-data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>) {
+
+data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>, val moves: Map<String, Pair<Boolean, Boolean>> = emptyMap()) {
     fun title(id: String) = buckets.values.firstNotNullOfOrNull { groups ->
         groups.firstNotNullOfOrNull { group -> group.projects.firstOrNull { it.id == id }?.title }
     }
@@ -110,29 +114,27 @@ data class ProjectsView(val buckets: Map<String, List<ProjectGroup>>) {
                         }
                     }
                 }
-            })
+            }, json.optJSONObject("moves")?.let { moves -> moves.keys().asSequence().associateWith { id ->
+                moves.getJSONObject(id).let { it.getBoolean("up") to it.getBoolean("down") } } }.orEmpty())
         }
     }
 }
 
 sealed interface DetailItem
-/** [collapsible]: RN's Completed pile heading, which folds ([collapsed]) the done tasks under it. */
+
 data class DetailSection(val id: String, val title: String, val count: Int, val muted: Boolean, val collapsible: Boolean = false,
                          val collapsed: Boolean = false, val flowLabel: String? = null) : DetailItem
 data class DetailTask(val row: TaskRow, val sequenceCue: String?) : DetailItem
 
-/** Core's sequence cue values and mobile's label key for each. */
+
 private val CUE_KEYS = mapOf("available" to "projects.availableNextAction", "later" to "projects.laterInSequence")
 
-/**
- * Core's getProjectDetail windows at one revision: section markers and task rows exactly in core's order, and core's
- * [metadata] for the project's Details (getProjectDetailsPresentation: the summary and every value's label).
- */
+
 data class ProjectDetail(val revision: String, val projectId: String, val readOnly: Boolean, val total: Int, val items: List<DetailItem>,
                          val metadata: JSONObject? = null, val gettingStarted: JSONObject? = null, val controls: JSONObject? = null,
-                         /** Core's filter view parts of the first window: `filters`, `chips`, `filterButtonLabel`, `empty` (the filter sheet's view). */
+
                          val listFilters: JSONObject? = null) {
-    /** Adds one later window after the items already loaded. */
+
     fun append(window: JSONObject): ProjectDetail {
         val next = parse(window)
         check(next.revision == revision && next.projectId == projectId) { "Unexpected project window" }
@@ -162,24 +164,21 @@ data class ProjectDetail(val revision: String, val projectId: String, val readOn
     }
 }
 
-/**
- * The Projects tab: core's project list, or the open project's detail. Both are
- * read again on every resume and after every command.
- */
+
 @Composable
 fun ProjectsTab(model: InboxViewModel, modifier: Modifier) {
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(owner) {
         owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { model.refreshProjects() }
     }
-    // The open project again when the clock changes one of its rows (a due color, an age; #1360).
+
     ReadAgainAt(model.project?.takeIf { model.openProjectId != null }?.let { open -> clockReadAt(open.items.map { (it as? DetailTask)?.row }) }) {
         model.refreshProjects()
     }
     if (model.openProjectId == null) ProjectList(model, modifier) else ProjectDetailList(model, modifier)
 }
 
-/** RN's collapsible section heading (TaskList): the chevron, the title and the count; a tap folds or unfolds the Completed pile. */
+
 @Composable
 private fun CompletedHeading(entry: DetailSection, enabled: Boolean, toggle: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -195,17 +194,24 @@ private fun CompletedHeading(entry: DetailSection, enabled: Boolean, toggle: () 
     }
 }
 
-/**
- * Core's groups as they come, drawn as RN's project list: RN's "Add new project…" field first,
- * then Active, then Someday / Waiting and Closed, which open on a tap and start closed. Each
- * area header has RN's dot and chevron and folds its projects. What is open is kept on the
- * device as RN keeps it.
- */
+
 @Composable
 private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model) {
     val c = LocalTheme.current.colors
     LazyColumn(modifier, contentPadding = PaddingValues(12.dp)) {
         item(key = "add") { AddProjectField(model) }
+
+        item(key = "controls") {
+            val manage = t("areas.manage")
+            val shape = RoundedCornerShape(8.dp)
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 8.dp, bottom = 4.dp), horizontalArrangement = Arrangement.End) {
+                Box(Modifier.heightIn(min = 44.dp).clip(shape).rnBorder(1.dp, c.border, shape)
+                    .clickable(enabled = writable && !busy, role = Role.Button) { openAreaManager() }
+                    .semantics { contentDescription = manage }.testTag("projects-manage-areas").padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+                    Text(manage, style = rnText(12, 600), color = c.text)
+                }
+            }
+        }
         if (projects != null && PROJECT_BUCKETS.all { (bucket, _) -> projects?.buckets?.get(bucket).isNullOrEmpty() }) item(key = "empty") {
             Text(t("projects.empty"), style = rnText(16, 400), color = c.secondaryText, textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth().padding(48.dp))
@@ -221,7 +227,7 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
             item(key = "bucket:$bucket") {
                 val toggleLabel = t(if (open) "markdown.collapse" else "markdown.expand")
                 val title = t(heading)
-                // RN's section toggle: 12/700 capitals and a chevron, a rule above all but the first.
+
                 Row(
                     Modifier.fillMaxWidth().then(if (ruled) Modifier.rnBorderTop(c.border) else Modifier)
                         .clearAndSetSemantics {
@@ -239,17 +245,20 @@ private fun ProjectList(model: InboxViewModel, modifier: Modifier) = with(model)
             }
             if (!open) continue
             for (group in groups) {
-                // RN keys a collapsed area by its id, "no-area" without one, the same in every group.
+
                 val areaKey = group.areaId ?: "no-area"
                 val folded = areaKey in projectsView.collapsedAreas
                 item(key = "area:$bucket:${group.areaId}") { AreaHeader(model, group, areaKey, folded) }
-                if (!folded) for (row in group.projects) item(key = "project:${row.id}") { ProjectRowItem(model, row) }
+                if (!folded) for (row in group.projects) item(key = "project:${row.id}") {
+                    val (up, down) = projects?.moves?.get(row.id) ?: (false to false)
+                    ProjectRowItem(model, row, group.projects.map { it.id }, up, down)
+                }
             }
         }
     }
 }
 
-/** RN's area header: the area's icon or colored dot, its name in capitals, and a chevron; a tap folds its projects. */
+
 @Composable
 private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: String, folded: Boolean) {
     val c = LocalTheme.current.colors
@@ -275,12 +284,7 @@ private fun AreaHeader(model: InboxViewModel, group: ProjectGroup, areaKey: Stri
     }
 }
 
-/**
- * RN's "Add new project…" field and its + button; once a title is typed, RN's area chips
- * (No area, then core's areas) choose the new project's area. + runs core's createProject
- * with the draft's request UUID; while its retry is owed the field is locked, and only +
- * (the exact retry) works.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddProjectField(model: InboxViewModel) = with(model) {
@@ -325,7 +329,7 @@ private fun AddProjectField(model: InboxViewModel) = with(model) {
     }
 }
 
-/** RN's chip: a pill, filled with the tint when selected. */
+
 @Composable
 private fun AreaChip(label: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -334,23 +338,32 @@ private fun AreaChip(label: String, selected: Boolean, enabled: Boolean, onClick
             .selectable(selected = selected, enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp))
 }
 
-/**
- * RN's project row: the title; core's next action, its "No next action" warning, or the
- * project's status in RN's status color; then core's active task count and RN's star. The
- * star asks core for the other state, dimmed and disabled when core says five are starred.
- */
+
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow) = with(model) {
+private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow, order: List<String>, canMoveUp: Boolean, canMoveDown: Boolean) = with(model) {
     val theme = LocalTheme.current
     val c = theme.colors
     val count = "${row.activeTaskCount} ${t("common.tasks")}"
     val view = LocalView.current
+
+    val moves = listOfNotNull("up".takeIf { canMoveUp }?.let { it to t("projects.moveUp") }, "down".takeIf { canMoveDown }?.let { it to t("projects.moveDown") })
+    val canAct = writable && !busy && failedAction == null
+    var moveMenu by remember { mutableStateOf(false) }
+    val move = { direction: String -> moveMenu = false; projectDetails.move(row.id, direction, order) }
+    if (moveMenu) ThemedAlert(row.title, null, moves.map { (direction, label) -> AlertButton(label, "default") { move(direction) } } +
+        AlertButton(t("common.cancel"), "cancel") { moveMenu = false }) { moveMenu = false }
     Row(
         Modifier.fillMaxWidth().padding(bottom = 6.dp).clip(RoundedCornerShape(8.dp)).background(c.cardBg)
             .heightIn(min = 52.dp).padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f).clickable(enabled = writable && !busy && failedAction == null, role = Role.Button) { openProject(row.id) }) {
+        Column(Modifier.weight(1f)
+            .combinedClickable(enabled = canAct, role = Role.Button, onLongClick = if (moves.isEmpty()) null else ({
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK); moveMenu = true
+            })) { openProject(row.id) }
+            .semantics { customActions = moves.map { (direction, label) -> CustomAccessibilityAction(label) { if (canAct) move(direction); canAct } } }
+            .testTag("project-row-open-${row.id}")) {
             Text(row.title, style = rnText(16, 500), color = c.text, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(bottom = 4.dp))
             if (row.nextActionTitle != null) {
@@ -384,14 +397,10 @@ private fun ProjectRowItem(model: InboxViewModel, row: ProjectRow) = with(model)
     }
 }
 
-/**
- * One project as core lists it, under RN's project header (Back and the title):
- * section markers and task rows in core's order, with core's titles and counts.
- * A read-only (archived) project shows no Complete.
- */
+
 @Composable
 private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(model) {
-    // While a failed command's retry is owed, Back is left to the system, as on the lists and in the editor.
+
     BackHandler(enabled = failedAction == null) { closeProject() }
     val c = LocalTheme.current.colors
     val detail = project
@@ -399,8 +408,8 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
     LaunchedEffect(openProjectId) { projectDetails.follow(openProjectId) }
     DisposableEffect(Unit) { onDispose { projectDetails.closeOverlays() } }
     Column(modifier) {
-        // RN's modalHeader: 10 above and 8 below Android's 18/bold EditText (45.3 dp with its own padding), then a 1 dp border:
-        // 64.3 dp in all, as measured on the S23 (193 px at 3 px per dp).
+
+
         Row(Modifier.fillMaxWidth().heightIn(min = 64.3.dp).background(c.cardBg).bottomBorder(c.border).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             val back = t("common.back")
@@ -408,7 +417,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 Icon(Lucide.ChevronLeft, null, tint = c.tint, modifier = Modifier.size(24.dp))
             }
             ProjectTitleField(model, projects?.title(openProjectId.orEmpty()).orEmpty(), detail?.readOnly != false, Modifier.weight(1f).padding(start = 8.dp))
-            // RN's project actions button (projectHeaderActionButton): the "..." that opens Duplicate, Complete, Cancel and Delete.
+
             val actionsLabel = t("projects.actionsLabel")
             val actionsShape = RoundedCornerShape(10.dp)
             Box(Modifier.padding(start = 8.dp).size(38.dp).clip(actionsShape).background(c.filterBg).rnBorder(1.dp, c.border, actionsShape)
@@ -417,11 +426,11 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 Icon(Ionicons.EllipsisHorizontal, null, tint = c.secondaryText, modifier = Modifier.size(20.dp))
             }
         }
-        // RN's pinned row under the header (projectTaskPinnedToolbar): its "+" adds a task in this project, as Next (a filed project
-        // takes none).
+
+
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            // RN's filter chip before the "..." while any filter is on: core's "Filters · N", opening the sheet.
+
             detail?.listFilters?.let { view ->
                 if (view.getJSONObject("filters").optInt("activeCount") > 0) {
                     val label = view.getString("filterButtonLabel")
@@ -435,7 +444,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                     }
                 }
             }
-            // RN's view options "..." (More options): washed in the tint while the project's sort or Show completed is on.
+
             LaunchedEffect(openProjectId) { projectDetails.readSort() }
             val optionsLabel = t("taskEdit.moreOptions")
             val active = projectShowCompleted || projectDetails.customSort || projectDetails.reorderMode
@@ -458,13 +467,12 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                 }
             }
         }
-        // RN's KeyboardAvoidingView: the open keyboard shortens the list, so a focused Details field scrolls into view.
-        // RN's list starts at the top for each project (resetProjectDetailScroll), and its header rows (Getting Started's actions)
-        // show again at the top when they come back (Reactivate): a lazy list would keep the row below them first instead.
+
+
         val listState = remember(openProjectId) { LazyListState() }
         val gettingStarted = detail?.gettingStarted != null
         LaunchedEffect(openProjectId, gettingStarted) { if (gettingStarted && listState.firstVisibleItemIndex <= 1) listState.scrollToItem(0) }
-        // RN's TaskList centres a highlighted task once (#916): the task a project's "+" just saved scrolls into view when it lands.
+
         var scrolledTo by remember(openProjectId) { mutableStateOf<String?>(null) }
         LaunchedEffect(highlightTaskId, detail) {
             val id = highlightTaskId ?: return@LaunchedEffect
@@ -472,19 +480,19 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             val entry = items.indexOfFirst { it is DetailTask && it.row.id == id }
             if (entry < 0 || scrolledTo == id || !isHighlighted(id)) return@LaunchedEffect
             scrolledTo = id
-            // The rows come after the header items; the More row, when shown, after them.
+
             val after = items.size - entry + (if (items.size < detail.total) 1 else 0)
             listState.animateScrollToItem(maxOf(0, listState.layoutInfo.totalItemsCount - after))
         }
-        // RN's #765: the task the user is looking at, where Task order opens.
+
         LaunchedEffect(listState) {
             snapshotFlow { listState.layoutInfo.let { info -> firstViewedTask(info.visibleItemsInfo.map { Triple(it.key, it.offset, it.size) },
                 info.viewportStartOffset, info.viewportEndOffset) } }.collect { if (!projectDetails.reorderMode) projectDetails.viewedTaskId = it }
         }
-        // RN's reorder mode: the list's header rows (Getting Started's actions, Details) pinned above its own reorder list.
+
         if (projectDetails.reorderMode) {
-            // The order reads again with every read of the project (on Reorder, after a move, the view options, the filter chip,
-            // Details and sync), so the list never drops onto an order the screen no longer shows.
+
+
             LaunchedEffect(detail) { projectDetails.readOrder() }
             LazyColumn(Modifier.fillMaxWidth().background(c.bg), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp), userScrollEnabled = false) {
                 openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
@@ -492,10 +500,10 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
             ProjectReorderList(model, Modifier.weight(1f))
             return@Column
         }
-        // RN's pull down to sync (ProjectTaskList's TaskList, 5bb0ea8f).
+
         PullToSync(model, Modifier.weight(1f).background(c.bg).imePadding()) {
             LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(12.dp)) {
-                // RN's Details toggle and panel (its Attachments card inside), scrolling away with the rows as RN's list header.
+
                 openProjectId?.let { id -> projectDetailsItems(model, id, detail) }
                 for (entry in detail?.items.orEmpty()) when (entry) {
                     is DetailSection -> item(key = "section:${entry.id}") {
@@ -508,7 +516,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
                             note = entry.sequenceCue?.let(CUE_KEYS::get)?.let(::t), available = entry.sequenceCue == "available")
                     }
                 }
-                // RN's ListEmptyState: core's words when the filters match nothing (with Clear), or the plain empty list.
+
                 detail?.listFilters?.optJSONObject("empty")?.takeIf { detail.items.none { it is DetailTask } }?.let { empty ->
                     item(key = "empty") {
                         val clear = empty.optJSONObject("action")?.optJSONObject("filterEdit")
@@ -527,10 +535,7 @@ private fun ProjectDetailList(model: InboxViewModel, modifier: Modifier) = with(
     }
 }
 
-/**
- * RN's #765 anchor: the first task row ([items]: the lazy list's key, offset and size) at least 10% inside the viewport, RN's
- * viewabilityConfig { itemVisiblePercentThreshold: 10 }. Task order opens on it.
- */
+
 internal fun firstViewedTask(items: List<Triple<Any, Int, Int>>, viewportStart: Int, viewportEnd: Int): String? =
     items.firstOrNull { (key, offset, size) ->
         (key as? String)?.startsWith("task:") == true && size > 0

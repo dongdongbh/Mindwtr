@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { dismissOnboarding, seedAppData, seedTasks } from './seed';
 
-// Each width is independent; change density through Settings so layout checks
-// do not repeatedly reload Vite's module graph. Keep one persistence reload.
+
 for (const locale of [
     { language: 'en', title: 'Someday/Maybe' },
     { language: 'de', title: 'Irgendwann/Vielleicht' },
@@ -34,8 +33,7 @@ for (const locale of [
             await expect(header).toBeVisible();
         };
 
-        // Wait for the responsive sidebar's matchMedia update before taking
-        // the baseline; density changes must not be blamed for that resize.
+
         await expect.poll(async () => Math.round((await page.getByRole('complementary').boundingBox())?.width ?? 0))
             .toBe(width < 1024 ? 64 : 256);
         const boxes = () => header.locator('button').evaluateAll((buttons) => buttons.map((button) => {

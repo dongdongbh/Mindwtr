@@ -89,7 +89,7 @@ vi.mock('@react-navigation/native', () => ({
 }));
 
 vi.mock('@mindwtr/core', async () => {
-  // The shared capture transaction runs real; only its store actions are substituted.
+
   const actual = await vi.importActual<typeof import('@mindwtr/core')>('@mindwtr/core');
   return {
   executeCaptureTransaction: actual.executeCaptureTransaction,
@@ -207,7 +207,7 @@ vi.mock('@/lib/task-meta-navigation', () => ({
 
 vi.mock('@/lib/attachment-sync-utils', () => ({
   getAttachmentsDir: vi.fn(async () => 'file:///data/mindwtr/attachments/'),
-  // Mirrors the real gate: the flat, id-named managed layout only.
+
   canUploadAttachmentFrom: (uri: string) => {
     if (!uri.startsWith('file:///data/mindwtr/attachments/')) return false;
     const leaf = uri.slice('file:///data/mindwtr/attachments/'.length);
@@ -727,7 +727,7 @@ describe('CaptureScreen', () => {
     const strip = tree.root.findByProps({ testID: 'quick-add-preview' });
     const chipText = strip.findAllByType(Text).map((node) => node.props.children);
     expect(chipText).toContain('@errands');
-    // The resolved date the task will store, formatted for reading.
+
     expect(chipText.some((text) => typeof text === 'string' && /2026/.test(text))).toBe(true);
   });
 
@@ -964,7 +964,7 @@ describe('CaptureScreen', () => {
       try {
         await write.promise;
       } catch {
-        // CaptureScreen owns the rejection and renders retry feedback.
+
       }
     });
 
@@ -1160,8 +1160,8 @@ describe('CaptureScreen', () => {
             updatedAt: '2026-07-12T00:00:00.000Z',
           },
           {
-            // A deep link is attacker-reachable, and this uri passes a bare
-            // startsWith(managedDir) check while pointing at the app database.
+
+
             id: 'att-3',
             kind: 'file',
             title: 'mindwtr.db',
@@ -1179,7 +1179,7 @@ describe('CaptureScreen', () => {
       tree = create(<CaptureScreen />);
     });
 
-    // The pending attachment is visible on the sheet before saving.
+
     expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'report.pdf')).toBe(true);
     expect(tree.root.findAllByType(Text).some((node) => node.props.children === 'mindwtr.db')).toBe(false);
 
@@ -1203,10 +1203,7 @@ describe('CaptureScreen', () => {
     });
   });
 
-  // This route is presented modally, so an Alert raised over it is a second
-  // native presentation on the first. On iOS it never showed: saving a
-  // multi-line paste did nothing and left the screen blocked (#941). The
-  // confirmation is drawn on the screen itself now, and no Alert is raised.
+
   it('dismisses multiline confirmation with hardware Back before creating one task per line', async () => {
     routeParams.current = {
       initialValue: encodeURIComponent('Email Bob\n\nCall Alice /next'),
@@ -1264,7 +1261,7 @@ describe('CaptureScreen', () => {
       await findTouchableByText(tree, 'Save').props.onPress();
     });
 
-    // The confirmation is on screen, reachable as ordinary rendered content.
+
     const confirmButton = findTouchableByText(tree, 'Create tasks');
     await act(async () => {
       await confirmButton.props.onPress();
@@ -1552,9 +1549,8 @@ describe('CaptureScreen', () => {
   });
 
   it('pops back to the project instead of stacking a duplicate screen per saved task (#938)', async () => {
-    // The project add-task flow pushes capture on top of the project screen, so
-    // replacing capture with returnTo left one extra screen on the stack per
-    // save: leaving the project then took one back tap per task added.
+
+
     routerMocks.canGoBack.mockReturnValue(true);
     routeParams.current = {
       initialValue: encodeURIComponent('Project task'),
@@ -1716,8 +1712,8 @@ describe('CaptureScreen', () => {
       status: 'next',
       projectId: 'project-1',
     });
-    // replace, not push: the capture route must leave the stack when it hands
-    // off to the editor, or backing out reopens it pre-filled (#1029).
+
+
     expect(openTaskScreen).toHaveBeenCalledWith('task-new', 'project-1', 'task', { replace: true });
     expect(routerMocks.replace).not.toHaveBeenCalledWith('/inbox');
   });
@@ -1751,9 +1747,7 @@ describe('CaptureScreen', () => {
       await saveAndEditButton.props.onPress();
     });
 
-    // The project screen is directly underneath: navigating to it would stack
-    // a duplicate of it, so the editor request is stashed for its focus
-    // effect and the capture closes exactly like a plain save (#1029).
+
     expect(stashPendingCaptureTaskOpen).toHaveBeenCalledWith({
       taskId: 'task-new',
       projectId: 'project-1',
@@ -1777,7 +1771,7 @@ describe('CaptureScreen', () => {
       await act(async () => {
         tree = create(<CaptureScreen />);
       });
-      // The debounced copilot request plus the promise it awaits.
+
       await act(async () => {
         await vi.advanceTimersByTimeAsync(900);
       });

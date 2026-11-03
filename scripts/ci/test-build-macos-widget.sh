@@ -90,9 +90,7 @@ case "$2" in
 esac
 STUB
 
-# Signing records the entitlements it was handed per target; `-d` plays that
-# recording back, so the script's post-sign assertions see exactly what it
-# signed with (including any unresolved placeholder it failed to substitute).
+
 cat > "$STUB_BIN/codesign" <<'STUB'
 #!/usr/bin/env bash
 printf 'codesign %s\n' "$*" >> "$WIDGET_TEST_LOG"
@@ -130,7 +128,7 @@ STUB
 
 chmod +x "$STUB_BIN"/*
 
-# run_case <rust-target> <case-name> [distribution]
+
 run_case() {
     local rust_target="$1"
     local case_name="$2"
@@ -188,8 +186,8 @@ run_case() {
 
     case "$distribution" in
         developer-id)
-            # Developer ID never touches a provisioning profile and signs the
-            # host with Entitlements.mac.plist (no sandbox there).
+
+
             ! test -e "$appex/Contents/embedded.provisionprofile"
             ! test -e "$case_dir/profile-sealed"
             ! grep -q 'com.apple.security.app-sandbox' "$case_dir/host-entitlements.plist"
@@ -200,10 +198,10 @@ run_case() {
             grep -qF '<string>TEAM123.tech.dongdongbh.mindwtr.MindwtrWidgets</string>' "$case_dir/widget-entitlements.plist"
             grep -q 'com.apple.developer.team-identifier' "$case_dir/widget-entitlements.plist"
             grep -qF '<string>TEAM123</string>' "$case_dir/widget-entitlements.plist"
-            # Entitlements.mas.plist is the only host file with the sandbox key.
+
             grep -q 'com.apple.security.app-sandbox' "$case_dir/host-entitlements.plist"
             grep -q 'com.apple.security.files.user-selected.read-write' "$case_dir/host-entitlements.plist"
-            # The profile has to be in place when the appex is signed (sealed).
+
             test -f "$case_dir/profile-sealed"
             ;;
     esac
@@ -257,8 +255,7 @@ grep -q '^appintentsmetadataprocessor ' "$METADATA_ONLY_LOG"
 ! grep -q '^codesign ' "$METADATA_ONLY_LOG"
 ! test -e "$METADATA_ONLY_APP/Contents/PlugIns"
 
-# App Store mode without a profile must fail loudly rather than ship a widget
-# the App Store would reject.
+
 if (
     cd "$ROOT_DIR"
     mkdir -p "$TEST_DIR/noprofile/Mindwtr.app/Contents/MacOS"

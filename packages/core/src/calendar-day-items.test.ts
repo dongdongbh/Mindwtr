@@ -37,8 +37,8 @@ describe('completed look-back (#955)', () => {
     it('files a completed task under its completion instant, falling back to updatedAt', () => {
         expect(getTaskCompletionInstant({ status: 'done', completedAt: '2026-05-04T09:00:00.000Z', updatedAt: '2026-05-06T00:00:00.000Z' })?.toISOString())
             .toBe('2026-05-04T09:00:00.000Z');
-        // Archived before completion timestamps existed: the Archive list shows
-        // updatedAt as the completion time, so the calendar must agree.
+
+
         expect(getTaskCompletionInstant({ status: 'archived', updatedAt: '2026-05-06T00:00:00.000Z' })?.toISOString())
             .toBe('2026-05-06T00:00:00.000Z');
         expect(buildCalendarDayItems({
@@ -50,8 +50,8 @@ describe('completed look-back (#955)', () => {
     });
 
     it('splits the calendar cleanly: a task is schedulable or completed, never both', () => {
-        // The two platforms had drifted here — mobile kept done tasks in its
-        // scheduled buckets while desktop dropped them (#955). Pin the split.
+
+
         for (const status of ['inbox', 'next', 'waiting', 'someday'] as const) {
             expect(isSchedulableCalendarTask(task({ status }))).toBe(true);
             expect(isCompletedCalendarTask(task({ status }))).toBe(false);
@@ -60,7 +60,7 @@ describe('completed look-back (#955)', () => {
             expect(isSchedulableCalendarTask(task({ status }))).toBe(false);
             expect(isCompletedCalendarTask(task({ status }))).toBe(true);
         }
-        // Reference is in neither: it is not scheduled work and was never completed.
+
         expect(isSchedulableCalendarTask(task({ status: 'reference' }))).toBe(false);
         expect(isCompletedCalendarTask(task({ status: 'reference' }))).toBe(false);
     });
@@ -129,7 +129,7 @@ describe('buildCalendarDayItems', () => {
             scheduled: [task({ id: 'timed', title: 'Timed', startTime: '2026-05-04T08:00:00' })],
         });
 
-        // A date-only deadline lands at the end of its day, after the timed items.
+
         expect(items.map((item) => item.id)).toEqual([
             'scheduled-timed',
             'event-standup',
@@ -267,7 +267,7 @@ describe('buildTimedCalendarLayouts', () => {
             { id: 'afternoon', startMinutes: 14 * 60, endMinutes: 15 * 60 },
         ]);
 
-        // A day-wide column count would squeeze both of these to 50%.
+
         expect(layouts.get('morning')).toMatchObject({ columnCount: 1, leftPercent: 0, widthPercent: 100 });
         expect(layouts.get('afternoon')).toMatchObject({ columnCount: 1, leftPercent: 0, widthPercent: 100 });
     });

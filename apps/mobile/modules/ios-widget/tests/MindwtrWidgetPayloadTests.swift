@@ -7,7 +7,7 @@ final class MindwtrWidgetPayloadTests: XCTestCase {
         let mobile = package.deletingLastPathComponent().deletingLastPathComponent()
         let widget = try String(contentsOf: mobile.appendingPathComponent("widgets-ios/MindwtrTasksWidget.swift"))
         let boundary = try XCTUnwrap(widget.range(of: "struct MindwtrTasksWidgetEntry: TimelineEntry"))
-        // Compile the production payload projection without requiring WidgetKit or Expo.
+
         let payload = "import Foundation\n" + widget[..<boundary.lowerBound]
             .replacingOccurrences(of: "import AppIntents\n", with: "")
             .replacingOccurrences(of: "import SwiftUI\n", with: "")

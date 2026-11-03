@@ -31,8 +31,7 @@ describe('task list sort rosters', () => {
         expect(DONE_TASK_LIST_SORT_OPTIONS).toEqual([...TASK_LIST_SORT_OPTIONS.filter((option) => option !== 'priority'), 'completed']);
     });
 
-    // Both Focus filter panels read this one; pinning the order keeps the two
-    // pickers showing the same choices in the same places.
+
     it('keeps the Focus roster fixed', () => {
         expect(FOCUS_SORT_OPTIONS).toEqual(['default', 'due', 'start', 'priority', 'created', 'created-desc']);
     });
@@ -62,7 +61,7 @@ describe('resolveNonDoneTaskSortBy / resolveDoneTaskSortBy', () => {
     });
 });
 
-// Priority is a shared-list sort (settings.taskSortBy) only (#1415).
+
 describe('priority in the shared list sort', () => {
     const flags = (priorities: boolean) => ({ features: { priorities } } as AppSettings);
 
@@ -92,8 +91,7 @@ describe('priority in the shared list sort', () => {
             .toEqual(sortTasksBy(tasks, 'default').map((entry) => entry.id));
     });
 
-    // Project.taskSortBy syncs; an older client normalizes an unknown value to
-    // undefined and would erase a project's Priority sort on its next edit.
+
     it('never offers or accepts priority as a project sort', () => {
         expect(PROJECT_TASK_SORT_OPTIONS).toEqual(TASK_LIST_SORT_OPTIONS.filter((option) => option !== 'priority'));
         expect(getVisibleTaskSortOptions(PROJECT_TASK_SORT_OPTIONS, flags(true))).not.toContain('priority');

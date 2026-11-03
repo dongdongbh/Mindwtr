@@ -130,8 +130,8 @@ final class NativeCalendarHostTests: XCTestCase {
     private func object(_ value: String) throws -> [String: Any] {
         try XCTUnwrap(NativeJSON.jsonObject(with: Data(value.utf8)) as? [String: Any])
     }
-    // Actual production polyfills and cancellation remain active; only the
-    // shared entry method is replaced to isolate native transport behavior.
+
+
     private func probeBundle(_ expression: String, setup: String = "") throws -> URL {
         let suffix = """
         ;(()=>{
@@ -548,8 +548,8 @@ final class NativeCalendarHostTests: XCTestCase {
         let feeds = [["id": "feed-cancel", "name": "ICS cancellation fixture", "url": "https://calendar.example.invalid/calendar.ics", "enabled": true]] as [[String: Any]]
         let original = Data(try json(["mindwtr-external-calendars": json(feeds), "@mindwtr_sync_backend": "off", "unknown": "preserve"]).utf8)
         try original.write(to: manifest)
-        // Only Date.now is frozen, so a slow CI drain still retries within the
-        // one-second cache window. All production entry/loader/IO code is intact.
+
+
         let clockBundle = root.appendingPathComponent("calendar-cancel-clock.js")
         try (String(contentsOf: bundle, encoding: .utf8) + "\n;Date.now=()=>1791504000000;\n")
             .write(to: clockBundle, atomically: true, encoding: .utf8)

@@ -51,22 +51,18 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-/** Core's RECURRENCE draft fields (native-host-contract-task-save.ts): a save that edits one carries the recurrence baseline. */
+
 internal val RECURRENCE_FIELDS = setOf("recurrence", "preserveChecklistOnRepeat", "recurrenceStrategy", "recurrenceRRule", "showFutureRecurrence")
 
-/** The editor menu's Menu command: its owed retry is EditorMenuModel.run, and core can refuse it before writing. */
+
 val EDITOR_MENU_KINDS = setOf("taskEditorAction")
 
-/** One row of RN's TaskEditHeader "..." menu; [danger] rows are drawn in RN's danger color. */
+
 internal enum class EditorMenuAction(val danger: Boolean = false) {
     CopyLink, CopyId, Share, Duplicate, Promote, ConvertToAction, ConvertToSection, Skip, Cancel(danger = true), Delete(danger = true)
 }
 
-/**
- * RN's menu rows in RN's order (TaskEditHeader, its props from task-edit-modal.tsx): the copy rows for any saved task, then, unless
- * the editor is read-only, Share, Duplicate, Create project, Convert to action for a Reference draft, Convert to section for a draft
- * in a project, Skip when core says the occurrence can be skipped, Cancel when core says the task can be cancelled, and Delete.
- */
+
 internal fun editorMenuActions(readOnly: Boolean, reference: Boolean, hasProject: Boolean, canSkip: Boolean, canCancel: Boolean): List<EditorMenuAction> =
     listOf(EditorMenuAction.CopyLink, EditorMenuAction.CopyId) + if (readOnly) emptyList() else listOfNotNull(
         EditorMenuAction.Share, EditorMenuAction.Duplicate, EditorMenuAction.Promote,
@@ -74,48 +70,45 @@ internal fun editorMenuActions(readOnly: Boolean, reference: Boolean, hasProject
         EditorMenuAction.Skip.takeIf { canSkip }, EditorMenuAction.Cancel.takeIf { canCancel }, EditorMenuAction.Delete,
     )
 
-/**
- * RN's TaskEditHeader menu and its actions (use-task-edit-actions.ts). The writes are core's one journaled taskEditorAction
- * (runTaskEditorAction): a request UUID per tap, on disk before it is sent, so a lost answer is sent again and core answers it once.
- */
+
 class EditorMenuModel(private val shell: InboxViewModel) {
-    /** The menu card shows. */
+
     var open by mutableStateOf(false)
-    /** RN's TaskProjectConversionModal for a task with a checklist: the project title being typed, while it shows. */
+
     var promoteTitle by mutableStateOf<String?>(null)
-    /** The dialog's Expand checklist switch. */
+
     var expand by mutableStateOf(false)
-    /** Why Expand is off for the draft (core's checklistProjectBlockReason, translated), "" when it is allowed, null until read. */
+
     var expandBlocked by mutableStateOf<String?>(null)
-    /** Each confirmed expansion's source project, by its request: its Undo opens the task there (RN's openTaskScreen). */
+
     private val expandedFrom = mutableMapOf<String, String?>()
-    /** Create project or Convert to section held for the editor's own Save (RN saves the draft first): the task, kind and title. */
+
     private var afterSave: Triple<String, String, String?>? = null
 
     internal fun choose(action: EditorMenuAction, context: Context) {
         open = false
         val editor = shell.editor ?: return
         when (action) {
-            EditorMenuAction.CopyLink -> copy(context, "${BuildConfig.URL_SCHEME}://open?task=${Uri.encode(editor.id)}")
-            EditorMenuAction.CopyId -> copy(context, editor.id)
+            EditorMenuAction.CopyLink -> shell.copyTaskReference(context, editor.id, link = true)
+            EditorMenuAction.CopyId -> shell.copyTaskReference(context, editor.id, link = false)
             EditorMenuAction.Share -> share(context, editor)
-            // RN duplicates the saved task, closes the editor, and opens the copy on its Form tab (Board's duplicate does the opening).
+
             EditorMenuAction.Duplicate -> { shell.closeEditor(); shell.menu.board.duplicate(editor.id) }
-            // RN asks first only for a task with a checklist (its TaskProjectConversionModal); otherwise the draft's title goes at once.
+
             EditorMenuAction.Promote ->
                 if (JSONArray(editor.checklistNow).length() > 0) openPromote(editor) else promote(editor.text("title"))
-            // RN's requestStatusChange('next'): the draft's status, saved with the editor's Save.
+
             EditorMenuAction.ConvertToAction -> shell.editFields(mapOf("status" to "next"))
             EditorMenuAction.ConvertToSection -> afterSaving(editor, "convertToSection", null)
-            // Skip and Cancel carry the draft's save, as RN's draftLifecycle.save / cancel do; core writes both in one.
+
             EditorMenuAction.Skip -> send(editor.id, editor.model.taskRevision, JSONObject().put("kind", "skip").put("save", save(editor)))
             EditorMenuAction.Cancel -> send(editor.id, editor.model.taskRevision, JSONObject().put("kind", "cancel").put("save", save(editor)))
-            // RN deletes the saved task; the draft goes with the editor.
+
             EditorMenuAction.Delete -> send(editor.id, editor.model.taskRevision, JSONObject().put("kind", "delete"))
         }
     }
 
-    /** RN's label for [action] (Cancel's is core's: Cancel task, or Cancel recurring series). */
+
     internal fun label(action: EditorMenuAction, editor: TaskEditor): String = when (action) {
         EditorMenuAction.CopyLink -> t("task.copyTaskLink")
         EditorMenuAction.CopyId -> t("task.copyTaskId")
@@ -129,7 +122,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         EditorMenuAction.Delete -> t("common.delete")
     }
 
-    /** RN's dialog, its switch off, and core's reason Expand is off for the unsaved draft (RN reads it from the draft too). */
+
     private fun openPromote(editor: TaskEditor) {
         promoteTitle = editor.text("title")
         expand = false
@@ -141,14 +134,14 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** Create project with [title] (its dialog's, or the draft's own); with Expand on, the checklist becomes the project's tasks. */
+
     fun promote(title: String) {
         promoteTitle = null
         shell.editor?.let { afterSaving(it, if (expand) "expandChecklist" else "promote", title.trim()) }
         expand = false
     }
 
-    /** The editor closed: its menu and dialog go (an action held for a Save already left through [saved]). */
+
     fun closed() {
         open = false
         promoteTitle = null
@@ -156,10 +149,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         afterSave = null
     }
 
-    /**
-     * RN saves the draft first (draftLifecycle.save): an editor with unsaved edits saves, and the action follows once that save
-     * landed ([saved]), at the task's revision then.
-     */
+
     private fun afterSaving(editor: TaskEditor, kind: String, title: String?) {
         val input = JSONObject().put("kind", kind).apply { title?.let { put("title", it) } }
         if (!editor.dirty && !shell.editsPending) return send(editor.id, editor.model.taskRevision, input)
@@ -167,7 +157,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         shell.saveEditor()
     }
 
-    /** The editor's Save of [id] landed: the action it held goes, at the revision the save left. */
+
     fun saved(id: String) {
         val (owner, kind, title) = afterSave ?: return
         afterSave = null
@@ -186,7 +176,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         run(FailedAction("taskEditorAction", taskId, input.toString(), requestId = requestId))
     }
 
-    /** The command, or its owed retry: [action] holds its exact input, so a retry is the same request. */
+
     fun run(action: FailedAction) = shell.perform(action) { runtime ->
         val input = JSONObject(action.title)
         val reply = runtime.menuCommand("taskEditorAction", input.toString())
@@ -194,7 +184,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         shell.ui { done(input, reply) }
     }
 
-    /** Core's answer, shown as RN shows each action's outcome. */
+
     private fun done(input: JSONObject, reply: JSONObject) {
         val taskId = input.getString("taskId")
         val revision = input.getString("taskRevision")
@@ -202,13 +192,13 @@ class EditorMenuModel(private val shell: InboxViewModel) {
             "promote" -> {
                 shell.showToast(t("common.success"), t(if (reply.optBoolean("reused")) "task.promoteToProjectMoved" else "task.promoteToProjectCreated"), "success")
                 shell.closeEditor()
-                // RN's openProjectScreen: the project opens once this command's action ended (its own read needs the app free).
+
                 val projectId = reply.getString("projectId")
                 shell.menu.whenIdle { shell.menu.openProjects(projectId) }
             }
-            // RN's convert(): its success toast with Undo, and the new project opens.
+
             "expandChecklist" -> {
-                // The tester's line: the expansion landed (or a replay found it landed); never the task's or project's text.
+
                 val fields = JSONObject().put("releaseCheck", "v1.3.8/native-checklist-to-project").put("outcome", reply.optString("outcome"))
                 shell.anyTime({ it.logLine("Native checklist expanded into a project releaseCheck=v1.3.8/native-checklist-to-project", fields) }, {})
                 expandedFrom[input.getString("requestId")] = shell.editor?.takeIf { it.id == taskId }?.text("projectId")?.takeIf { it.isNotEmpty() }
@@ -219,11 +209,11 @@ class EditorMenuModel(private val shell: InboxViewModel) {
                 val projectId = reply.getString("projectId")
                 shell.menu.whenIdle { shell.menu.openProjects(projectId) }
             }
-            // RN's undo(): the task is back, and openTaskScreen(source.id, source.projectId, 'task') opens it on its project (else
-            // Focus) on the Form tab.
+
+
             "expandChecklistUndo" -> shell.openSavedTask(taskId, expandedFrom.remove(input.getString("expandRequestId")))
             "convertToSection" -> {
-                // The tester's line: the conversion landed (or a replay found it landed); never the task's or section's text.
+
                 val fields = JSONObject().put("releaseCheck", "v1.3.8/native-convert-to-section").put("outcome", reply.optString("outcome"))
                 shell.anyTime({ it.logLine("Native task converted to a section releaseCheck=v1.3.8/native-convert-to-section", fields) }, {})
                 shell.closeEditor()
@@ -248,14 +238,7 @@ class EditorMenuModel(private val shell: InboxViewModel) {
         }
     }
 
-    private fun copy(context: Context, text: String) {
-        val copied = runCatching {
-            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Mindwtr", text))
-        }.isSuccess
-        shell.showToast(null, t(if (copied) "list.taskCopied" else "list.taskCopyFailed"), if (copied) "success" else "error")
-    }
 
-    /** RN's Share.share: core's text for the draft (getTaskShare), in the system share sheet; its title rides as the subject. */
     private fun share(context: Context, editor: TaskEditor) = shell.perform { runtime ->
         val input = JSONObject().put("id", editor.id).put("taskRevision", editor.model.taskRevision)
             .put("draft", JSONObject(draftJson(editor.fullDraft()))).put("checklist", JSONArray(editor.checklistNow))
@@ -268,17 +251,17 @@ class EditorMenuModel(private val shell: InboxViewModel) {
     }
 }
 
-/** The editor's draft save for Skip and Cancel: the fields Save sends, and the bases core reads a change since against. */
+
 internal fun editorActionSave(editor: TaskEditor): JSONObject = JSONObject().put("base", JSONObject(draftJson(editor.base))).put("patch", JSONObject(draftJson(editor.patch)))
     .put("scheduleBase", editor.model.scheduleBase ?: JSONObject())
     .apply {
-        // Core takes the recurrence baseline exactly when the patch edits a recurrence field (its RECURRENCE list).
+
         if (editor.patch.keys.any { it in RECURRENCE_FIELDS }) editor.model.recurrenceBase?.let { put("recurrenceBase", it) }
         editor.checklistSave.takeIf { it.isNotEmpty() }?.let { put("checklist", JSONObject(it)) }
         editor.attachmentsSave.takeIf { it.isNotEmpty() }?.let { put("attachments", JSONObject(it)) }
     }
 
-/** RN's More button beside Close (MoreHorizontal 24, the tint): it opens the menu. */
+
 @Composable
 fun EditorMoreButton(model: InboxViewModel, editor: TaskEditor) = with(model) {
     val c = LocalTheme.current.colors
@@ -291,7 +274,7 @@ fun EditorMoreButton(model: InboxViewModel, editor: TaskEditor) = with(model) {
     PromoteDialog(model)
 }
 
-/** RN's dimmed screen (40% black) with a centered card: Back and a tap outside close it. The platform's own dim is off. */
+
 @Composable
 private fun MenuOverlay(dismiss: () -> Unit, content: @Composable () -> Unit) {
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -301,7 +284,7 @@ private fun MenuOverlay(dismiss: () -> Unit, content: @Composable () -> Unit) {
     }
 }
 
-/** RN's menu Modal: a 220-wide card (radius 12, border, 8 above and below, at most 82% of the screen) with RN's rows. */
+
 @Composable
 private fun EditorMenuCard(model: InboxViewModel, editor: TaskEditor) = with(model) {
     if (!editorMenu.open) return
@@ -325,10 +308,7 @@ private fun EditorMenuCard(model: InboxViewModel, editor: TaskEditor) = with(mod
     }
 }
 
-/**
- * RN's TaskProjectConversionModal for a task with a checklist: the project's name (the draft's title to start), the Expand checklist
- * switch and the note for its choice, core's reason it is off, then Cancel and Create project from task.
- */
+
 @Composable
 private fun PromoteDialog(model: InboxViewModel) = with(model) {
     val title = editorMenu.promoteTitle ?: return
@@ -338,8 +318,8 @@ private fun PromoteDialog(model: InboxViewModel) = with(model) {
         val shape = RoundedCornerShape(12.dp)
         Column(Modifier.padding(20.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).clickable(enabled = false) {}
             .padding(16.dp).testTag("promote-dialog")) {
-            // RN's modalTitle (16/700, 12 below), modalInput (radius 10, 12 by 10, right under its label) and modalButtons (14 above,
-            // 12 apart, each 10 by 10) from task-edit-modal.styles.ts (phone pair).
+
+
             Text(t("task.createProjectFromTask"), style = rnText(16, 700), color = c.text, modifier = Modifier.padding(bottom = 12.dp).semantics { heading() })
             Text(t("projects.projectName"), style = rnText(14, 400), color = c.text)
             val inputShape = RoundedCornerShape(10.dp)
@@ -351,7 +331,7 @@ private fun PromoteDialog(model: InboxViewModel) = with(model) {
             val expandLabel = t("task.expandChecklist")
             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(expandLabel, style = rnText(14, 400), color = c.text, modifier = Modifier.weight(1f))
-                // RN's Switch with no colors: AppCompat's own track (the foreground, or the active color, at 30%) and thumb.
+
                 val dark = isSystemInDarkTheme()
                 val props = RnSwitchProps((if (dark) Color.White else Color.Black).copy(alpha = 0.3f), theme.switchThumb(true, true, dark).copy(alpha = 0.3f))
                 Box(Modifier.testTag("promote-expand")) {
@@ -372,4 +352,13 @@ private fun PromoteDialog(model: InboxViewModel) = with(model) {
             }
         }
     }
+}
+
+
+internal fun InboxViewModel.copyTaskReference(context: Context, taskId: String, link: Boolean) {
+    val text = if (link) "${BuildConfig.URL_SCHEME}://open?task=${Uri.encode(taskId)}" else taskId
+    val copied = runCatching {
+        (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Mindwtr", text))
+    }.isSuccess
+    showToast(null, t(if (copied) "list.taskCopied" else "list.taskCopyFailed"), if (copied) "success" else "error")
 }

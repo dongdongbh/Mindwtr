@@ -28,12 +28,6 @@ import { ThemedAlertHost } from '@/components/themed-alert';
 import type { TaskFilterSelections } from '@/hooks/use-task-filter-selections';
 import { useKeyboardInset } from '@/lib/use-android-keyboard-inset';
 
-/**
- * The one filter sheet for Focus and the task list. Both views hold their
- * selections in useTaskFilterSelections and render them here, so a filter
- * concept only ever has one picker. View-specific controls arrive through the
- * header, top-content, and advanced-chip slots rather than forking the sheet.
- */
 
 const PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
 const DATE_PRESETS = ['today', 'next_7_days', 'overdue_next_7_days', 'next_14_days', 'next_30_days', 'upcoming'] as const;
@@ -55,23 +49,19 @@ export type FilterChipVariant = 'advanced' | 'excluded';
 
 type FilterChipProps = {
   label: string;
-  /** Decorative node (priority dot) rendered before the label. */
+
   leading?: React.ReactNode;
   selected: boolean;
   themeColors: TaskFilterSheetColors;
   onPress?: () => void;
   variant?: FilterChipVariant;
-  /** Accessible name for the advanced chip's remove button. */
+
   removeLabel?: string;
   excludedLabel?: string;
   removable?: boolean;
 };
 
-/**
- * One filter chip. `advanced` marks a saved-filter criterion no picker can
- * express (dashed, removable); `excluded` marks a token that subtracts and
- * relies on the strikethrough so the state survives E-ink/mono themes.
- */
+
 export function FilterChip({
   label,
   selected,
@@ -141,9 +131,9 @@ export function FilterChip({
 }
 
 export type TaskFilterSheetOptions = {
-  /** Context and tag chips offered by the visible tasks. */
+
   tokens: string[];
-  /** Project chips, including the "no project" sentinel when it applies. */
+
   projects?: { id: string; title: string }[];
   timeEstimates: TimeEstimate[];
   visibility: TaskMetadataFilterVisibility;
@@ -164,18 +154,16 @@ type TaskFilterSheetProps = {
   options: TaskFilterSheetOptions;
   themeColors: TaskFilterSheetColors;
   t: (key: string) => string;
-  /** Extra header buttons, left of Clear (Focus's save-filter action). */
+
   headerActions?: React.ReactNode;
-  /** View-local controls above the shared category rows. */
+
   topContent?: React.ReactNode;
-  /**
-   * Rendered in place of the sheet body inside the same modal (Focus's
-   * save-filter dialog), so stepping into it does not remount the modal.
-   */
+
+
   overlay?: React.ReactNode;
-  /** View-local controls that participate in Clear without entering filter criteria. */
+
   hasAdditionalActiveFilters?: boolean;
-  /** Focus-only saved criteria that no shared picker can express. */
+
   additionalActiveChips?: TaskFilterSheetActiveChip[];
 };
 
@@ -767,8 +755,8 @@ export function TaskFilterSheet({
         </View>
       </View>
       )}
-      {/* Confirms raised by the host screen while this sheet is up would
-          otherwise never reach the screen on iOS (#940). */}
+      {
+                                                            }
       <ThemedAlertHost />
     </Modal>
   );

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Private serial tickets; an accepted SDK mutation retains ownership through its return.
+
 final class NativeAppleRemindersJobs: @unchecked Sendable {
     static let maximumRequestBytes = NativeCalendarJobs.maximumRequestBytes
     static let maximumReplyBytes = NativeCalendarJobs.maximumReplyBytes
@@ -109,7 +109,7 @@ final class NativeAppleRemindersJobs: @unchecked Sendable {
                                 self.lock.unlock()
                                 guard current else { self.finish(job, result: .failure(.cancelled)); return }
                                 do {
-                                    // Fresh SDK authority is checked at settlement, after callback drain.
+
                                     let value = try result.get(); try provider.requireList(list)
                                     self.finish(job, result: .success(value.value))
                                 } catch { self.finish(job, result: .failure(error as? NativeAppleRemindersError ?? .failed)) }
@@ -132,7 +132,7 @@ final class NativeAppleRemindersJobs: @unchecked Sendable {
         }
     }
     private func error(_ error: NativeAppleRemindersError, id: String) -> String {
-        // Fixed messages and generated ASCII IDs always form a bounded JSON object.
+
         "{\"id\":\"\(id)\",\"error\":\"\(Self.message(error))\"}"
     }
     private func publish(_ job: Job, result: Result<Any, NativeAppleRemindersError>) {
@@ -168,7 +168,7 @@ final class NativeAppleRemindersJobs: @unchecked Sendable {
                         worker.async { self.finish(job, result: .failure(.cancelled)) }
                     }
                 }
-            case .requestPermission: break // Retain ownership until the actual OS callback.
+            case .requestPermission: break
             default: finish(job, result: .failure(.cancelled))
             }
         } else { startNext() }
@@ -203,7 +203,7 @@ final class NativeAppleRemindersJobs: @unchecked Sendable {
         provider = nil; continuations.forEach { $0.resume() }
     }
     #if DEBUG
-    func workerBarrier() { worker.sync {} } // Test ordering only, not asynchronous-operation drain.
+    func workerBarrier() { worker.sync {} }
     var counters: (accepted: Int, active: Int) {
         lock.lock(); defer { lock.unlock() }
         let retainedActive = active.map { jobs[$0.id] == nil ? 1 : 0 } ?? 0

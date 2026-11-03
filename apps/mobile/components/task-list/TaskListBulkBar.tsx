@@ -6,7 +6,7 @@ import { BULK_MOVE_STATUS_ORDER, buildTaskListBulkBarModel, type TaskStatus } fr
 import { styles } from './task-list.styles';
 import { useFilledButtonColors } from '@/hooks/use-filled-button-colors';
 
-// The statuses a list offers live in core, shared with the native host; re-exported for existing imports.
+
 export { BULK_MOVE_STATUS_ORDER, getBulkMoveStatusOptions } from '@mindwtr/core';
 
 type ThemeColors = {
@@ -61,7 +61,7 @@ export function TaskListBulkBar({
   themeColors,
 }: TaskListBulkBarProps) {
   const filledButton = useFilledButtonColors();
-  // Labels and enabled states come from core, as the native host shows them.
+
   const bar = buildTaskListBulkBarModel({
     selectedCount,
     hasSelection,

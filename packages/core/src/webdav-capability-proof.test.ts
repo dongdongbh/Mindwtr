@@ -92,7 +92,7 @@ describe('createWebdavCapabilityProofStore', () => {
         await expect(store.ensureWebdavCapabilityProof(config, probe, plaintextOk)).resolves.toBe('legacy-plaintext');
         expect(probe).toHaveBeenCalledTimes(1);
 
-        // Encryption on: the cached legacy answer never short-circuits the probe, and is not rewritten.
+
         await store.ensureWebdavCapabilityProof(config, probe, { now: () => now });
         expect(probe).toHaveBeenCalledTimes(2);
         expect(JSON.parse(storage.values.get(WEBDAV_LEGACY_PROOF_STORAGE_KEY)!).at).toBe(50_000);
@@ -101,7 +101,7 @@ describe('createWebdavCapabilityProofStore', () => {
         await store.ensureWebdavCapabilityProof(config, probe, plaintextOk);
         expect(probe).toHaveBeenCalledTimes(3);
 
-        // A clock that went backwards does not count as fresh.
+
         now = 49_000;
         storage.values.set(WEBDAV_LEGACY_PROOF_STORAGE_KEY, JSON.stringify({
             proof: serializeWebdavCapabilityProof(config),

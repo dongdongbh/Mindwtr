@@ -28,13 +28,8 @@ type BasicRemoteAttachmentSyncOptions = Omit<
     AttachmentTransferLifecycleOptions,
     'beforeEachAttachment' | 'resolveLocalPath' | 'canUploadFrom' | 'requireUploadSnapshot'
 > & {
-    /**
-     * The sync run's freshness guard, checked between attachments exactly like the
-     * cleanup lifecycle does (sync-attachment-cleanup.ts). The run re-checks freshness
-     * before persisting either way, so this is not what keeps a local edit safe — it is
-     * what stops a pass from working through every remaining transfer before the run
-     * discovers the snapshot is stale and requeues.
-     */
+
+
     ensureLocalSnapshotFresh?: () => void;
 };
 
@@ -48,11 +43,7 @@ type AttachmentUploadSnapshotFactoryOptions = {
     ) => Promise<{ sourcePath: string; dispose: () => Promise<void> }>;
 };
 
-/**
- * Capture the exact desktop bytes that an uploader will retry, together with
- * the digest it will publish. The before/after stat check is a cheap race
- * detector for a live source changing while it is being copied into memory.
- */
+
 export const createAttachmentUploadSnapshotFactory = ({
     readLocalFile,
     statLocalFile,
@@ -100,11 +91,7 @@ export const createAttachmentUploadSnapshotFactory = ({
     };
 };
 
-/**
- * Reports changes as attachment patches; it never writes to the objects it is given.
- * Callers fold the patches into a fresh document with `applyAttachmentPatches` and
- * return that.
- */
+
 export async function syncBasicRemoteAttachments({
     ensureLocalSnapshotFresh,
     ...options

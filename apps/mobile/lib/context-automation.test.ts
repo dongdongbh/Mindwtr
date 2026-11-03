@@ -89,9 +89,8 @@ describe('context-automation', () => {
   });
 
   it('prioritizes next actions while Priorities is on, and stops when it is off', () => {
-    // Two undated next actions in the same bucket, titled so the alphabetical
-    // tie-break puts the LOW one first: only priority can flip them, so this
-    // fails the moment the flag stops reaching sortFocusNextActions.
+
+
     const tasks = [
       task({ id: 'low', title: 'Alpha', contexts: ['@parents'], priority: 'low' }),
       task({ id: 'high', title: 'Beta', contexts: ['@parents'], priority: 'high' }),

@@ -4,9 +4,9 @@ import { configDefaults, defineConfig } from 'vitest/config';
 export default defineConfig({
     test: {
         setupFiles: ['./vitest.setup.ts'],
-        // SQLite-host contract tests boot a real database per test; 5 s timed out under shared-host and CI load.
+
         testTimeout: 20000,
-        // Vitest 4 narrowed discovery defaults; retain the Vitest 3 boundary.
+
         exclude: [
             ...configDefaults.exclude,
             '**/dist/**',
@@ -16,7 +16,7 @@ export default defineConfig({
         ],
         coverage: {
             provider: 'v8',
-            // Keep Vitest 3's unloaded-source denominator and exclusions.
+
             include: ['**/*.{js,cjs,mjs,ts,mts,tsx,jsx,vue,svelte,marko,astro}'],
             exclude: [
                 'coverage/**',
@@ -27,7 +27,7 @@ export default defineConfig({
                 '**/*.d.ts',
                 '**/virtual:*',
                 '**/__x00__*',
-                // Do not retain the old raw-NUL glob: picomatch strips NUL and excludes every file.
+
                 'cypress/**',
                 'test?(s)/**',
                 'test?(-*).?(c|m)[jt]s?(x)',

@@ -16,7 +16,7 @@ describe('Settings › Calendar rules', () => {
         expect(maskCalendarFeedUrl('https://alex:s3cret@calendar.example.com/team/basic.ics')).toBe('https://calendar.example.com/...');
         expect(maskCalendarFeedUrl('user@calendar.example.com/private/feed')).toBe('calendar.example.com/...');
         expect(maskCalendarFeedUrl(' https://calendar.example.com/team/basic.ics ')).toBe('https://calendar.example.com/...');
-        // A token in the path or the query never shows, not even its end.
+
         expect(maskCalendarFeedUrl('https://calendar.example.com/ical/a1b2c3d4e5f6/basic.ics')).not.toMatch(/basic|ics|e5f6/);
         expect(maskCalendarFeedUrl('https://calendar.example.com?token=abcdef')).toBe('https://calendar.example.com/...');
         expect(maskCalendarFeedUrl('https://calendar.example.com')).toBe('https://calendar.example.com');
@@ -31,7 +31,7 @@ describe('Settings › Calendar rules', () => {
         expect(setCalendarFeedColor(feeds, 'auto', undefined)).toBeNull();
         expect(setCalendarFeedColor(feeds, 'team', '#2563eb')?.[0]).toMatchObject({ color: '#2563EB' });
         expect(setCalendarFeedColor(feeds, 'team', undefined)?.[0]).not.toHaveProperty('color');
-        // The Mindwtr calendar's color: re-picking it must not recreate the calendar (Android).
+
         expect(planCalendarPushColor('#059669', '#059669')).toBeNull();
         expect(planCalendarPushColor('#7c3aed', '#7C3AED')).toBeNull();
         expect(planCalendarPushColor('#3B82F6', '#059669')).toBe('#059669');
@@ -48,7 +48,7 @@ describe('Settings › Calendar rules', () => {
             const choices = buildCalendarPushTargetChoices({ targets, targetId: null, color: '#3B82F6', tr: t, platform });
             return [choices.options[0].description, choices.localHint];
         };
-        // Android makes it on the account of the first calendar it owns, never local-only.
+
         expect(first('android', [shared])).toEqual(['Dedicated account calendar', false]);
         expect(first('ios', [shared])).toEqual(['Dedicated local calendar', true]);
         expect(first('android', [managed(false), shared])).toEqual(['Dedicated account calendar · alex@gmail.com', false]);

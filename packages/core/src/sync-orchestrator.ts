@@ -9,13 +9,10 @@ interface CreateSyncOrchestratorOptions<Arg, Result> {
     onDrained?: () => void;
     onQueuedRunComplete?: (result: Result) => void;
     onQueuedRunError?: (error: unknown) => void;
-    /** Delay before a queued follow-up cycle starts, derived from how long the
-     *  finished cycle took. Slow cycles (large datasets, slow storage) otherwise
-     *  chain back-to-back and starve user interactions between them.
-     *  `minimumDelayMs` is the largest delay the cycle requested through
-     *  `requestFollowUpAfter`; the effective delay is never below it. */
+
+
     getFollowUpDelayMs?: (lastCycleDurationMs: number, minimumDelayMs: number) => number;
-    /** Asked again when the follow-up's timer fires: a positive wait (an edit since it was scheduled) moves it back. */
+
     getFollowUpWaitMs?: () => number;
 }
 
@@ -77,9 +74,8 @@ export const createSyncOrchestrator = <Arg, Result>(
 
         cancelFollowUpTimer();
         setQueued(false);
-        // A direct call is a newer user/system intent than the delayed request
-        // waiting in queuedArg. The timer callback resolves queuedArg before it
-        // calls run(), so only that callback consumes the delayed request.
+
+
         const cycleArg = arg;
         queuedArg = undefined;
         const cycleStartedAt = Date.now();
@@ -106,10 +102,7 @@ export const createSyncOrchestrator = <Arg, Result>(
             rejectDeferred(error);
         }
 
-        // .finally() returns a derived promise that rejects with `current`'s reason
-        // whenever this cycle throws. Nothing else holds onto that derived promise
-        // (callers hold `current`, returned below), so an unhandled rejection would
-        // fire for every failing cycle unless it's given a no-op handler here.
+
         current.finally(() => {
             if (inFlight !== current) return;
             inFlight = null;
@@ -121,7 +114,7 @@ export const createSyncOrchestrator = <Arg, Result>(
 
             const startQueuedRun = () => {
                 followUpTimer = null;
-                // A direct run() during the delay window already consumed the queue.
+
                 if (inFlight || !queued) return;
                 const waitMs = getFollowUpWaitMs?.() ?? 0;
                 if (waitMs > 0) {

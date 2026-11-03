@@ -293,9 +293,7 @@ describe('useRootLayoutNotificationOpenHandler', () => {
     expect(router.push).not.toHaveBeenCalled();
   });
 
-  // The root layout passes appReady = first paint AND canonical data. A cold-start
-  // Complete action must not write a snapshot copy of the task. It stays in
-  // native storage until then, so a kill during a slow load does not lose it.
+
   it('leaves a cold-start complete action in native storage until the app is ready, then applies it once', async () => {
     const router = createRouter();
     storeTasksById.set('task-1', { id: 'task-1', title: 'Pay rent', status: 'next' });

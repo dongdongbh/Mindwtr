@@ -7,7 +7,7 @@ import type { Project } from './types';
 export const iso = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value))
     && new Date(value).toISOString() === value;
 
-/** Reject non-JSON, cycles, hazardous keys, and envelopes above the native 2 MB UTF-8 bound. */
+
 export const detach = <T>(value: unknown): T | null => {
     const valid = (item: unknown, depth: number): boolean => {
         if (depth > 24) return false;

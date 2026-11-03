@@ -1,14 +1,6 @@
-/**
- * React Native's Focus controls, replayed against the frozen parity fixture
- * that core's focus-controls and the native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at.
- * MINDWTR_CAPTURE_FOCUS_CONTROLS=1 rewrites it. Each scenario renders the real
- * Focus screen on the real core store and drives the filter sheet, the saved
- * filter row, View options and the reorder screen through the handlers their
- * buttons call. It records what a user sees and what the store is asked to
- * write.
- */
+
+
+
 import React from 'react';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Alert, SectionList, TextInput } from 'react-native';
@@ -106,8 +98,6 @@ vi.mock('react-native-draggable-flatlist', async () => {
   };
 });
 
-// ---------------------------------------------------------------------------
-// Data. Now is Wednesday 2026-09-23, 10:00 in New York.
 
 export const TIME_ZONE = 'America/New_York';
 export const NOW = '2026-09-23T14:00:00.000Z';
@@ -161,7 +151,7 @@ const savedFilters: SavedFilter[] = [
     criteria: { areas: ['a-work'], priority: ['urgent', 'high'], startDateRange: { from: '2026-09-01', to: '2026-09-30' } },
     sortBy: 'priority', sortOrder: 'desc', createdAt: at('02'), updatedAt: at('02'),
   },
-  // A view this build does not know (a newer app's), so Focus must not offer it.
+
   { id: 'sf-list', name: 'List only', view: 'list' as SavedFilter['view'], criteria: { tags: ['#work'] }, createdAt: at('03'), updatedAt: at('03') },
   {
     id: 'sf-gone', name: 'Gone', view: 'focus', criteria: { tags: ['#home'] }, createdAt: at('03'), updatedAt: at('05'), deletedAt: at('05'),
@@ -295,8 +285,6 @@ const scenarios: Scenario[] = [
   { name: 'nothing to do', settings: 'base', taskIds: ['d1', 'w1'], actions: [] },
 ];
 
-// ---------------------------------------------------------------------------
-// Harness
 
 const t = (key: string) => english.strings[key] ?? key;
 const tf = (key: string, fallback: string) => {
@@ -452,7 +440,7 @@ function observe(h: Harness) {
     ? hosts(root, (node) => String(node.type) === 'TextInput' && node.props.placeholder === tf('savedFilters.namePlaceholder', 'Filter name'))[0]
     : null;
   const widget = getFocusWidgetFilter();
-  // The sheet's overview: each row's label and summary, and whether Clear shows.
+
   const sheetRoot = root.findByType(TaskFilterSheet);
   const overviewRows = hosts(sheetRoot, (node) => String(node.type) === 'TouchableOpacity'
     && hosts(node, (inner) => String(inner.type) === 'Text').length === 2)
@@ -547,7 +535,7 @@ async function perform(h: Harness, action: FocusControlsAction) {
     }
     case 'sort':
     case 'group': {
-      // Located by the label RN draws for the value; the replay asserts the labels themselves.
+
       const label = action[0] === 'sort' ? sortLabel(action[1]) : groupLabel(action[1]);
       const row = viewOptionRows(h)[action[0] === 'sort' ? 0 : 1];
       const chip = row.find((entry) => entry.props.label === label);

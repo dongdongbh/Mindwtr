@@ -56,7 +56,7 @@ describe('iOS widget task contexts', () => {
         };
         const projection = createWidgetPayloadProjection(data, 'en', iosWidgetProjectionOptions({}));
         for (const maxItems of Object.values(IOS_WIDGET_FAMILY_CACHE_ITEMS)) {
-            // Exercise the JSON boundary used by the native widget cache.
+
             const payload = JSON.parse(JSON.stringify(projection.build(maxItems)));
             const row = payload.sections.flatMap((section: { items: unknown[] }) => section.items)[0];
             expect(row).toMatchObject({
@@ -117,11 +117,11 @@ describe('widget times', () => {
     });
 
     it('reads the System setting as the app does on that device', () => {
-        // The app formats 'p' in the device locale (configureDateFormatting's systemLocale).
+
         expect(times({}, 'en-US')).toEqual({ due: '9:30 PM', start: 'Today 8:05 AM' });
         expect(times({}, 'en-GB')).toEqual({ due: '21:30', start: 'Today 08:05' });
         expect(times({ timeFormat: 'system' }, 'de-DE', 'de')).toEqual({ due: '21:30', start: 'Heute 08:05' });
-        // An explicit date format picks the locale, as it does in the app.
+
         expect(times({ dateFormat: 'dmy' }, 'en-US')).toEqual({ due: '21:30', start: 'Today 08:05' });
         expect(times({ dateFormat: 'mdy' }, 'en-GB')).toEqual({ due: '9:30 PM', start: 'Today 8:05 AM' });
     });
@@ -138,8 +138,8 @@ describe('widget times', () => {
     });
 
     it('reaches the device locale through the platform publications', () => {
-        // A host without Intl names the device locale itself; both publication
-        // paths must hand it to the builder.
+
+
         const data: AppData = {
             tasks: [
                 task('due-tonight', { dueDate: '2026-09-28T21:30:00' }),

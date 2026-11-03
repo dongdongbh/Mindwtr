@@ -5,23 +5,16 @@ import { taskMatchesFilterSelections } from './task-filter-selections';
 import { compareTasksByProjectOrder, getProjectFlowMode, sortDoneTasksForListView, sortTasksBy, splitCompletedTasks } from './task-utils';
 import type { FilterCriteria, Project, Section, Task, TaskSortBy, TaskStatus } from './types';
 
-/**
- * A project's task list, as the project workspace shows it: which tasks, in what
- * order, under which section headers, plus the Completed and Reference piles.
- * Mobile renders it and the native host contract pages it, so both show the
- * same list.
- */
 
-/** Header for tasks with no live section (or a section that no longer exists). */
 export const PROJECT_NO_SECTION_ID = 'no-section';
-/** The project Completed pile: a screen section, not a grouping heading. */
+
 export const PROJECT_COMPLETED_SECTION_ID = 'project-completed-tasks';
-/** The project References pile below the task list, matching desktop's ProjectWorkspace (#1000). */
+
 export const PROJECT_REFERENCE_SECTION_ID = 'project-reference-tasks';
 
 export type ProjectSyntheticSection = 'none' | 'completed' | 'reference';
 
-/** Screen-only header IDs must never claim a stored Section's ID. */
+
 export function getProjectSyntheticSectionIds(sections: readonly Pick<Section, 'id'>[]): Record<ProjectSyntheticSection, string> {
     const used = new Set(sections.map(({ id }) => id));
     const allocate = (base: string) => {
@@ -39,26 +32,26 @@ export function getProjectSyntheticSectionIds(sections: readonly Pick<Section, '
 
 export type ProjectTaskListItem =
     | { type: 'section'; id: string; title: string; count: number; muted?: boolean; collapsible?: boolean; collapsed?: boolean; synthetic?: ProjectSyntheticSection;
-        /** "Parallel" or "Sequential", only on real sections of a Per section project (#1429). */
+
         flowLabel?: string }
-    /** `reorderSectionId`: the section a drag lands the task in (null = no section; undefined = not reorderable). */
+
     | { type: 'task'; task: Task; reorderSectionId?: string | null };
 
 export type ProjectTaskListModel = {
     items: ProjectTaskListItem[];
-    /** The listed (non-reference) tasks in display order, before the Completed split. */
+
     orderedTasks: Task[];
-    /** The project's sections, in display order, including empty ones. */
+
     sections: Section[];
 };
 
 export type ProjectTaskListModelInput = {
-    /** An archived project reads its archived section history. Its tags pull in tag-matched references. */
+
     project: Pick<Project, 'id' | 'status'> & { tagIds?: readonly string[] }
         & Partial<Pick<Project, 'isSequential' | 'perSectionFlow'>>;
-    /** The list's tasks, from selectProjectTaskListTasks. */
+
     tasks: readonly Task[];
-    /** Every visible task: a tag-matched reference can live in another project (#1000). */
+
     visibleTasks: readonly Task[];
     sections: readonly Section[];
     allSections: readonly Section[];
@@ -66,28 +59,22 @@ export type ProjectTaskListModelInput = {
     criteria: FilterCriteria;
     searchQuery: string;
     sortBy: TaskSortBy;
-    /** Use the stored project order when sortBy is 'default' (the list supports manual reorder). */
+
     projectOrder: boolean;
-    /** Reorder mode keeps empty sections as drop targets and hides the Reference pile. */
+
     reorderMode: boolean;
-    /** Move finished tasks into the Completed pile (all-status list only). */
+
     groupCompletedTasksLast: boolean;
     completedCollapsed: boolean;
     t: (key: string) => string;
 };
 
-// Delegates to the one core comparator so display, reorder write plans, and
-// desktop all sort identically — including the id tie-break that keeps tied
-// (order, createdAt) rows from reshuffling with every sync merge (#784).
+
 export function sortProjectTasksByOrder<T extends { createdAt: string; id: string; order?: number; orderNum?: number }>(tasks: readonly T[]): T[] {
     return [...tasks].sort(compareTasksByProjectOrder);
 }
 
-/**
- * What a project's own state makes of its task list. Archived projects are read
- * only and show their finished work inline; live ones hide it behind the
- * Completed pile unless the workspace asks for it.
- */
+
 export function getProjectDetailTaskListOptions(
     selectedProject: Pick<Project, 'status' | 'isSequential' | 'perSectionFlow'> | null,
     showCompletedTasks = false,
@@ -98,14 +85,14 @@ export function getProjectDetailTaskListOptions(
         enableProjectReorder: !isArchived,
         includeArchived: isArchived || showCompletedTasks,
         includeDone: isArchived || showCompletedTasks,
-        // Any sequence (Sequential or Per section, #1429) keeps finished steps in place.
+
         groupCompletedTasksLast: !isArchived && showCompletedTasks
             && (!selectedProject || getProjectFlowMode(selectedProject) === 'parallel'),
         readOnly: isArchived,
     };
 }
 
-/** The project's own tasks that the list may show, before search and filter criteria. */
+
 export function selectProjectTaskListTasks(
     tasks: readonly Task[],
     options: {
@@ -113,7 +100,7 @@ export function selectProjectTaskListTasks(
         statusFilter: TaskStatus | 'all';
         includeArchived: boolean;
         includeDone: boolean;
-        /** Extra visibility rule from the caller, such as the mobile area filter. */
+
         isVisible?: (task: Task) => boolean;
     },
 ): Task[] {
@@ -143,7 +130,7 @@ export function buildProjectTaskListModel(input: ProjectTaskListModelInput): Pro
     if (input.projectOrder && sortBy === 'default') {
         orderedTasks = sortProjectTasksByOrder(filteredTasks);
     } else if (statusFilter === 'done' && sortBy === 'default') {
-        // Done is a log: default order is completion date descending, matching desktop.
+
         orderedTasks = sortDoneTasksForListView(filteredTasks);
     } else {
         orderedTasks = sortTasksBy(filteredTasks, sortBy);
@@ -158,10 +145,7 @@ export function buildProjectTaskListModel(input: ProjectTaskListModelInput): Pro
         completedTasks = sortDoneTasksForListView(split.completedTasks);
     }
 
-    // Reference tasks render as their own pile below the list, matching desktop's
-    // ProjectWorkspace: the project's own references plus references whose tags
-    // match the project's tags (that tag match is how one reference serves
-    // several projects) (#1000).
+
     let referenceTasks: Task[] = [];
     if (statusFilter === 'all') {
         const projectTagSet = new Set((project.tagIds || []).map((tag) => String(tag).toLowerCase()));

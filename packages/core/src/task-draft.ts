@@ -26,16 +26,7 @@ import type {
     TimeEstimate,
 } from './types';
 
-/**
- * The task editor draft as one module: a single field-descriptor table drives
- * initialization, reset, the dirty check, and the update patch. Adding an
- * editor field means adding one descriptor here (plus its UI), instead of
- * hand-syncing six parallel per-field lists across four files.
- *
- * Interface: createTaskDraft · setTaskDraftField · isTaskDraftDirty ·
- * areDraftAttachmentsDirty · taskDraftToUpdatePatch ·
- * taskDraftToChangedUpdatePatch. Everything else is implementation.
- */
+
 export type TaskDraft = {
     title: string;
     dueDate: string;
@@ -65,9 +56,10 @@ export type TaskDraft = {
     reviewAt: string;
     repeatReminderMinutes: number | undefined;
     dueReminderLeadMinutes: number | undefined;
+    startReminderLeadMinutes: number | undefined;
     reminderPolicy: NonNullable<Task['reminderPolicy']>;
     suppressMindwtrReminders: boolean;
-    /** Editor-session data, retained by spread and JSON recovery; never a Task field. */
+
     dateInputBaseline?: TaskDraftDateInputBaseline;
 };
 
@@ -77,7 +69,7 @@ export type TaskDraftDateInputBaseline = { taskId: string } & Record<DateInputFi
 
 export type TaskDraftField = Exclude<keyof TaskDraft, 'dateInputBaseline'>;
 
-/** Optional session metadata may come back through a native or RN JSON boundary. */
+
 export function isTaskDraftDateInputBaseline(value: unknown): value is TaskDraftDateInputBaseline {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
     const record = value as Record<string, unknown>;
@@ -106,20 +98,20 @@ const serializeDraftDate = (draft: TaskDraft, task: Task, field: DateInputField)
     preservesDateAfterTimezoneChange(draft, task, field) ? task[field] : draft[field] || undefined
 );
 
-/** The one write path surfaces get: bind this to setTaskDraftField. */
+
 export type TaskDraftSetter = <K extends TaskDraftField>(field: K, value: TaskDraft[K]) => void;
 
 type FieldSpec<K extends TaskDraftField> = {
     fromTask: (task: Task) => TaskDraft[K];
-    /** Custom dirty comparison; defaults to `draftValue !== fromTask(task)`. */
+
     isDirty?: (draftValue: TaskDraft[K], task: Task) => boolean;
-    /** Cascade applied after this field changes; returns the adjusted draft. */
+
     onSet?: (draft: TaskDraft) => TaskDraft;
 };
 
 const trimmedDiffers = (draftValue: string, taskValue: string) => draftValue.trim() !== taskValue.trim();
 
-// Convert stored ISO or datetime-local strings into datetime-local input values.
+
 export function toTaskDraftDateTimeLocalValue(dateStr: string | undefined): string {
     if (!dateStr) return '';
     const parsed = safeParseDate(dateStr);
@@ -149,8 +141,8 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     title: { fromTask: (task) => task.title },
     dueDate: {
         fromTask: (task) => toTaskDraftDateTimeLocalValue(task.dueDate),
-        // A relative start follows its due date; with no due, or a start the new due
-        // cannot compute (minutes or hours before a date-only due), the link ends.
+
+
         onSet: (draft) => {
             if (!draft.relativeStartOffset) return draft;
             const startTime = draft.dueDate ? computeRelativeStartTime(draft.dueDate, draft.relativeStartOffset) : undefined;
@@ -161,7 +153,7 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     },
     startTime: {
         fromTask: (task) => toTaskDraftDateTimeLocalValue(task.startTime),
-        // A start other than the one the relative link computes ends the link.
+
         onSet: (draft) => (
             draft.relativeStartOffset
             && draft.startTime !== computeRelativeStartTime(draft.dueDate, draft.relativeStartOffset)
@@ -193,9 +185,8 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     },
     status: {
         fromTask: (task) => task.status,
-        // Leaving the active workflow or moving to Inbox drops its star; leaving Done drops its
-        // completion timestamp. The reverse star→Next transition belongs to
-        // focusedToday below, so direction is explicit at the write seam.
+
+
         onSet: (draft) => {
             const focusedToday = draft.status === 'inbox' || !isTaskActionable(draft.status)
                 ? false : draft.focusedToday;
@@ -207,7 +198,7 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
     },
     focusedToday: {
         fromTask: (task) => task.isFocusedToday === true,
-        // Starring is a clarifying action: an Inbox draft becomes Next.
+
         onSet: (draft) => {
             if (!draft.focusedToday) return draft;
             if (draft.status === 'inbox') return { ...draft, status: 'next' };
@@ -242,6 +233,10 @@ const TASK_DRAFT_FIELDS: { [K in TaskDraftField]: FieldSpec<K> } = {
         fromTask: (task) => task.dueReminderLeadMinutes,
         isDirty: (value, task) => value !== undefined && value !== task.dueReminderLeadMinutes,
     },
+    startReminderLeadMinutes: {
+        fromTask: (task) => task.startReminderLeadMinutes,
+        isDirty: (value, task) => value !== undefined && value !== task.startReminderLeadMinutes,
+    },
     repeatReminderMinutes: {
         fromTask: (task) => task.repeatReminderMinutes,
         isDirty: (value, task) => (value ?? undefined) !== (task.repeatReminderMinutes ?? undefined),
@@ -272,11 +267,7 @@ export function createTaskDraft(task: Task): TaskDraft {
     return draft;
 }
 
-/**
- * The one write path into a draft: returns the same reference when the value
- * is unchanged, otherwise a new draft with the field set and any descriptor
- * cascade applied.
- */
+
 export function setTaskDraftField<K extends TaskDraftField>(
     draft: TaskDraft,
     field: K,
@@ -306,8 +297,7 @@ const attachmentFingerprint = (attachments: Attachment[] | undefined) =>
         ))
         .join('\n');
 
-/** Attachments are draft-buffered outside the field table (their records are
- *  edited via useTaskItemAttachments); they still count as pending edits. */
+
 export function areDraftAttachmentsDirty(editAttachments: Attachment[] | undefined, task: Task): boolean {
     return attachmentFingerprint(editAttachments) !== attachmentFingerprint(task.attachments);
 }
@@ -324,20 +314,17 @@ const RECURRENCE_ANCHOR_FIELDS = [
     'reviewAnchorDay',
 ] as const satisfies readonly (keyof Recurrence)[];
 
-/** The persisted editor title; an empty draft retains its original title. */
+
 export function resolveTaskDraftTitle(draftTitle: string, originalTitle: string): string {
     return draftTitle.trim() || originalTitle;
 }
 
-/** Serialize editor tokens with the shared prefix policy, preserving their order and duplicates. */
+
 export function serializeTaskDraftTokens(value: string, field: 'contexts' | 'tags'): string[] {
     return value.split(',').map((token) => normalizeBulkTaskTokenInput(token, field)).filter(Boolean);
 }
 
-/**
- * Serialize the draft into the `updateTask` patch. Returns null when there is
- * no usable title (empty draft title on a task that never had one).
- */
+
 export function taskDraftToUpdatePatch(
     draft: TaskDraft,
     task: Task,
@@ -385,10 +372,8 @@ export function taskDraftToUpdatePatch(
         }
         recurrenceValue.rrule = draft.recurrenceRRule;
     }
-    // Attachment removal soft-deletes records, so a legitimate buffer is never
-    // shorter than the stored list. An empty/absent buffer means the caller has
-    // nothing to say about attachments — omit the key entirely; an explicit
-    // `attachments: undefined` would spread-wipe stored records and tombstones.
+
+
     const attachmentsPatch = (options.attachments?.length ?? 0) > 0
         ? { attachments: options.attachments }
         : {};
@@ -402,8 +387,8 @@ export function taskDraftToUpdatePatch(
         startTime: serializeDraftDate(draft, task, 'startTime'),
         relativeStartOffset: draft.relativeStartOffset,
         projectId: resolvedProjectId,
-        // Container exclusivity: a project home clears the direct area, and a
-        // section is only valid inside its project.
+
+
         sectionId: resolvedProjectId ? (draft.sectionId || undefined) : undefined,
         viewSectionIds: draft.viewSectionIds,
         areaId: resolvedProjectId ? undefined : (draft.areaId || undefined),
@@ -422,6 +407,8 @@ export function taskDraftToUpdatePatch(
         repeatReminderMinutes: draft.repeatReminderMinutes || undefined,
         ...(draft.dueReminderLeadMinutes !== undefined && draft.dueReminderLeadMinutes !== task.dueReminderLeadMinutes
             ? { dueReminderLeadMinutes: draft.dueReminderLeadMinutes } : {}),
+        ...(draft.startReminderLeadMinutes !== undefined && draft.startReminderLeadMinutes !== task.startReminderLeadMinutes
+            ? { startReminderLeadMinutes: draft.startReminderLeadMinutes } : {}),
         ...(task.reminderPolicy !== undefined || draft.reminderPolicy !== getTaskReminderPolicy(task)
             ? { reminderPolicy: draft.reminderPolicy } : {}),
         ...attachmentsPatch,
@@ -445,10 +432,7 @@ const areSerializedTaskFieldValuesEqual = (left: unknown, right: unknown): boole
     return (left ?? null) === (right ?? null);
 };
 
-/**
- * Serialize only fields changed from the task snapshot that opened an edit
- * session. Callers keep that snapshot stable while live task data may update.
- */
+
 export function taskDraftToChangedUpdatePatch(
     draft: TaskDraft,
     baselineTask: Task,
@@ -463,9 +447,8 @@ export function taskDraftToChangedUpdatePatch(
     const narrowed: Partial<Task> = { ...patch };
     let preservedDate = false;
     for (const key of Object.keys(narrowed) as (keyof Task)[]) {
-        // A project assignment semantically clears areaId, while removing a
-        // project clears sectionId. Compare these fields to stored values so
-        // those intentional clears are not normalized away.
+
+
         let baselineValue = RAW_CONTAINER_TASK_FIELDS.has(key)
             ? baselineTask[key]
             : baseline[key];
@@ -488,8 +471,8 @@ export function taskDraftToChangedUpdatePatch(
             context: { releaseCheck: 'v1.3.3/task-draft-timezone', outcome: 'preserved' },
         });
     }
-    // The store reads a start or due change that comes without the offset as a
-    // hand-set start and ends the relative link. A draft that keeps the link sends it.
+
+
     if (patch.relativeStartOffset && ('startTime' in narrowed || 'dueDate' in narrowed)) {
         narrowed.relativeStartOffset = patch.relativeStartOffset;
     }

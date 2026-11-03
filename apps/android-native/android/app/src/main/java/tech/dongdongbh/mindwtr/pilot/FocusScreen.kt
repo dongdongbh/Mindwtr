@@ -43,36 +43,28 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
-/**
- * One Focus section as core sent it. [rowTotal] is the rows to page through (under a grouping a task in two groups is listed twice), and [groups] core's Next actions headings,
- * each drawn before the row at its `start`.
- */
+
 data class FocusSection(val key: String, val title: String, val total: Int, val rows: List<TaskRow>,
                         val rowTotal: Int = total, val groups: List<JSONObject> = emptyList(),
                         val countLabel: String = total.toString(), val hiddenByAreaLabel: String? = null)
-/** One of core's "Projects to review" rows: the project, its status, and core's review date text. */
+
 data class ReviewProject(val id: String, val title: String, val status: String, val color: String?, val reviewDate: String?)
 
-/**
- * Core's getFocus reply at one revision. Sections, titles, totals, and rows
- * stay exactly in core's order: Kotlin never sorts, drops, or regroups them.
- * [dateLabel] is core's date line, formatted with the user's settings. [controls]
- * is core's controls view (native-host-contract-focus-controls.ts), [state] its control state.
- */
+
 data class FocusView(val revision: String, val dateLabel: String, val sections: List<FocusSection>, val reviewProjects: List<ReviewProject>,
                      val controls: JSONObject? = null) {
     val state: JSONObject get() = controls?.optJSONObject("state") ?: JSONObject()
 
     fun section(key: String) = sections.firstOrNull { it.key == key }
 
-    /** Whether [other] draws the same as this: everything but the revision, core's JSON parts by their text. */
+
     fun sameShown(other: FocusView): Boolean = dateLabel == other.dateLabel && reviewProjects == other.reviewProjects
         && controls?.toString() == other.controls?.toString() && sections.size == other.sections.size
         && sections.zip(other.sections).all { (mine, theirs) ->
             mine.copy(groups = emptyList()) == theirs.copy(groups = emptyList()) && mine.groups.map { it.toString() } == theirs.groups.map { it.toString() }
         }
 
-    /** Adds one getFocusSectionWindow reply after the rows (and group headings) its section already has. */
+
     fun append(window: JSONObject): FocusView {
         check(window.getInt("version") == 1 && window.getString("revision") == revision) { "Unexpected Focus window" }
         val key = window.getString("key")
@@ -104,20 +96,11 @@ data class FocusView(val revision: String, val dateLabel: String, val sections: 
     }
 }
 
-/**
- * Focus as core sent it, in one list, drawn as RN's Focus: core's date line with RN's View options,
- * Filters and "Focus only / Expand sections" buttons, core's saved Focus filters and active chips
- * (FocusControls.kt), then each section with RN's triangle, title and count (Today's Focus with
- * RN's Reorder while core allows it). A section core counts as empty is not drawn, as in RN. A tap
- * on a title folds the section; the open sections are kept on the device as RN keeps them. Core's
- * group headings (Next actions' groups, Today's "Later today") go before the row each starts, the
- * rows under them indented; a tap folds one. "Projects to review" follows. While
- * reordering, RN's reorder screen takes the list's place.
- */
+
 @Composable
 fun FocusList(model: InboxViewModel, modifier: Modifier) {
-    // Core's Focus changes with the clock. Read it again on every resume and each
-    // minute while this list shows; the loop stops when the screen pauses or leaves.
+
+
     val owner = LocalLifecycleOwner.current
     LaunchedEffect(owner) {
         owner.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -131,29 +114,29 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
         val c = LocalTheme.current.colors
         val more = t("common.more")
         val controls = focus?.controls
-        // RN's reorder mode owns the screen while core allows it; Back leaves it, as RN's does.
+
         val reorder = controls?.optJSONObject("reorder")?.takeIf { menu.focusControls.reordering }
         BackHandler(enabled = failedAction == null && reorder != null && menu.focusControls.dialog == null) { menu.focusControls.reorder(false) }
         if (reorder != null) return FocusReorder(model, reorder, modifier)
-        // RN's pull down to sync (5bb0ea8f).
+
         PullToSync(model, modifier) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
                 val view = focus
                 val sections = view?.sections.orEmpty()
                 val reviewCount = view?.reviewProjects?.size ?: 0
                 val shown = sections.count { it.total > 0 }
-                // RN's toggle acts on every shown section but Today's Focus.
+
                 val others = sections.count { it.total > 0 && it.key != "focus" } + (if (reviewCount > 0) 1 else 0)
                 val othersOpen = sections.any { it.total > 0 && it.key != "focus" && focusView.isOpen(it.key) } ||
                     (reviewCount > 0 && focusView.isOpen("reviewProjects"))
-                // RN's header: the Pomodoro card (while the feature is on) above the date row, 6 dp below the top.
+
                 val pomodoro = pomodoro.panel.pomodoroShown() != null
                 if (view != null && pomodoro) item(key = "pomodoro") { Box(Modifier.padding(top = 6.dp)) { PomodoroCard(model) } }
                 if (view != null) item(key = "date") {
-                    // RN's headerTopRow: the date, 12 dp, then its 44 dp buttons 8 dp apart, so a long date wraps where RN's does.
+
                     Row(Modifier.fillMaxWidth().padding(top = if (pomodoro) 0.dp else 6.dp), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        // RN's text block fills the row's height and its text sits at the top of it.
+
                         Text(view.dateLabel.uppercase(), style = rnText(12, 600, letterSpacing = 0.6f), color = c.secondaryText,
                             modifier = Modifier.weight(1f).align(Alignment.Top).padding(end = 4.dp))
                         view.controls?.let { FocusHeaderButtons(model, it) }
@@ -166,9 +149,9 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                         }
                     }
                 }
-                // Core's saved Focus filters, then the active filters with Clear.
+
                 view?.controls?.let { item(key = "controls") { FocusFilterRows(model, it) } }
-                // RN's empty Focus: core's title and hint (a filter that hides everything says so), centered.
+
                 if (view != null && shown == 0 && reviewCount == 0) item(key = "empty") {
                     val empty = view.controls?.optJSONObject("empty")
                     Column(Modifier.fillMaxWidth().padding(vertical = 40.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -181,11 +164,11 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                 for (section in focus?.sections.orEmpty()) {
                     if (section.total == 0) continue
                     val open = focusView.isOpen(section.key)
-                    // RN's Reorder beside Today's Focus, while core allows reordering (the default sort, no filter, a star).
+
                     val reorderable = controls?.optJSONObject("reorder")?.takeIf { section.key == "focus" }
                     val top = if (first) 8.dp else 18.dp
                     item(key = "title:${section.key}") {
-                        // RN's sectionHeaderRow: the margins are the title's, so Reorder (36 dp) sits beside them, not inside them.
+
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FocusSectionTitle(section.title, section.total, open, section.countLabel, Modifier.padding(top = top, bottom = 10.dp)) {
                                 toggleFocusSection(section.key)
@@ -201,8 +184,8 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                     }
                     first = false
                     if (!open) continue
-                    // Core's group headings (Next actions under a grouping, Today's Later today) in core's order, each before the row
-                    // at its start; a folded one has no rows, so several can share a start, or follow the last row.
+
+
                     var group: String? = null
                     var nextHeading = 0
                     fun headingsTo(index: Int) {
@@ -215,7 +198,7 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                     section.rows.forEachIndexed { index, task ->
                         headingsTo(index)
                         val grouped = group != null
-                        // RN's itemWrapper: 8 dp below each Focus row, past the row's own 6.
+
                         item(key = "${section.key}:${group}:${task.id}") {
                             Box(Modifier.padding(bottom = 8.dp)) { GroupedRow(grouped) {
                                 TaskRowItem(model, task, status = if (section.key == "reviewDue") RowStatus.Badge else RowStatus.Hidden,
@@ -224,7 +207,7 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
                             } }
                         }
                     }
-                    // Folded headings after the last row (core sends them with the window that ends the section).
+
                     headingsTo(section.rows.size)
                     if (section.rows.size < section.rowTotal) item(key = "more:${section.key}") {
                         Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
@@ -248,7 +231,7 @@ fun FocusList(model: InboxViewModel, modifier: Modifier) {
     }
 }
 
-/** RN's Focus section header: ▾ or ▸, the title in capitals, and the count. TalkBack hears core's title and count. */
+
 @Composable
 private fun RowScope.FocusSectionTitle(title: String, count: Int, open: Boolean, countLabel: String = count.toString(), margin: Modifier = Modifier,
                                        onToggle: () -> Unit) {
@@ -271,7 +254,7 @@ private fun RowScope.FocusSectionTitle(title: String, count: Int, open: Boolean,
     }
 }
 
-/** RN's review card: the folder tile (the project color as its border), the title, the status, and core's review date. A tap opens the project. */
+
 @Composable
 private fun ReviewProjectCard(model: InboxViewModel, project: ReviewProject) = with(model) {
     val c = LocalTheme.current.colors

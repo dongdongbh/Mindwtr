@@ -194,8 +194,7 @@ describe('SettingsView', () => {
             </LanguageProvider>
         );
 
-        // No async wait: once the route is available, its default content must
-        // be present in the initial commit rather than suspend on another chunk.
+
         expect(getByText('main-page')).toBeVisible();
         expect(resourceTracker).toEqual({ sync: false, calendar: false, obsidian: false, advanced: false });
     });

@@ -14,9 +14,8 @@ import {
 } from './server-config';
 
 describe('parseArgs', () => {
-    // apps/mcp-server/src/flags.ts's parseArgs already accepted this form; cloud's own copy
-    // silently ignored it (a `--port=8787` in an env/script invocation was read as if `--port`
-    // had no value at all, falling back to the default instead of erroring or applying it).
+
+
     it('accepts --key=value flags alongside the existing --key value form', () => {
         expect(parseArgs(['--port=9000', '--host', '0.0.0.0', '--verbose'])).toEqual({
             port: '9000',
@@ -56,11 +55,7 @@ describe('cloud Task schema contract', () => {
     });
 });
 
-// Frozen snapshot of the pre-refactor hand-written literals (parity-entities follow-up to the
-// 2026-07-20 generative-schema refactor). CLOUD_PROJECT_*/CLOUD_SECTION_* allowlists are now
-// derived from PROJECT_SYNC_FIELD_SCHEMA / SECTION_SYNC_FIELD_SCHEMA's cloudWrite flag instead
-// of hand-maintained Sets. Do not update these lists to match a schema change — grow the
-// schema and leave this alone; these snapshots cover the unchanged entity descriptors only.
+
 const PRE_REFACTOR_CLOUD_PROJECT_CREATION_ALLOWED_PROP_KEYS = [
     'status', 'color', 'order', 'tagIds', 'isSequential', 'taskSortBy', 'isFocused',
     'supportNotes', 'attachments', 'startDate', 'dueDate', 'reviewAt', 'areaId', 'areaTitle',

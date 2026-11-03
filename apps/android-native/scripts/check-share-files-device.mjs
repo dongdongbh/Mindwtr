@@ -1,21 +1,6 @@
-// File share check for the isolated native Android development app (O3 review item 5: RN's file shares).
-//
-//   node apps/android-native/scripts/check-share-files-device.mjs <adb-serial> [apk]
-//
-// Installs the debug APK with `install -r` (existing development data stays). Another app's share sheet is played by the debug
-// build's own ShareTestProvider (files the check puts in files/share-test/, never another path) and ShareTestSender (a SEND or
-// SEND_MULTIPLE to the app's alias, which `am start` cannot send with a list): (a) a PDF opens RN's capture screen titled with
-// its name without the extension, listing the file under Attachments; Save stores the task once with one attachment, a copy in
-// files/attachments with the file's bytes; (b) three files (one whose provider gives no name, no size and no type, RN's #1117
-// fallbacks) are listed and saved; (c) seven files list six, and Cancel stores nothing; (d) a 51 MiB file and a blocked type
-// beside a PDF: core's notice counts two skipped files, the PDF is listed, and no copy over the cap is left; (e) a file that
-// cannot be read shows "Share unavailable"; (f) a file share's subject and text are left out, as RN's Android share module sends files only (the title is the file's name); (g) a share sent
-// to a stopped app opens after the boot and saves; (h) a hostile share naming this app's own files (a file:// URI, this app's own
-// provider, and that provider behind a `0@` user prefix, plain or encoded) shows "Share unavailable" and copies nothing. Each share's staged files are
-// gone once it opened. Titles are 77 + a
-// 12-digit run id + a number (check-projects-device.mjs --prune-old removes earlier runs'). It types nothing, never launches over
-// another app, removes its test files and leaves the app on its Inbox. It needs host `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -60,11 +45,11 @@ const lines = (...needles) => device.logs(pid(), TAG).replace(/\\/g, '').split('
 const prepared = () => lines('native-share-files');
 const captures = () => lines('native-android-dev-task-command', '"operation":"captureModal"', '"outcome":"saved"');
 
-// ---- the test files: made here, pushed, then copied into the provider's folder ----
+
 const local = {};
 const makeFile = (fileName, bytes) => { local[fileName] = bytes; writeFileSync(resolve(work, 'files', fileName), bytes); };
 
-// ---- core on a copy of the app's database ----
+
 const pullDatabase = () => {
     const dir = resolve(work, 'db');
     rmSync(dir, { recursive: true, force: true });
@@ -73,7 +58,7 @@ const pullDatabase = () => {
     for (const suffix of ['', '-wal', '-shm']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/** The live tasks titled [titles], each with its attachments' titles and URIs. */
+
 const stored = (titles) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -92,26 +77,25 @@ const stored = (titles) => JSON.parse(execFileSync('bun', ['-e', `
         .map((task) => ({ description: task.description ?? null, attachments: (task.attachments ?? []).filter((item) => !item.deletedAt).map((item) => ({ title: item.title, uri: item.uri })) }))]))));
     process.exit(0);
 `], { encoding: 'utf8', env: { ...process.env, CHECK_DB: pullDatabase(), CHECK_TITLES: JSON.stringify(titles) } }).trim().split('\n').pop());
-/** A managed copy's SHA-256 on the phone. */
+
 const deviceSha = (uri) => runAs(`sha256sum ${uri.replace(/^file:\/\/\/data\/user\/0\/[^/]+\//, '').replace(/^file:\/\/\/data\/data\/[^/]+\//, '')}`).split(/\s+/)[0];
 const staged = () => runAs('ls cache/shared-entries 2>/dev/null || true').split(/\s+/).filter(Boolean);
-/** The largest file in files/attachments, in bytes. */
+
 const largestCopy = () => Math.max(0, ...runAs('ls -l files/attachments 2>/dev/null || true').split('\n').map((line) => Number(line.trim().split(/\s+/)[4])).filter(Number.isFinite));
 
-// ---- the share and the screen ----
-/** Sends a share of the provider's [uris] ("mode/name"), as another app's share sheet does; waits until core prepared it. [fromApp] false: the app is stopped. */
+
 const share = async ({ action = 'SEND', type = '*/*', uris, raw = [], subject, text }, expected, description, timeoutMs = 30_000, fromApp = true) => {
     if (fromApp) requireAppFront();
-    // A stopped app's new process logs from zero.
+
     const before = fromApp ? prepared() : 0;
     const extras = [`--es action android.intent.action.${action}`, `--es type '${type}'`, `--esal uris ${[...uris.map((uri) => `${PROVIDER}/${uri}`), ...raw].join(',')}`,
         ...(subject ? [`--es subject '${subject}'`] : []), ...(text ? [`--es text '${text}'`] : [])];
-    // An app that sends a file:// URI dies of FileUriExposedException before the share leaves it, so the shell sends that one.
+
     const fileUri = uris.length === 0 && raw.length === 1 && raw[0].startsWith('file://') ? raw[0] : null;
     sh(fileUri
         ? `am start -W -a android.intent.action.${action} -t '${type}' --eu android.intent.extra.STREAM '${fileUri}' -n ${PKG}/${PKG}.MainActivity`
-        // Each sender start opens its own task: after the cold start (g) the sender is the app task's root, and a plain start of the
-        // same intent only brings that task to the front, so the sender never runs and no share is sent.
+
+
         : `am start -W --activity-multiple-task -n ${SENDER} ${extras.join(' ')}`);
     const deadline = Date.now() + timeoutMs;
     while (prepared() === before) {
@@ -143,10 +127,10 @@ const restore = async () => {
             for (let step = 0; step < 2 && tagged(nodes, 'capture-modal'); step += 1) { sh('input keyevent KEYCODE_BACK'); await sleep(800); nodes = await screen(); }
             if (tab(nodes, en['tab.inbox']) && !tabSelected(nodes, en['tab.inbox'])) await device.tap(tab(nodes, en['tab.inbox']));
         }
-    } catch { /* the app is gone */ }
-    try { runAs('rm -rf files/share-test'); } catch { /* device gone */ }
-    try { sh(`rm -rf ${pushed} ${UI_FILE}`); } catch { /* device gone */ }
-    try { sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch { /* device gone */ }
+    } catch {                       }
+    try { runAs('rm -rf files/share-test'); } catch {                   }
+    try { sh(`rm -rf ${pushed} ${UI_FILE}`); } catch {                   }
+    try { sh(`settings put system accelerometer_rotation ${originalAccelerometer === 'null' ? 1 : originalAccelerometer}`); } catch {                   }
 };
 
 try {
@@ -167,7 +151,7 @@ try {
     makeFile(name(8, 'pdf'), randomBytes(100));
     makeFile(name(10, 'pdf'), randomBytes(100));
     makeFile(name(13, 'pdf'), randomBytes(2_000));
-    // adb nests a pushed folder inside a target that exists, so the target must not exist yet.
+
     sh(`rm -rf ${pushed}`);
     execFileSync(adbBin, ['-s', serial, 'push', resolve(work, 'files'), pushed], { stdio: 'ignore' });
     runAs(`mkdir -p files/share-test && cp ${pushed}/* files/share-test/`);
@@ -176,7 +160,7 @@ try {
     sh('settings put system accelerometer_rotation 0');
     await waitFor('the tabs', (nodes) => Boolean(tab(nodes, en['tab.inbox'])), 60_000);
 
-    // (a) One PDF: RN's capture screen titled with its name, the file under Attachments; Save stores it with a managed copy.
+
     let nodes = await share({ type: 'application/pdf', uris: [`file/${name(1, 'pdf')}`] }, modal(title(1)), 'the capture screen with the PDF');
     check(JSON.stringify(rows(nodes)) === JSON.stringify([name(1, 'pdf')]) && hasText(nodes, en['attachments.title']), `(a) the PDF is listed under Attachments (${rows(nodes)})`);
     await save(nodes);
@@ -187,7 +171,7 @@ try {
     check(deviceSha(one.attachments[0].uri) === createHash('sha256').update(local[name(1, 'pdf')]).digest('hex'), '(a) the copy has the shared bytes');
     await noStaged('(a)');
 
-    // (b) Three files, one whose provider gives no name, size or type (RN's fallbacks: the URI's name, octet-stream).
+
     nodes = await share({ action: 'SEND_MULTIPLE', uris: [`file/${name(2, 'png')}`, `nometa/${name(3, 'csv')}`, `file/${name(4, 'pdf')}`] },
         modal(title(2)), 'the capture screen with three files');
     check(JSON.stringify(rows(nodes)) === JSON.stringify([name(2, 'png'), name(3, 'csv'), name(4, 'pdf')]), `(b) the three files are listed (${rows(nodes)})`);
@@ -196,7 +180,7 @@ try {
     check(tasks[title(2)].length === 1 && tasks[title(2)][0].attachments.length === 3, `(b) the task is stored with three attachments (${JSON.stringify(tasks[title(2)])})`);
     await noStaged('(b)');
 
-    // (c) Seven files: RN's six are listed; Cancel stores nothing.
+
     nodes = await share({ action: 'SEND_MULTIPLE', type: 'application/pdf', uris: [1, 2, 3, 4, 5, 6, 7].map((n) => `file/${name(`5-${n}`, 'pdf')}`) },
         modal(title('5-1')), 'the capture screen with seven files');
     check(rows(nodes).length === 6 && !rows(nodes).includes(name('5-7', 'pdf')), `(c) six of seven files are listed (${rows(nodes)})`);
@@ -204,7 +188,7 @@ try {
     check(stored([title('5-1')])[title('5-1')].length === 0, '(c) Cancel stored nothing');
     await noStaged('(c)');
 
-    // (d) A file over 50 MiB (its provider gives no size) and a blocked type beside a PDF: one notice for both, the PDF listed.
+
     nodes = await share({ action: 'SEND_MULTIPLE', uris: [`nosize/${name(6, 'bin')}`, `file/${name(7, 'exe')}`, `file/${name(8, 'pdf')}`] },
         modal(title(8)), 'the capture screen with the PDF only', 60_000);
     const skipped = en['share.filesSkipped'].replace('{{count}}', '2');
@@ -215,17 +199,17 @@ try {
     check(largestCopy() <= 50 * MIB, `(d) no copy over 50 MiB is left in files/attachments (largest ${largestCopy()} bytes)`);
     await noStaged('(d)');
 
-    // (e) A file that cannot be read: RN's "Share unavailable", and no capture screen.
+
     nodes = await share({ type: 'application/pdf', uris: [`gone/${name(9, 'pdf')}`] }, (current) => hasText(current, en['share.unavailable']), 'the share failure notice');
     check(!tagged(nodes, 'capture-modal'), '(e) an unreadable file shows "Share unavailable" and opens nothing');
     await noStaged('(e)');
 
-    // (f) A subject and text with the file: RN's Android share module sends the files only, so the file's name is the title.
+
     nodes = await share({ type: 'application/pdf', uris: [`file/${name(10, 'pdf')}`], subject: title(11), text: title(12) }, modal(title(10)), 'the capture screen titled with the file');
     check(!tagged(nodes, 'capture-modal-description') && rows(nodes).length === 1, '(f) a file share\'s subject and text are left out, as RN\'s Android share leaves them');
     await cancel(nodes);
 
-    // (g) A share sent to a stopped app opens after the boot, and saves.
+
     sh(`am force-stop ${PKG}`);
     await sleep(1000);
     nodes = await share({ type: 'application/pdf', uris: [`file/${name(13, 'pdf')}`] }, modal(title(13)), 'the capture screen after a cold start', 90_000, false);
@@ -234,7 +218,7 @@ try {
     check(tasks[title(13)].length === 1 && tasks[title(13)][0].attachments.length === 1, '(g) the cold-started share is stored with its file');
     await noStaged('(g)');
 
-    // (h) A hostile share naming this app's own files: never opened, so nothing is copied, and RN's "Share unavailable".
+
     const managed = tasks[title(13)][0].attachments[0].uri.split('/files/attachments/')[1];
     const own = `${PKG}.FileSystemFileProvider/attachments/${managed}`;
     for (const [label, uri] of [['a file:// URI', `file:///data/user/0/${PKG}/files/${DB}`], ['this app\'s own provider', `content://${own}`],
@@ -244,7 +228,7 @@ try {
         check(!tagged(nodes, 'capture-modal') && runAs('ls files/attachments').split(/\s+/).filter(Boolean).length === copies,
             `(h) ${label} shows "Share unavailable" and copies nothing`);
         await noStaged('(h)');
-        // The next refusal must show its own notice.
+
         await waitFor('the notice to go', (current) => !hasText(current, en['share.unavailable']), 20_000);
     }
     console.log('Share files device check passed');

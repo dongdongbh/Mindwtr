@@ -79,18 +79,8 @@ fn allowed_open_roots(app: &tauri::AppHandle) -> Vec<PathBuf> {
     )
 }
 
-// #1245 moved an installed Windows/macOS profile's managed folders from
-// `<root>/` down into `<root>/data/`. Only these two hold files whose absolute
-// path was recorded in an attachment `uri`; `quick-add-images` did not move, so
-// old pasted-image paths must keep resolving exactly where they are.
 const RELOCATED_MANAGED_DIR_NAMES: &[&str] = &["attachments", "audio-captures"];
 
-/// Map a path recorded at the flat profile root onto the same file under the
-/// current managed data dir. Unlike the relocated portable profile of #1038 the
-/// stale path sits inside the OS data dir and its file name need not be the
-/// attachment id (audio captures are named after their timestamp), so the
-/// id-based fallback never reaches it. Every remaining component must be a plain
-/// name — a traversal segment would leave the managed data dir, so it is refused.
 fn rehomed_managed_path(candidate: &Path, managed_attachments_dir: &Path) -> Option<PathBuf> {
     let managed_data_dir = managed_attachments_dir.parent()?;
     let rest = candidate.strip_prefix(managed_data_dir.parent()?).ok()?;
@@ -131,10 +121,7 @@ fn normalize_open_path(
     if let Ok(resolved) = candidate.canonicalize() {
         return Ok(resolved);
     }
-    // A portable profile travels with the install, so an attachment URI recorded
-    // at the previous location is stale even though the file moved along inside
-    // the profile's attachments dir. Retry the same file name there before
-    // giving up — the recorded path always wins when it still resolves (#1038).
+
     if let Some(resolved) = managed_attachments_dir
         .and_then(|dir| rehomed_managed_path(&candidate, dir))
         .and_then(|rehomed| rehomed.canonicalize().ok())
@@ -156,8 +143,6 @@ fn normalize_open_path(
         .zip(candidate.file_name())
         .map(|(dir, name)| dir.join(name))
         .and_then(|fallback| fallback.canonicalize().ok())
-        // The path is the one clue a user has for repairing a broken
-        // reference (moved file, relocated portable profile) — name it (#1001).
         .ok_or_else(|| {
             format!(
                 "File does not exist or cannot be accessed: {}",
@@ -172,11 +157,6 @@ fn path_is_under_allowed_root(path: &Path, allowed_roots: &[PathBuf]) -> bool {
         .any(|root| path == root || path.starts_with(root))
 }
 
-// Existing files AND directories are user-openable wherever they live: a user-added
-// link may point anywhere on their machine, and opening a folder in the file manager
-// is strictly less dangerous than opening a file (which is already allowed and can
-// execute). The managed-roots check remains for paths that don't exist locally yet
-// (e.g. Flatpak portal documents).
 fn path_is_openable(path: &Path, allowed_roots: &[PathBuf]) -> bool {
     path_is_under_allowed_root(path, allowed_roots) || path.is_file() || path.is_dir()
 }
@@ -186,9 +166,7 @@ fn parse_macos_eventkit_json(raw: *mut c_char) -> Result<Value, String> {
     if raw.is_null() {
         return Err("EventKit bridge returned null output".to_string());
     }
-    // SAFETY: We have verified `raw` is non-null. The Objective-C bridge allocates
-    // via `strdup()` so the pointer is valid until we free it. We copy the string
-    // immediately and then free the original to avoid use-after-free.
+
     let text = unsafe { CStr::from_ptr(raw) }
         .to_string_lossy()
         .into_owned();
@@ -197,8 +175,6 @@ fn parse_macos_eventkit_json(raw: *mut c_char) -> Result<Value, String> {
         .map_err(|error| format!("Failed to parse EventKit bridge output: {error}"))
 }
 
-// Off the UI thread, same reason as get_macos_calendar_events: the shim
-// allocates its own EKEventStore per call, so there's no shared-state race.
 #[tauri::command(async)]
 pub(crate) fn get_macos_calendar_permission_status() -> Result<String, String> {
     #[cfg(target_os = "macos")]
@@ -238,8 +214,6 @@ pub(crate) async fn request_macos_calendar_permission() -> Result<String, String
     }
 }
 
-// Off the UI thread: `eventsMatchingPredicate:` is a synchronous EventKit query
-// Apple documents as slow, and the shim uses its own EKEventStore per call.
 #[tauri::command(async)]
 pub(crate) fn get_macos_calendar_events(
     range_start: String,
@@ -747,9 +721,6 @@ fn sanitize_attachment_file_name(raw: &str) -> Result<&str, String> {
     Ok(trimmed)
 }
 
-// Intentionally avoids canonicalize(): exotic mounts (Windows RAM drives, some
-// network shares) fail canonicalization even though plain reads work, which is
-// exactly the case this import path exists to support.
 fn import_attachment_into(
     dest_dir: &Path,
     source: &Path,
@@ -795,9 +766,6 @@ pub(crate) struct ImportedAttachmentFile {
     size: u64,
 }
 
-// Off the UI thread: this copies a user-picked file that may live on a network
-// share or removable drive. Concurrent imports are safe — the temp name is
-// unique per process and nanosecond, and the final rename is atomic.
 #[tauri::command(async)]
 pub(crate) fn import_attachment_file(
     app: tauri::AppHandle,
@@ -806,8 +774,7 @@ pub(crate) fn import_attachment_file(
     max_bytes: Option<u64>,
 ) -> Result<ImportedAttachmentFile, String> {
     let source = PathBuf::from(strip_file_scheme(path.trim())?);
-    // Matches the webview-side managed dir used by sync downloads, previews,
-    // and cleanup; portable mode redirects it into the profile dir (#855).
+
     let dest_dir = get_data_dir(&app).join("attachments");
     let (final_path, size) = import_attachment_into(&dest_dir, &source, &file_name, max_bytes)?;
     Ok(ImportedAttachmentFile {
@@ -816,15 +783,11 @@ pub(crate) fn import_attachment_file(
     })
 }
 
-// The directory the webview must use for managed app files (attachments, logs,
-// audio captures, speech models). Portable mode points it into the profile dir.
 #[tauri::command]
 pub(crate) fn get_managed_data_dir(app: tauri::AppHandle) -> String {
     get_data_dir(&app).to_string_lossy().into_owned()
 }
 
-// Device-level managed files (logs, speech models) shared by every workspace
-// (#1473). The same folder as get_managed_data_dir in the default workspace.
 #[tauri::command(async)]
 pub(crate) fn get_device_managed_data_dir(app: tauri::AppHandle) -> String {
     crate::storage::get_device_data_dir(&app)
@@ -836,12 +799,6 @@ fn legacy_webview_data_root() -> Option<PathBuf> {
     dirs::data_dir().map(|dir| dir.join("mindwtr"))
 }
 
-// A standard (installed) copy of Mindwtr on the same machine stores its data
-// under the OS data dir; its attachment files must never be moved away by a
-// portable copy that references the same paths. Since #1245 a standard install
-// on Windows and macOS keeps those files one level down in `data/`, so both
-// layouts count — missing the new one would turn a copy back into a move and
-// take the installed app's attachments with it (#936, #1119).
 fn standard_install_present(legacy_root: &Path) -> bool {
     use crate::storage_layout::{CONFIG_DIR_NAME, DATA_DIR_NAME, DATA_JSON_BACKUP_FILE_NAME};
 
@@ -849,7 +806,6 @@ fn standard_install_present(legacy_root: &Path) -> bool {
     let data_present = [legacy_root, &data_subfolder].iter().any(|root| {
         root.join(DATA_FILE_NAME).exists()
             || root.join(DB_FILE_NAME).exists()
-            // An interrupted replacement can leave only the recovery copy.
             || root.join(DATA_JSON_BACKUP_FILE_NAME).exists()
     });
     data_present
@@ -869,11 +825,6 @@ pub(crate) struct PortableAttachmentMigration {
     migrated_file_names: Vec<String>,
 }
 
-// Where a pre-#855 attachment file can still be sitting in the OS data dir.
-// Since #1245 an installed build on the same machine keeps those files one
-// level down in `data/`, so both layouts count — the same rule
-// `standard_install_present` already follows. The dir REPORTED to the webview
-// stays the flat one: that is what the stored URIs name.
 fn legacy_portable_attachment_dirs(legacy_root: &Path) -> Vec<PathBuf> {
     use crate::storage_layout::DATA_DIR_NAME;
 
@@ -892,7 +843,6 @@ fn migrate_portable_attachment_files(
 ) -> Result<Vec<String>, String> {
     let mut migrated = Vec::new();
     for file_name in file_names {
-        // Reject anything that could escape the legacy attachments dir.
         if file_name.is_empty()
             || file_name.contains('/')
             || file_name.contains('\\')
@@ -920,7 +870,6 @@ fn migrate_portable_attachment_files(
             fs::copy(&source, &target).map(|_| ())
         } else {
             fs::rename(&source, &target).or_else(|_| {
-                // Profile dir may sit on another volume (USB stick).
                 fs::copy(&source, &target).map(|_| {
                     let _ = fs::remove_file(&source);
                 })
@@ -936,12 +885,6 @@ fn migrate_portable_attachment_files(
     Ok(migrated)
 }
 
-// One-time, idempotent re-home of attachment files a portable install wrote to
-// the OS data dir before portable mode covered webview-managed files (#855).
-// Only the requested file names are touched, sources must live inside a legacy
-// attachments dir, and files are copied (not moved) when a standard install
-// shares the machine. Runs off the UI thread because it copies attachment files
-// at startup, often from a USB profile dir.
 #[tauri::command(async)]
 pub(crate) fn migrate_portable_attachments(
     app: tauri::AppHandle,
@@ -959,8 +902,7 @@ pub(crate) fn migrate_portable_attachments(
         managed_attachments_dir: managed_dir.to_string_lossy().into_owned(),
         migrated_file_names: Vec::new(),
     };
-    // The legacy files belong to the default workspace's tasks; another
-    // workspace never adopts them (#1473).
+
     if !result.is_portable
         || file_names.is_empty()
         || crate::workspaces::active_workspace_id().is_some()
@@ -993,8 +935,6 @@ fn link_folder_bookmark_for(raw: Option<&str>, attachment_id: &str) -> Option<St
     map.get(attachment_id)?.as_str().map(str::to_string)
 }
 
-// An unreadable map is replaced: it only caches access the user can grant
-// again by re-linking the folder.
 #[cfg(any(target_os = "macos", test))]
 fn with_link_folder_bookmark(raw: Option<&str>, attachment_id: &str, bookmark: String) -> String {
     let mut map = raw
@@ -1004,12 +944,6 @@ fn with_link_folder_bookmark(raw: Option<&str>, attachment_id: &str, bookmark: S
     Value::Object(map).to_string()
 }
 
-// "Link folder…" on the sandboxed App Store build: the folder the user just
-// picked is reachable only for this launch, so keep a security-scoped
-// bookmark for it in the device-local config. Other builds open the stored
-// path as is and keep nothing.
-// ponytail: entries are never pruned when a link is removed; each is a few
-// hundred bytes, prune on attachment delete if the config ever grows large.
 #[tauri::command(async)]
 pub(crate) fn remember_link_folder_access(
     app: tauri::AppHandle,
@@ -1047,8 +981,6 @@ pub(crate) fn remember_link_folder_access(
     }
 }
 
-// Ok(false) = no usable bookmark on this device; the caller takes the normal
-// open path, which the sandbox may refuse with the usual error.
 #[cfg(target_os = "macos")]
 fn open_through_link_folder_bookmark(
     app: &tauri::AppHandle,
@@ -1086,8 +1018,6 @@ fn open_through_link_folder_bookmark(
     }
 }
 
-// Stateless: canonicalizes the path and spawns the OS file-open shell
-// command, no shared state to race (B1).
 #[tauri::command(async)]
 pub(crate) fn open_path(
     app: tauri::AppHandle,
@@ -1108,8 +1038,7 @@ pub(crate) fn open_path(
     if !path_is_openable(&normalized, &allowed_roots) {
         return Err("Path does not exist or cannot be opened.".to_string());
     }
-    // Detached: waiting on the handler would block this command for as long as
-    // the viewer or browser stays open.
+
     open::that_detached(normalized).map_err(|e| e.to_string())?;
     Ok(true)
 }
@@ -1118,9 +1047,6 @@ pub(crate) fn open_path(
 mod tests {
     use super::*;
 
-    // Whatever this misses, a portable launch renames the installed app's
-    // attachments away instead of copying them (#936, #1119). Every file an
-    // installed profile can be left holding counts as evidence.
     #[test]
     fn a_standard_install_is_recognized_from_every_profile_marker() {
         use crate::storage_layout::{CONFIG_DIR_NAME, DATA_DIR_NAME, DATA_JSON_BACKUP_FILE_NAME};
@@ -1133,17 +1059,14 @@ mod tests {
         let config = root.join(CONFIG_DIR_NAME);
         std::fs::create_dir_all(&data).expect("data dir");
         std::fs::create_dir_all(&config).expect("config dir");
-        // Still not evidence: the two folders alone say nothing.
+
         assert!(!standard_install_present(root));
 
         let markers = [
-            // The flat layout older versions wrote.
             root.join(DB_FILE_NAME),
             root.join(DATA_FILE_NAME),
             root.join(CONFIG_FILE_NAME),
-            // An interrupted Windows replacement can leave only this.
             root.join(DATA_JSON_BACKUP_FILE_NAME),
-            // The subfolder layout installed builds use since #1245.
             data.join(DB_FILE_NAME),
             data.join(DATA_FILE_NAME),
             data.join(DATA_JSON_BACKUP_FILE_NAME),
@@ -1161,10 +1084,6 @@ mod tests {
         assert!(!standard_install_present(root));
     }
 
-    // #1245: once an installed build on the same machine moved its managed
-    // folders into `data/`, a portable copy that still references pre-#855
-    // files there found nothing to copy. Both layouts are searched — and an
-    // installed profile's files are still COPIED, never moved (#936, #1119).
     #[test]
     fn portable_migration_finds_legacy_files_in_both_layouts() {
         use crate::storage_layout::DATA_DIR_NAME;
@@ -1199,7 +1118,7 @@ mod tests {
             std::fs::read(managed_dir.join("moved.pdf")).expect("copy"),
             b"moved"
         );
-        // The installed app still references both originals.
+
         assert!(flat_dir.join("flat.pdf").is_file());
         assert!(moved_dir.join("moved.pdf").is_file());
         assert!(!managed_dir.join("escape.pdf").exists());
@@ -1279,8 +1198,6 @@ mod tests {
 
     #[test]
     fn normalize_open_path_falls_back_to_the_current_managed_attachments_dir() {
-        // #1038: a portable profile that moved leaves every stored URI pointing
-        // at the old location, though the file travelled inside attachments/.
         let dir = tempfile::tempdir().expect("tempdir");
         let managed_dir = dir.path().join("new-profile").join("attachments");
         std::fs::create_dir_all(&managed_dir).expect("create managed dir");
@@ -1297,8 +1214,6 @@ mod tests {
                 .expect("stale portable path resolves against the current profile");
         assert_eq!(resolved, managed_file.canonicalize().expect("canonicalize"));
 
-        // A path with no counterpart in the managed dir still fails, and names
-        // the recorded path so the user can repair the reference (#1001).
         let missing = dir.path().join("elsewhere").join("report.pdf");
         let error =
             normalize_open_path(&missing.to_string_lossy(), Some(&managed_dir), Some("id-1"))
@@ -1319,9 +1234,6 @@ mod tests {
         assert!(normalize_open_path(&stale.to_string_lossy(), Some(&managed_dir), None,).is_err());
     }
 
-    // #1245 moved an installed Windows/macOS profile's managed folders from
-    // <root>/ down into <root>/data/. Audio captures are the case the #1038
-    // fallback cannot reach: the file name is a timestamp, never the attachment id.
     #[test]
     fn normalize_open_path_rehomes_a_flat_root_path_into_the_data_subfolder() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1342,7 +1254,6 @@ mod tests {
         .expect("a capture recorded at the flat root resolves under data/");
         assert_eq!(resolved, capture.canonicalize().expect("canonicalize"));
 
-        // Same rule for attachments whose file name is not the attachment id.
         let report = managed_dir.join("report.pdf");
         std::fs::write(&report, b"pdf").expect("write report");
         let stale_report = root.join("attachments").join("report.pdf");
@@ -1350,7 +1261,6 @@ mod tests {
             .expect("a flat-root attachment resolves under data/");
         assert_eq!(resolved, report.canonicalize().expect("canonicalize"));
 
-        // A folder the move did not touch keeps failing on its recorded path.
         let pasted = root.join("quick-add-images").join("pasted-1.png");
         std::fs::create_dir_all(root.join("data").join("quick-add-images")).expect("create dir");
         std::fs::write(
@@ -1364,15 +1274,13 @@ mod tests {
         );
     }
 
-    // The re-homed path is still a trust boundary: only names, never traversal.
     #[test]
     fn normalize_open_path_refuses_to_rehome_outside_the_managed_data_dir() {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = dir.path().join("mindwtr");
         let managed_dir = root.join("data").join("attachments");
         std::fs::create_dir_all(&managed_dir).expect("create managed dir");
-        // Only reachable by joining the traversal onto the managed dir; the
-        // recorded path itself points at a directory that does not exist.
+
         let outside = root.join("outside");
         std::fs::create_dir_all(&outside).expect("create outside dir");
         std::fs::write(outside.join("secrets.toml"), b"token").expect("write secret");
@@ -1474,7 +1382,7 @@ mod tests {
         assert_eq!(link_folder_bookmark_for(Some(&two), "a").as_deref(), Some("bm-a"));
         assert_eq!(link_folder_bookmark_for(Some(&two), "b").as_deref(), Some("bm-b"));
         assert_eq!(link_folder_bookmark_for(Some(&two), "c"), None);
-        // Re-linking replaces; a corrupt map starts over instead of failing.
+
         let replaced = with_link_folder_bookmark(Some(&two), "a", "bm-a2".to_string());
         assert_eq!(link_folder_bookmark_for(Some(&replaced), "a").as_deref(), Some("bm-a2"));
         let fresh = with_link_folder_bookmark(Some("not json"), "a", "bm".to_string());
@@ -1496,14 +1404,6 @@ mod tests {
     }
 }
 
-/// Accessory removes the Dock icon, the Cmd+Tab entry and the app's menu bar,
-/// so it is only ever correct while the main window is actually hidden in the
-/// tray. Every caller therefore sits on a hide or a show path, never on a
-/// settings change. No-op off macOS, so call sites stay platform-agnostic.
-///
-/// Applying a policy does not activate the app: a caller switching back to
-/// Regular for a window it is about to show must still focus that window, or
-/// the menu bar keeps belonging to the previously frontmost app.
 pub(crate) fn apply_macos_activation_policy(
     app: &tauri::AppHandle,
     accessory: bool,

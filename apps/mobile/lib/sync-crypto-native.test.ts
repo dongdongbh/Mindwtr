@@ -23,18 +23,7 @@ import {
 import vectors from '../../../packages/core/src/__fixtures__/sync-crypto/vectors.json';
 import primitiveVectors from '../../../packages/core/src/__fixtures__/sync-crypto/primitive-vectors.json';
 
-/**
- * react-native-quick-crypto is a native (Nitro/C++/OpenSSL) module and cannot load in a
- * node test process. What CAN be verified here is the whole adapter: the argon2 parameter
- * mapping, the AES-GCM AAD/tag marshalling, and interop with the phase-1 reference
- * implementation — because quick-crypto's cipher surface is deliberately Node-`crypto`
- * compatible (`createCipheriv`/`setAAD`/`getAuthTag`), so node's own implementation is a
- * faithful stand-in, and its `argon2(algo, params, cb)` shape is reproduced exactly here.
- *
- * What this does NOT prove, and no node test can: that the shipped OpenSSL build produces
- * the same bytes on device. The phase-1 fixture vectors below are the shared interop
- * contract that a device check would use.
- */
+
 const nodeBackedQuickCrypto: SyncCryptoNativeModule = {
   argon2: (algorithm, params, callback) => {
     if (algorithm !== 'argon2id') {
@@ -153,7 +142,7 @@ describe('mobileSyncCryptoPrimitives', () => {
       mobileSyncCryptoPrimitives,
     );
     const tampered = fromBase64(vector.encryptedB64);
-    tampered[34] ^= 0x01; // first nonce byte, inside the 54-byte AAD header
+    tampered[34] ^= 0x01;
     await expect(
       decryptSyncArtifact(tampered, material.key, mobileSyncCryptoPrimitives),
     ).rejects.toBeInstanceOf(SyncCryptoAuthError);
@@ -226,8 +215,7 @@ describe('native module unavailability latch', () => {
     setExpoGoProbeForTests(() => false);
     setSyncCryptoNativeModuleForTests(null);
 
-    // Under vitest the real react-native-quick-crypto cannot load, which is exactly
-    // the broken-build shape: the digest must surface that, not hide it in pure JS.
+
     expect(() => mobileSha256Hex(new Uint8Array([1]))).toThrow(/rebuild the app/);
   });
 
@@ -241,11 +229,7 @@ describe('native module unavailability latch', () => {
   });
 });
 
-/**
- * The shared primitive vectors (core's primitive-vectors.json, also checked by core and by the Android host's HostCrypto.kt)
- * through this adapter on OpenSSL, the library quick-crypto wraps: node's own crypto for AES-GCM and SHA-256, and the OpenSSL
- * command line's Argon2id KDF (the one HybridArgon2 calls) where the installed OpenSSL has it (3.2 or later).
- */
+
 describe('mobileSyncCryptoPrimitives on OpenSSL against the shared primitive vectors', () => {
   const fromHex = (hex: string): Uint8Array => new Uint8Array(Buffer.from(hex, 'hex'));
   const toHex = (bytes: Uint8Array): string => Buffer.from(bytes).toString('hex');

@@ -1,15 +1,6 @@
-/**
- * Settings › Sync's encryption card: its state read, its flows (enable, change
- * passphrase, turn off, unlock), what each failure means, and the messages it
- * shows. It moved here from React Native's
- * `apps/mobile/components/settings/sync-settings-encryption-card.tsx` (the card
- * now renders from this controller) so the native apps run the same rules; each
- * host binds the sync encryption service, its random bytes and its error log.
- *
- * The passphrase fields are the card's own text; a host that draws its own
- * fields sends them with a submit (`setFields`), and nothing here stores or
- * logs them.
- */
+
+
+
 import { generateDicewarePassphrase } from './diceware';
 import { SyncCryptoUnsupportedError } from './sync-crypto';
 import type { AppData } from './types';
@@ -25,9 +16,7 @@ import {
 
 type Translate = (key: string) => string;
 
-/** Which message the card shows after a failed transition. `rotation-first` is the
- *  one terminal case with a remedy: an interrupted passphrase change left the sync
- *  location on two salts, and only re-running the change can heal it. */
+
 export type SyncEncryptionCardError =
     | 'mismatch'
     | 'wrong-passphrase'
@@ -43,7 +32,7 @@ export type SyncEncryptionPassphraseField = 'current' | 'next' | 'confirm';
 
 type TransitionOptions = { appData?: AppData | null; onProgress?: (progress: SyncEncryptionTransitionProgress) => void };
 
-/** The sync encryption service (core's `createSyncEncryptionService`, bound by the host). */
+
 export type SyncEncryptionCardHost = {
     getStatus(): Promise<SyncEncryptionStatus>;
     isBackendPending(): Promise<boolean>;
@@ -52,13 +41,13 @@ export type SyncEncryptionCardHost = {
     disable(options: TransitionOptions): Promise<void>;
     provide(passphrase: string): Promise<'ok' | 'wrong-passphrase' | 'no-encrypted-remote'>;
     decline(): Promise<void>;
-    /** "Abandon setup": this device drops an unfinished change, locally (sync-encryption-service.ts). */
+
     abandon(): Promise<unknown>;
-    /** "Check this location again" for a partly encrypted location (sync-encryption-service.ts recheckPartlyEncryptedLocation). */
+
     recheck(): Promise<unknown>;
     isCleanupDeferredError(error: unknown): error is Error & { cleanupKind?: string; outcome?: unknown };
     randomBytes(length: number): Uint8Array;
-    /** Supplies the attachment worklist; phase 2 leaves attachments plaintext without it. */
+
     appData(): AppData | null;
     logSettingsError(error: unknown): void;
 };
@@ -66,12 +55,12 @@ export type SyncEncryptionCardHost = {
 export type SyncEncryptionCardState = {
     state: SyncEncryptionState | null;
     stateUnavailable: boolean;
-    /** A change (enable, change, disable) is unfinished on this device: "Abandon setup" is offered. */
+
     incompleteTransition: boolean;
-    /** The durable unfinished kind, retained for hosts that admit a selected recovery flow. */
+
     incompleteTransitionKind: SyncEncryptionTransitionKind | null;
-    /** This device holds the location as partly encrypted (an encryption change cut off there): it syncs nothing there
-     *  until "Check this location again" finds it whole. */
+
+
     partlyEncrypted: boolean;
     flow: SyncEncryptionCardFlow;
     busy: boolean;
@@ -83,8 +72,8 @@ export type SyncEncryptionCardState = {
     confirmPassphrase: string;
     revealed: boolean;
     generated: boolean;
-    // Durable backend, not the screen's editor selection: a typed-but-unproven config
-    // still runs transitions local-only, and the copy must say so (#1001).
+
+
     pendingFirstSync: boolean;
 };
 
@@ -129,7 +118,7 @@ const SYNC_ENCRYPTION_CARD_ERROR_KEYS: Record<SyncEncryptionCardError, string> =
     generic: 'settings.syncEncryptionErrorGeneric',
 };
 
-/** The card's error, progress and warning lines for its state. */
+
 export const getSyncEncryptionCardMessages = (card: Pick<SyncEncryptionCardState, 'error' | 'progress' | 'warning'>, t: Translate) => {
     const { error, progress, warning } = card;
     const errorMessage = error ? t(SYNC_ENCRYPTION_CARD_ERROR_KEYS[error]) : null;
@@ -156,10 +145,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         for (const listener of listeners) listener();
     };
 
-    // A status read that failed says nothing about the folder; reporting 'off'
-    // would offer "Enable encryption" for a folder that may already be encrypted.
-    // null is paired with stateUnavailable so the card can offer a safe retry
-    // without guessing that encryption is off.
+
     const readState = async (): Promise<{
         state: SyncEncryptionState | null;
         unavailable: boolean;
@@ -182,14 +168,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         }
     };
 
-    /**
-     * Reads the state and whether a durable backend exists: when the card opens,
-     * and when a transport action finishes (activating a folder that already holds
-     * ciphertext persists 'remote-encrypted-no-key' during the probe, and the card
-     * must flip from "set a new passphrase" to "enter the existing passphrase"
-     * without the user first failing an enable, #1001). The answer cancels it; its
-     * `done` settles once both reads are applied.
-     */
+
     const refresh = (): (() => void) & { done: Promise<void> } => {
         let cancelled = false;
         const read = readState().then((next) => {
@@ -208,7 +187,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         }, { done: Promise.all([read, pending]).then(() => undefined) });
     };
 
-    /** Retires staged plaintext without dismissing its flow or inline outcome. */
+
     const clearPassphrases = () => set({
         currentPassphrase: '',
         nextPassphrase: '',
@@ -246,7 +225,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         });
     };
 
-    /** A typed passphrase field; typing clears the error. */
+
     const setField = (field: SyncEncryptionPassphraseField, value: string) => {
         set(field === 'current' ? { currentPassphrase: value } : field === 'next' ? { nextPassphrase: value } : { confirmPassphrase: value });
         set({ error: null });
@@ -273,7 +252,7 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
                 set({ error: classifySyncEncryptionCardFailure(failure, terminal) });
             }
         }
-        // Transitions are resumable, so a half-finished run still moved the state.
+
         const nextState = await readState();
         set({ state: nextState.state, stateUnavailable: nextState.unavailable, incompleteTransition: nextState.incomplete, incompleteTransitionKind: nextState.incompleteKind, partlyEncrypted: nextState.partly });
         if (nextState.incomplete) set({ error: 'transition-incomplete' });
@@ -320,9 +299,8 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         try {
             const outcome = await host.provide(card.currentPassphrase);
             accepted = outcome === 'ok';
-            // #1138: nothing encrypted is here any more, so the lock described a location
-            // this device has left behind. Core already cleared it; close the flow and say
-            // what changed rather than reporting a wrong passphrase.
+
+
             if (outcome === 'no-encrypted-remote') {
                 accepted = true;
                 cleanupDeferred = 'no-encrypted-remote';
@@ -354,13 +332,13 @@ export function createSyncEncryptionCard(host: SyncEncryptionCardHost) {
         }
     };
 
-    /** "Abandon setup": the unfinished change is dropped on this device only; the card reads off again. */
+
     const submitAbandon = () => run(async () => { await host.abandon(); }, 'generic');
 
-    /** "Check this location again": a whole location clears the mark (the card reads it again either way). */
+
     const recheckLocation = () => run(async () => { await host.recheck(); }, 'generic');
 
-    /** "Not now": keeps the persisted no-key state; sync stays paused. */
+
     const decline = () => {
         closeFlow();
         return host.decline()

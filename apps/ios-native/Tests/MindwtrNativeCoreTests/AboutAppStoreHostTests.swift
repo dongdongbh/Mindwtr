@@ -4,8 +4,7 @@ import Security
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Intercept every destination, including malformed URLs and redirects. This
-/// fixture never contacts Apple and does not prove live App Store availability.
+
 private final class AboutLookupProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var state: AboutLookupState?

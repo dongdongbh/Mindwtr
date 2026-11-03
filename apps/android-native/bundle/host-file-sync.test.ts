@@ -4,8 +4,7 @@ import { SYNC_BACKEND_KEY, SYNC_PATH_KEY, resetForTests, setLogger, type AppData
 import { defaultSyncCryptoPrimitives } from '../../../packages/core/src/sync-crypto';
 import { createNativeSync } from './host-sync';
 
-// File Sync on the Android host (S5): core's File Sync, lock and diagnostics line on the host's SAF and lock channels
-// (HostDocuments.kt, HostSyncLock.kt), with an in-memory externalstorage tree standing in for the provider.
+
 const globals = globalThis as unknown as Record<string, unknown>;
 const channelGlobals = ['__mindwtrHostPlatform', '__mindwtrDocumentCall', '__mindwtrSyncLockCall', '__mindwtrCryptoCall'];
 const originalGlobals = new Map(channelGlobals.map((name) => [name, globals[name]]));
@@ -19,7 +18,7 @@ const provider = () => {
     const docs = new Map<string, { name: string; bytes: Uint8Array }>();
     const ops: string[] = [];
     let revoked = false;
-    /** The host's pick slot (PendingSyncFolderPick.kt): what Settings › Sync's picker left, taken once. */
+
     let pick: Record<string, unknown> | null = null;
     const refuse = () => { if (revoked) throw new Error('SAF_DOCUMENTS_UNAVAILABLE: permission revoked'); };
     const row = (uri: string) => {
@@ -122,8 +121,8 @@ const host = (stored: Record<string, string>) => {
         },
         localData: () => ({
             getData: async () => structuredClone(local), saveData: async (data) => { saved.push(data); },
-            // An Android cycle is sliced (core sync-run.ts): its save needs the read's token; the fake keeps no rows to slice.
-            readTokenOf: () => 'fake-read-token', prepareSaveRows: function* () { /* no rows to prepare */ },
+
+            readTokenOf: () => 'fake-read-token', prepareSaveRows: function* () {                          },
         }),
         networkState: () => ({ isConnected: true, isInternetReachable: true }),
         appendLog: async (entry) => { entries.push(entry); return null; },
@@ -156,7 +155,7 @@ const install = () => {
 };
 
 afterEach(async () => {
-    // A cycle's store save is still pending when a test ends: the next test's contract cannot load over it.
+
     await core.flushPendingSave().catch(() => undefined);
     resetForTests();
     setLogger(null);
@@ -168,8 +167,8 @@ afterEach(async () => {
 });
 
 describe('native Android File Sync', () => {
-    // First: core's store keeps a cycle's merged rows across tests, and the contract's activation refuses a store holding rows
-    // its storage lacks (the merge test's peer row).
+
+
     describe('Select folder (the pick slot)', () => {
         const pick = async (contract: Awaited<ReturnType<ReturnType<typeof host>['contract']>>, requestId = core.generateUUID()) => {
             const result = await contract.pickSyncFolder({ requestId });
@@ -195,13 +194,13 @@ describe('native Android File Sync', () => {
             const requestId = core.generateUUID();
             const first = await pick(opened, requestId);
             expect(first.toasts.filter((toast) => toast.tone === 'error')).toEqual([]);
-            // The folder's sync file by name, created only when the first cycle published it.
+
             expect(kv.get(SYNC_PATH_KEY)).toBe(childUri('data.json'));
             expect(kv.get(SYNC_BACKEND_KEY)).toBe('file');
             expect(JSON.parse(folder.text('data.json')!).tasks.map((task: { title: string }) => task.title)).toEqual(['mine']);
             expect(cycleLine().length).toBeGreaterThan(0);
             expect(cycleLine().every((line) => line?.outcome === 'synced' && line.provider === AUTHORITY)).toBe(true);
-            // The probe left nothing behind, and a replayed request takes nothing twice.
+
             expect([...folder.docs.values()].map((doc) => doc.name)).toEqual(['data.json']);
             const takes = folder.ops.filter((op) => op === 'takePick').length;
             expect(await pick(opened, requestId)).toEqual(first);
@@ -247,7 +246,7 @@ describe('native Android File Sync', () => {
 
     it('enables encryption on the folder under its lock, then syncs the encrypted file', async () => {
         const { folder, folderLock } = install();
-        // The host's crypto channel (HostCrypto.kt) with a fast stand-in key derivation; AES-GCM stays real.
+
         globals.__mindwtrCryptoCall = async (request: Record<string, unknown>) => {
             const bytes = (name: string) => request[name] as Uint8Array;
             if (request.op === 'argon2id') {

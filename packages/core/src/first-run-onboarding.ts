@@ -1,8 +1,5 @@
 import type { SyncBackend } from './sync-service-utils';
 
-// The mobile apps' first-run welcome sheet (moved from React Native's lib/mobile-onboarding-events.ts so the native app opens
-// it the same way): when it opens, and its dismissal. Device-local, stored by each app in its key-value store under RN's key,
-// so an upgraded RN install never sees it again; never synced.
 
 export const MOBILE_ONBOARDING_STORAGE_KEY = 'mindwtr:mobile:first-run-onboarding:v1';
 
@@ -42,6 +39,6 @@ export async function writeMobileOnboardingDismissed(storage: OnboardingStorage)
     try {
         await storage.setItem(MOBILE_ONBOARDING_STORAGE_KEY, 'dismissed');
     } catch {
-        // Onboarding is convenience UI; storage failures should not block the app.
+
     }
 }

@@ -40,8 +40,8 @@ interface TaskItemEditorProps {
     setField: TaskDraftSetter;
     autoFocusTitle?: boolean;
     isModalEditor?: boolean;
-    // One seam for the whole AI feature: the editor forwards it to the menu
-    // and panel components and otherwise knows nothing about AI.
+
+
     ai: ReturnType<typeof useTaskItemAi>;
     timeEstimatesEnabled: boolean;
     projects: Project[];
@@ -67,7 +67,7 @@ interface TaskItemEditorProps {
     renderField: (fieldId: TaskEditorFieldId) => ReactNode;
     language: string;
     inputContexts: string[];
-    /** Known people for the title's %Person suggestions; without it `%` offers nothing (#1255). */
+
     inputPeople?: string[];
     onAcceptTitleSuggestion?: (suggestion: TaskInputAcceptedSuggestion) => boolean | Promise<boolean>;
     isDoneActionActive?: boolean;
@@ -147,8 +147,8 @@ export function TaskItemEditor({
     isImportingFiles = false,
     onFilesDropped,
 }: TaskItemEditorProps) {
-    // Draft values and setField bindings, under the names the form below was
-    // written against.
+
+
     const {
         title: editTitle,
         contexts: editContexts,
@@ -192,9 +192,7 @@ export function TaskItemEditor({
     const [organizationOpen, setOrganizationOpen] = useState(() => sectionOpenDefaults.organization || sectionCounts.organization > 0);
     const [detailsOpen, setDetailsOpen] = useState(() => sectionOpenDefaults.details || sectionCounts.details > 0);
 
-    // Attachments can live in any of the three collapsible sections (user
-    // configurable layout); a dropped file needs to expand whichever one
-    // holds it and scroll it into view so the drop isn't invisible feedback.
+
     const attachmentsSection = findAttachmentsSection(schedulingFields, organizationFields, detailsFields);
     const attachmentsFieldRef = useRef<HTMLDivElement | null>(null);
     const [isFileDragOver, setIsFileDragOver] = useState(false);
@@ -208,8 +206,7 @@ export function TaskItemEditor({
         setIsFileDragOver(true);
     };
 
-    // dragleave also fires when the pointer crosses into a child element, which
-    // would flicker the ring off for the whole drag if not guarded.
+
     const handleFormDragLeave = (event: DragEvent<HTMLFormElement>) => {
         const next = event.relatedTarget;
         if (next instanceof Node && event.currentTarget.contains(next)) return;
@@ -230,9 +227,7 @@ export function TaskItemEditor({
         if (attachmentsSection) setRevealAttachmentsToken((prev) => prev + 1);
     };
 
-    // Expanding a section and scrolling to it in the same tick scrolls to a
-    // node that isn't laid out yet; wait a frame after the open-state update
-    // has painted before scrolling.
+
     useEffect(() => {
         if (revealAttachmentsToken === 0) return;
         const raf = requestAnimationFrame(() => {

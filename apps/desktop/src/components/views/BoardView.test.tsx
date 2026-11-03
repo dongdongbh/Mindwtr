@@ -250,7 +250,7 @@ describe('BoardView', () => {
         const inboxCard = getByText('Inbox thought').closest('[role="listitem"]') as HTMLElement;
         expect(inboxCard.querySelector('[data-focus-star-pinned]')).not.toBeInTheDocument();
 
-        // The indicator is not a control: starring stays in the quick-actions menu.
+
         expect(queryByRole('button', { name: 'Remove from focus' })).not.toBeInTheDocument();
         expect(queryByRole('button', { name: "Add to today's focus" })).not.toBeInTheDocument();
     });
@@ -452,8 +452,8 @@ describe('BoardView', () => {
         const matchGroup = getByRole('group', { name: /context match/i });
         expect(within(matchGroup).getByRole('button', { name: 'Any' })).toHaveAttribute('aria-pressed', 'true');
         expect(within(matchGroup).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false');
-        // "Any" is what the board filters with: a card carrying only one of the
-        // two selected contexts stays on the board.
+
+
         expect(getByText('Work task')).toBeInTheDocument();
         expect(getByText('Both task')).toBeInTheDocument();
     });
@@ -492,7 +492,7 @@ describe('BoardView', () => {
         fireEvent.click(getByRole('button', { name: '@work' }));
         expect(useUiStore.getState().boardFilters.criteria.contexts).toEqual(['@work']);
 
-        // Included → excluded: the token switches sides, never sitting on both.
+
         fireEvent.click(getByRole('button', { name: '@work' }));
         const excludedCriteria = useUiStore.getState().boardFilters.criteria;
         expect(excludedCriteria.excludedContexts).toEqual(['@work']);
@@ -503,7 +503,7 @@ describe('BoardView', () => {
         expect(getByText('Home task')).toBeInTheDocument();
         expect(queryByText('Work task')).not.toBeInTheDocument();
 
-        // Excluded → neutral.
+
         fireEvent.click(excludedChip);
         expect(useUiStore.getState().boardFilters.criteria.excludedContexts).toBeUndefined();
         expect(getByText('Work task')).toBeInTheDocument();

@@ -49,9 +49,7 @@ function Harness({ canonicalDataReady }: { canonicalDataReady: boolean }) {
 describe('useRootLayoutWatch', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  // The Watch keeps the last Focus list it was sent, and its capture wake-up
-  // drains the queue. Neither may run on the startup snapshot. A wake-up
-  // missed before then is harmless: its capture waits as a queue file.
+
   it('does not publish to the Watch or listen for captures before canonical data', async () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<Harness canonicalDataReady={false} />); });
@@ -78,8 +76,7 @@ describe('useRootLayoutWatch', () => {
     act(() => tree.unmount());
   });
 
-  // Every store notify (UI state, selection, sync status) used to rebuild the
-  // widget payload over all tasks and stringify it, paired Watch or not.
+
   it('rebuilds the Watch context only when its data changes', async () => {
     let tree!: renderer.ReactTestRenderer;
     await act(async () => { tree = renderer.create(<Harness canonicalDataReady />); });
@@ -97,7 +94,7 @@ describe('useRootLayoutWatch', () => {
     act(() => tree.unmount());
   });
 
-  // A timed start reveals a task on the Focus screen without any data change.
+
   it('rebuilds once a timed start later today has arrived', async () => {
     mocks.state = { ...mocks.state, tasks: [{ id: 't1', startTime: new Date(Date.now() + 300).toISOString() }] };
     let tree!: renderer.ReactTestRenderer;
@@ -111,8 +108,7 @@ describe('useRootLayoutWatch', () => {
     act(() => tree.unmount());
   });
 
-  // In a sequential project, a waiting task's review coming due displaces the
-  // Today task after it, with no data, day or Pomodoro change.
+
   it('rebuilds once a timed review has come due', async () => {
     mocks.state = {
       ...mocks.state,

@@ -511,8 +511,8 @@ export const styles = StyleSheet.create({
     paddingBottom: 18,
     marginBottom: 18,
   },
-  // The item stays anchored above every step so the question always has its
-  // subject in view.
+
+
   anchorCard: {
     borderWidth: 1,
     borderRadius: 14,

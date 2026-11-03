@@ -6,11 +6,7 @@ import { cn } from '../../lib/utils';
 
 export const taskEditorLabelClassName = 'text-xs text-muted-foreground font-semibold';
 
-/**
- * Sub-heading label shared by every desktop task-editor field. Renders an
- * optional leading icon (muted like the label, sized to the text-xs heading)
- * before the field's label text, which stays visible and is never hidden.
- */
+
 export function TaskEditorFieldLabel({
     icon: Icon,
     className,
@@ -28,9 +24,7 @@ export function TaskEditorFieldLabel({
     );
 }
 
-// Quick-add tokens each editor field maps to, verified against parseQuickAdd
-// (packages/core/src/quick-add.ts). Fields whose token the parser does not
-// accept get no hint. Tokens are language-neutral and never translated.
+
 export const QUICK_ADD_FIELD_TOKENS = {
     priority: '/priority:',
     energyLevel: '/energy:',
@@ -46,7 +40,7 @@ export const QUICK_ADD_FIELD_TOKENS = {
     project: '+Project',
 } as const;
 
-// Localized "Quick add: <token>" hint for a token badge's `title` tooltip (#918).
+
 export function quickAddTokenHint(t: (key: string) => string, token: string): string {
     return formatI18nTemplate(
         tFallback(t, 'taskEdit.quickAddTokenHint', 'Quick add: {{token}}'),

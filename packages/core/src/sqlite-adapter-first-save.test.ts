@@ -6,8 +6,6 @@ import { openScratchSqlite } from './screen-parity.replay';
 import { SqliteAdapter } from './sqlite-adapter';
 import type { AppData, Task } from './types';
 
-// A cold start's first save (the native host's boot sync, D9): the adapter has no fingerprints of its own yet, so it compares
-// against the rows its last full read saw instead of rewriting every row. Those rows stand in only while nothing was written.
 
 const AT = '2026-09-01T00:00:00.000Z';
 const task = (id: string, extra: Partial<Task> = {}): Task => ({
@@ -47,7 +45,7 @@ describe('SqliteAdapter first save after a cold start', () => {
         const writer = new SqliteAdapter(connect(), { rejectConcurrentWrites: true });
         await writer.getData();
         await writer.saveData(library());
-        // A new process: a new adapter on the same file, whose first act is the boot's full read.
+
         const adapter = new SqliteAdapter(connect(), { rejectConcurrentWrites: true });
         return { adapter, data: await adapter.getData(), reader: () => new SqliteAdapter(connect()).getData() };
     };
@@ -67,10 +65,10 @@ describe('SqliteAdapter first save after a cold start', () => {
     it('forgets the read once a write started: a save after it writes every row it holds', async () => {
         const { adapter, data, reader } = await seeded();
         const original = data.tasks.find((row) => row.id === 't1')!;
-        // The same revision, so the save's revision guard lets either version through: only the comparison decides.
+
         await adapter.saveTask({ ...original, title: 'changed by a single-row save' });
-        // A stale snapshot saved after the single-row write: its t1 equals what the read saw, so a read-based comparison would
-        // skip it and leave the single-row write in place. The save writes it, as every save without fingerprints did.
+
+
         await adapter.saveData(data);
         expect((await reader()).tasks.find((row) => row.id === 't1')?.title).toBe(original.title);
     });

@@ -345,7 +345,7 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     try {
       await vi.waitFor(() => expect(webdavGetFile).toHaveBeenCalledTimes(2));
       await vi.waitFor(() => expect(secondSettled).toBe(true));
-      // Adapter arrival order is independent of invocation order (including awaited hashes).
+
       await expect(second).resolves.toMatchObject({ status: 'prepared', sourceToken: SECOND_SOURCE_TOKEN });
       expect(firstSettled).toBe(false);
       expect(preparePlaintextDownload).toHaveBeenCalledTimes(1);
@@ -440,7 +440,7 @@ describe('mobile attachment availability: private WebDAV preparation', () => {
     });
     expect(webdavGetFile).toHaveBeenCalledWith('https://dav.example/Mindwtr/attachments/att-1.txt', expect.anything());
     expect(preparePlaintextDownload).toHaveBeenCalledOnce();
-    // Current-owner freshness is separately checked by the future native353 lease.
+
     expect(requested.title).toBe('Later title.txt');
   });
 });
@@ -479,7 +479,7 @@ describe('mobile attachment availability', () => {
   });
 
   it('answers a WebDAV 404 as unavailable and leaves the row as it is, so a file uploaded later still arrives', async () => {
-    // Deleting the row would sync to every device, and a location still holding the file would then delete it.
+
     const { availability, memory, webdavGetFile, lines } = setup({ storage: webdav });
     webdavGetFile.mockRejectedValueOnce(Object.assign(new Error('Not found'), { status: 404 }));
     const fileHash = await computeSha256Hex(REMOTE);
@@ -539,8 +539,8 @@ describe('mobile attachment availability', () => {
     expect(requested).toEqual(before);
     expect([...ports.values.entries()]).toEqual(configBefore);
     expect(ports.installAttachmentFileGeneration).not.toHaveBeenCalled();
-    // Ordinary availability may create the managed directory before requesting
-    // bytes. A refused response must never create or install a file generation.
+
+
     expect(ports.memory.calls.filter((call) => /^(writeBytes|copy|move|delete) /.test(call))).toEqual([]);
     expect(ports.memory.files.size).toBe(0);
   });

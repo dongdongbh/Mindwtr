@@ -17,7 +17,7 @@ const boolean = (value: unknown): boolean | undefined => {
     return value as boolean | undefined;
 };
 
-/** Private saved controls only: defaults stay in this projection, never in persisted settings. */
+
 export function buildNativeAISettingsProjection(settings: AppSettings) {
     const saved = object(settings), ai = saved.ai === undefined ? {} : object(saved.ai);
     const speech = ai.speechToText === undefined ? {} : object(ai.speechToText);
@@ -25,7 +25,7 @@ export function buildNativeAISettingsProjection(settings: AppSettings) {
     if (thinkingBudget !== undefined && (!Number.isSafeInteger(thinkingBudget)
         || (thinkingBudget as number) < 0 || (thinkingBudget as number) > 32768)) throw malformed();
     if (timeout !== undefined && !AI_REQUEST_TIMEOUT_OPTIONS.some(option => option === timeout)) throw malformed();
-    // Do not even read arbitrary model/language strings, endpoints, body JSON, credentials or local paths.
+
     const state = resolveAISettingsScreenState({ ai: {
         enabled: boolean(ai.enabled), provider: choice(ai.provider, ['openai', 'gemini', 'anthropic']),
         reasoningEffort: choice(ai.reasoningEffort, ['minimal', 'low', 'medium', 'high']),

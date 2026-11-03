@@ -250,7 +250,7 @@ describe('prepared native Area color', () => {
         forged.effect.area.after.updatedAt = now;
         expect(methods.validatePreparedAreaColor({ request: input, prepared: forged }))
             .toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
-        // A different stamp makes the receipt observable; mutable guards still run before first apply.
+
         useTaskStore.setState({ _allProjects: [project('newly-linked', { color: '#ef4444' })] });
         expect(await methods.commitPreparedAreaColor({ request: input, prepared: next.value.prepared }))
             .toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
@@ -274,5 +274,48 @@ describe('prepared native Area color', () => {
         useTaskStore.setState({ _allProjects: [project('huge', { title: 'é'.repeat(1_100_000) })] });
         expect(methods.prepareAreaColor(input)).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
         expect(saves()).toBe(before);
+    });
+});
+
+
+describe('runAreaColor (#1263)', () => {
+    const run = (methods: Awaited<ReturnType<typeof open>>['methods'], color: string | null, areaId = 'area-work') =>
+        methods.runAreaColor({ requestId: id, areaId, color });
+
+    it('stores a swatch and None once each, and a replay writes nothing', async () => {
+        const { methods, data, saves } = await open({ areas: [area()], projects: [project('p1')] });
+        expect(await run(methods, '#ef4444')).toEqual({ ok: true, value: { outcome: 'saved', id: 'area-work', color: '#ef4444' } });
+        expect(data().areas[0].color).toBe('#ef4444');
+        const count = saves();
+        expect(await run(methods, '#ef4444')).toEqual({ ok: true, value: { outcome: 'unchanged', id: 'area-work', color: '#ef4444' } });
+        expect(saves()).toBe(count);
+        expect(await run(methods, null)).toMatchObject({ ok: true, value: { outcome: 'saved', color: null } });
+        expect(data().areas[0].color).toBeUndefined();
+    });
+
+    it('refuses a color RN does not offer and a gone area, writing nothing', async () => {
+        const { methods, saves } = await open({ areas: [area()] });
+        const count = saves();
+        expect(await run(methods, '#123456')).toMatchObject({ ok: false, error: { code: 'INVALID_INPUT' } });
+        expect(await run(methods, '#ef4444', 'gone')).toMatchObject({ ok: false, error: { code: 'STALE_REVISION' } });
+        expect(saves()).toBe(count);
+    });
+});
+
+
+describe('runAreaColor retry (#1263 review 5c)', () => {
+    it('prepares again when a sync changes the area between prepare and commit, keeping the synced name', async () => {
+        const { methods, data } = await open({ areas: [area()], projects: [project('p1')] });
+        const commit = methods.commitPreparedAreaColor.bind(methods);
+        let calls = 0;
+        vi.spyOn(methods, 'commitPreparedAreaColor').mockImplementation(async (input) => {
+            calls += 1;
+            if (calls === 1) await useTaskStore.getState().updateArea('area-work', { name: 'Synced' });
+            return commit(input);
+        });
+        expect(await methods.runAreaColor({ requestId: id, areaId: 'area-work', color: '#ef4444' }))
+            .toEqual({ ok: true, value: { outcome: 'saved', id: 'area-work', color: '#ef4444' } });
+        expect(calls).toBe(2);
+        expect(data().areas[0]).toMatchObject({ name: 'Synced', color: '#ef4444' });
     });
 });

@@ -1,16 +1,6 @@
-/**
- * React Native's notification open routing, replayed against the frozen parity
- * fixture (packages/core/src/notification-open-parity.fixtures.json) that core's
- * mobile-notification-open routing is tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit every other change first, then run
- *   MINDWTR_CAPTURE_REMINDER_ALARMS=1 MINDWTR_CAPTURE_REMINDER_ALARMS_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run tests/use-root-layout-notification-open-handler.parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code and the reminder parity harnesses. Each scenario mounts
- * the real root-layout hook, sends its payloads to the handler it registers, and
- * records every navigation, highlight, store write and log line in order.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';

@@ -14,7 +14,7 @@ export function confirmMobileSandboxEntry(t: Translate, onEnter: () => void): vo
     );
 }
 
-/** Check again when Enter is pressed because another operation may start while the alert is open. */
+
 export function requestMobileSandboxEntry(
     t: Translate,
     onEnter: () => void,

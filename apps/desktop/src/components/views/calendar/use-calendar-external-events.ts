@@ -1,11 +1,6 @@
-/**
- * Subscribed (read-only) calendars: fetching the events for the visible range,
- * bucketing them per day, remembering which calendars the user hid, and
- * resolving each source's colour.
- *
- * Hidden calendars are a local display preference, not synced state — they live
- * in localStorage under one key.
- */
+
+
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     isSandboxMode,
@@ -27,11 +22,7 @@ import { getWorkspaceCache } from '../../../lib/workspace-cache';
 
 const HIDDEN_EXTERNAL_CALENDAR_IDS_STORAGE_KEY = 'mindwtr.calendar.hiddenExternalCalendars';
 
-/**
- * User pick > feed-provided color > deterministic palette hash (#974), then a
- * display-only theme remap — the resolved value is canonical, `theme` only
- * decides which hex it is painted as.
- */
+
 export const defaultExternalCalendarColor = (sourceId: string, override?: string, feedColor?: string, theme?: string): string => (
     themeExternalCalendarDisplayColor(resolveExternalCalendarColor(sourceId, override, feedColor), theme)
 );
@@ -55,10 +46,7 @@ export const readHiddenExternalCalendarIds = (): { serialized: string; value: Se
     }
 };
 
-/**
- * Review modals show only calendars the user can see on the Calendar screen:
- * enabled sources that are not switched off. Area filters do not apply.
- */
+
 export const filterVisibleReviewCalendarEvents = (
     events: readonly ExternalCalendarEvent[],
     calendars: readonly ExternalCalendarSubscription[],
@@ -89,7 +77,7 @@ const eventDayRangeForVisibleRange = (
 };
 
 export type CalendarExternalEventsOptions = {
-    /** Already normalized (trimmed, lower-cased); empty means "no filter". */
+
     filterQuery: string;
     visibleRange: { end: Date; start: Date };
     areas?: Area[];

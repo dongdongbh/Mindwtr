@@ -3,8 +3,7 @@ import type { Area, Project, Task } from '@mindwtr/core';
 
 import { buildTaskGroupSections, getTaskGroupByLabel, type TaskGroupItem } from './task-group-sections';
 
-// Returns the key unchanged, so tFallback falls through to the English fallback
-// and these assertions pin the strings a user actually sees.
+
 const t = (key: string) => key;
 
 const task = (id: string, overrides: Partial<Task> = {}): Task => ({
@@ -35,7 +34,7 @@ const area = (id: string, name: string, order: number): Area => ({
   updatedAt: '2026-05-01T00:00:00.000Z',
 } as Area);
 
-/** Section titles in order, each with the ids that follow it. */
+
 const layout = (items: TaskGroupItem[]) => {
   const out: Array<{ section: string; count: number; ids: string[] }> = [];
   items.forEach((item) => {
@@ -61,7 +60,7 @@ describe('buildTaskGroupSections', () => {
       t,
     });
 
-    // The ungrouped pile goes last on both platforms (#963).
+
     expect(layout(items)).toEqual([
       { section: 'Zebra', count: 1, ids: ['c'] },
       { section: 'Alpha', count: 1, ids: ['a'] },
@@ -120,8 +119,7 @@ describe('buildTaskGroupSections', () => {
     ]);
   });
 
-  // Desktop's References/Done/Archive lists group by context; the mobile axis
-  // mirrors groupTasksByContext's semantics exactly (#1027).
+
   it('lists a multi-context task under each of its contexts', () => {
     const items = buildTaskGroupSections({
       groupBy: 'context',
@@ -153,8 +151,7 @@ describe('buildTaskGroupSections', () => {
       t,
     });
 
-    // A task pointing at an area that no longer exists lands in General rather
-    // than creating a phantom section or vanishing.
+
     expect(layout(items)).toEqual([
       { section: 'Work', count: 2, ids: ['direct', 'viaProject'] },
       { section: 'General', count: 2, ids: ['loose', 'staleArea'] },
@@ -179,7 +176,7 @@ describe('buildTaskGroupSections', () => {
     const sections = layout(items);
     expect(sections.map((section) => section.section)).toContain('Today');
     expect(sections.find((section) => section.section === 'Today')?.ids).toEqual(['today']);
-    // Older than a week is bucketed by month, not one shared Earlier heading (#959).
+
     expect(sections.find((section) => section.section === 'January 2026')?.ids).toEqual(['old']);
     expect(sections.some((section) => section.section === 'Earlier')).toBe(false);
     expect(sections.find((section) => section.section === 'Not completed')?.ids).toEqual(['never']);
@@ -241,7 +238,7 @@ describe('buildTaskGroupSections', () => {
       { section: 'Work', count: 2, ids: [] },
       { section: 'Home', count: 1, ids: ['home-1'] },
     ]);
-    // Every header is tappable once folding is available, not only folded ones.
+
     expect(items.filter((item) => item.type === 'section').map((item) => (
       item.type === 'section' ? [item.title, item.collapsible, item.collapsed] : null
     ))).toEqual([['Work', true, true], ['Home', true, false]]);

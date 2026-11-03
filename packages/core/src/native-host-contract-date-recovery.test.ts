@@ -14,7 +14,7 @@ const task = (extra: Partial<Task> = {}): Task => ({
     ...extra,
 });
 
-// The original legacy-API RED cases are frozen under .orchestrator/baselines/date-recovery-red.
+
 describe('native date draft recovery', () => {
     const originalTZ = process.env.TZ;
     let durable: AppData;

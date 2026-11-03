@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Colours are applied at runtime from the stored widget palette
-     (QuickCaptureActivity.applyPalette); the resources here are the
-     themeMode "system" defaults shared with the widgets. -->
+
+
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/mindwtr_quick_capture_root"
     android:layout_width="match_parent"
@@ -76,7 +75,7 @@
                 android:textAllCaps="false"
                 android:textColor="@color/mindwtr_widget_accent" />
 
-            <!-- Contexts button (#1418): a filter box and up to 8 matches; a tap inserts the token at the caret. -->
+
             <Button
                 android:id="@+id/mindwtr_quick_capture_contexts"
                 style="?attr/borderlessButtonStyle"

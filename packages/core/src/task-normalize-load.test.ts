@@ -1,18 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { normalizeTaskForLoad, normalizeCancellationTimestamp, isTaskFinished, normalizeTaskStatus, type TaskLoadTemporalContext } from './task-status';
 import { normalizeRecurrenceForLoad } from './recurrence';
-import { normalizeDueReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
+import { normalizeDueReminderLeadMinutes, normalizeStartReminderLeadMinutes, normalizeRepeatReminderMinutes } from './schedule-utils';
 import { normalizeTimeSpentMinutes } from './time-spent';
 import { normalizeRelativeStartOffset } from './task-relative-start';
 import { preserveShallowIdentity, sameShallowRecord } from './shallow-identity';
 import { safeParseDate } from './date';
 import type { AppData, Task } from './types';
 
-// The load normalizer runs over every task on every load (230 of 482 ms in the native boot's activation at 5,000 tasks on the S23's
-// QuickJS). Its one-pass form must give exactly what the two-pass form gave: the same values, the same key order, and the input
-// back exactly when that form gave it back.
 
-// ---- Frozen reference: normalizeTaskLifecycleFields and normalizeTaskForLoad as of commit 1a1559e8e (task-status.ts), test-only. ----
 const isFutureStart = (task: Pick<Task, 'startTime'>, now: Date, temporal?: TaskLoadTemporalContext): boolean => {
     if (temporal) {
         const parsedAt = task.startTime ? temporal.dates.get(task.startTime)?.parsedAt : null;
@@ -107,31 +103,23 @@ function frozenNormalizeTaskForLoad(task: Task, nowIso: string = new Date().toIS
         rev,
         ...(revBy ? { revBy } : {}),
         ...(textDirection ? { textDirection } : {}),
-        // Purged tombstones stay in their compacted shape: backfilling
-        // pushCount: 0 here while the merge normalizers strip it again made
-        // every loaded tombstone differ from its merged twin, so each sync
-        // cycle rewrote every purged row and requeued itself (#766 — the
-        // content-oscillation sibling of the rev-bump loop fixed earlier;
-        // stats.tombstoneRepairs stayed 0 because rev never changed).
+
+
         ...(hasValidPushCount || task.purgedAt ? {} : { pushCount: 0 }),
     };
 
     const lifecycleNormalized = frozenLifecycle(next);
 
-    // A future-start Next action keeps its queued star across load and sync.
-    // focusOrder only applies once it has reached Today's Focus.
+
     if (lifecycleNormalized.isFocusedToday && isFutureStart(lifecycleNormalized, new Date(nowIso), temporal)) {
         if (lifecycleNormalized.status !== 'next') lifecycleNormalized.isFocusedToday = false;
         lifecycleNormalized.focusOrder = undefined;
     }
 
-    // Hand back the input when nothing actually changed, so an already-normalized
-    // task keeps its identity through the merge normalizers (#766 — see
-    // shallow-identity.ts). The time-dependent branches above naturally produce a
-    // differing object on the cycle they fire, so this stays a pure no-change check.
+
     return sameShallowRecord(task, lifecycleNormalized) ? task : lifecycleNormalized;
 }
-// ---- end of the frozen reference ----
+
 
 const NOW = '2026-10-27T10:00:00.000Z';
 const AT = '2026-01-01T00:00:00.000Z';
@@ -140,7 +128,7 @@ const base = (extra: Record<string, unknown> = {}): Task => ({ id: 't', title: '
 const future = '2099-01-01T09:00:00.000Z';
 const temporal: TaskLoadTemporalContext = { futureBoundary: '2026-10-27T23:59:59.999Z',
     dates: new Map([[future, { parsedAt: Date.parse(future) }]]) };
-// Every field the normalizer writes, in its odd shapes, plus the plain ones.
+
 const corpus = (): Array<[string, Task]> => [
     ['plain', base()],
     ['normalized', frozenNormalizeTaskForLoad(base({ rev: 3, revBy: 'device', pushCount: 1 }), NOW)],
@@ -171,16 +159,33 @@ const corpus = (): Array<[string, Task]> => [
     ['bad minutes', base({ repeatReminderMinutes: 'x', dueReminderLeadMinutes: Number.NaN, timeSpentMinutes: -3 })],
 ];
 const same = (task: Task, now: string, temporalContext?: TaskLoadTemporalContext) => {
-    const expected = frozenNormalizeTaskForLoad(task, now, temporalContext);
+    let expected = frozenNormalizeTaskForLoad(task, now, temporalContext);
+    const lead = normalizeStartReminderLeadMinutes(task.startReminderLeadMinutes);
+    const leadChanged = !Object.hasOwn(task, 'startReminderLeadMinutes') || !Object.is(task.startReminderLeadMinutes, lead);
+    if (leadChanged && expected === task) {
+
+        expected = frozenNormalizeTaskForLoad({ ...task, revBy: ` ${task.revBy ?? ''} ` }, now, temporalContext);
+    }
     const actual = normalizeTaskForLoad(task, now, temporalContext);
-    expect(JSON.stringify(actual)).toBe(JSON.stringify(expected));
-    expect(Object.keys(actual)).toEqual(Object.keys(expected));
-    expect(actual).toEqual(expected);
-    expect(actual === task).toBe(expected === task);
+    const { startReminderLeadMinutes: actualLead, ...actualLegacy } = actual;
+    const { startReminderLeadMinutes: _expectedLead, ...expectedLegacy } = expected;
+    expect(actualLead).toBe(lead);
+    expect(JSON.stringify(actualLegacy)).toBe(JSON.stringify(expectedLegacy));
+    expect(Object.keys(actualLegacy)).toEqual(Object.keys(expectedLegacy));
+    expect(actualLegacy).toEqual(expectedLegacy);
+    expect(actual === task).toBe(expected === task && !leadChanged);
 };
 
 describe('normalizeTaskForLoad in one pass', () => {
     afterEach(() => { vi.resetModules(); vi.doUnmock('./task-status'); });
+
+    it.each([[undefined, undefined], [null, undefined], [0, 0], [5, 5], [15, 15], [30, 30], [60, 60], [13, undefined], [61, undefined]])(
+        'normalizes the added start field %s to %s and preserves second-load identity', (raw, expected) => {
+            const normalized = normalizeTaskForLoad(base({ startReminderLeadMinutes: raw }), NOW);
+            expect(normalized.startReminderLeadMinutes).toBe(expected);
+            expect(normalizeTaskForLoad(normalized, NOW)).toBe(normalized);
+        },
+    );
 
     it.each(corpus())('gives what the two-pass form gave: %s', (_name, task) => {
         same(task, NOW);
@@ -220,7 +225,7 @@ describe('normalizeTaskForLoad in one pass', () => {
     });
 
     it('keeps an unknown text direction as stored, as the two-pass form did', () => {
-        // textDirection is only written when valid; an unknown value stays in the record untouched (not a normalized field).
+
         const stored = normalizeTaskForLoad(base({ textDirection: 'up', rev: 1, revBy: 'dev', pushCount: 0 }), NOW);
         expect(stored.textDirection).toBe('up');
         expect(normalizeTaskForLoad(stored, NOW)).toBe(stored);
@@ -254,7 +259,7 @@ describe('normalizeTaskForLoad in one pass', () => {
             console.log('DIFF', diff(a, b, '').join(' | '));
         }
         expect(actual).toBe(expected);
-    // It imports the store twice (with and without the frozen normalizer): seconds of module loading on a loaded machine, so the
-    // default 5 s timeout would make it flaky.
+
+
     }, 60_000);
 });

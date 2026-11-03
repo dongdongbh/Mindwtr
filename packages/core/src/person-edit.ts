@@ -9,7 +9,7 @@ export type PersonEditScope = { person: Person; destination: Person | null; task
 export type PersonEditEffect = { people: Array<{ before: Person; after: Person }>;
     tasks: Array<{ before: Task; after: Task }> };
 
-/** Existing updatePerson normalization; omitted fields retain their current values. */
+
 export function planPersonMetadataUpdates(person: Person, updates: Partial<Person>): Partial<Person> | null {
     const name = updates.name !== undefined ? normalizePersonName(updates.name) : person.name;
     if (!name) return null;
@@ -24,7 +24,7 @@ export const selectPersonRenameDestination = (people: readonly Person[], id: str
 export const selectPersonRenameTasks = (tasks: readonly Task[], name: string): Task[] =>
     tasks.filter((row) => !row.deletedAt && getPersonNameKey(row.assignedTo) === getPersonNameKey(name));
 
-/** Existing RN rename branch, including first live collision and raw assignment policy. */
+
 export function planPersonRename(rows: PersonEditRows, id: string, name: string, updateTasks: boolean,
     deviceId: string, now: string): (PersonEditRows & { changed: boolean; result: PersonEditResult }) | null {
     const source = rows.people.find((row) => row.id === id);
@@ -48,7 +48,7 @@ export function planPersonRename(rows: PersonEditRows, id: string, name: string,
         name: destination?.name ?? nextName } };
 }
 
-/** Compose the editor's two RN calls without changing either action's persistence behavior. */
+
 export function planPersonEditorSave(rows: PersonEditRows, id: string,
     draft: { name: string; note: string; referenceLink: string }, deviceId: string,
     updateAt: string, renameAt: string | null): (PersonEditRows & { metadata: boolean; renamed: boolean;

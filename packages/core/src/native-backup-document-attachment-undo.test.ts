@@ -1,7 +1,6 @@
-// Follow-up restore-undo-attachment-bytes (2026-10-19): a restore, then a sync's attachment cleanup, then the restore's Undo
-// must not bring an attachment back live as available when the cleanup deleted its local file. While the Undo may still be
-// taken, cleanup leaves the files (and remote copies) of the Undo's recovery snapshot alone; once it is gone, cleanup runs as
-// before, and a restore or Undo that lands marks a live file attachment whose local file is gone as 'missing'.
+
+
+
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,11 +78,7 @@ const cases = [
 ];
 const collectDeletes = (deleted: string[]) => async (target: Attachment) => { if (target.uri) deleted.push(target.uri); };
 
-/**
- * Restore [tasks] over a library holding [item], run a sync's cleanup a day later, then take the restore's Undo. [between]: the
- * process lives on (`held`), ends (`process-ended`), or ends and the next start shows the leftover result's Undo (`leftover`,
- * Android), which holds the files again from the recovery snapshot.
- */
+
 async function restoreCleanupUndo(item: Attachment, tasks: readonly Task[], between: 'held' | 'process-ended' | 'leftover') {
     vi.useFakeTimers({ toFake: ['Date'], now: NOW });
     const library = libraryWith(item);
@@ -96,8 +91,7 @@ async function restoreCleanupUndo(item: Attachment, tasks: readonly Task[], betw
         text: serializeBackupData({ ...clone(library), tasks: clone([...tasks]) }), metadata: clone(metadata) });
     await commitNativeBackupDocument(adapter, reference(replaceId, 'a'), replaced.planJSON, NAME, { getLocalAttachmentPresence: presence });
 
-    // The next sync's cleanup (mobile-attachment-cleanup.ts wires deleteLocalAttachment to the device's file delete).
-    // The hold has no end in time: an iOS result panel or a confirm question can wait for as long as the app runs.
+
     vi.setSystemTime(NOW + 24 * 60 * 60 * 1000);
     if (between !== 'held') resetRestoreUndoAttachmentHold();
     if (between === 'leftover') holdNativeBackupUndoAttachments(replaced.recoveryJSON!, NAME);
@@ -107,7 +101,7 @@ async function restoreCleanupUndo(item: Attachment, tasks: readonly Task[], betw
         deleteRemoteAttachment: async (target) => { remoteDeletes.push(target.cloudKey); } });
     await adapter.saveData(cleaned.appData);
 
-    // The restore's Undo: a snapshot restore of the recovery snapshot taken before the restore.
+
     const undoId = '22222222-2222-4222-8222-222222222222';
     const undo = await prepareNativeBackupDocument(adapter, { requestId: undoId, mode: 'restore', snapshotName: NAME,
         text: replaced.recoveryJSON!, metadata: clone(metadata) });
@@ -121,7 +115,7 @@ describe('a restore, a sync\'s attachment cleanup, then the restore\'s Undo', ()
         const result = await restoreCleanupUndo(item, tasks, 'held');
         expect(result.deleted).toEqual([]);
         expect(result.remoteDeletes).toEqual([]);
-        // A held tombstone is no reason to run cleanup ahead of its daily interval, and cleanup leaves it unprocessed.
+
         expect(result.freshWork).toBe(false);
         expect(result.cleanedRecord).toEqual(result.restoredRecord);
         expect(result.after).toMatchObject({ localStatus: 'available' });
@@ -140,12 +134,12 @@ describe('a restore, a sync\'s attachment cleanup, then the restore\'s Undo', ()
         const result = await restoreCleanupUndo(item, tasks, 'process-ended');
         expect(result.after?.deletedAt ?? null).toBeNull();
         if (label.startsWith('the restored backup lacks the task')) {
-            // Nothing in the restored library names the attachment, so cleanup has nothing to delete.
+
             expect(result.deleted).toEqual([]);
             expect(result.after?.localStatus).toBe('available');
             return;
         }
-        // Today's cleanup deletes the local file whether or not a cloud copy exists: with no cloudKey the bytes are gone for good.
+
         expect(result.freshWork).toBe(true);
         expect(result.deleted).toEqual([FILE_URI]);
         expect(result.remoteDeletes).toEqual(item.cloudKey ? [CLOUD_KEY] : []);
@@ -162,7 +156,7 @@ describe('a restore, a sync\'s attachment cleanup, then the restore\'s Undo', ()
         };
         await commitReplace('11111111-1111-4111-8111-111111111111', 'a',
             [task('with-file', { rev: 2, attachments: [{ ...attachment, deletedAt: AT, updatedAt: AT }] }), task('other')]);
-        // The second restore's recovery snapshot has the attachment deleted already: its Undo cannot bring it back.
+
         await commitReplace('33333333-3333-4333-8333-333333333333', 'c', [task('other', { rev: 2 })]);
         const deleted: string[] = [];
         await runAttachmentCleanupLifecycle({ appData: libraryWith({ ...attachment, deletedAt: AT }), deleteLocalAttachment: collectDeletes(deleted) });
@@ -176,7 +170,7 @@ describe('a restore, a sync\'s attachment cleanup, then the restore\'s Undo', ()
         const replaced = await prepareNativeBackupDocument(adapter, { requestId: replaceId, mode: 'replace', snapshotName: NAME,
             text: serializeBackupData(libraryWith({ ...attachment, deletedAt: AT, updatedAt: AT }, { rev: 2 })), metadata: clone(metadata) });
         await commitNativeBackupDocument(adapter, reference(replaceId, 'a'), replaced.planJSON, NAME);
-        // The snapshot restore's own baseline has the attachment deleted: had it taken the hold, the file would go.
+
         const restoreId = '44444444-4444-4444-8444-444444444444';
         const restored = await prepareNativeBackupDocument(adapter, { requestId: restoreId, mode: 'restore', snapshotName: NAME,
             text: serializeBackupData({ ...clone(library), tasks: [task('other', { rev: 3 })] }), metadata: clone(metadata) });
@@ -252,7 +246,7 @@ describe('a mobile data transfer (React Native\'s restore, merge, import and sna
             apply: () => ({ data: libraryWith(attachment, { attachments: [kept] }), result: undefined }) });
         expect(findAttachment(persisted[0]!)?.localStatus).toBe('missing');
         expect(persisted[0]!.tasks[1]!.attachments?.[0]?.localStatus).toBe('available');
-        // No Undo, no hold: a later cleanup of this attachment runs as before.
+
         const deleted: string[] = [];
         await runAttachmentCleanupLifecycle({ appData: libraryWith({ ...attachment, deletedAt: AT }), deleteLocalAttachment: collectDeletes(deleted) });
         expect(deleted).toEqual([FILE_URI]);

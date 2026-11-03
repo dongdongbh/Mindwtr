@@ -1,12 +1,6 @@
-/**
- * Test support only (imported by the Board tests; not exported). Replays the
- * frozen React Native Board scenarios (board-views-parity.fixtures.json, captured
- * by apps/mobile/components/views/board-view.parity.test.tsx) through the native
- * host contract. The replay plays the native screen: it keeps the screen's own
- * state (the filters the view returned, whether the sheet and the due-date section
- * are open, the editor), reads views, sends actions, and lays the view's text out
- * in the order the React Native screen draws it.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { BOARD_FILTER_VISIBILITY, EMPTY_BOARD_FILTER_STATE, type BoardFilterEdit, type BoardFilterState } from './board-view-model';
 import type { createNativeHostContract, NativeHostResult } from './native-host-contract';
@@ -33,15 +27,15 @@ export const loadBoardViewsFixture = (): BoardViewsFixture => JSON.parse(
     readFileSync(new URL('./board-views-parity.fixtures.json', import.meta.url), 'utf8'),
 );
 
-// The mobile harness's theme colors.
+
 const THEME = {
     bg: '#fff', filterBg: '#f1f5f9', border: '#cbd5e1', text: '#0f172a', secondaryText: '#64748b', tint: '#3b82f6',
     success: '#10b981', warning: '#f59e0b',
 };
-/** The store refuses to copy this task, as the mobile harness makes it. */
+
 const REFUSED_COPY = 'n-locked';
 
-/** The store writes a scenario asks for, as the mobile harness records them. */
+
 export function createBoardRecorder() {
     const log: unknown[][] = [];
     const createdIds = new Map<string, string>();
@@ -55,7 +49,7 @@ export type BoardRecorder = ReturnType<typeof createBoardRecorder>;
 type Recorded = 'updateTask' | 'deleteTask' | 'duplicateTask' | 'reorderBoardTasks';
 let realActions: Pick<ReturnType<typeof useTaskStore.getState>, Recorded> | null = null;
 
-/** Loads a scenario's data through the store and records the writes, as the harness does. */
+
 export async function seedBoardStore(
     part: BoardFixturePart,
     scenario: BoardScenario,
@@ -111,7 +105,7 @@ const requestId = () => {
     return `00000000-0000-4000-9000-${requestCount.toString(16).padStart(12, '0')}`;
 };
 
-/** The whole Board: the view with every column's cards and the sheet's lists paged in under its revision. */
+
 function readBoard(contract: Contract, filters: BoardFilterState, filterEdit?: BoardFilterEdit) {
     const view = ok(contract.getBoardView({ filters, filterEdit, limit: 3 }));
     const page = (list: 'cards' | 'tokens' | 'projects' | 'chips', total: number, first: unknown[], status?: string) => {
@@ -212,7 +206,7 @@ export async function replayBoardScenario(input: {
 
     const perform = async ([kind, target, ...rest]: [string, ...unknown[]]) => {
         const view = () => ok(contract.getBoardView({ filters, limit: 1 }));
-        /** The revision the card shows: a move or a delete sends it back. */
+
         const shown = (taskId: string) => readBoard(contract, filters).cards.flat().find((card) => card.row.id === taskId)!.row.taskRevision;
         switch (kind) {
             case 'search': return edit({ type: 'setSearch', value: target as string });

@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const trOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Başlamadan önce",
     "attachments.webUploadRequiresCloud": "Tarayıcıdan yükleme, kendi sunucunuzda bulut eşitlemesi gerektirir.",
     "attachments.webUploadEncrypted": "Tarayıcıdan yükleme için eşitleme şifrelemesi kapalı olmalıdır.",
     "attachments.webUploadOffline": "Çevrimdışıyken dosya yüklenemez.",
@@ -795,6 +796,7 @@ export const trOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Her aktif projenin bir sonraki eylemi olduğundan emin olun.',
         'review.projectsHint': 'Her projeyi inceleyin. En az bir somut Sonraki Eylem var mı? Değilse, şimdi bir tane ekleyin. Tamamlanan projeleri tamamlandı olarak işaretleyin.',
         'review.hasNextAction': 'Sonraki İşlemi Var',
+    'review.projectDeferred': 'Planlandı',
         'review.needsAction': 'İşlem Gerekiyor',
         'review.noActiveTasks': 'Aktif görev yok',
         'review.somedayStep': 'Bir gün/Belki',
@@ -1583,7 +1585,7 @@ export const trOverrides: Record<string, string> = {
         'captureNotification.text': 'Gelen kutunuza kaydetmek için dokunun',
         'captureNotification.channelName': 'Hızlı yakalama',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'Zihin temizliği',
         'mindSweep.title': 'Zihin temizliği',
         'mindSweep.intro': 'Birkaç ipucu listesini gözden geçir ve aklına gelen her şeyi yaz. Süzme, düzenleme — her madde gelen kutusuna düşer, sonra ayıklarsın.',

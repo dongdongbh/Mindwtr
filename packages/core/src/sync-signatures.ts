@@ -69,18 +69,7 @@ const normalizeAttachmentsForContentComparison = (
         .map((attachment) => normalizeAttachmentForContentComparison(attachment));
 };
 
-// Task fields deliberately absent from content comparison: revision/order metadata
-// (CONTENT_DIFF_IGNORED_KEYS) and project-archive bookkeeping (SIGNATURE_OPAQUE_KEYS).
-// A new Task field must be added either here or to the comparable below (compile error
-// otherwise, via the `satisfies Record<Exclude<...>>` below).
-//
-// This list mirrors the 'ignored'/'opaque'-signature fields in
-// TASK_SYNC_FIELD_SCHEMA (task-sync-schema.ts) — task-sync-schema.test.ts pins the two
-// together with a snapshot test, and scripts/check-synced-field-parity.ts imports this
-// array directly. It stays a hand-written `as const` literal (not computed from the JSON
-// schema at runtime) because TypeScript can't narrow a JSON-imported field's `name` to a
-// literal per-entry type, and doing so here would silently turn the `satisfies` guard
-// below into a no-op instead of a real compile-time exhaustiveness check.
+
 export const TASK_CONTENT_COMPARISON_EXCLUDED_KEYS = [
     'rev',
     'revBy',
@@ -118,10 +107,8 @@ export const normalizeTaskForContentComparison = (task: Task): Record<string, un
         checklist: normalizeOptionalArrayForComparison(task.checklist),
         description: task.description,
         textDirection: task.textDirection,
-        // Attachment entities merge independently. Ignore file transport/runtime fields here
-        // so task conflicts only reflect meaningful task-level attachment changes. Once
-        // the parent task is deleted, attachment tombstone cleanup should not keep
-        // surfacing as a user-visible task conflict.
+
+
         attachments: task.deletedAt ? undefined : normalizeAttachmentsForContentComparison(task.attachments),
         location: task.location,
         projectId: task.projectId,
@@ -137,6 +124,7 @@ export const normalizeTaskForContentComparison = (task: Task): Record<string, un
         pushCount: task.pushCount === 0 ? undefined : task.pushCount,
         repeatReminderMinutes: task.repeatReminderMinutes ? task.repeatReminderMinutes : undefined,
         dueReminderLeadMinutes: task.dueReminderLeadMinutes || undefined,
+        startReminderLeadMinutes: task.startReminderLeadMinutes || undefined,
         reviewAt: task.reviewAt,
         completedAt: task.completedAt,
         cancelledAt: task.cancelledAt,
@@ -156,7 +144,7 @@ export const normalizeProjectForContentComparison = (project: Project): Record<s
         sequentialScope: project.isSequential && normalizeProjectSequentialScope(project.sequentialScope) === 'section'
             ? 'section'
             : undefined,
-        // Off and never-set both mean "not Per section"; only true is a distinct value.
+
         perSectionFlow: project.perSectionFlow === true ? true : undefined,
         taskSortBy: normalizeProjectTaskSortBy(project.taskSortBy),
         isFocused: project.isFocused ? true : undefined,
@@ -199,10 +187,8 @@ export const toComparableValue = (value: unknown, options?: { includeIgnoredKeys
     if (value && typeof value === 'object') {
         const record = value as Record<string, unknown>;
         const comparable: Record<string, unknown> = {};
-        // Normalized entities carry the full optional schema, mostly absent.
-        // Discard fields that cannot contribute before sorting their names:
-        // the resulting byte order is identical, without sorting dozens of
-        // undefined/ignored keys for every entity and every signature flavor.
+
+
         const keys = Object.keys(record).filter((key) => (
             record[key] !== undefined && record[key] !== null
             && !SIGNATURE_OPAQUE_KEYS.has(key)
@@ -223,24 +209,7 @@ export const toComparableValue = (value: unknown, options?: { includeIgnoredKeys
     return value;
 };
 
-/**
- * Module-level identity-keyed signature caches (#766 round 3). A merge at 7k
- * tasks used to spend ~40% of its time recomputing and re-validating these
- * signatures: the old per-merge memo started empty every call, and its
- * revision-keyed fallback validated each hit by stringifying the whole raw
- * entity — measured at a 3.4% hit rate costing more bytes than it saved.
- *
- * Correctness premise: synced entity objects are never mutated in place, so
- * object identity implies content identity. This is the same invariant the
- * SQLite adapter's identity-keyed row cache already ships on, enforced for the
- * one historical violator (attachment backends) by the pure patch lifecycle,
- * whose deep-freeze suites fail on any regression. An entity that changes is a
- * new object and simply computes fresh — nothing here trusts revision metadata.
- *
- * Three caches because one entity object legitimately carries up to three
- * signatures: the merge loop's type-normalized comparable, the deterministic
- * winner's plain comparable, and its ignored-keys tie-breaker.
- */
+
 const mergeComparableSignatureCache = new WeakMap<object, string>();
 const plainComparableSignatureCache = new WeakMap<object, string>();
 const deterministicSignatureCache = new WeakMap<object, string>();
@@ -248,16 +217,10 @@ const deterministicSignatureCache = new WeakMap<object, string>();
 const computeSignature = (value: unknown, options?: { includeIgnoredKeys?: boolean }): string =>
     JSON.stringify(toComparableValue(value, options));
 
-/**
- * Teeth for the never-mutated-in-place premise above, which nothing at runtime
- * would otherwise catch: under NODE_ENV=test every cache hit is recomputed and
- * compared, so any code path a test exercises that mutates a cached entity in
- * place fails loudly instead of silently corrupting merge convergence.
- * Production never pays for this.
- */
+
 let validateCacheHits = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
 
-/** Test-only: lets the memo-has-teeth tests observe a true cache hit. */
+
 export const setSignatureCacheValidationForTests = (enabled: boolean): void => {
     validateCacheHits = enabled;
 };
@@ -286,9 +249,7 @@ const memoizedSignature = (
 export const toComparableSignature = (value: unknown): string =>
     memoizedSignature(plainComparableSignatureCache, value, () => computeSignature(value));
 
-/** The merge loop's signature: the per-entity-type comparison normalizer is
- *  applied inside, so the cache can key on the stable entity object instead of
- *  the freshly-spread normalized copy the old code hashed. */
+
 export const getMergeComparableSignature = <T>(
     item: T,
     normalizeForComparison?: (item: T) => unknown,

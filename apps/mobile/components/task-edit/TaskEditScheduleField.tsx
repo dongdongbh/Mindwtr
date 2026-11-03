@@ -206,23 +206,28 @@ export function TaskEditScheduleField({
         );
     };
     const renderAdvanceReminderControl = () => {
-        if (fieldId !== 'dueDate' || (!draft.dueDate && !draft.dueReminderLeadMinutes && !reminders.showSkip)) return null;
+        const start = fieldId === 'startTime' ? reminders.startAdvance : null;
+        if (fieldId === 'startTime' ? !start : fieldId !== 'dueDate' || (!draft.dueDate && !draft.dueReminderLeadMinutes && !reminders.showSkip)) return null;
+        const control = start ?? {
+            enabled: reminders.showAdvance, label: reminders.advanceLabel, valueLabel: reminders.advanceValueLabel,
+            hint: reminders.advanceHint, options: reminders.advanceOptions,
+        };
         return (
             <View style={{ marginTop: 8 }}>
                 <TouchableOpacity
                     accessibilityRole="button"
-                    accessibilityLabel={`${reminders.advanceLabel}: ${reminders.advanceValueLabel}`}
-                    accessibilityState={{ disabled: !reminders.showAdvance, expanded: advanceReminderOptionsExpanded }}
-                    disabled={!reminders.showAdvance}
-                    style={[styles.dateBtn, { backgroundColor: tc.cardBg, borderColor: tc.border, opacity: reminders.showAdvance ? 1 : 0.5 }]}
+                    accessibilityLabel={`${control.label}: ${control.valueLabel}`}
+                    accessibilityState={{ disabled: !control.enabled, expanded: advanceReminderOptionsExpanded }}
+                    disabled={!control.enabled}
+                    style={[styles.dateBtn, { backgroundColor: tc.cardBg, borderColor: tc.border, opacity: control.enabled ? 1 : 0.5 }]}
                     onPress={() => setAdvanceReminderOptionsExpanded((expanded) => !expanded)}
                 >
-                    <Text style={[styles.modalLabel, { color: tc.text }]}>{reminders.advanceLabel}: {reminders.advanceValueLabel}</Text>
+                    <Text style={[styles.modalLabel, { color: tc.text }]}>{control.label}: {control.valueLabel}</Text>
                 </TouchableOpacity>
-                {reminders.advanceHint && <Text style={{ marginTop: 4, color: tc.secondaryText, fontSize: 12, lineHeight: 16 }}>{reminders.advanceHint}</Text>}
-                {reminders.showAdvance && advanceReminderOptionsExpanded && (
-                    <View style={[styles.statusContainer, { marginTop: 8 }]} accessibilityRole="radiogroup" accessibilityLabel={reminders.advanceLabel}>
-                        {reminders.advanceOptions.map((option) => (
+                {control.hint && <Text style={{ marginTop: 4, color: tc.secondaryText, fontSize: 12, lineHeight: 16 }}>{control.hint}</Text>}
+                {control.enabled && advanceReminderOptionsExpanded && (
+                    <View style={[styles.statusContainer, { marginTop: 8 }]} accessibilityRole="radiogroup" accessibilityLabel={control.label}>
+                        {control.options.map((option) => (
                             <TouchableOpacity
                                 key={option.value}
                                 accessibilityRole="radio"
@@ -230,7 +235,7 @@ export function TaskEditScheduleField({
                                 accessibilityState={{ checked: option.selected }}
                                 style={getStatusChipStyle(option.selected)}
                                 onPress={() => {
-                                    setDraftField('dueReminderLeadMinutes', option.value);
+                                    setDraftField(start ? 'startReminderLeadMinutes' : 'dueReminderLeadMinutes', option.value);
                                     setAdvanceReminderOptionsExpanded(false);
                                 }}
                             >
@@ -300,7 +305,7 @@ export function TaskEditScheduleField({
         }
     };
 
-    // A new due date moves a relative start, or ends the link, through the draft's cascade.
+
     const updateDueDate = (dueDate: string | undefined) => {
         setDraftField('dueDate', dueDate ?? '');
     };
@@ -598,6 +603,7 @@ export function TaskEditScheduleField({
                             )}
                         </View>
                         {renderQuickDateChips('start', parsed)}
+                        {renderAdvanceReminderControl()}
                         {renderDateIssue()}
                         {relativeStart && (() => {
                             const relativeUnit = relativeStart.unit;

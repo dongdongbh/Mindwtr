@@ -3,9 +3,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical } from 'lucide-react';
 import { StoreTaskItem, type StoreTaskItemProps } from '../list/StoreTaskItem';
 
-// Sortable wrapper for a Today's Focus row. Follows the projects list drag
-// pattern (SortableRows.tsx): useSortable drives the row transform and feeds a
-// drag handle into TaskItem via StoreTaskItem's forwarded dragHandle prop.
+
 export function SortableFocusRow({
     dragAriaLabel,
     ...storeTaskItemProps

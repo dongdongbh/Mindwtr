@@ -42,7 +42,7 @@ describe('native Pomodoro presentation using RN timer helpers', () => {
     it('distinguishes hidden, absent and malformed storage without inventing a timer', () => {
         expect(panel(null, { settings: {} })).toMatchObject({ kind: 'uninitialized', visible: false });
         expect(panel(null)).toMatchObject({ kind: 'uninitialized', visible: true });
-        // RN's card while its session loads: the default timer with its controls off and a Loading row, no session of its own.
+
         expect(panel(null)).toMatchObject({ sessionID: null, generation: null, clock: '25:00', phase: 'focus', isRunning: false,
             needsReconcile: false, selectionMissing: false, selectedTask: null, completedToday: 0,
             text: { loading: 'Loading...', toggle: 'Start', state: 'Paused' } });
@@ -120,8 +120,7 @@ describe('native Pomodoro presentation using RN timer helpers', () => {
         expect(choices[0]).toBe(latest); expect(JSON.stringify(pools)).toBe(snapshot);
     });
 
-    // e4d71e032: RN's card keeps only an actionable task linked (isTaskActionable); a task done, archived, cancelled, filed as
-    // Reference unlinks, and the timer stays as it was (a task gone from the store unlinked before too).
+
     it.each(['done', 'archived', 'cancelled', 'reference'] as const)('drops a linked task once it is %s (e4d71e032)', (transition) => {
         const state = initial(); state.session.selectedTaskId = 'linked'; const raw = JSON.stringify(state);
         const live = [{ ...task('linked'),

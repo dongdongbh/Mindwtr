@@ -110,25 +110,17 @@ import org.json.JSONObject
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/*
- * RN's Calendar (components/views/calendar-view.tsx, calendar/calendar-view.styles.ts, calendar-period-navigation.tsx,
- * calendar-task-composer-modal.tsx) drawn from core's getCalendarView: the header with its period navigation, mode switch and
- * Show completed; the month grid with its details pane; the week grid with its all-day row, timeline, now line and density
- * bar; the day timeline with its drag; and the schedule list. Every word, day, minute, position and tone is core's; Kotlin
- * only turns a finger's place into the grid cell core describes (its minutes, its day keys) and sends core's actions.
- */
 
-/** RN's PIXELS_PER_MINUTE (dp) and its week time gutter's width. */
 private const val PPM = 1.4f
 private val GUTTER = 56.dp
-/** Core's CALENDAR_SNAP_MINUTES and CALENDAR_TAP_DURATION_MINUTES: a drop or a tap lands on 5 minutes; a tap leaves room for 30. */
+
 internal const val SNAP_MINUTES = 5
 internal const val TAP_MINUTES = 30
-/** RN's long presses before a drag: a timeline block's (140 ms) and a Board card's (180 ms). */
+
 internal const val BLOCK_HOLD_MS = 140L
 internal const val CARD_HOLD_MS = 180L
 
-/** Core's entries in their places, in core's order: the day entries, each day's items by lane, and the task rows. */
+
 private class Placed(val days: List<JSONObject>, private val lanes: Map<String, List<JSONObject>>, val tasks: List<JSONObject>) {
     fun lane(lane: String, dayKey: String): List<JSONObject> = lanes["$lane|$dayKey"].orEmpty()
 }
@@ -145,10 +137,10 @@ private fun place(entries: List<JSONObject>): Placed {
     return Placed(days, lanes, tasks)
 }
 
-/** A grid's extent in minutes: core's hour labels run from the grid's start to its end, one an hour. */
+
 private fun JSONObject.extentMinutes(): Int = (getJSONArray("hourLabels").length() - 1) * 60
 
-/** RN's long press, shortened to [millis] for the gestures below it (RN's activateAfterLongPress). */
+
 @Composable
 internal fun HoldFor(millis: Long, content: @Composable () -> Unit) {
     val base = LocalViewConfiguration.current
@@ -156,12 +148,7 @@ internal fun HoldFor(millis: Long, content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalViewConfiguration provides config, content = content)
 }
 
-/**
- * RN's Pressable without hitSlop (the day's and the week's all-day rows have none): each row takes touches only inside its own
- * bounds, as in RN. Compose widens a target under 48 dp (the day's all-day rows are 19 dp) and reports that widened box, less
- * the next row's, as the row's accessibility bounds, so every stacked row's node sat about 14 dp above the row it names
- * (TalkBack's box, and a tap at the node's centre missed).
- */
+
 @Composable
 private fun ExactTargets(content: @Composable () -> Unit) {
     val base = LocalViewConfiguration.current
@@ -169,33 +156,30 @@ private fun ExactTargets(content: @Composable () -> Unit) {
     CompositionLocalProvider(LocalViewConfiguration provides config, content = content)
 }
 
-/** RN's 1-wide border on one edge (its borderBottomWidth, borderTopWidth or borderLeftWidth). */
+
 private fun Modifier.edge(color: Color, top: Boolean = false, bottom: Boolean = false) = drawBehind {
     val w = 1.dp.toPx()
     if (top) drawRect(color, Offset.Zero, Size(size.width, w))
     if (bottom) drawRect(color, Offset(0f, size.height - w), Size(size.width, w))
 }
 
-/** RN's left accent border ([width]), dashed where core says the item is projected. */
+
 private fun Modifier.leftBorder(color: Color, width: Dp, dashed: Boolean = false) = drawBehind {
     val w = width.toPx()
     if (dashed) drawLine(color, Offset(w / 2, 0f), Offset(w / 2, size.height), w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(w * 2, w * 2)))
     else drawRect(color, Offset.Zero, Size(w, size.height))
 }
 
-/** The spoken text of an item: core's label where it gives one, else what the item shows. */
+
 private fun JSONObject.spoken(): String = menuText("accessibilityLabel") ?: listOfNotNull(getString("title"), menuText("detail")).joinToString(", ")
 
-/**
- * RN's Calendar under its header: core's view for the open place, read again each minute while shown, the item sheet and the
- * composer over it. Back closes the composer or the sheet first.
- */
+
 @Composable
 fun CalendarList(model: InboxViewModel) = with(model.menu.calendar) {
     val owner = LocalLifecycleOwner.current
-    // A calendar changes with the clock: read again each minute while it shows (the screen reads on resume), as Focus does.
+
     LaunchedEffect(owner) { owner.repeatOnLifecycle(Lifecycle.State.RESUMED) { while (true) { delay(60_000); refresh() } } }
-    // A composer edit waits while a command runs or a retry is owed; it goes once none does.
+
     LaunchedEffect(model.busy, model.failedAction, composer) { pumpComposer() }
     BackHandler(enabled = composer != null || sheet != null) { if (composer != null) closeComposer() else closeSheet() }
     Box(Modifier.fillMaxSize().testTag("calendar")) {
@@ -219,9 +203,7 @@ fun CalendarList(model: InboxViewModel) = with(model.menu.calendar) {
     }
 }
 
-// ---- The header ----
 
-/** RN's calendar header card: the period navigation (the schedule's title and Today), the mode switch, and Show completed. */
 @Composable
 private fun CalendarHeader(model: InboxViewModel, view: JSONObject) {
     val c = LocalTheme.current.colors
@@ -235,7 +217,7 @@ private fun CalendarHeader(model: InboxViewModel, view: JSONObject) {
     }
 }
 
-/** RN's CalendarPeriodNavigation: ‹, the title with Today under it, ›; the schedule has only the title and Today. */
+
 @Composable
 private fun PeriodNavigation(model: InboxViewModel, header: JSONObject, day: Boolean) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -265,7 +247,7 @@ private fun NavArrow(model: InboxViewModel, glyph: String, target: JSONObject) =
     }
 }
 
-/** RN's mode switch: core's four modes, the open one filled with the tint; a mode is core's state for it and its setViewMode. */
+
 @Composable
 private fun ModeToggle(model: InboxViewModel, view: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -284,7 +266,7 @@ private fun ModeToggle(model: InboxViewModel, view: JSONObject) = with(model.men
     }
 }
 
-/** RN's Show completed pill (#955): the tint while on; TalkBack hears core's hint. */
+
 @Composable
 private fun ShowCompleted(model: InboxViewModel, toggle: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
@@ -299,10 +281,7 @@ private fun ShowCompleted(model: InboxViewModel, toggle: JSONObject) = with(mode
             .clickable(enabled = idle) { calendar.showCompleted(!on) }.padding(horizontal = 10.dp, vertical = 6.dp))
 }
 
-/**
- * RN's swipe between periods (month and day): a horizontal drag of at least 28 moves to core's next (a swipe left) or previous
- * period; the content follows the finger up to 72 and springs back.
- */
+
 @Composable
 private fun Modifier.periodSwipe(model: InboxViewModel, header: JSONObject): Modifier {
     val density = LocalDensity.current
@@ -327,9 +306,7 @@ private fun Modifier.periodSwipe(model: InboxViewModel, header: JSONObject): Mod
     }
 }
 
-// ---- Month ----
 
-/** RN's month: the weekday names, the grid (core's cells after its leading blanks), and the selected day's details pane. */
 @Composable
 private fun MonthView(model: InboxViewModel, view: JSONObject, content: JSONObject, placed: Placed) {
     val c = LocalTheme.current.colors
@@ -358,7 +335,7 @@ private fun MonthView(model: InboxViewModel, view: JSONObject, content: JSONObje
     }
 }
 
-/** RN's month cell: today's number in a tint circle, the selected cell washed, core's two previews, or core's counts. */
+
 @Composable
 private fun RowScope.MonthCell(model: InboxViewModel, cell: JSONObject, compact: Boolean) = with(model.menu) {
     val theme = LocalTheme.current
@@ -405,11 +382,7 @@ private fun CountDot(text: String, fill: Color, color: Color) {
     }
 }
 
-/**
- * RN's day details pane over the month: a handle that resizes it between RN's three heights (a drag down past its lowest closes
- * it, core's `close` state), the selected day's title with Add task, the search with core's results, and core's events,
- * deadlines and scheduled tasks, each with Done where core offers it.
- */
+
 @Composable
 private fun DetailsPane(model: InboxViewModel, view: JSONObject, details: JSONObject, placed: Placed) = with(model.menu) {
     val theme = LocalTheme.current
@@ -422,7 +395,7 @@ private fun DetailsPane(model: InboxViewModel, view: JSONObject, details: JSONOb
     val text = view.getJSONObject("text")
     val shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     Box(Modifier.fillMaxSize()) {
-        // The pane takes the touches it covers, as RN's pane does: a tap on it never reaches a day cell under it.
+
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height((screen * snap).dp).clip(shape).background(c.cardBg).edge(c.border, top = true)
             .pointerInput(Unit) { detectTapGestures { } }) {
             val handle = "${text.getString("detailsHandle")}. ${text.getString("detailsHandleHint")}"
@@ -461,7 +434,7 @@ private fun DetailsPane(model: InboxViewModel, view: JSONObject, details: JSONOb
     }
 }
 
-/** The nearest of RN's snap heights to [value]. */
+
 private fun List<Float>.nearestTo(value: Float): Float {
     var best = first()
     for (height in this) if (abs(height - value) < abs(best - value)) best = height
@@ -472,7 +445,7 @@ private fun List<Float>.nearestTo(value: Float): Float {
 private fun EmptyLine(text: String) = Text(text, style = rnText(14, 400), color = LocalTheme.current.colors.secondaryText, textAlign = TextAlign.Center,
     modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp).semantics { liveRegion = LiveRegionMode.Polite })
 
-/** RN's schedule search under the selected day: the typed text, read by core once typing pauses. */
+
 @Composable
 private fun ScheduleSearch(model: InboxViewModel, placeholder: String, modifier: Modifier = Modifier) = with(model.menu.calendar) {
     val c = LocalTheme.current.colors
@@ -487,7 +460,7 @@ private fun ScheduleSearch(model: InboxViewModel, placeholder: String, modifier:
         })
 }
 
-/** RN's task rows to schedule (search results, the planning list): core's title and slot label; a tap opens core's composer. */
+
 @Composable
 private fun TaskResults(model: InboxViewModel, title: String?, subtitle: String?, tasks: List<JSONObject>, section: Boolean = false) = with(model.menu) {
     if (title == null || tasks.isEmpty()) return
@@ -504,10 +477,7 @@ private fun TaskResults(model: InboxViewModel, title: String?, subtitle: String?
     }
 }
 
-/**
- * RN's taskItem row: a left accent (dashed for a projected occurrence), core's title and detail, and an optional trailing
- * control; one TalkBack node with its label, role and state.
- */
+
 @Composable
 private fun CalendarRow(title: String, detail: String?, titleColor: Color, fill: Color, accent: Color, dashed: Boolean, pressable: Boolean, enabled: Boolean,
                         spoken: String, tag: String, struck: Boolean = false, actions: List<CustomAccessibilityAction> = emptyList(), onClick: () -> Unit,
@@ -531,7 +501,7 @@ private fun CalendarRow(title: String, detail: String?, titleColor: Color, fill:
     }
 }
 
-/** A month details row (events, deadlines, scheduled): core's tones as RN's details rows paint them, and core's Done. */
+
 @Composable
 private fun CalendarItemRow(model: InboxViewModel, item: JSONObject, lane: String) = with(model.menu) {
     val theme = LocalTheme.current
@@ -544,7 +514,7 @@ private fun CalendarItemRow(model: InboxViewModel, item: JSONObject, lane: Strin
     val accent = if (event) source ?: c.secondaryText else c.tint
     val done = calendar.view?.getJSONObject("text")?.getString("done").orEmpty()
     val complete = { if (idle) calendar.complete(item.getString("taskId"), item.rowRevision()) }
-    // RN's Done beside the row; TalkBack reaches it as the row's action.
+
     val actions = if (item.optBoolean("showDone")) listOf(CustomAccessibilityAction(done) { complete(); true }) else emptyList()
     CalendarRow(item.getString("title"), item.menuText("detail"), if (projected) c.tint else c.text, fill, accent, tones.optBoolean("dashed"),
         item.getBoolean("pressable"), idle, item.spoken(), "calendar-item", actions = actions, onClick = { calendar.openItem(item) }) {
@@ -556,13 +526,7 @@ private fun CalendarItemRow(model: InboxViewModel, item: JSONObject, lane: Strin
     }
 }
 
-// ---- Week ----
 
-/**
- * RN's week: a canvas of seven day columns that scrolls sideways, landing on whole days, with the time gutter pinned at its
- * left; the day headers (a tap opens that day), the all-day row, the timeline with core's timed blocks and the now line (a tap
- * on a column opens the composer for that day), and the density bar.
- */
 @Composable
 private fun WeekView(model: InboxViewModel, view: JSONObject, content: JSONObject, placed: Placed) = with(model.menu) {
     val theme = LocalTheme.current
@@ -587,7 +551,7 @@ private fun WeekView(model: InboxViewModel, view: JSONObject, content: JSONObjec
                     }
                 }
             })
-            // RN's first place: the selected day (else today) at the left, as far as the week allows.
+
             val start = days.indexOfFirst { it.getBoolean("selected") }.takeIf { it >= 0 } ?: days.indexOfFirst { it.getBoolean("isToday") }.coerceAtLeast(0)
             val availablePx = with(density) { (maxWidth - GUTTER).toPx() }
             val keys = weekScrollKeys(days.firstOrNull()?.getString("key"), visible, start, days.size, columnPx, availablePx)
@@ -614,7 +578,7 @@ private fun WeekView(model: InboxViewModel, view: JSONObject, content: JSONObjec
     }
 }
 
-/** RN's week day header: core's weekday (capitals) and day number, today in the tint on a wash; a tap opens core's day view. */
+
 @Composable
 private fun WeekDayHeader(model: InboxViewModel, day: JSONObject, width: Dp, compact: Boolean) = with(model.menu) {
     val theme = LocalTheme.current
@@ -631,7 +595,7 @@ private fun WeekDayHeader(model: InboxViewModel, day: JSONObject, width: Dp, com
     }
 }
 
-/** RN's all-day cell: core's first all-day items as chips, then core's "+N more", which opens the day. */
+
 @Composable
 private fun WeekAllDay(model: InboxViewModel, day: JSONObject, items: List<JSONObject>, width: Dp, compact: Boolean) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -647,7 +611,7 @@ private fun WeekAllDay(model: InboxViewModel, day: JSONObject, items: List<JSONO
     } }
 }
 
-/** RN's all-day chip, in the week lane and the day card: core's fill, left edge and title tones; a completed item is crossed out and muted. */
+
 @Composable
 private fun AllDayChip(model: InboxViewModel, item: JSONObject, style: TextStyle, edge: Dp, radius: Dp, padding: PaddingValues) = with(model.menu) {
     val theme = LocalTheme.current
@@ -667,33 +631,27 @@ private fun AllDayChip(model: InboxViewModel, item: JSONObject, style: TextStyle
             .padding(padding))
 }
 
-/**
- * RN's getCalendarWeekInitialScrollX: day [start] at the left, as far as the week allows. Deadline weeks widen the columns past
- * the density, so the bound is the week's overflow of the viewport, not the density's day count (which opened on Tuesday).
- */
+
 internal fun weekStartScroll(start: Int, dayCount: Int, columnPx: Float, availablePx: Float): Int =
     minOf(start * columnPx, (dayCount * columnPx - availablePx).coerceAtLeast(0f)).roundToInt()
 
-/**
- * When the week scrolls itself to its first place (RN's getCalendarWeekAutoScrollKey): a new week, density, or start offset. The
- * offset carries the selected day (Today in the same week) and the viewport (a resize under deadline-wide columns).
- */
+
 internal fun weekScrollKeys(firstDay: String?, visible: Int, start: Int, dayCount: Int, columnPx: Float, availablePx: Float): List<Any?> =
     listOf(firstDay, visible, weekStartScroll(start, dayCount, columnPx, availablePx))
 
-/** A scroll to [target] once the content is laid out (its extent known). */
+
 private suspend fun androidx.compose.foundation.ScrollState.settleTo(target: Int) {
     if (target <= 0) { scrollTo(0); return }
     snapshotFlow { maxValue }.first { it > 0 }
     scrollTo(minOf(target, maxValue))
 }
 
-/** A timeline's vertical scroll: RN scrolls to [minutes] (now, or a saved task's start), 180 below the view's top. */
+
 private suspend fun androidx.compose.foundation.ScrollState.toMinute(minutes: Int, density: androidx.compose.ui.unit.Density) {
     settleTo(with(density) { (minutes * PPM).dp.toPx() - 180.dp.toPx() }.roundToInt())
 }
 
-/** RN's week timeline: the pinned hour labels, and per day its hour rules, the now line on today, and core's timed blocks. */
+
 @Composable
 private fun WeekTimeline(model: InboxViewModel, content: JSONObject, placed: Placed, column: Dp, compact: Boolean, ultra: Boolean, pin: Modifier) = with(model.menu) {
     val theme = LocalTheme.current
@@ -705,10 +663,10 @@ private fun WeekTimeline(model: InboxViewModel, content: JSONObject, placed: Pla
     val weekKey = "week:${placed.days.firstOrNull()?.getString("key")}"
     var scrolledFor by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(weekKey) {
-        // RN's first scroll for a week: to now.
+
         if (scrolledFor != weekKey) { content.optInt("nowMinutes", -1).takeIf { it >= 0 }?.let { down.toMinute(it, density) }; scrolledFor = weekKey }
     }
-    // 7 above the first hour, so its label (centered on its rule) shows whole; RN cuts it (an RN bug, rn-calendar-visual-20260927-01).
+
     Column(Modifier.fillMaxWidth().verticalScroll(down).padding(top = 7.dp, bottom = 24.dp)) {
         Row(Modifier.fillMaxWidth()) {
             Box(pin.width(GUTTER).height(height)) {
@@ -738,10 +696,7 @@ private fun WeekTimeline(model: InboxViewModel, content: JSONObject, placed: Pla
     }
 }
 
-/**
- * RN's now line: a red dot and a 2-high rule in a 10-high row, centered on core's minute [minutes] (RN draws it 5 lower, an RN
- * bug, rn-calendar-visual-20260927-01). [modifier] places it across.
- */
+
 @Composable
 private fun NowLine(minutes: Int, modifier: Modifier) {
     val theme = LocalTheme.current
@@ -751,7 +706,7 @@ private fun NowLine(minutes: Int, modifier: Modifier) {
     }
 }
 
-/** A timed block's place in its lane: core's minutes and its column among overlapping blocks, with RN's 2 between columns. */
+
 private class BlockBox(val x: Dp, val width: Dp, val top: Dp, val height: Dp)
 
 private fun blockBox(item: JSONObject, lane: Dp, minHeight: Dp): BlockBox {
@@ -766,7 +721,7 @@ private fun blockBox(item: JSONObject, lane: Dp, minHeight: Dp): BlockBox {
         maxOf(minHeight, ((timed.getInt("endMinutes") - start) * PPM).dp))
 }
 
-/** RN's week block: an event on a gray wash with its calendar's color, or a task filled with the tint (a projected one dashed). */
+
 @Composable
 private fun WeekBlock(model: InboxViewModel, item: JSONObject, lane: Dp, compact: Boolean, ultra: Boolean) = with(model.menu) {
     val theme = LocalTheme.current
@@ -796,10 +751,7 @@ private fun WeekBlock(model: InboxViewModel, item: JSONObject, lane: Dp, compact
     }
 }
 
-/**
- * RN's density bar: a track whose thumb sits on core's visible-day count (a drag picks the nearest of core's choices, sent once
- * it ends), and core's choices as ticks. TalkBack hears core's label, value and its More and Fewer actions.
- */
+
 @Composable
 private fun DensityBar(model: InboxViewModel, density: JSONObject, text: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -854,12 +806,7 @@ private fun DensityBar(model: InboxViewModel, density: JSONObject, text: JSONObj
     }
 }
 
-// ---- Day ----
 
-/**
- * RN's day: core's all-day items pinned above the timeline, the timeline card (a tap opens the composer at that time; a block
- * held for RN's 140 ms follows the finger and its drop sends core's moveTask), and the search card with core's results.
- */
 @Composable
 private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject, placed: Placed) = with(model.menu) {
     val theme = LocalTheme.current
@@ -868,13 +815,13 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
     val text = view.getJSONObject("text")
     val dayKey = content.getString("dayKey")
     val allDay = placed.lane("allDay", dayKey)
-    // RN's day card past its "+N more", kept across days as RN keeps it.
+
     var allDayExpanded by rememberSaveable { mutableStateOf(false) }
     val down = rememberScrollState()
     var scrolledFor by rememberSaveable { mutableStateOf("") }
     val pending = calendar.scrollTo
     LaunchedEffect(pending, dayKey) {
-        // RN's first scroll into the day view goes to now; a saved composer's start goes there.
+
         if (pending != null) { down.toMinute(pending, density); calendar.scrolled(); scrolledFor = "day" }
         else if (scrolledFor != "day") { content.optInt("nowMinutes", -1).takeIf { it >= 0 }?.let { down.toMinute(it, density) }; scrolledFor = "day" }
     }
@@ -883,7 +830,7 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
             val shape = RoundedCornerShape(12.dp)
             Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp).fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape).padding(12.dp)) {
                 Text(text.getString("allDay").uppercase(), style = rnText(12, 800), color = c.secondaryText, modifier = Modifier.padding(bottom = 8.dp))
-                // Core sends every all-day item; collapsed, RN draws core's first allDayLimit and a "+N more" that expands in place.
+
                 val more = content.menuText("allDayMore")
                 val shown = if (allDayExpanded || more == null) allDay else allDay.take(content.getInt("allDayLimit"))
                 Column(Modifier.heightIn(max = 176.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) { ExactTargets {
@@ -910,7 +857,7 @@ private fun DayView(model: InboxViewModel, view: JSONObject, content: JSONObject
     }
 }
 
-/** RN's day timeline card: the hour lines with core's labels, the now line on today, and core's timed events and tasks. */
+
 @Composable
 private fun DayTimeline(model: InboxViewModel, content: JSONObject, placed: Placed, dayKey: String) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -918,9 +865,9 @@ private fun DayTimeline(model: InboxViewModel, content: JSONObject, placed: Plac
     val extent = content.extentMinutes()
     val shape = RoundedCornerShape(12.dp)
     Box(Modifier.fillMaxWidth().clip(shape).background(c.cardBg).rnBorder(1.dp, c.border, shape)) {
-        // 9 above and below the grid, so the first and last hour rows (centered on their lines) show whole.
+
         Box(Modifier.fillMaxWidth().padding(vertical = 9.dp).height((extent * PPM).dp).testTag("calendar-timeline")
-            // A tap: the minute under the finger, snapped to core's 5 and early enough for a 30-minute task (core's snapCalendarTimelineMinutes).
+
             .pointerInput(dayKey, extent) {
                 detectTapGestures { at ->
                     val minutes = ((at.y / density / PPM / SNAP_MINUTES).roundToInt() * SNAP_MINUTES).coerceIn(0, extent - TAP_MINUTES)
@@ -928,7 +875,7 @@ private fun DayTimeline(model: InboxViewModel, content: JSONObject, placed: Plac
                 }
             }) {
             for (index in 0 until labels.length()) {
-                // The 18-high row is centered on its hour, so the line lies exactly at the minute (RN draws it 9 lower, an RN bug).
+
                 Row(Modifier.offset(y = (index * 60 * PPM).dp - 9.dp).fillMaxWidth().height(18.dp).padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(labels.getString(index), style = rnText(11, 700), color = c.secondaryText, maxLines = 1, textAlign = TextAlign.End,
                         modifier = Modifier.width(56.dp).padding(end = 8.dp))
@@ -945,7 +892,7 @@ private fun DayTimeline(model: InboxViewModel, content: JSONObject, placed: Plac
     }
 }
 
-/** Deadline points and a separate scrollable label rail; no drag or work duration. */
+
 @Composable
 private fun DeadlineMarkers(model: InboxViewModel, markers: List<JSONObject>, lane: Dp) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -974,11 +921,7 @@ private fun DeadlineMarkers(model: InboxViewModel, markers: List<JSONObject>, la
     }
 }
 
-/**
- * RN's ScheduledTaskBlock and event block. A task held for 140 ms follows the finger (RN's scale and lift); let go, its new start
- * is the minute under it snapped to core's 5 and kept inside core's day, sent as one moveTask. A tap opens the item's sheet.
- * A projected occurrence neither moves nor opens.
- */
+
 @Composable
 private fun DayBlock(model: InboxViewModel, item: JSONObject, dayKey: String, extent: Int, lane: Dp) = with(model.menu) {
     val theme = LocalTheme.current
@@ -1006,7 +949,7 @@ private fun DayBlock(model: InboxViewModel, item: JSONObject, dayKey: String, ex
     }
     val shape = RoundedCornerShape(12.dp)
     val spoken = item.spoken()
-    // The gesture outlives a recomposition: a drop reads the block and its day as core shows them now.
+
     val itemNow by rememberUpdatedState(item)
     val dayNow by rememberUpdatedState(dayKey)
     HoldFor(BLOCK_HOLD_MS) {
@@ -1048,9 +991,7 @@ private fun DayBlock(model: InboxViewModel, item: JSONObject, dayKey: String, ex
     }
 }
 
-// ---- Schedule ----
 
-/** RN's schedule: core's days with their items, then the planning list for the selected day, or core's empty line. */
 @Composable
 private fun ScheduleView(model: InboxViewModel, view: JSONObject, content: JSONObject, placed: Placed) = with(model.menu) {
     val theme = LocalTheme.current
@@ -1080,13 +1021,7 @@ private fun ScheduleView(model: InboxViewModel, view: JSONObject, content: JSONO
     }
 }
 
-// ---- The item sheet and the composer ----
 
-/**
- * RN's item sheet: its Alert, which RN draws as its themed alert (components/themed-alert.tsx): a card over a dark backdrop (a
- * tap on it closes), core's title, a projected occurrence's message, and every button core offers, stacked when more than two
- * (a destructive one in red, the last plain one filled with the tint).
- */
 @Composable
 private fun ItemSheet(model: InboxViewModel, sheet: JSONObject) = with(model.menu) {
     val theme = LocalTheme.current
@@ -1122,12 +1057,7 @@ private fun ItemSheet(model: InboxViewModel, sheet: JSONObject) = with(model.men
     }
 }
 
-/**
- * RN's CalendarTaskComposerModal: a card from the bottom over a dark backdrop (a tap on it closes), core's title and date,
- * New or Existing task, the title with core's quick-add help or the search with core's candidates, the start and end fields
- * (core's clock labels, the raw text while typing), core's duration chips, core's error, Cancel and Save. Typed text goes to
- * core's editCalendarComposer; Save sends core's composer with its request UUID (Try again re-sends it while owed).
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ComposerSheet(model: InboxViewModel, draft: ComposerDraft) = with(model.menu) {
@@ -1239,7 +1169,7 @@ private fun ComposerSheet(model: InboxViewModel, draft: ComposerDraft) = with(mo
     }
 }
 
-/** RN's composer input: 46 high, bordered, the input background; [value] is the typed text, else core's. */
+
 @Composable
 private fun ComposerField(value: String, placeholder: String, enabled: Boolean, tag: String, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -1254,7 +1184,7 @@ private fun ComposerField(value: String, placeholder: String, enabled: Boolean, 
         })
 }
 
-/** RN's time field: its label in capitals over a centered input showing core's clock label, and the raw text while focused. */
+
 @Composable
 private fun TimeField(modifier: Modifier, label: String, raw: String, shown: String, placeholder: String, enabled: Boolean, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors

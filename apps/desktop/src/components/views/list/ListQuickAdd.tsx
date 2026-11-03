@@ -37,10 +37,8 @@ export function ListQuickAdd({
     onResetCopilot,
     dense = false,
 }: ListQuickAddProps) {
-    // The buttons must stay shorter than the bar (min-h on the input below
-    // guarantees its height regardless of font metrics) — at equal heights the
-    // bar's focus ring runs straight through them and they sit flush with its
-    // edges (#959).
+
+
     const iconButtonClass = cn(
         "inline-flex items-center justify-center rounded-lg border border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         dense ? "h-8 w-8" : "h-9 w-9"
@@ -48,9 +46,8 @@ export function ListQuickAdd({
     return (
         <form
             onSubmit={onSubmit}
-            // The mic and add buttons sit inside the field, so the border and
-            // focus ring belong to the bar rather than the input — drawn on the
-            // input, the ring ran straight through both buttons (#959).
+
+
             className="relative rounded-lg border border-border bg-card shadow-sm transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/30"
         >
             <TaskInput

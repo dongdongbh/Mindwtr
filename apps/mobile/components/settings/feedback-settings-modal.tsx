@@ -74,7 +74,7 @@ export function FeedbackSettingsModal({
         Platform.OS === 'android' ? { scrollsChildToFocus: false } : {}
     );
 
-    // Each opening is its own visit: a send from an earlier visit that ends later changes nothing here.
+
     const visit = useRef(0);
     useEffect(() => {
         visit.current += 1;
@@ -90,7 +90,7 @@ export function FeedbackSettingsModal({
         setBugLocation('');
     }, [category]);
 
-    // Core's words and rules (about-settings-model.ts), shared with the native host.
+
     const text = useMemo(() => buildFeedbackModalText(tr), [tr]);
     const categoryLabels = text.categories;
     const messagePlaceholders = text.messagePlaceholders;
@@ -285,7 +285,7 @@ export function FeedbackSettingsModal({
                                     placeholder={messagePlaceholders[category]}
                                     placeholderTextColor={tc.secondaryText}
                                     multiline
-                                    // Let the form scroll long messages instead of nesting an iOS text scroller.
+
                                     scrollEnabled={Platform.OS !== 'ios'}
                                     maxLength={getFeedbackMessageMaxLength({ category, location: bugLocation }, tr)}
                                     style={[

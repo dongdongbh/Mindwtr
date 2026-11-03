@@ -1,12 +1,13 @@
 import React from 'react';
 import { act, create, type ReactTestInstance } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { buildReviewSteps, getWeeklyReviewBuckets, type Project, type Task } from '@mindwtr/core';
+import { buildReviewSteps, getWeeklyReviewBuckets, type Project, type Section, type Task } from '@mindwtr/core';
 
 import { Modal, Platform, ScrollView } from 'react-native';
 import { CompactText } from './compact-text';
 import { ReviewModal } from './review-modal';
 import { styles } from './review-modal.styles';
+import { logInfo } from '../lib/app-log';
 import { fetchExternalCalendarEvents } from '../lib/external-calendar';
 import { openContextsScreen, openProjectScreen } from '@/lib/task-meta-navigation';
 import { useTaskEditPreview } from './task-edit/use-task-edit-preview';
@@ -17,15 +18,13 @@ const { mockStorageGetItem, mockStorageRemoveItem, mockStorageSetItem } = vi.hoi
     mockStorageSetItem: vi.fn(),
 }));
 
-// The real core bucket builders run in this file, so "now" is pinned: stale
-// items, the look-back week, and the calendar window are all measured against
-// it. Wednesday 2026-03-04; the default (Sunday) review week starts 2026-03-01.
+
 const NOW = new Date(2026, 2, 4, 10, 0, 0);
-// Local-time fixture timestamps. UTC literals would land in the previous week
-// (and outside the look-back window) for any test machine behind UTC.
+
+
 const at = (day: number, hour = 9) => new Date(2026, 2, day, hour, 0, 0).toISOString();
 
-const defaultTasks = [
+const defaultTasks: Task[] = [
     {
         id: 'inbox-1',
         title: 'Inbox task',
@@ -55,7 +54,7 @@ const defaultTasks = [
         updatedAt: at(2),
     },
     {
-        // Inside the calendar step's 7-day window, so that step has work.
+
         id: 'due-1',
         title: 'Due soon',
         status: 'next',
@@ -68,18 +67,20 @@ const defaultTasks = [
     },
 ];
 
-const defaultProjects = [
+const defaultProjects: Project[] = [
     {
         id: 'project-1',
         title: 'Project One',
         status: 'active',
+        color: '#3b82f6',
+        order: 0,
+        tagIds: [],
         createdAt: at(2),
         updatedAt: at(2),
     },
 ];
 
-// A task completed inside the current review week. The look-back counts it, no
-// bucket does, so the completed step stays the first step with work.
+
 const doneTask = (overrides: Record<string, unknown> = {}) => ({
     id: 'done-1',
     title: 'Shipped the thing',
@@ -92,9 +93,7 @@ const doneTask = (overrides: Record<string, unknown> = {}) => ({
     ...overrides,
 });
 
-// Finishing a task in a project counts as "moved forward" whatever the project's
-// own status is; an archived one keeps `projectEntries` (and so the projects
-// step) empty, which is what these look-back tests need.
+
 const archivedProject = {
     id: 'project-archived',
     title: 'Wrapped up',
@@ -108,7 +107,14 @@ const defaultSettings = {
     gtd: { weeklyReview: { includeContextStep: false } },
 };
 
+let hiddenTasks: Task[] = [];
+
 const storeState = {
+    get _allTasks() { return [...this.tasks, ...hiddenTasks]; },
+    get _allProjects() { return this.projects; },
+    _allSections: [] as Section[],
+    sections: [] as Section[],
+    updateProject: vi.fn(),
     tasks: defaultTasks.map((task) => ({ ...task })),
     projects: defaultProjects.map((project) => ({ ...project })),
     areas: [],
@@ -146,8 +152,7 @@ vi.mock('react-native', async () => {
     };
 });
 
-// Only the store is faked; every review rule (buckets, step order, quick-add
-// parsing) runs for real, the way daily-review-modal.test.tsx does it.
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@mindwtr/core')>();
     return {
@@ -180,7 +185,7 @@ vi.mock('@/hooks/use-theme-tokens', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-    // One object, like the real hook: rows compare `tc` by identity (#766).
+
     const themeColors = {
         bg: '#0f172a',
         cardBg: '#111827',
@@ -215,6 +220,7 @@ vi.mock('../lib/ai-config', () => ({
 
 vi.mock('../lib/app-log', () => ({
     logError: vi.fn(),
+    logInfo: vi.fn(),
 }));
 
 vi.mock('../lib/external-calendar', () => ({
@@ -242,6 +248,7 @@ vi.mock('lucide-react-native', () => {
     return {
         Brain: icon('Brain'),
         ChevronRight: icon('ChevronRight'),
+        ChevronDown: icon('ChevronDown'),
         X: icon('X'),
         History: icon('History'),
         Inbox: icon('Inbox'),
@@ -291,9 +298,7 @@ const flattenText = (value: unknown): string => {
     return '';
 };
 
-// Step-rail titles are drawn for every step, present or skipped, so they cannot
-// say which step is open. Each of these lines is rendered by exactly one step
-// body.
+
 const STEP_BODY_TEXT: Record<string, string> = {
     inbox: 'dailyReview.inboxDesc',
     stale: 'No recent activity.',
@@ -316,7 +321,7 @@ const STEP_RAIL_TITLE: Record<string, string> = {
     completed: 'Done!',
 };
 
-/** The open step, or the list of matches when the body is ambiguous. */
+
 const currentStepOf = (tree: ReturnType<typeof create>): string | string[] => {
     const open = Object.entries(STEP_BODY_TEXT)
         .filter(([, text]) => tree.root
@@ -333,11 +338,18 @@ const railTitlesOf = (tree: ReturnType<typeof create>) => {
 
 describe('ReviewModal', () => {
     beforeEach(() => {
-        // Pinned clock: the real bucket builders measure stale items, the
-        // look-back week and the calendar window against it.
+
+
         vi.useFakeTimers();
         vi.setSystemTime(NOW);
         vi.clearAllMocks();
+        hiddenTasks = [];
+        storeState._allSections = [];
+        storeState.sections = [];
+        storeState.updateProject.mockReset().mockImplementation(async (id: string, updates: Partial<Project>) => {
+            storeState.projects = storeState.projects.map((project) => project.id === id ? { ...project, ...updates } : project);
+            return { success: true };
+        });
         storeState.tasks = defaultTasks.map((task) => ({ ...task }));
         storeState.projects = defaultProjects.map((project) => ({ ...project }));
         storeState.settings = { ...defaultSettings };
@@ -349,6 +361,131 @@ describe('ReviewModal', () => {
     afterEach(() => {
         Platform.OS = 'web';
         vi.useRealTimers();
+    });
+
+    const openProjectCompletion = async () => {
+        mockStorageGetItem.mockResolvedValue(JSON.stringify({ step: 'projects', startedAt: NOW.toISOString() }));
+        let tree!: ReturnType<typeof create>;
+        await act(async () => { tree = create(<ReviewModal visible onClose={vi.fn()} />); });
+        const card = tree.root.findAll((node) => typeof node.props.onPress === 'function' && node.props.accessibilityState?.expanded === false)[0];
+        act(() => card.props.onPress());
+        return tree;
+    };
+
+    it.each(['project', 'perSection'] as const)('expands a %s sequential tail into the existing task editor without writing on disclosure', async (flow) => {
+        storeState.projects = [{ ...defaultProjects[0], isSequential: flow === 'project', perSectionFlow: flow === 'perSection' }];
+        storeState.sections = [{ id: 'sequence-section', projectId: 'project-1', title: 'Sequence', order: 0, isSequential: true, createdAt: at(2), updatedAt: at(2) }];
+        storeState.tasks = [
+            { ...defaultTasks[2], id: 'head', title: 'Waiting head', status: 'waiting', sectionId: 'sequence-section', order: 0 },
+            { ...defaultTasks[2], id: 'tail', title: 'Later tail', sectionId: 'sequence-section', order: 1 },
+        ];
+        const original = structuredClone(storeState.tasks);
+        const tree = await openProjectCompletion();
+        const rows = () => tree.root.findAll((node) => String(node.type) === 'SwipeableTaskItem');
+        expect(rows().map((row) => row.props.task.id)).toEqual(['head']);
+        const disclosure = () => tree.root.findAll((node) => node.props.accessibilityLabel === 'Later in sequence (1)' && typeof node.props.onPress === 'function').at(-1)!;
+        expect(disclosure().props.accessibilityState).toEqual({ expanded: false });
+        act(() => disclosure().props.onPress());
+        expect(rows().map((row) => row.props.task.id)).toEqual(['head', 'tail']);
+        expect(storeState.updateTask).not.toHaveBeenCalled();
+        expect(storeState.tasks).toEqual(original);
+        act(() => rows().find((row) => row.props.task.id === 'tail')!.props.actions.edit(storeState.tasks[1]));
+        expect(tree.root.findByType('TaskEditModal' as React.ElementType).props.task.id).toBe('tail');
+        await act(async () => tree.unmount());
+    });
+
+    it('completes an empty project and retains Projects until the review closes', async () => {
+        storeState.tasks = [];
+        const tree = await openProjectCompletion();
+        await act(async () => { await tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress(); });
+        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' });
+        expect(currentStepOf(tree)).toBe('projects');
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        expect(logInfo).toHaveBeenCalledWith('Weekly review project completed', {
+            scope: 'review', force: true,
+            extra: { releaseCheck: 'v1.3.8/weekly-review-complete-project', outcome: 'completed' },
+        });
+        await act(async () => tree.update(<ReviewModal visible={false} onClose={vi.fn()} />));
+        await act(async () => tree.update(<ReviewModal visible onClose={vi.fn()} />));
+        expect(currentStepOf(tree)).toBe('completed');
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['direct', 'section'] as const)('confirms unfinished %s tasks inside the sheet and cancel writes nothing', async (association) => {
+        Platform.OS = association === 'direct' ? 'android' : 'ios';
+        storeState.tasks = [];
+        hiddenTasks = [{ ...defaultTasks[2], projectId: association === 'direct' ? 'project-1' : undefined, sectionId: association === 'section' ? 'section-1' : undefined }];
+        storeState._allSections = [{ id: 'section-1', projectId: 'project-1', title: 'Section', order: 0, createdAt: at(2), updatedAt: at(2) }];
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        expect(tree.root.findAllByType(Modal)[0].props.allowSwipeDismissal).toBe(false);
+        expect(tree.root.findByProps({ accessibilityViewIsModal: true }).props.onAccessibilityEscape).toBeTypeOf('function');
+        expect(tree.root.findAllByType(Modal).some((modal) => modal.props.presentationStyle === 'pageSheet' && modal.findAllByProps({ testID: 'review-confirm-complete-project' }).length > 0)).toBe(true);
+        expect(storeState.updateProject).not.toHaveBeenCalled();
+        act(() => tree.root.findByProps({ accessibilityLabel: 'common.cancel' }).props.onPress());
+        expect(tree.root.findAllByType(Modal)[0].props.allowSwipeDismissal).toBe(true);
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        expect(storeState.updateProject).not.toHaveBeenCalled();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        await act(async () => tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.onPress());
+        expect(storeState.updateProject).toHaveBeenCalledExactlyOnceWith('project-1', { status: 'archived' });
+        expect(currentStepOf(tree)).toBe('projects');
+        await act(async () => tree.unmount());
+    });
+
+    it('bounds long confirmation titles while keeping the full accessible name', async () => {
+        const title = 'A very long project title\n'.repeat(100);
+        storeState.projects = [{ ...defaultProjects[0], title }];
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        const heading = tree.root.findByProps({ accessibilityLabel: title });
+        expect(heading.props.numberOfLines).toBe(2);
+        expect(heading.props.children).toBe(title);
+        expect(tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.disabled).toBe(false);
+        await act(async () => tree.unmount());
+    });
+
+    it('does not confirm deleted, finished or reference tasks', async () => {
+        storeState.tasks = [];
+        hiddenTasks = [
+            { ...defaultTasks[2], id: 'deleted', deletedAt: at(3) },
+            { ...defaultTasks[2], id: 'done', status: 'done' },
+            { ...defaultTasks[2], id: 'archived', status: 'archived' },
+            { ...defaultTasks[2], id: 'reference', status: 'reference' },
+        ];
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        expect(storeState.updateProject).toHaveBeenCalledOnce();
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['archived', 'deleted'] as const)('does not complete a project made %s while confirmation was open', async (change) => {
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        storeState.projects = [{ ...defaultProjects[0], ...(change === 'deleted' ? { deletedAt: at(3) } : { status: 'archived' as const }) }];
+        await act(async () => tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.onPress());
+        expect(storeState.updateProject).not.toHaveBeenCalled();
+        expect(tree.root.findAllByProps({ testID: 'review-confirm-complete-project' })).toHaveLength(0);
+        await act(async () => tree.unmount());
+    });
+
+    it.each(['result', 'throw'] as const)('shows a translated failure for a rejected %s and prevents duplicate writes', async (failure) => {
+        let rejectWrite!: () => void;
+        storeState.updateProject.mockImplementation(() => new Promise((resolve, reject) => {
+            rejectWrite = () => failure === 'throw' ? reject(new Error('Disk full')) : resolve({ success: false, error: 'Disk full' });
+        }));
+        const tree = await openProjectCompletion();
+        await act(async () => tree.root.findByProps({ testID: 'review-complete-project-project-1' }).props.onPress());
+        const confirm = tree.root.findByProps({ testID: 'review-confirm-complete-project' });
+        act(() => { confirm.props.onPress(); confirm.props.onPress(); });
+        expect(storeState.updateProject).toHaveBeenCalledOnce();
+        expect(tree.root.findByProps({ testID: 'review-confirm-complete-project' }).props.disabled).toBe(true);
+        await act(async () => rejectWrite());
+        expect(tree.root.findByProps({ accessibilityRole: 'alert' }).props.children).toBe('projects.archiveFailed');
+        expect(storeState.projects[0].status).toBe('active');
+        expect(logInfo).not.toHaveBeenCalled();
+        await act(async () => tree.unmount());
     });
 
     it.each([
@@ -520,7 +657,7 @@ describe('ReviewModal', () => {
             nextButton.props.onPress();
         });
 
-        // Stale is skipped (nothing is stale), so Next lands on Calendar.
+
         expect(currentStepOf(tree)).toBe('calendar');
 
         const backLabel = tree.root.find((node) => flattenText(node.props?.children) === '← Back');
@@ -593,8 +730,7 @@ describe('ReviewModal', () => {
             await Promise.resolve();
         });
 
-        // Inbox is empty, so the initial 'inbox' step canonicalizes to Calendar;
-        // the stored checkpoint then wins.
+
         expect(currentStepOf(tree)).toBe('waiting');
     });
 
@@ -695,15 +831,15 @@ describe('ReviewModal', () => {
         expect(summary.type).toBe(ScrollView);
         expect(summary.props.contentContainerStyle).toEqual(expect.objectContaining({ flexGrow: 1 }));
         expect(summary.props.contentContainerStyle.flex).toBeUndefined();
-        // Finish stays in the safe-area footer, outside the scrolling summary.
+
         expect(summary.findAllByProps({ accessibilityLabel: 'Finish' })).toHaveLength(0);
         expect(tree.root.findByProps({ accessibilityLabel: 'Finish' })).toBeDefined();
         expect(tree.root.findByProps({ testID: 'review-share-card-button' })).toBeDefined();
     });
 
     it('shows this week\'s completion, project, estimate, and tracked totals', async () => {
-        // Two tasks finished this week, one of them in a project and carrying a
-        // 1h estimate with 45m tracked against it.
+
+
         storeState.tasks = [
             doneTask({
                 projectId: archivedProject.id,
@@ -740,9 +876,8 @@ describe('ReviewModal', () => {
     it('shows the estimate look-back at defaults, with no features block stored', async () => {
         storeState.tasks = [doneTask({ timeEstimate: '1hr', timeSpentMinutes: 45 })] as typeof storeState.tasks;
         storeState.projects = [];
-        // No `features` key at all: time estimates default ON, so the look-back
-        // must render. `features?.timeEstimates === true` read this as OFF and
-        // hid the rows for everyone at defaults.
+
+
         storeState.settings = {
             ...defaultSettings,
             gtd: {
@@ -760,7 +895,7 @@ describe('ReviewModal', () => {
             tree.root.findAll((node) => flattenText(node.props?.children).includes(text)).length > 0;
         expect(hasText('1 completed task(s) had an estimate')).toBe(true);
         expect(hasText('Estimated: 1h')).toBe(true);
-        // Pomodoro still defaults OFF, so the tracked line stays hidden.
+
         expect(hasText('Tracked on those tasks: 45m')).toBe(false);
     });
 
@@ -790,16 +925,17 @@ describe('ReviewModal', () => {
     });
 
     it('parses the project-step prompt and Save & edit opens the created task in the editor', async () => {
-        storeState.addTask.mockImplementation(async (title: string, props: Record<string, unknown>) => {
+        storeState.addTask.mockImplementation(async (title: string, props: Partial<Task>) => {
             storeState.tasks.push({
                 id: 'new-task-1',
                 title,
+                status: 'inbox',
                 contexts: [],
                 tags: [],
                 createdAt: '2026-03-15T00:00:00.000Z',
                 updatedAt: '2026-03-15T00:00:00.000Z',
                 ...props,
-            } as (typeof storeState.tasks)[number]);
+            });
             return { success: true, id: 'new-task-1' };
         });
         let tree!: ReturnType<typeof create>;
@@ -825,7 +961,7 @@ describe('ReviewModal', () => {
             throw new Error(`No pressable found for "${text}"`);
         };
 
-        // Walk forward to the projects step (empty steps are skipped).
+
         for (let i = 0; i < 6; i += 1) {
             if (tree.root.findAll((node) => flattenText(node.props?.children).includes('Review Your Projects')).length > 0) break;
             await pressByText('Next →');
@@ -840,8 +976,7 @@ describe('ReviewModal', () => {
 
         await pressByText('Save & edit');
 
-        // The real quick-add grammar runs here: the `@errands` token leaves the
-        // title and becomes a context on the new task.
+
         expect(storeState.addTask).toHaveBeenCalledTimes(1);
         const [savedTitle, savedProps] = storeState.addTask.mock.calls[0];
         expect(savedTitle).toBe('Buy cable');
@@ -854,8 +989,7 @@ describe('ReviewModal', () => {
         expect(editModal.props.defaultTab).toBe('task');
     });
 
-    // Rows carry the #766 memo boundary, which only holds while the modal hands
-    // untouched rows the same references back.
+
     it('hands rows stable prop references across a re-render', async () => {
         storeState.tasks = [
             ...defaultTasks.map((task) => ({ ...task })),
@@ -885,8 +1019,7 @@ describe('ReviewModal', () => {
         expect(after[1].tc).toBe(before[1].tc);
     });
 
-    // The rail is the mobile copy of core's step order. Pinned against
-    // `buildReviewSteps` so the two cannot drift apart silently.
+
     it('renders the canonical core step order in the rail', async () => {
         const coreStepIds = (includeContextStep: boolean) => buildReviewSteps(
             getWeeklyReviewBuckets(

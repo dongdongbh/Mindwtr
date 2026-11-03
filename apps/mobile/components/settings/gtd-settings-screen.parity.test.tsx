@@ -1,22 +1,6 @@
-/**
- * React Native's Settings › GTD screens (the hub and its six sub-screens),
- * replayed against the frozen parity fixture
- * (packages/core/src/gtd-settings-parity.fixtures.json) that core's GTD
- * settings model and the native host contract are tested against.
- *
- * To recapture, keep every file under apps/ at HEAD except this one, then run
- *   MINDWTR_CAPTURE_GTD_SETTINGS=1 TZ=UTC bunx vitest run components/settings/gtd-settings-screen.parity.test.tsx
- * The capture refuses to run while any other file under apps/ differs from HEAD,
- * so the provenance always names the React Native code that ran. After a
- * recorded React Native fix, MINDWTR_DUMP_GTD_SETTINGS=<file> writes this run's
- * observations, to replace only the ones the fix changes (see provenance.recaptured).
- *
- * Each scenario renders the real screen with the real core store, drives it
- * through its own controls, and records what a user sees, what the store is
- * asked to write, what the screen stores on the device, its toasts and where
- * it navigates. The device is stubbed: the exact-alarm permission is the
- * scenario's, and the Android capture intent panel (a native module) is a marker.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -99,15 +83,15 @@ vi.mock('@/lib/exact-alarm-permission', () => ({
   refreshExactAlarmPermission: async () => harness.exactAlarm.allowed,
   openExactAlarmSettings: async () => undefined,
 }));
-// A native module; the native host draws its own. Only where it sits is recorded.
+
 vi.mock('./android-capture-intent-section', () => ({
   AndroidCaptureIntentSection: () => React.createElement('AndroidCaptureIntentSection'),
 }));
-// Native account cards have separate behavior tests; this frozen fixture covers the GTD model.
+
 vi.mock('./gmail-capture-section', () => ({
   GmailCaptureSection: () => React.createElement('GmailCaptureSection'),
 }));
-// Each lucide icon is its own element, so the archive screen's Check can be seen.
+
 vi.mock('lucide-react-native', () => {
   const icons = new Map<string, unknown>();
   return new Proxy({ __esModule: true } as Record<string, unknown>, {
@@ -121,8 +105,6 @@ vi.mock('lucide-react-native', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Scenario data.
 
 const at = (day: string) => `2026-${day}T12:00:00.000Z`;
 const area = (id: string, name: string, order: number, extra: Partial<Area> = {}): Area => ({
@@ -160,7 +142,7 @@ const SETTINGS: Record<string, AppSettings> = {
   },
   pomodoroOn: { features: { pomodoro: true } },
   activeArea: { gtd: { defaultAreaMode: 'active' } },
-  // An id with no mode reads as a fixed area; this one is deleted.
+
   goneArea: { gtd: { defaultAreaId: 'a-gone' } },
   oddArchive: { gtd: { autoArchiveDays: 10.6 } },
   customEditor: {
@@ -169,7 +151,7 @@ const SETTINGS: Record<string, AppSettings> = {
       taskEditor: {
         order: ['dueDate', 'status', 'tags', 'retiredField', 'project', 'contexts'] as never,
         hidden: ['description', 'priority', 'timeEstimate'],
-        // status is not sectionable: the screen ignores it.
+
         sections: { tags: 'details', dueDate: 'scheduling', status: 'details' },
         sectionOpen: { scheduling: true, details: true },
       },
@@ -185,15 +167,8 @@ type Device = {
   storage?: Record<string, string>;
   exactAlarm?: { relevant: boolean; allowed: boolean };
 };
-/**
- * Actions: ['press', label] a control outside the modal; ['modalPress', label]
- * one inside it; ['switch', index] / ['modalSwitch', index] flips a switch;
- * ['type', index, text] and ['blur', index] edit a text field; ['dismiss']
- * closes the modal; ['eye', field] and ['field', field] press a task editor
- * row's visibility badge or its body. A label is the control's text (or its
- * accessibility label, or the first of its texts); 'k:<key>' is that key's
- * translation.
- */
+
+
 type Scenario = { name: string; screen: Screen; settings: string; device: Device; actions: [string, ...unknown[]][] };
 
 const scenarios: Scenario[] = [
@@ -294,8 +269,6 @@ const scenarios: Scenario[] = [
   { name: 'task editor: an unreadable open mode', screen: 'gtd-task-editor', settings: 'base', device: { storage: { [OPEN_MODE_KEY]: 'sideways' } }, actions: [] },
 ];
 
-// ---------------------------------------------------------------------------
-// The store: real data, recorded writes.
 
 const writeLog: unknown[][] = [];
 const normalize = (value: unknown): unknown => JSON.parse(JSON.stringify(value, (_key, entry) => (
@@ -337,9 +310,6 @@ function setDevice(device: Device) {
   __resetTaskOpenModeStoreForTests();
 }
 
-// ---------------------------------------------------------------------------
-// Reading the rendered screen. Hidden modals render their children in the test
-// shim; they are skipped, as a user would.
 
 const deepText = (node: ReactTestInstance | string | number | null | undefined | boolean): string => {
   if (node === null || node === undefined || typeof node === 'boolean') return '';
@@ -347,7 +317,7 @@ const deepText = (node: ReactTestInstance | string | number | null | undefined |
   return node.children.map((child) => deepText(child as ReactTestInstance | string)).join('');
 };
 
-/** Host nodes in screen order; `modals: false` skips every modal, `true` skips only hidden ones. */
+
 function hosts(root: ReactTestInstance, type: string, modals = false): ReactTestInstance[] {
   const out: ReactTestInstance[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -359,7 +329,7 @@ function hosts(root: ReactTestInstance, type: string, modals = false): ReactTest
   return out;
 }
 
-/** The visible text, one entry per outermost Text, in screen order. */
+
 function textsIn(root: ReactTestInstance, modals = false): string[] {
   const out: string[] = [];
   const walk = (node: ReactTestInstance) => {
@@ -382,10 +352,7 @@ const visibleModal = (root: ReactTestInstance) => root.findAll((node) => String(
 
 const controlLabel = (node: ReactTestInstance) => node.props.accessibilityLabel ?? textsIn(node, true).join('|');
 
-/**
- * Whether a control shows as chosen: its accessibility state when it has one,
- * else a check mark, else a tinted first text.
- */
+
 function controlSelected(node: ReactTestInstance): boolean {
   const state = node.props.accessibilityState?.selected;
   if (typeof state === 'boolean') return state;
@@ -429,8 +396,6 @@ function observe(root: ReactTestInstance, seen: Seen) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Driving the screen.
 
 async function run(what: string, fn: (() => unknown) | undefined) {
   if (!fn) throw new Error(`Nothing to do for ${what}`);
@@ -454,7 +419,7 @@ async function perform(renderer: ReactTestRenderer, action: [string, ...unknown[
       const scope = kind === 'press' ? hosts(root, 'TouchableOpacity') : hosts(modal(), 'TouchableOpacity', true);
       const label = labelText(target as string);
       const control = scope.find((node) => matches(node, label));
-      // A disabled control cannot be pressed.
+
       if (control?.props.disabled) return undefined;
       return run(`${kind} ${label}`, control?.props.onPress);
     }
@@ -542,7 +507,7 @@ describe('React Native GTD settings screens parity fixture', () => {
   it('replays every scenario exactly as frozen', async () => {
     const captured: Record<string, unknown> = {};
     for (const scenario of scenarios) captured[scenario.name] = await runScenario(scenario);
-    // Writes this run's observations to a file, to replace only the ones a fix changes.
+
     if (process.env.MINDWTR_DUMP_GTD_SETTINGS) writeFileSync(process.env.MINDWTR_DUMP_GTD_SETTINGS, JSON.stringify(captured));
     if (CAPTURE) {
       writeFileSync(FIXTURE_PATH, `${JSON.stringify({ provenance: captureProvenance(), ...inputs(), observations: captured }, null, 1)}\n`);

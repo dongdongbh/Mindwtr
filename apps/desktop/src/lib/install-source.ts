@@ -2,8 +2,7 @@ export function normalizeAnalyticsInstallChannel(value: string | null | undefine
     const normalized = String(value || '').trim().toLowerCase();
     if (!normalized) return 'unknown';
 
-    // Mindwtr's official Flatpak distribution is Flathub, and analytics dashboards
-    // bucket these installs under the store channel rather than generic "flatpak".
+
     if (normalized === 'flatpak' || normalized.startsWith('flatpak:')) {
         return 'flathub';
     }

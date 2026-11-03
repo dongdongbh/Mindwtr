@@ -41,14 +41,14 @@ jsonFiles.forEach(file => {
 
             let updated = false;
 
-            // Handle standard package.json
+
             if (json.version) {
                 console.log(`Updating ${file} version from ${json.version} to ${newVersion}`);
                 json.version = newVersion;
                 updated = true;
             }
 
-            // Handle MCP Registry package metadata
+
             if (Array.isArray(json.packages)) {
                 json.packages.forEach((pkg, index) => {
                     if (pkg && pkg.version) {
@@ -60,7 +60,7 @@ jsonFiles.forEach(file => {
                 });
             }
 
-            // Handle app.json (Expo)
+
             if (json.expo && json.expo.version) {
                 console.log(`Updating ${file} (expo) version from ${json.expo.version} to ${newVersion}`);
                 json.expo.version = newVersion;

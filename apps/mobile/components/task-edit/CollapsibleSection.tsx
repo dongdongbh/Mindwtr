@@ -16,7 +16,7 @@ type CollapsibleSectionProps = {
     badge?: number;
     defaultExpanded?: boolean;
     resetKey?: string | number;
-    /** Adds a (?) after the title; its text opens under the header. */
+
     help?: { topic: OnboardingTopic; t: (key: string) => string };
     children: React.ReactNode;
 };
@@ -69,7 +69,7 @@ export function CollapsibleSection({
                         onPress={() => setHelpOpen((prev) => !prev)}
                     />
                 )}
-                {/* The rest of the row toggles too, so the whole header stays a tap target; the titled button is the accessible one. */}
+                {                                                                                                                       }
                 <Pressable
                     style={styles.headerRest}
                     onPress={toggle}

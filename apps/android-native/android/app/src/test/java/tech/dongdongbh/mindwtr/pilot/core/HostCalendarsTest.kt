@@ -3,7 +3,7 @@ package tech.dongdongbh.mindwtr.pilot.core
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** expo-calendar's permission status for READ_CALENDAR and WRITE_CALENDAR, as RN reads it (C3). */
+
 class HostCalendarsTest {
     @Test fun thePairIsGrantedOnlyWhenBothAre() {
         assertEquals("granted", HostCalendars.status(listOf(true, true), listOf(true, true)))

@@ -5,7 +5,7 @@ import { flushPendingSave, getStorageAdapter, resetForTests, useTaskStore } from
 import { buildSaveSnapshot } from './store-helpers';
 import type { AppData, Project, Task } from './types';
 
-// Each forced failed save waits the store's real retry backoff (250+500+1000+2000 ms), so one such test takes ~3.8 s alone.
+
 vi.setConfig({ testTimeout: 30_000 });
 
 const NOW = '2026-10-02T13:00:00.000Z';
@@ -255,7 +255,7 @@ describe('Archive row completion time uses RN completedAt-only update and guarde
             const command = await prepare(native);
             expect(value(await native.host.commitPreparedArchiveTaskCompletedAt(command))).toEqual({ id: ID });
             expect(rows()).toEqual(expected); expect(await raw(native)).toEqual(expectedRaw);
-            // Recovery deliberately retains a dangling raw parent instead of performing normal-load repairs.
+
             await native.client().run('UPDATE tasks SET projectId = ? WHERE id = ?', ['parent', ID]);
             await native.restart(undefined, { recoveryLoad: true });
             expect(useTaskStore.getState()._tasksById.get(ID)?.projectId).toBe('parent');

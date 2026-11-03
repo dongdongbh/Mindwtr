@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
  * THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/** Lucide's `<circle>` as a path. */
+
 internal fun circle(cx: Int, cy: Int, r: Int) = "M${cx - r} ${cy}a$r $r 0 1 0 ${2 * r} 0a$r $r 0 1 0 ${-2 * r} 0"
 
 internal fun lucide(name: String, vararg paths: String, stroke: Float = 2f, filled: Boolean = false): ImageVector =
@@ -50,14 +50,16 @@ object Lucide {
         "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z")
     val Folder = lucide("Folder",
         "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z")
-    /** The capture popup's Import .txt. */
+
     val FileText = lucide("FileText",
         "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z",
         "M14 2v5a1 1 0 0 0 1 1h5", "M10 9H8", "M16 13H8", "M16 17H8")
-    /** RN's capture button draws Plus at stroke 3. */
+
     val Plus = lucide("Plus", "M5 12h14", "M12 5v14", stroke = 3f)
     val Check = lucide("Check", "M20 6 9 17l-5-5")
-    /** RN's Notifications day picker draws Check at stroke 2.5. */
+
+    val Ban = lucide("Ban", "M4.929 4.929 19.07 19.071", circle(12, 12, 10))
+
     val CheckPicked = lucide("CheckPicked", "M20 6 9 17l-5-5", stroke = 2.5f)
     val Circle = lucide("Circle", circle(12, 12, 10))
     val Star = lucide("Star", STAR)
@@ -68,7 +70,7 @@ object Lucide {
     val ChevronDown = lucide("ChevronDown", "m6 9 6 6 6-6", stroke = 2.2f)
     val ChevronRight = lucide("ChevronRight", "m9 18 6-6-6-6", stroke = 2.2f)
     val X = lucide("X", "M18 6 6 18", "m6 6 12 12")
-    /** The startup prompt window's icon and the welcome sheet's Import tasks (app-announcement-modal.tsx, MobileOnboardingFlow.tsx). */
+
     val Megaphone = lucide("Megaphone", "M11 6a13 13 0 0 0 8.4-2.8A1 1 0 0 1 21 4v12a1 1 0 0 1-1.6.8A13 13 0 0 0 11 14H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
         "M6 14a12 12 0 0 0 2.4 7.2 2 2 0 0 0 3.2-2.4A8 8 0 0 1 10 14", "M8 6v8", stroke = 2.2f)
     val Download = lucide("Download", "M12 15V3", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "m7 10 5 5 5-5", stroke = 2.2f)
@@ -82,7 +84,7 @@ object Lucide {
     val Paperclip = lucide("Paperclip", "m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551")
     val ChevronsUp = lucide("ChevronsUp", "m17 11-5-5-5 5", "m17 18-5-5-5 5")
     val ChevronsDown = lucide("ChevronsDown", "m7 6 5 5 5-5", "m7 13 5 5 5-5")
-    // The task editor's field headings and controls (TaskEditFormTab and its field components).
+
     val Type = lucide("Type", "M12 4v16", "M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2", "M9 20h6")
     val ListTodo = lucide("ListTodo", "M13 5h8", "M13 12h8", "M13 19h8", "m3 17 2 2 4-4",
         "M4 4h4a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z")
@@ -113,67 +115,70 @@ object Lucide {
     val User = lucide("User", "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2", circle(12, 7, 4))
     val AlignLeft = lucide("AlignLeft", "M21 5H3", "M15 12H3", "M17 19H3")
     val Navigation = lucide("Navigation", "M3 11 22 2 13 21 11 13z")
-    /** RN's field help button draws Ionicons help-circle-outline; lucide's CircleQuestionMark is the same glyph. */
+
     val CircleHelp = lucide("CircleHelp", circle(12, 12, 10), "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", "M12 17h.01")
-    // RN's TASK_STATUS_ICONS (lib/task-status-icons.ts): Inbox, ArrowRight, Check and these.
+
     val CirclePause = lucide("CirclePause", circle(12, 12, 10), "M10 15V9", "M14 15V9")
     val CircleArrowUp = lucide("CircleArrowUp", circle(12, 12, 10), "m16 12-4-4-4 4", "M12 16V8")
     val Book = lucide("Book", "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20")
-    // Global search (app/global-search.tsx) and Process Inbox (inbox-processing/ and inbox.tsx).
+
     val Search = lucide("Search", "m21 21-4.34-4.34", circle(11, 11, 8))
     val SlidersHorizontal = lucide("SlidersHorizontal", "M10 5H3", "M12 19H3", "M14 3v4", "M16 17v4", "M21 12h-9", "M21 19h-5",
         "M21 5h-7", "M8 10v4", "M8 12H3")
-    /** RN's CheckCircle (lucide CircleCheckBig). */
+
     val CheckCircle = lucide("CheckCircle", "M21.801 10A10 10 0 1 1 17 3.335", "m9 11 3 3L22 4")
-    /** RN's CheckCircle2 (lucide CircleCheck). */
+
     val CheckCircle2 = lucide("CheckCircle2", circle(12, 12, 10), "m9 12 2 2 4-4")
-    /** RN's XCircle (lucide CircleX). */
+
     val XCircle = lucide("XCircle", circle(12, 12, 10), "m15 9-6 6", "m9 9 6 6")
     val Pencil = lucide("Pencil", "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z", "m15 5 4 4")
     val Trash2 = lucide("Trash2", "M10 11v6", "M14 11v6", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6", "M3 6h18", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2")
     val LayoutList = lucide("LayoutList", "M4 3h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z",
         "M4 14h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1z", "M14 4h7", "M14 9h7", "M14 15h7", "M14 20h7")
     val ChevronUp = lucide("ChevronUp", "m18 15-6-6-6 6")
-    /** The Pomodoro card's fold button: ChevronDown at lucide's own stroke 2 (the other ChevronDown is RN's 2.2). */
+
     val ChevronDownPlain = lucide("ChevronDown", "m6 9 6 6 6-6")
-    /** RN's SettingsGuideLink icon (lucide external-link, stroke 2.2). */
+
     val ExternalLink = lucide("ExternalLink", "M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", stroke = 2.2f)
-    /** RN's START_LATER_ICON. */
+
     val Clock3 = lucide("Clock3", "M12 6v6h4", circle(12, 12, 10))
-    /** RN's add-project button draws Plus at stroke 2.4. */
+
     val PlusMedium = lucide("PlusMedium", "M5 12h14", "M12 5v14", stroke = 2.4f)
-    // The Menu tab's screens (views/waiting-view.tsx, views/someday-view.tsx, list-overflow-menu.tsx, archived.tsx).
-    /** RN's empty-state glyphs are drawn at stroke 1.5. */
+
+
     val CirclePauseThin = lucide("CirclePauseThin", circle(12, 12, 10), "M10 15V9", "M14 15V9", stroke = 1.5f)
     val LightbulbThin = lucide("LightbulbThin",
         "M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5", "M9 18h6", "M10 22h4", stroke = 1.5f)
     private const val ARCHIVE_BOX = "M3 3h18a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"
     val ArchiveThin = lucide("ArchiveThin", ARCHIVE_BOX, "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8", "M10 12h4", stroke = 1.5f)
-    /** RN's MoreHorizontal (lucide Ellipsis). */
+
     val MoreHorizontal = lucide("MoreHorizontal", circle(12, 12, 1), circle(19, 12, 1), circle(5, 12, 1))
     val ArrowUpDown = lucide("ArrowUpDown", "m21 16-4 4-4-4", "M17 20V4", "m3 8 4-4 4 4", "M7 4v16")
     val Eye = lucide("Eye", "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0", circle(12, 12, 3))
-    /** RN's Plus at lucide's own stroke 2 (the Someday menu's New section). */
+
     val PlusPlain = lucide("PlusPlain", "M5 12h14", "M12 5v14")
-    /** Lucide's Menu: RN's Menu tab. */
+
     val Menu = lucide("Menu", "M4 5h16", "M4 12h16", "M4 19h16")
-    // The Review, Contexts and Trash screens and the Weekly and Daily Review (review.tsx, review-modal.tsx, daily-review-modal.tsx).
+
     val ClipboardCheck = lucide("ClipboardCheck", "M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z",
         "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2", "m9 14 2 2 4-4")
     val FolderOpen = lucide("FolderOpen", "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2")
     private const val LIGHTBULB = "M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"
     val Lightbulb = lucide("Lightbulb", LIGHTBULB, "M9 18h6", "M10 22h4")
-    // The feedback modal's categories (feedback-settings-modal.tsx): Bug, Lightbulb and MessageSquare.
+
     val Bug = lucide("Bug", "M12 20v-9", "M14 7a4 4 0 0 1 4 4v3a6 6 0 0 1-12 0v-3a4 4 0 0 1 4-4z", "M14.12 3.88 16 2", "M21 21a4 4 0 0 0-3.81-4",
         "M21 5a4 4 0 0 1-3.55 3.97", "M22 13h-4", "M3 21a4 4 0 0 1 3.81-4", "M3 5a4 4 0 0 0 3.55 3.97", "M6 13H2", "m8 2 1.88 1.88",
         "M9 7.13V6a3 3 0 1 1 6 0v1.13")
+
+    val Mic = lucide("Mic", "M12 19v3", "M19 10v2a7 7 0 0 1-14 0v-2", "M9 5a3 3 0 0 1 6 0v7a3 3 0 0 1-6 0z")
+    val Square = lucide("Square", "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z")
     val MessageSquare = lucide("MessageSquare",
         "M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z")
     val PartyPopper = lucide("PartyPopper", "M5.8 11.3 2 22l10.7-3.79", "M4 3h.01", "M22 8h.01", "M15 2h.01", "M22 20h.01",
         "m22 2-2.24.75a2.9 2.9 0 0 0-1.96 3.12c.1.86-.57 1.63-1.45 1.63h-.38c-.86 0-1.6.6-1.76 1.44L14 10",
         "m22 13-.82-.33c-.86-.34-1.82.2-1.98 1.11c-.11.7-.72 1.22-1.43 1.22H17", "m11 2 .33.82c.34.86-.2 1.82-1.11 1.98C9.52 4.9 9 5.52 9 6.23V7",
         "M11 13c1.93 1.93 2.83 4.17 2 5-.83.83-3.07-.07-5-2-1.93-1.93-2.83-4.17-2-5 .83-.83 3.07.07 5 2Z", stroke = 1.5f)
-    /** RN draws the review's Play filled, at stroke 2.5. */
+
     val PlayFilled = lucide("PlayFilled", "M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z", stroke = 2.5f, filled = true)
     val Share2 = lucide("Share2", circle(18, 5, 3), circle(6, 12, 3), circle(18, 19, 3), "M8.59 13.51 15.42 17.49", "M15.41 6.51 8.59 10.49")
     private const val SPARKLE = "M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"
@@ -182,19 +187,19 @@ object Lucide {
     val Brain = lucide("Brain", "M12 18V5", "M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4", "M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5",
         "M17.997 5.125a4 4 0 0 1 2.526 5.77", "M18 18a4 4 0 0 0 2-7.464", "M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517",
         "M6 18a4 4 0 0 1-2-7.464", "M6.003 5.125a4 4 0 0 0-2.526 5.77")
-    /** RN's empty-state glyphs at stroke 1.5: Contexts' Tag and CheckCircle2, the reviews' CheckCircle2 and Star. */
+
     val TagThin = lucide("TagThin", "M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z",
         "M7 7.5a.5 .5 0 1 0 1 0a.5 .5 0 1 0-1 0", stroke = 1.5f)
     val CheckCircle2Thin = lucide("CheckCircle2Thin", circle(12, 12, 10), "m9 12 2 2 4-4", stroke = 1.5f)
     val StarThin = lucide("StarThin", STAR, stroke = 1.5f)
-    /** RN's selection check (stroke 3). */
+
     val CheckBold = lucide("CheckBold", "M20 6 9 17l-5-5", stroke = 3f)
-    /** The Board's Filters button (lucide's Filter, drawn as Funnel in 0.556). */
+
     val Filter = lucide("Filter", "M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z")
-    /** Focus's View options, its filter sheet's Save, and the Today's Focus reorder handle. */
+
     val Settings2 = lucide("Settings2", "M14 17H5", "M19 7h-9", circle(17, 17, 3), circle(7, 7, 3))
     val BookmarkPlus = lucide("BookmarkPlus", "m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z", "M12 7L12 13", "M15 10L9 10")
-    /** RN's reorder mode's section arrows (task-list.tsx: ArrowUp, ArrowDown). */
+
     val ArrowUp = lucide("ArrowUp", "m5 12 7-7 7 7", "M12 19V5")
     val ArrowDown = lucide("ArrowDown", "M12 5v14", "m19 12-7 7-7-7")
     val GripVertical = lucide("GripVertical", circle(9, 12, 1), circle(9, 5, 1), circle(9, 19, 1), circle(15, 12, 1), circle(15, 5, 1), circle(15, 19, 1))
@@ -216,7 +221,7 @@ internal fun ionicon(name: String, path: String): ImageVector =
     ImageVector.Builder(name, 24.dp, 24.dp, 512f, 512f).apply { addPath(addPathNodes(path), fill = SolidColor(ICON_MASK)) }.build()
 
 object Ionicons {
-    // The attachments field's buttons (TaskEditContentField: document-attach-outline, image-outline, link-outline).
+
     val DocumentAttachOutline = ionicon("DocumentAttachOutline",
         "M148 17Q151 16 163 17Q181 17 194 26Q207 34 213 44L215 48H249Q279 48 285.5 49Q292 50 300 56Q306 59 379.5 132.5" +
         "Q453 206 456 212Q460 217 462 223L464 229V336Q464 442 462 448Q454 476 428 489Q418 495 404 495.5Q390 496 293 496" +
@@ -365,8 +370,7 @@ object Ionicons {
         "Q348 386 349 389Q353 396 351 404Q350 413 342.5 419Q335 425 326 424Q319 423 309 414Q299 405 239 345" +
         "Q178 284 169 274Q160 264 160 256Q160 248 168.5 238.5Q177 229 237 169Q309 96 313.5 93Q318 90 322 89Z")
 
-    /** RN's IconSymbol MAPPING from core's SF Symbols names (more-menu-model.ts) to the Ionicons it draws on Android. */
-    // Project details (ProjectDetailModal): the type and scope help, the notes' expand, a date's clear, a dialog's close.
+
     val HelpCircleOutline = ionicon("HelpCircleOutline",
         "M242 65Q261 63 284 66Q313 71 340 84Q395 110 424.5 163.5Q454 217 447 278Q441 327 413 367Q385 407 340 428Q285 45" +
         "6 224.5 445.5Q164 435 120 391Q98 369 84 341Q64 301 64 256Q64 211 84 171Q113 112 172 84Q203 69 242 65ZM279 98Q2" +
@@ -406,7 +410,7 @@ object Ionicons {
         ".5Q392 360 392 367Q392 378 385 385Q378 392 367 392Q360 392 352.5 385.5Q345 379 305 339Q305 339 256 290L207 339" +
         "Q167 379 159.5 385.5Q152 392 145 392Q134 392 127 385Q120 378 120 367Q120 360 126.5 352.5Q133 345 173 305Q173 3" +
         "05 222 256L173 207Q133 166 126.5 159Q120 152 120 144Q120 127 136 121Z")
-    // The project header's actions sheet (ProjectDetailModal): its "..." (ellipsis-horizontal), Complete and Convert to section.
+
     val EllipsisHorizontal = ionicon("EllipsisHorizontal",
         "M84 210Q97 206 111 210Q127 215 137 231Q153 256 137 281Q122 304 96 304Q70 304 55.5 281.5Q41 259 53 235" +
         "Q63 215 84 210ZM246 209Q259 206 272 211Q297 220 302.5 245.5Q308 271 290 290Q275 304 256 304Q237 304 222.5 290" +
@@ -431,7 +435,7 @@ object Ionicons {
         "Q229 124 208 110Q192 100 189 98Q186 96 142.5 96.5Q99 97 96 97ZM454 209Q454 209 454 209Q451 208 255.5 208" +
         "Q60 208 58 209Q52 212 49 219Q48 222 55 295Q62 368 64 384Q65 398 67 402Q70 410 79 414Q79 414 83 416H256H429" +
         "L433 414Q442 410 445 402Q447 398 448 388Q449 379 456 301Q464 223 463 220Q461 212 454 209Z")
-    // The project's view options (ProjectDetailModal's "..." in the pinned row): Sort, Order and its Done, Filter.
+
     val SwapVerticalOutline = ionicon("SwapVerticalOutline",
         "M153 82Q162 77 171 84Q173 86 174.5 89Q176 92 176 235V378L220 334Q263 290 265.5 289Q268 288 272.5 288.5" +
         "Q277 289 279 290Q286 293 287 299Q288 302 288 303Q288 304 287.5 308Q287 312 228.5 370Q170 428 167 430" +
@@ -472,8 +476,8 @@ object Ionicons {
         "circle" to EllipseOutline, "calendar" to CalendarOutline, "folder.fill" to Folder, "trash.fill" to Trash, "square.grid.2x2.fill" to Grid,
         "clock.arrow.circlepath" to Time, "gearshape.fill" to Settings, "tray.fill" to FileTray,
     )
-    // RN's MarkdownFormatToolbar (markdown-format-toolbar.tsx): list-circle, checkbox, remove, chatbox-ellipses, code-slash,
-    // code-working and arrow-undo outlines; list-outline and link-outline are above.
+
+
     val ListCircleOutline = ionicon("ListCircleOutline",
         "M237 51Q240 51 260 51Q287 51 308 57Q350 68 386 96Q411 116 430 144Q464 196 464 258.5Q464 321 430 373" +
         "Q406 408 369 432Q331 458 284.5 464Q238 470 194 456Q166 447 143 432Q106 408 83 373Q41 310 49 236.5" +
@@ -546,10 +550,7 @@ object Ionicons {
         "Q393 345 422 371Q422 371 429 378V372Q426 342 416 314Q379 206 253 201Q237 200 234 199Q229 197 225 191Z")
 }
 
-/*
- * The two FontAwesome glyphs RN's MarkdownFormatToolbar draws (italic, strikethrough; @expo/vector-icons 15.0.3 FontAwesome.ttf),
- * on the font's 1792 em with the glyph's own advance as its width. FontAwesome 4.7 is SIL OFL 1.1 licensed (Dave Gandy).
- */
+
 internal fun fontAwesome(name: String, advance: Int, path: String): ImageVector =
     ImageVector.Builder(name, (24f * advance / 1792).dp, 24.dp, advance.toFloat(), 1792f).apply { addPath(addPathNodes(path), fill = SolidColor(ICON_MASK)) }.build()
 

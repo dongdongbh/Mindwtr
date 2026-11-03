@@ -54,7 +54,7 @@ const readRequest = (value: unknown): NativeProjectStatusRequest | null => {
         && iso(expected.updatedAt) ? input as NativeProjectStatusRequest : null;
 };
 
-/** Pure cold-journal validation, including lifecycle and result semantics, before any SQL operation. */
+
 const readPrepared = (value: unknown): NativePreparedProjectStatus | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;

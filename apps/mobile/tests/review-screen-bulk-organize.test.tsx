@@ -30,7 +30,7 @@ const mocks = vi.hoisted(() => {
     updateTask,
     storeState: {
       tasks: [] as Task[],
-      // Bulk organize reads the stored rows by id when its write is admitted.
+
       get _tasksById() { return new Map(this.tasks.map((task) => [task.id, task])); },
       projects: [] as Project[],
       areas: [] as Area[],
@@ -132,7 +132,7 @@ vi.mock('../contexts/language-context', () => ({
 }));
 
 vi.mock('@/hooks/use-theme-colors', () => {
-  // One object, like the real hook: rows compare `tc` by identity (#766).
+
   const themeColors = {
     bg: '#ffffff',
     border: '#d1d5db',
@@ -280,6 +280,37 @@ describe('ReviewScreen bulk organize', () => {
     mocks.storeState.tasks = [makeTask('task-1', 'Loose next action')];
   });
 
+  it('keeps sequence tails collapsed, editable on expansion, and visible when explicitly due', async () => {
+    const project: Project = {
+      id: 'sequence', title: 'Sequence', status: 'active', color: '#2563eb', order: 0,
+      tagIds: [], createdAt: now, updatedAt: now, isSequential: true,
+    };
+    mocks.storeState.projects = [project];
+    mocks.storeState.tasks = [
+      makeTask('head', 'Waiting head', { projectId: project.id, status: 'waiting', order: 0 }),
+      makeTask('tail', 'Later tail', { projectId: project.id, order: 1 }),
+      makeTask('due-tail', 'Review due tail', { projectId: project.id, order: 2, reviewAt: '2020-01-01' }),
+    ];
+    const original = structuredClone(mocks.storeState.tasks);
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<ReviewScreen />); });
+    pressButtonWithLabel(tree, 'Expand areas');
+    pressButtonWithLabel(tree, 'Expand projects');
+    const rows = () => tree.root.findAll((node) => (node.type as unknown) === 'SwipeableTaskItem');
+    expect(rows().map((row) => row.props.task.id)).toEqual(['due-tail']);
+    pressButtonWithText(tree, 'All open tasks');
+    expect(rows().map((row) => row.props.task.id)).toEqual(['head']);
+    const disclosure = () => tree.root.findAllByType(Pressable).find((node) => node.props.accessibilityLabel === 'projects.laterInSequence (2)')!;
+    expect(disclosure().props.accessibilityState).toEqual({ expanded: false });
+    act(() => disclosure().props.onPress());
+    expect(rows().map((row) => row.props.task.id)).toEqual(['head', 'tail', 'due-tail']);
+    expect(mocks.updateTask).not.toHaveBeenCalled();
+    expect(mocks.storeState.tasks).toEqual(original);
+    act(() => rows().find((row) => row.props.task.id === 'tail')!.props.actions.edit(mocks.storeState.tasks[1]));
+    expect(tree.root.findByType('TaskEditModal' as React.ElementType).props.task.id).toBe('tail');
+    await act(async () => tree.unmount());
+  });
+
   it('bulk-applies an area from the review selection organize modal', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
@@ -317,7 +348,7 @@ describe('ReviewScreen bulk organize', () => {
     ]);
   });
 
-  // RN runs Back listeners newest first and stops at the first that returns true.
+
   it('keeps selection on Android Back while a review dialog is open, then leaves it (#1415)', async () => {
     let tree!: ReactTestRenderer;
     await act(async () => {
@@ -376,8 +407,7 @@ describe('ReviewScreen bulk organize', () => {
     ]);
   });
 
-  // Rows carry the #766 memo boundary, which only holds while the screen hands
-  // untouched rows the same references back.
+
   it('hands rows stable prop references across a re-render', async () => {
     mocks.storeState.tasks = [
       makeTask('task-1', 'Loose next action'),

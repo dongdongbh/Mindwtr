@@ -31,8 +31,7 @@ type UseTaskEditDatesParams = {
     t: (key: string) => string;
 };
 
-// Core's date edit writes each field in order; a due date moves a relative start
-// through the draft's cascade.
+
 const applyDateEdit = (setDraftField: TaskDraftSetter, field: TaskEditorDateField, value: string) => {
     for (const [key, fieldValue] of Object.entries(getTaskDraftDateEdit(field, value))) {
         setDraftField(key as TaskDraftField, fieldValue as never);
@@ -41,8 +40,7 @@ const applyDateEdit = (setDraftField: TaskDraftSetter, field: TaskEditorDateFiel
 
 const pickedTime = (selectedDate: Date) => ({ hours: selectedDate.getHours(), minutes: selectedDate.getMinutes() });
 
-// The picker's day for the time picker that may follow: the written value when it
-// has a time, else the picked day.
+
 const pendingDateFor = (value: string, selectedDate: Date): Date => (
     hasTimeComponent(value) ? safeParseDate(value) ?? new Date(selectedDate) : new Date(selectedDate)
 );

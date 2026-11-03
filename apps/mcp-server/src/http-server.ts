@@ -9,26 +9,22 @@ import { parseBooleanFlag, readFlagValue, readStringFlag, type FlagEnv, type Fla
 
 export const DEFAULT_HTTP_HOST = '127.0.0.1';
 export const DEFAULT_HTTP_PORT = 8722;
-// Kept at 16 (not raised to cloud's 20-char bearer-token floor, apps/cloud/src/server-config.ts's
-// BEARER_TOKEN_PATTERN): an existing self-hosted MCP HTTP deployment with a 16-19 char token
-// must not be refused at startup on upgrade — that's a breaking change to something already
-// running in production, not a validation bug. RECOMMENDED_HTTP_TOKEN_LENGTH below carries the
-// stronger number instead, surfaced as a startup warning (see resolveHttpConfig) rather than
-// a hard failure.
+
+
 export const MIN_HTTP_TOKEN_LENGTH = 16;
 export const RECOMMENDED_HTTP_TOKEN_LENGTH = 20;
-export const MAX_HTTP_BODY_BYTES = 1024 * 1024; // 1 MiB
-/** Auth failures allowed per key per window before 429s take over. Mirrors cloud's default. */
+export const MAX_HTTP_BODY_BYTES = 1024 * 1024;
+
 export const AUTH_FAILURE_RATE_MAX = 30;
 export const AUTH_FAILURE_WINDOW_MS = 60_000;
-/** Bounds memory against spoofed source addresses; oldest window is dropped at capacity. */
+
 const AUTH_FAILURE_MAX_KEYS = 5_000;
 
 export type HttpServerConfig = {
   host: string;
   port: number;
   token: string;
-  /** Set when the token is valid but shorter than RECOMMENDED_HTTP_TOKEN_LENGTH; the caller logs it. */
+
   weakTokenWarning?: string;
 };
 
@@ -43,12 +39,7 @@ const parseHttpPort = (raw: string | undefined): number | undefined => {
   return parsed;
 };
 
-/**
- * Resolves opt-in HTTP transport settings from CLI flags/env. HTTP mode is enabled by
- * `--http`/`MINDWTR_MCP_HTTP`, or implicitly by setting any of --http-host/--http-port/--http-token.
- * Returns undefined when HTTP mode is off (the default), in which case the caller keeps the
- * existing stdio behavior untouched.
- */
+
 export const resolveHttpConfig = (flags: FlagMap, env: FlagEnv = process.env): HttpServerConfig | undefined => {
   const explicitHttp = parseBooleanFlag(readFlagValue(flags, 'http') ?? env.MINDWTR_MCP_HTTP, 'http');
   const host = readStringFlag(flags, 'http-host', 'httpHost') ?? env.MINDWTR_MCP_HTTP_HOST;
@@ -75,10 +66,7 @@ export const resolveHttpConfig = (flags: FlagMap, env: FlagEnv = process.env): H
   };
 };
 
-/**
- * Timing-safe bearer token check, mirroring the SHA-256-digest + timingSafeEqual pattern used
- * by apps/cloud/src/server-auth.ts (not imported directly to keep workspaces independent).
- */
+
 export const isAuthorizedBearerToken = (
   authorizationHeader: string | undefined | null,
   expectedToken: string,
@@ -112,11 +100,8 @@ const readRequestBody = (req: IncomingMessage, maxBytes: number): Promise<BodyRe
       if (settled) return;
       total += chunk.length;
       if (total > maxBytes) {
-        // Don't req.destroy() here: that tears down the socket immediately and races
-        // the 413 response we're about to send, which the client sees as ECONNRESET
-        // instead of a clean status code. Just stop buffering and let the remaining
-        // bytes drain (ignored by the early-return above) so the connection can be
-        // reused for keep-alive once the response is written.
+
+
         finish({ status: 'too-large' });
         return;
       }
@@ -124,10 +109,8 @@ const readRequestBody = (req: IncomingMessage, maxBytes: number): Promise<BodyRe
     });
     req.on('end', () => finish({ status: 'ok', body: Buffer.concat(chunks) }));
     req.on('error', () => finish({ status: 'error' }));
-    // A client that disconnects mid-upload never fires 'end' or 'error' - only 'close'. Without
-    // this the returned promise never settles and the awaiting handleMcpPost frame is stranded
-    // forever (BUG-15). Harmless when the body already finished normally: finish() is a no-op
-    // once settled.
+
+
     req.on('close', () => finish({ status: 'error' }));
   });
 
@@ -150,21 +133,15 @@ export type HttpMcpDeps = {
   token: string;
   maxBodyBytes?: number;
   logError?: (message: string, error?: unknown) => void;
-  /** Host the server is bound to; Origin headers must match it. */
+
   host?: string;
-  /** Clock override for tests. */
+
   now?: () => number;
 };
 
 type AuthFailureWindow = { count: number; resetAt: number };
 
-/**
- * Fixed-window auth-failure throttle, the same shape as the cloud server's
- * (apps/cloud/src/server-rate-limit.ts) but re-implemented rather than imported: the MCP
- * server is a separate workspace on node:http, and the cloud limiter speaks Bun `Response`.
- * Only FAILURES are counted, so a client presenting the right token is never throttled —
- * matching cloud, where the limiter is consulted solely from unauthorizedResponse.
- */
+
 const createAuthFailureThrottle = (now: () => number) => {
   const windows = new Map<string, AuthFailureWindow>();
 
@@ -206,11 +183,7 @@ const authFailureKeys = (req: IncomingMessage): string[] => {
   ];
 };
 
-/**
- * DNS-rebinding guard for a local HTTP transport (MCP spec guidance): a browser page on
- * another origin can reach 127.0.0.1, but it cannot omit or forge Origin. A request with no
- * Origin at all is a non-browser client (CLI, agent runtime) and is allowed through.
- */
+
 export const isAllowedOrigin = (origin: string | undefined, host: string): boolean => {
   if (!origin) return true;
   try {
@@ -256,11 +229,8 @@ const handleMcpPost = async (
     void transport.close().catch(() => {});
     void mcpServer.close().catch(() => {});
   };
-  // Registered before the (awaited) body read, not after - a client that aborts mid-upload
-  // used to close the connection before this listener existed, leaking the transport/server
-  // (BUG-15). `res.closed` covers the case where the response has ALREADY closed by the time
-  // we get here (e.g. the client disconnected during the origin/auth checks above): a 'close'
-  // listener attached after the event already fired would never run.
+
+
   if (res.closed) {
     cleanup();
     return;
@@ -298,7 +268,7 @@ const handleMcpPost = async (
   }
 };
 
-/** Builds the plain node:http request listener backing the MCP HTTP transport. */
+
 export const createHttpRequestListener = (deps: HttpMcpDeps) => {
   const resolvedDeps: Required<HttpMcpDeps> = {
     createServer: deps.createServer,
@@ -338,7 +308,7 @@ export const createHttpRequestListener = (deps: HttpMcpDeps) => {
   };
 };
 
-/** Creates (but does not start) the node:http server for the stateless MCP HTTP transport. */
+
 export const createMindwtrHttpServer = (deps: HttpMcpDeps): Server => {
   const listener = createHttpRequestListener(deps);
   const logError = deps.logError ?? (() => {});
@@ -354,7 +324,7 @@ export const createMindwtrHttpServer = (deps: HttpMcpDeps): Server => {
   });
 };
 
-/** Starts listening and resolves once bound, rejecting on bind errors (e.g. port in use). */
+
 export const startHttpServer = (server: Server, config: HttpServerConfig): Promise<void> =>
   new Promise((resolveListen, reject) => {
     const onError = (error: unknown) => {

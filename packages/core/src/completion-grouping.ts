@@ -3,16 +3,7 @@ import { tFallback } from './i18n';
 import { getCompletionDateGroup, type CompletionDateGroup } from './task-utils';
 import type { Task } from './types';
 
-/**
- * Sections for a list grouped by completion date, shared by desktop and mobile
- * so the buckets cannot drift per platform (#945, #959).
- *
- * The fixed buckets only cover the last week. Everything older is split by
- * calendar month instead of piling into one "Earlier" heading: Archive holds
- * years of finished work, and a single heading over all of it is not a
- * grouping. Month titles come from the date formatter, so they follow the
- * app language without needing a translation key per month (#959).
- */
+
 export interface CompletionDateSection<T> {
     id: string;
     title: string;
@@ -28,7 +19,7 @@ const COMPLETION_GROUP_FALLBACKS: Record<CompletionDateGroup, string> = {
     notCompleted: 'Not completed',
 };
 
-/** Newest first; 'earlier' and 'notCompleted' are appended after the months. */
+
 const RECENT_GROUPS = ['today', 'yesterday', 'previous7Days'] as const;
 
 const monthKey = (date: Date): string =>
@@ -39,7 +30,7 @@ export function buildCompletionDateSections<T extends Pick<Task, 'completedAt'>>
     t,
     now,
 }: {
-    /** Already filtered and sorted; grouping preserves the order within a section. */
+
     tasks: readonly T[];
     t: (key: string) => string;
     now?: Date;
@@ -50,8 +41,8 @@ export function buildCompletionDateSections<T extends Pick<Task, 'completedAt'>>
 
     tasks.forEach((task) => {
         const group = getCompletionDateGroup(task, reference);
-        // Only the 'earlier' bucket splits by month, and only when the stamp
-        // still parses — anything else keeps its fixed bucket.
+
+
         const completedAt = group === 'earlier' ? safeParseDate(task.completedAt) : null;
         if (!completedAt) {
             const items = fixed.get(group) ?? [];
@@ -65,8 +56,7 @@ export function buildCompletionDateSections<T extends Pick<Task, 'completedAt'>>
         months.set(monthKey(start), bucket);
     });
 
-    // A bucket with nothing in it is not shown — an Archive of old work should
-    // not open on a column of empty headings.
+
     const section = (id: string, title: string, items: T[], muted = false): CompletionDateSection<T>[] =>
         items.length > 0 ? [{ id, title, tasks: items, muted }] : [];
     const fixedSection = (group: CompletionDateGroup, muted = false) => section(
@@ -79,7 +69,7 @@ export function buildCompletionDateSections<T extends Pick<Task, 'completedAt'>>
     return [
         ...RECENT_GROUPS.flatMap((group) => fixedSection(group)),
         ...[...months.entries()]
-            // Keys are yyyy-MM, so a string compare orders them newest first.
+
             .sort(([a], [b]) => b.localeCompare(a))
             .flatMap(([key, bucket]) => section(
                 `completedDate:${key}`,

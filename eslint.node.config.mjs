@@ -57,4 +57,5 @@ export default [
       'no-redeclare': 'off',
     },
   },
+  { rules: { 'no-empty': ['error', { allowEmptyCatch: true }] } },
 ];

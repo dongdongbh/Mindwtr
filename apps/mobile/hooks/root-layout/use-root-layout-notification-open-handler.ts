@@ -13,13 +13,12 @@ import { replayNotificationCompletions } from '@/lib/notification-completion-dra
 import { setNotificationOpenHandler } from '@/lib/notification-service';
 import { consumePendingNotificationOpenPayload } from '@/modules/notification-open-intents';
 
-// Outcome evidence for #1028: a received action that changes nothing must say
-// why, or the log can't separate a lost tap from a deliberately ignored one.
+
 const logNotificationOutcome = (message: string, extra: Record<string, string>) => {
     void logInfo(`[Local Notifications] ${message}`, { scope: 'notifications', extra });
 };
 
-// Release evidence for #1386; an update returning is not proof of durable background completion.
+
 const logIosReminderAction = (stage: string, action = 'complete', reason = '') => {
     if (Platform.OS !== 'ios') return;
     void logInfo('[Local Notifications] iOS reminder action progress', {
@@ -68,7 +67,7 @@ export function useRootLayoutNotificationOpenHandler({
         context?: string;
         kind?: string;
     }) => {
-        // Which screen or action a tap means is core's (mobile-notification-open.ts).
+
         const route = resolveNotificationOpenRoute(payload, {
             now: () => Date.now(),
             nextTaskOpenSequence: () => {
@@ -163,8 +162,8 @@ export function useRootLayoutNotificationOpenHandler({
     useEffect(() => {
         if (disabled) return;
         setNotificationOpenHandler(handleNotificationOpen);
-        // Read the cold-start payload only once it can be acted on. Until then
-        // native storage keeps it, so a kill during a slow data load loses nothing.
+
+
         if (canNavigate) {
             void consumePendingNotificationOpenPayload().then((payload) => {
                 if (!payload) return;

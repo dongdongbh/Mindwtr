@@ -1,47 +1,6 @@
-// Settings › Data check (pass D1a) on the test phone, in the throwaway upgrade-harness package only.
-//
-//   MINDWTR_HARNESS_DIR=<dir> node apps/android-native/scripts/check-data-device.mjs <adb-serial>
-//
-// A restore replaces a whole library, so this check never runs in the development app: it reinstalls the harness's native
-// build (tech.dongdongbh.mindwtr.upgradetest, as check-upgrade-device.mjs does before each scenario) and works only on rows it
-// merges in itself (titles `d1…<run>`, tag d1test). The test backups are pushed to the phone's Download/mtd1/, the
-// exports land there, and the folder is removed on exit. Steps (design D1 §7):
-//   E3 Merge backup (the system document picker), Undo from its toast, then Restore backup from the E1 file;
-//   E1 Export backup, CSV and TaskNotes through RN's folder picker (Use this folder, Allow); each file is pulled and read, the
-//      CSV and TaskNotes files compared byte for byte with core's serializers, and the folder is a persisted grant;
-//   E2 a cancelled folder picker falls back to the share sheet (Back, nothing is picked or sent);
-//   Sync › Recovery snapshots: RN's rows, and Restore with RN's question;
-//   E4 process death at each step of a merge (debug properties backup_stop, journal_stop, and commit_stop between the SQL
-//      commit and core's reload, E4c): it lands at most once, the
-//      journal and the operation folder end empty, a commit replayed at start meets its document even with a task that became
-//      due meanwhile (E4a), and a result a death left unshown shows once;
-//   E2b a death in the middle of a folder write: the half file is gone at the next start;
-//   E5 while a merge waits (delay_before_ms), one row is busy and every other row is off (Getting Started's too).
-// Pass D1b (design D1b §9), after E2b:
-//   G1 Getting Started on a library without it: RN's toast with Open, 7 tasks and 2 Inbox samples, then a second tap adds nothing;
-//   I1 each importer (Todoist ZIP, TickTick ZIP, DGT JSON, OmniFocus CSV, Mindwtr CSV) through its picker: the rows equal core's
-//      own import of the fixture over the pulled library, then Undo leaves none;
-//   I2 a TickTick file on the DGT row: core's invalid-file warning, no staged copy; I3 a 16 MiB + 1 byte file: core's limit text;
-//   I4 process death before the journal (no row, no result) and after COMMIT (the rows once, the receipt, one replay line);
-//   I5 the 60 000-row Mindwtr CSV whose Undo cannot be admitted (large-library pass b): core's "Undo may not be available"
-//      question; Cancel lands nothing, Continue lands it and the commit's real bytes leave no Undo: the toast says so, no button;
-//   I6 sentinels in a dropped rule, a renamed project and a skipped archive entry reach no result record, journal, receipt
-//      or log;
-//   G3 and G2 (each on a fresh install): a seed stopped before its send replays once; one stopped after its COMMIT is there
-//      once with its receipt under the journal's request UUID.
-// Pass D1c: D0 the data channel through the real bridge (a read chunk that starts with the error marker, a write chunk ending
-//   inside a surrogate pair); L1 a multi-byte restore over another, byte for byte, with the v1.3.7/native-large-transfer line;
-//   R1 a replay whose plan cannot be read keeps its entry, and the next start answers from the receipt with Undo; DL1-DL4 the
-//   size-scaled deadlines, each delay between the old budget and the new one (a slow recovery boot, a large restore over a
-//   small library, a replay before SQL then activation, a slow export).
-// With D1_MEASURE=1 it runs pass D1c's step 0 instead (design §8): every Data workload in every shape at growing sizes, each
-// sampled from before it starts, with the library measured before and after; then the limit data-transfer-limit.mjs proposes,
-// and every workload again at that limit, which must pass. With D1C_PART=deadlines it runs only the DL rows
-// (D1C_PART=deadlines-1 or deadlines-2: check-data-deadlines-device.mjs, check-data-deadlines2-device.mjs).
-// With D1C_PART=large-import (check-data-large-import-device.mjs) it runs only the LI rows: the largest TickTick and Mindwtr CSV
-// imports and their Undo.
-// It clears every debug property it sets, puts rotation back, and leaves the phone on its home screen.
-// Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -49,7 +8,7 @@ import { strToU8, zipSync } from 'fflate';
 import { resolve } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { box, button, check, connect, evidenced, fail, hasText, inboxCount, mainList, Stopped, tab, tagged, withDescription } from './device.mjs';
-/** The tagged node, only once it sits wholly inside the main list (a row half under the gesture bar takes no tap). */
+
 const shown = (nodes, tag) => {
     const node = tagged(nodes, tag);
     const list = mainList(nodes);
@@ -84,29 +43,27 @@ if (execFileSync(aapt2, ['dump', 'packagename', apk], { encoding: 'utf8' }).trim
     process.exit(2);
 }
 const ACTIVITY = `${PKG}/${PKG}.MainActivity`;
-/**
- * The native test builds other device checks and measurements leave in front: every id under this prefix (build.gradle.kts:
- * the dev build `.nativeclient.dev` and its benchmark builds `.nativeclient.dev.benchmark`). Never dd's own apps.
- */
+
+
 const NATIVE_TEST_PREFIX = 'tech.dongdongbh.mindwtr.nativeclient';
 const TAG = 'MindwtrNativeDev';
 const UI_FILE = '/data/local/tmp/mindwtr-d1-ui.xml';
-// A short folder name: an Android property value holds at most 91 characters, and the picker's starting URI names it.
+
 const PHONE_DIR = '/sdcard/Download/mtd1';
-// The folder picker's starting place (EXTRA_INITIAL_URI takes a document URI, not a tree URI).
+
 const TREE = 'content://com.android.externalstorage.documents/document/primary%3ADownload%2Fmtd1';
 const DB = 'files/SQLite/mindwtr.db';
 const PROPS = ['backup_stop', 'journal_stop', 'commit_stop', 'delay_before_ms', 'export_tree', 'language', 'transfer_limit_mb', 'channel_roundtrip',
     'channel_fail', 'sql_read_delay_ms', 'sql_read_delay_skip', 'channel_write_delay_ms', 'budget_ms_per_mib', 'd1c_control', 'clipboard'];
 const work = resolve(app, 'android/build/data-check');
 const { en: localeEn } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'));
-// The starter.* strings live in their own generated module (getting-started-seed.ts reads them), not in en.ts.
+
 const { STARTER_SEED_STRINGS } = await import(resolve(repo, 'packages/core/src/i18n/starter-seed-strings.ts'));
 const en = { ...localeEn, ...STARTER_SEED_STRINGS.en };
 for (const key of ['starter.projectTitle', 'starter.sampleBuyMilk', 'starter.sampleReplySam']) if (!en[key]) throw new Error(`no English string for ${key}`);
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 
-// ---- The test backups (RN's backup format: serializeBackupData's pretty JSON of the library) ----
+
 mkdirSync(work, { recursive: true });
 const at = () => new Date().toISOString();
 const task = (title, extra = {}) => ({ id: randomUUID(), title, status: 'next', tags: ['d1test'], contexts: [], createdAt: at(), updatedAt: at(), rev: 1, ...extra });
@@ -120,9 +77,8 @@ const device = connect({ serial, pkg: PKG, uiFile: UI_FILE });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting } = device;
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
-// The phone's log ring drops old lines on a long run, so a count read twice could shrink and a `===` against an earlier
-// count fail with nothing new logged. Every line read stays here (a line carries its millisecond stamp and thread, so a
-// repeat is the same line); clearLogs empties the phone's log and this together.
+
+
 const seenLogs = new Set();
 const allLogs = () => {
     for (const line of adbRaw('logcat', '-d', '-s', `${TAG}:*`).toString('utf8').replace(/\\/g, '').split('\n')) if (line.trim()) seenLogs.add(line);
@@ -135,13 +91,13 @@ const clearLogs = () => {
 const until = async (description, holds, timeoutMs = 60_000, everyMs = 1_000) => {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-        try { if (await holds()) return; } catch { /* not ready yet */ }
+        try { if (await holds()) return; } catch {                     }
         if (Date.now() > deadline) fail(`timed out waiting for ${description}`);
         await sleep(everyMs);
     }
 };
 
-// ---- The phone's storage ----
+
 const pullDb = (label) => {
     const dir = resolve(work, `db-${label}`);
     rmSync(dir, { recursive: true, force: true });
@@ -151,11 +107,11 @@ const pullDb = (label) => {
     return resolve(dir, 'mindwtr.db');
 };
 const sqlite = (file, sql) => {
-    // A large library's rows pass spawnSync's 1 MiB default (batch2: ENOBUFS).
+
     const out = execFileSync('sqlite3', ['-json', file, sql], { encoding: 'utf8', maxBuffer: 1 << 28 }).trim();
     return out ? JSON.parse(out) : [];
 };
-/** This run's live task titles (the d1… rows), sorted. */
+
 const liveTitles = (label) => sqlite(pullDb(label), `SELECT title FROM tasks WHERE deletedAt IS NULL AND title LIKE 'd1%${run}'`).map((row) => row.title).sort();
 const listing = (path) => runAs(`sh -c 'ls ${path} 2>/dev/null || true'`).split(/\s+/).filter(Boolean);
 const snapshots = () => listing('files/snapshots').filter((name) => name.endsWith('.snapshot.json'));
@@ -163,7 +119,7 @@ const journal = () => listing('files/journal').filter((name) => name.endsWith('.
 const operations = () => listing('no_backup/backup-operations').filter((name) => name !== 'result.json');
 const exportsOnPhone = () => sh(`ls ${PHONE_DIR} 2>/dev/null || true`).split(/\s+/).filter((name) => name.startsWith('mindwtr-backup'));
 
-// ---- The app ----
+
 const onInbox = (nodes) => !tagged(nodes, 'menu-screen') && Number.isFinite(inboxCount(nodes));
 const onData = (nodes) => Boolean(tagged(nodes, 'settings-data'));
 const onSync = (nodes) => Boolean(tagged(nodes, 'settings-sync'));
@@ -205,7 +161,7 @@ const relaunch = async () => {
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
     await launch();
 };
-// ---- The system pickers (another app in front) ----
+
 const anyScreen = async () => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
         try {
@@ -214,7 +170,7 @@ const anyScreen = async () => {
                 return [...xml.matchAll(/<node [^>]*>/g)].map(([node]) => Object.fromEntries([...node.matchAll(/([\w-]+)="([^"]*)"/g)]
                     .map(([, name, value]) => [name, value.replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))).replace(/&quot;/g, '"').replace(/&amp;/g, '&')])));
             }
-        } catch { /* briefly unavailable */ }
+        } catch {                           }
         await sleep(500);
     }
     return fail('uiautomator dump failed in the picker');
@@ -224,7 +180,7 @@ const tapAny = async (node) => {
     sh(`input tap ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)}`);
     await sleep(900);
 };
-/** RN's document picker (ACTION_OPEN_DOCUMENT): the file named [name], found in its list or through its search. */
+
 const pickDocument = async (name) => {
     await until('the document picker', otherAppFront, 15_000, 500);
     await sleep(1500);
@@ -246,12 +202,12 @@ const pickDocument = async (name) => {
     }
     return fail(`the document picker did not show ${name}`);
 };
-/** RN's folder picker (ACTION_OPEN_DOCUMENT_TREE, opened in the test folder Download/mtd1): Use this folder, then Allow when it asks. */
+
 const useTestFolder = async () => {
     await until('the folder picker', otherAppFront, 15_000, 500);
     await sleep(1500);
     let nodes = await anyScreen();
-    // Opened somewhere else (the provider ignored the starting place): walk to Download › mtd1.
+
     for (const folder of ['Download', 'mtd1']) {
         if (nodes.some((node) => node['resource-id']?.endsWith('breadcrumb_text') && node.text === folder)) continue;
         if (folder === 'Download' && nodes.some((node) => node.text === 'mtd1' && node['resource-id']?.endsWith('breadcrumb_text'))) continue;
@@ -273,8 +229,7 @@ const useTestFolder = async () => {
     await until('the app back in front', () => !otherAppFront(), 15_000, 500);
 };
 
-// ---- Data actions ----
-/** The open question's action button (a dialog window has no test tags): core's Merge, Restore or Import word, its text or TalkBack name. */
+
 const confirmButton = (nodes) => nodes.find((node) => [en['settings.mergeBackupAction'], en['markdown.referenceRestore'], en['settings.backupMobile.import'],
     en['settings.backupMobile.undoUnavailableContinue']]
     .some((label) => [node.text, node['content-desc']].some((text) => (text ?? '').toUpperCase() === label.toUpperCase())));
@@ -288,7 +243,7 @@ const merge = async (file) => {
     await pickDocument(file.name);
     await until('the app back in front', () => !otherAppFront(), 15_000, 500);
 };
-// The question closed first: a question can carry the same title as its result (Merge Backup).
+
 const toastWith = (title, timeoutMs = 120_000) => waitFor(`the toast "${title}"`, (nodes) => hasText(nodes, title) && !confirmButton(nodes), timeoutMs);
 const undoButton = (nodes) => nodes.find((node) => node.text === en['settings.undoImport']);
 const push = (file) => adbRaw('push', resolve(work, file.name), `${PHONE_DIR}/${file.name}`);
@@ -303,7 +258,7 @@ const exportFile = async (tag, suffix) => {
     writeFileSync(local, adbRaw('exec-out', 'cat', `${PHONE_DIR}/${name}`));
     return { name, local };
 };
-/** Whether the app holds a persisted URI grant naming [fragment] (`dumpsys activity permissions`, the app's UID block). */
+
 const persistedGrant = (fragment) => {
     const uid = /uid:(\d+)/.exec(sh(`pm list packages -U ${PKG}`))?.[1] ?? fail(`no UID for ${PKG}`);
     const lines = sh('dumpsys activity permissions').split('\n');
@@ -315,9 +270,8 @@ const persistedGrant = (fragment) => {
 const replayLines = () => allLogs().split('\n').filter((line) => line.includes('v1.3.5/android-backup-replay'));
 
 
-// ---- Pass D1c's rows ----
 const MIB = 1024 * 1024;
-const limitMiB = 15; // DataTransferLimits.LIMIT_BYTES (step 0 run 6)
+const limitMiB = 15;
 const fresh = async () => {
     if (sh(`pm list packages ${PKG}`).split('\n').some((line) => line.trim() === `package:${PKG}`)) sh(`pm uninstall ${PKG}`);
     adbRaw('install', '-g', apk);
@@ -333,20 +287,13 @@ const restore = async (file) => {
 };
 const rowsLike = (label, prefix) => sqlite(pullDb(label), `SELECT count(*) AS n FROM tasks WHERE deletedAt IS NULL AND title LIKE '${prefix}%'`)[0].n;
 const transfer = () => allLogs().split('\n').filter((line) => line.includes('v1.3.7/native-large-transfer')).at(-1) ?? '';
-/** The library's file bytes as the app sizes its budgets by (the database and its write-ahead log), in started MiB. */
+
 const libraryFileMiB = () => {
     const size = (name) => Number(runAs(`sh -c 'stat -c %s ${name} 2>/dev/null || echo 0'`).trim()) || 0;
     return Math.ceil((size(DB) + size(`${DB}-wal`)) / MIB);
 };
 
-/**
- * DL1-DL5 (design §3.4, reviews 3 #17 and the code review): each row first runs under a debug control that gives the code the
- * deadline or timeout it had before pass D1c, and must fail; then the same row with the fix, which must finish, taking longer
- * than the old budget. Each delay waits on timers in host-entry (a full library read, after `sql_read_delay_skip` reads, waits
- * `sql_read_delay_ms`; an export or snapshot write pauses `channel_write_delay_ms` after its first piece), so the deadlines and
- * core's storage timeout run while it waits. A 30 s per MiB rate (debug budget_ms_per_mib) and a 64 MiB transfer limit keep
- * the windows wide; the budget's base is 120 s.
- */
+
 const deadlineRows = async (part) => {
     const BASE = 120_000;
     const RATE = 30_000;
@@ -365,7 +312,7 @@ const deadlineRows = async (part) => {
         await confirmQuestion(en['settings.mergeBackup']);
         await toastWith(en['settings.mergeBackup']);
     };
-    /** The start after a stop: whether the Inbox showed within [timeoutMs], and how long it took. */
+
     const start = async (timeoutMs) => {
         const started = Date.now();
         device.launch(ACTIVITY);
@@ -382,14 +329,10 @@ const deadlineRows = async (part) => {
     };
     const outcomeToast = (nodes) => hasText(nodes, en['settings.backupMobile.restoreComplete']) || hasText(nodes, en['settings.backupMobile.restoreFailed']);
 
-    // Two parts (check-data-deadlines-device: DL1-DL2; check-data-deadlines2-device: DL3-DL5), each within the batch's hour.
+
     if (part === 1) {
-        // DL1: a merge stopped right after its COMMIT over the large library; the next start's three reads (the recovery load, the
-        // commit's reload, activation's load) each take 60 s: past the old 30 s boot deadline and 15 s storage timeout, within the
-        // library's budget.
-        // A merge's plan holds the library twice, so at 30 s per MiB its frozen budget over the large library would pass the 15-min
-        // ceiling and the merge would be refused before its commit (batch1). 10 s per MiB keeps it admitted, and the library's own
-        // budget still holds three 60 s reads.
+
+
         const DL1_RATE = 10_000;
         const dl1 = async (name) => {
             await setup();
@@ -399,7 +342,7 @@ const deadlineRows = async (part) => {
             setProp('commit_stop', 'backupDocumentCommit');
             await merge(small);
             await tap(confirmButton(await waitFor('the question', (current) => Boolean(confirmButton(current)), 120_000)));
-            // The process ends at its COMMIT; a failure toast instead means the merge never reached it.
+
             let refusal = '';
             await until(`the process to end at its COMMIT (DL1 ${name})`, async () => {
                 if (!pid()) return true;
@@ -423,8 +366,7 @@ const deadlineRows = async (part) => {
         check(dl1real.inbox && dl1real.ms > 120_000, `(DL1) the slow recovery boot replays from the receipt and activates, taking ${dl1real.ms} ms, past the old budgets`);
         await until('(DL1) the journal to empty', () => journal().length === 0, 120_000);
 
-        // DL2: a large restore over a small library; only its reload is slow, longer than the small library's storage budget and
-        // within the budget the commit froze. The control keeps the small library's storage timeout through the reload.
+
         for (const name of ['control', 'real']) {
             await setup();
             await device.stopApp();
@@ -445,9 +387,8 @@ const deadlineRows = async (part) => {
 
     }
     if (part === 2) {
-        // DL3 (review 4 #18): a large restore stopped with its entry journaled, nothing sent; before the restart the small library is
-        // there and no receipt names the restore. At the start only activation's read is slow (after the recovery load, the
-        // commit's stale check and its reload), longer than the small library's budget, within the large one's.
+
+
         for (const name of ['control', 'real']) {
             await setup();
             setProp('journal_stop', 'before:backupDocumentCommit');
@@ -462,9 +403,8 @@ const deadlineRows = async (part) => {
             const small0 = budget(libraryFileMiB());
             delays(small0 + 60_000, 3);
             if (name === 'control') control('no-activation-storage');
-            // The control's activation fails at the small library's storage timeout (small0, 180 s at 2 MiB of files), after
-            // the boot and the replay (undelayed, under 5 min). Its wait must also outlast a fixed run, whose activation read
-            // takes the delay (small0 + 60 s): so the delay plus 5 min for the boot and replay, and never under 600 s.
+
+
             const controlWait = Math.max(600_000, small0 + 60_000 + 300_000);
             const result = await start(name === 'control' ? controlWait : 900_000);
             await device.stopApp();
@@ -477,7 +417,7 @@ const deadlineRows = async (part) => {
             }
         }
 
-        // DL4: an export paused 60 s while it is written: past the old 30 s deadline, within the library's budget.
+
         setProp('export_tree', TREE);
         for (const name of ['control', 'real']) {
             if (name === 'control') control('fixed-deadlines');
@@ -486,8 +426,8 @@ const deadlineRows = async (part) => {
             const started = Date.now();
             await openData();
             await tap(tagged(await screen(), 'data-transfer-export') ?? fail('no export row'));
-            // The file is written before the folder picker opens (batch3: the picker waited behind the slow write), so wait for
-            // either the picker or the export's failure toast, then answer the picker.
+
+
             let failedToast = false;
             await until(`the folder picker or the export's failure (DL4 ${name})`, async () => {
                 if (otherAppFront()) return true;
@@ -498,20 +438,20 @@ const deadlineRows = async (part) => {
             let made = false;
             if (!failedToast) {
                 await useTestFolder();
-                try { await until(`the export (DL4 ${name})`, () => exportsOnPhone().some((file) => !before.includes(file) && file.endsWith('.json')), 120_000, 1000); made = true; } catch { /* no file */ }
+                try { await until(`the export (DL4 ${name})`, () => exportsOnPhone().some((file) => !before.includes(file) && file.endsWith('.json')), 120_000, 1000); made = true; } catch {               }
             }
             const ms = Math.max(pickedMs, Date.now() - started);
             noDelays(); control('');
             if (name === 'control') check(failedToast && !made, `(DL4 control) with the old 30 s deadline the slow export fails and makes no file (${ms} ms)`);
             else check(made && pickedMs > 60_000, `(DL4) the slow export was written in ${pickedMs} ms, past the old 30 s, and the file made`);
-            // The control's export outlived its old deadline while it waited, so the host stopped for good ("Core host stopped",
-            // batch4): only a new process serves the next run.
+
+
             await device.stopApp();
             await launch();
         }
         setProp('export_tree', '');
 
-        // DL5: the capture popup's recovery snapshot paused 60 s while it is written: past the old 30 s, within the library's budget.
+
         for (const name of ['control', 'real']) {
             if (name === 'control') control('fixed-deadlines');
             const titles = [`d1dl5a${name}${run}`, `d1dl5b${name}${run}`];
@@ -529,8 +469,8 @@ const deadlineRows = async (part) => {
             const started = Date.now();
             await tap(button(nodes, en['quickAdd.bulkConfirmCreate']) ?? fail('no Create tasks'));
             let stored = false;
-            // The control fails at its old 30 s deadline (and the drain after it); the real run's snapshot waits 60 s first.
-            try { await until(`the lines (DL5 ${name})`, () => rowsLike(`dl5-${name}`, `d1dl5a${name}`) === 1, name === 'control' ? 150_000 : 300_000, 5000); stored = true; } catch { /* the control stores nothing */ }
+
+            try { await until(`the lines (DL5 ${name})`, () => rowsLike(`dl5-${name}`, `d1dl5a${name}`) === 1, name === 'control' ? 150_000 : 300_000, 5000); stored = true; } catch {                                  }
             const ms = Date.now() - started;
             noDelays(); control('');
             const written = snapshots().filter((file) => !snapshotsBefore.includes(file));
@@ -538,8 +478,8 @@ const deadlineRows = async (part) => {
             else check(stored && written.length === 1 && ms > 60_000, `(DL5) the slow snapshot was written (${written[0]}) and the lines stored, in ${ms} ms`);
             await device.stopApp();
             if (name === 'control') {
-                // The control stopped the host and left its capture request on disk to be sent again: a fresh install and the
-                // same large library, so the real run starts from a clean popup.
+
+
                 await setup();
                 await restore(large);
                 await toastWith(en['settings.backupMobile.restoreComplete'], 600_000);
@@ -553,14 +493,13 @@ const deadlineRows = async (part) => {
     sh(`rm -f ${PHONE_DIR}/${small.name} ${PHONE_DIR}/${large.name}`);
 };
 
-// ---- The transfer limit measurement (D1_MEASURE=1) ----
-/** `dumpsys meminfo`'s Native Heap and Java Heap sizes (kB) and its TOTAL PSS. */
+
 const memory = () => {
     const text = sh(`dumpsys meminfo ${PKG}`);
     const kb = (pattern) => Number(pattern.exec(text)?.[1] ?? NaN);
     return { native: kb(/Native Heap:\s+(\d+)/), java: kb(/Java Heap:\s+(\d+)/), total: kb(/TOTAL PSS:\s+(\d+)/) };
 };
-/** The app's own line for the last Data operation (v1.3.7/native-large-transfer), parsed; null when none came. */
+
 const lastTransferLine = (after) => {
     const lines = allLogs().split('\n').filter((line) => line.includes('v1.3.7/native-large-transfer'));
     const line = lines.slice(after).at(-1);
@@ -571,29 +510,21 @@ const lastTransferLine = (after) => {
 };
 const transferLines = () => allLogs().split('\n').filter((line) => line.includes('v1.3.7/native-large-transfer')).length;
 const measured = [];
-/**
- * One measured run: `dumpsys meminfo` sampled every second from before [act] starts (D1a sampled only after the question
- * opened) until [done] holds, the app dies, or 900 s pass; then the app's own log line, when the run was a Data operation.
- */
-/** The library's SQLite bytes on the phone now (page count × page size, as core admits), in MiB, from a pulled copy. */
+
+
 const libraryNowMiB = (label) => {
     const [{ bytes }] = sqlite(pullDb(label), 'SELECT page_count * page_size AS bytes FROM pragma_page_count(), pragma_page_size()');
     return Math.round(bytes / MIB * 10) / 10;
 };
-/**
- * One measured run: `dumpsys meminfo` sampled every second from before [act] starts (D1a sampled only after the question
- * opened) until [done] holds, the app dies, or 900 s pass. The library is measured on the phone before and after (code review
- * P2: an import counts the library it left; an export, a capture or a start the library it read); [source] gives the
- * picked file's bytes and, for an import, its expanded bytes. [boundary] marks a rerun at the proposed limit.
- */
-/** [act] until [done] holds, the app dies, or 900 s pass, with `dumpsys meminfo` sampled every second from before it starts. */
+
+
 const sampledRun = async (act, done) => {
     const peak = { native: 0, java: 0, total: 0 };
     const linesBefore = transferLines();
     let sampling = true;
     const sampler = (async () => {
         while (sampling) {
-            try { if (pid()) { const now = memory(); for (const key of Object.keys(peak)) if (now[key] > peak[key]) peak[key] = now[key]; } } catch { /* sampling only */ }
+            try { if (pid()) { const now = memory(); for (const key of Object.keys(peak)) if (now[key] > peak[key]) peak[key] = now[key]; } } catch {                     }
             await sleep(1000);
         }
     })();
@@ -605,7 +536,7 @@ const sampledRun = async (act, done) => {
             if (!pid()) { outcome = 'died'; break; }
             const nodes = await screen().catch(() => []);
             if (done(nodes)) { outcome = 'done'; toast = nodes; break; }
-            // Large-library pass b: an operation whose Undo may not fit asks first; a measured row runs it (Continue).
+
             if (hasText(nodes, en['settings.backupMobile.undoUnavailableTitle']) && confirmButton(nodes)) { await tap(confirmButton(nodes)); continue; }
             const failed = nodes.find((node) => /failed|too large|too long/i.test(node.text ?? ''));
             if (failed) { outcome = `failed: ${failed.text}`; toast = nodes; break; }
@@ -620,12 +551,8 @@ const sampledRun = async (act, done) => {
     const app = lastTransferLine(linesBefore);
     return { outcome, toast, app, nativeMiB: Math.round(peak.native / 1024), javaMiB: Math.round(peak.java / 1024), pssMiB: Math.round(peak.total / 1024) };
 };
-/**
- * One measured run (sampledRun). The library is measured on the phone before and after (code review P2: an import counts the
- * library it left; an export, a capture or a start the library it read); [source] gives the picked file's bytes and, for an
- * import, its expanded bytes. [boundary] marks a rerun at the proposed limit. A run whose Java peak passes 128 MiB runs twice
- * more when [again] can repeat it on the same library (it returns a fresh `[act, done]`); every run's Java peak is recorded.
- */
+
+
 const measureRun = async (shape, workload, sizeMiB, act, done, { sourceBytes = 0, expandedBytes = null, boundary = false, again = null } = {}) => {
     const libraryBeforeMiB = pid() ? libraryNowMiB(`m-${workload}-before`) : null;
     const logsBefore = allLogs().split('\n').length;
@@ -640,14 +567,14 @@ const measureRun = async (shape, workload, sizeMiB, act, done, { sourceBytes = 0
         javaMiB: sample.javaMiB, appJavaMiB: sample.app?.javaPeakMiB ?? null });
     let javaRuns;
     let rerunFailed = false;
-    // A boundary row that finished under the native ceiling with Java over 128 MiB: two more runs.
+
     if (again && boundary && nativePasses(runOf(first)) && javaPeakOf(runOf(first)) > MEASURE_JAVA_MIB) {
         javaRuns = [javaPeakOf(runOf(first))];
         for (let rerun = 0; rerun < 2; rerun += 1) {
             if (!pid()) await launch();
             const [nextAct, nextDone] = again();
             const next = runOf(await sampledRun(nextAct, nextDone));
-            // A rerun that did not finish or passed the native ceiling fails the row, whatever its Java.
+
             if (!nativePasses(next)) rerunFailed = true;
             javaRuns.push(javaPeakOf(next));
             console.log(`measure rerun ${workload} ${sizeMiB}: ${JSON.stringify(next)}`);
@@ -656,7 +583,7 @@ const measureRun = async (shape, workload, sizeMiB, act, done, { sourceBytes = 0
     if (!pid()) await launch();
     const libraryAfterMiB = libraryNowMiB(`m-${workload}-after`);
     const pass = rowPassesFor({ boundary, rerunFailed, outcome, nativeMiB, appNativeMiB: app?.nativePeakMiB ?? null, javaMiB, appJavaMiB: app?.javaPeakMiB ?? null, javaRuns });
-    // Refused for its size (core's limit words): at the boundary, the evidence that nothing larger is admitted.
+
     const tooLarge = en['settings.backupDiagnostics.tooLarge'].split('{{')[0];
     const refused = outcome.startsWith('failed') && toast.some((node) => (node.text ?? '').startsWith(tooLarge) || node.text === en['settings.importDiagnostics.limitExceeded']);
     const row = { shape, workload, sizeMiB, boundary, refused, sourceMiB: Math.round(sourceBytes / MIB * 10) / 10,
@@ -664,29 +591,29 @@ const measureRun = async (shape, workload, sizeMiB, act, done, { sourceBytes = 0
         seconds, nativeMiB, javaMiB, pssMiB, appNativeMiB: app?.nativePeakMiB ?? null, appJavaMiB: app?.javaPeakMiB ?? null, probes,
         ...(javaRuns ? { javaRuns, rerunFailed } : {}), pass };
     if (!pass) {
-        // The toast's words and the app's own lines for this row (step 0 run 4: a passing run kept no log, so a failed row had no cause).
+
         row.toastText = toast.map((node) => node.text).filter(Boolean).join(' | ');
         row.log = resolve(work, `row-${shape}-${workload}-${sizeMiB}${boundary ? '-b' : ''}-${run}.log`);
-        try { writeFileSync(row.log, allLogs().split('\n').slice(logsBefore).join('\n')); } catch { /* evidence only */ }
+        try { writeFileSync(row.log, allLogs().split('\n').slice(logsBefore).join('\n')); } catch {                     }
     }
     measured.push(row);
     console.log(`measure ${JSON.stringify(row)}`);
     return { row, toast };
 };
-/** A backup of about [mib] MiB in [shape]: `notes` (D1a's: 64 KiB notes, few rows) or `rows` (about 1 KiB per task, RN's fields). */
+
 const measureFixture = (name, mib, shape, prefix) => {
     const target = mib * 1024 * 1024;
     const note = 'x'.repeat(64 * 1024);
     const words = 'plan review call write send check draft order book'.split(' ');
     const make = (index) => shape === 'notes'
         ? task(`${prefix}${index}${run}`, { description: note })
-        // Multi-byte text everywhere, so the channel's 1 MiB reads and 512 Ki-unit writes fall inside characters.
+
         : shape === 'emoji' ? task(`${prefix}${index}${run} 🦉`, { description: 'aé🦉日本語 '.repeat(40) })
         : task(`${prefix}${index}${run} ${words[index % words.length]} the weekly report`, {
             description: `${words[(index + 3) % words.length]} `.repeat(70).slice(0, 400), tags: ['d1test', 'work', `t${index % 7}`],
             contexts: ['@desk', `@c${index % 5}`], dueDate: '2026-12-01', checklist: [0, 1, 2].map((item) => ({ id: randomUUID(), title: `step ${item}`, isCompleted: item === 0 })),
         });
-    // Rows are added until the pretty JSON reaches the target; the size of one row sets the count.
+
     const per = Buffer.byteLength(JSON.stringify(make(0), null, 2)) + 8;
     const tasks = Array.from({ length: Math.max(1, Math.round(target / per)) }, (_, index) => make(index));
     return fixture(name, tasks);
@@ -698,17 +625,14 @@ const measureFreshInstall = async (limitMiB = 1024) => {
     setProp('transfer_limit_mb', String(limitMiB));
     await launch();
 };
-/**
- * The question after a pick, answered; or the pick's failure toast, which measureRun's loop reads. Step 0 run 6's boundary
- * waited 15 min for a question after a 16.8 MiB pick that Kotlin refused at stage (TransferTooLarge), so the refusal never
- * shrank the next attempt.
- */
+
+
 const answerQuestion = async () => {
     const asked = await waitFor('the question or the pick\'s failure', (current) => Boolean(confirmButton(current))
         || current.some((node) => /failed|too large/i.test(node.text ?? '')), 900_000);
     if (confirmButton(asked)) await tap(confirmButton(asked));
 };
-/** A setup restore's result: Restore complete, or the run stops on its failure toast (not a 15 min wait for success). */
+
 const restoredOrStop = async () => {
     const nodes = await waitFor('the restore\'s result', (current) => (hasText(current, en['settings.backupMobile.restoreComplete']) && !confirmButton(current))
         || hasText(current, en['settings.backupMobile.restoreFailed']), 900_000);
@@ -730,15 +654,13 @@ const importFile = async (key, file) => {
     await tap(tagged(nodes, `data-transfer-import-${key}`) ?? fail(`no ${key} import row`));
     await pickDocument(file.name);
     await until('the app back in front', () => !otherAppFront(), 15_000, 500);
-    // RN's invalid-file warning and its failure toast are both titled Import failed and last 4.2 s (step 0 run 4: the wait
-    // for the question outlasted one unseen); measureRun's loop reads that toast at once.
+
+
     const asked = await waitFor('the question or the import\'s failure', (current) => Boolean(confirmButton(current)) || hasText(current, en['settings.backupMobile.importFailed']), 900_000);
     if (confirmButton(asked)) await tap(confirmButton(asked));
 };
-/**
- * Each importer's file (data-measure-fixtures.mjs, sized by encoded bytes): the largest core admits, or [tasks] tasks; the
- * expanded bytes are what core parses.
- */
+
+
 const importFixtures = (tasks = undefined) => Object.entries(importTexts(run, tasks)).map(([key, entries]) => {
     const expandedBytes = entries.reduce((sum, [, text]) => sum + Buffer.byteLength(text), 0);
     const zipped = key === 'todoist' || key === 'ticktick' || key === 'mindwtr-csv';
@@ -748,7 +670,7 @@ const importFixtures = (tasks = undefined) => Object.entries(importTexts(run, ta
     push(file);
     return { key, workload: `import-${key}`, file, expandedBytes, bytes: statSync(resolve(work, name)).size };
 });
-/** The capture popup's several lines (RN's paste path, check-capture-device's (d)): its recovery snapshot, then the lines. */
+
 const captureLines = async (titles) => {
     setProp('clipboard', titles.join('\\n'));
     let nodes = await device.openCapture();
@@ -762,11 +684,8 @@ const captureLines = async (titles) => {
     await tap(button(nodes, en['quickAdd.bulkConfirmCreate']) ?? fail('no Create tasks'));
 };
 const bytesOf = (file) => statSync(resolve(work, file.name)).size;
-/**
- * The Undo of the last restore or import, from Sync › Recovery snapshots (its newest row): the same snapshot restore its toast's
- * Undo starts, without depending on a toast that a measurement's library reads outlast (step 0 run 3: "Undo this change?"
- * never came, the toast had gone).
- */
+
+
 const restoreNewestSnapshot = async () => {
     let nodes = await openRow(en['settings.sync'], onSync, 'Sync');
     for (let step = 0; step < 10 && !shown(nodes, 'recovery-snapshots-disclosure'); step += 1) nodes = await device.swipe(nodes, 'down');
@@ -777,18 +696,15 @@ const restoreNewestSnapshot = async () => {
     await tap(rows(nodes).find((row) => row['resource-id'].endsWith(newest)) ?? fail(`no row for the newest snapshot ${newest}`));
     await confirmQuestion(en['settings.backupMobile.restoreRecoverySnapshot']);
 };
-/**
- * That Undo, and its toast: Restore complete, or a failure named with the toast's words. Step 0 run 5 waited for the success
- * toast alone and dropped the wait's failure, so a refused Undo (its commit past the 15 min budget: "Restore failed") read as
- * an Undo that never ran, and every later row ran on the import's library.
- */
+
+
 const undoNewest = async () => {
     await restoreNewestSnapshot();
     const nodes = await waitFor('the Undo\'s toast', (current) => hasText(current, en['settings.backupMobile.restoreComplete'])
         || hasText(current, en['settings.backupMobile.restoreFailed']), 900_000);
     if (!hasText(nodes, en['settings.backupMobile.restoreComplete'])) fail(`the Undo failed: ${nodes.map((node) => node.text).filter(Boolean).join(' | ')}`);
 };
-/** An export's folder picker: it opens once the file is written, which takes minutes for a large library (step 0 run 3). */
+
 const exportToFolder = async (tag) => {
     await openData();
     await tap(tagged(await screen(), tag) ?? fail(`no ${tag} row`));
@@ -799,27 +715,24 @@ const exportToFolder = async (tag) => {
         failed = ['settings.backupMobile.failedToExportBackup', 'settings.exportCsvFailed', 'settings.exportTaskNotesFailed'].some((key) => hasText(nodes, en[key]));
         return failed;
     }, 900_000, 1000);
-    // measureRun's loop reads the failure toast.
+
     if (!failed) await useTestFolder();
 };
-/** An export as a fresh `[act, done]` (measureRun's [again] repeats it): the new file in the test folder. */
+
 const exportRun = (tag, suffix) => {
     sh(`rm -f ${PHONE_DIR}/mindwtr-backup*`);
     const before = exportsOnPhone();
     return [() => exportToFolder(tag), () => exportsOnPhone().some((name) => !before.includes(name) && name.endsWith(suffix))];
 };
-/** A cold start as `[act, done]`: the process stopped the way the checks stop it, then launched to the Inbox. */
+
 const coldStartRun = () => [async () => { await device.stopApp(); device.launch(ACTIVITY); }, (nodes) => onInbox(nodes)];
-/** A new process on the Inbox, where the capture popup opens (the measurement's other steps end on Settings › Data). */
+
 const toInbox = async () => {
     await device.stopApp();
     await launch();
 };
 
-/**
- * The recovery boot (code review 2): [stopped] starts an operation that dies with its commit journaled and never sent. Only
- * with that process gone and its one entry pending is the next start measured; otherwise the row says why it was not.
- */
+
 const measureRecoveryBoot = async (shape, mib, stopped, options) => {
     setProp('journal_stop', 'before:backupDocumentCommit');
     let reason = null;
@@ -839,11 +752,7 @@ const measureRecoveryBoot = async (shape, mib, stopped, options) => {
     return measureRun(shape, 'recovery-boot', mib, async () => { device.launch(ACTIVITY); }, (nodes) => onInbox(nodes), options);
 };
 
-/**
- * The largest run the app admits at the limit (code review 2 #4): [attempt] at [startMiB], then 10 % smaller after each size
- * refusal, at most 12 times. The refused row just before the admitted one is its evidence (boundaryVerdict reads it from the
- * rows' order).
- */
+
 const atAdmittedBoundary = async (startMiB, attempt) => {
     let size = startMiB;
     for (let tries = 0; tries < 12 && size >= 0.5; tries += 1) {
@@ -855,13 +764,7 @@ const atAdmittedBoundary = async (startMiB, attempt) => {
     return null;
 };
 
-/**
- * Every workload again at the proposed limit [limitMiB] (transfer_limit_mb), each at its own admitted boundary, sized by the
- * library on the phone: a fresh restore as large as admitted (then its Undo, stopped before its send, for the recovery boot;
- * then the same restore again on a fresh install for the exports, the capture and the start, which read that library); a
- * merge and, on its own install, a second restore filling what a quarter-full library leaves, and that restore's Undo; with [imports], each import as large as admitted
- * on a fresh install.
- */
+
 const boundarySequence = async (shape, limitMiB, imports) => {
     const options = { boundary: true };
     const restoreAt = (workload, prefix) => async (size) => {
@@ -872,11 +775,11 @@ const boundarySequence = async (shape, limitMiB, imports) => {
     await measureFreshInstall(limitMiB);
     const fresh = await atAdmittedBoundary(limitMiB, restoreAt('restore-fresh', 'd1mf'));
     if (!fresh) return;
-    // The Undo of that restore, stopped before its send: the start reads the full library, then replays the Undo.
+
     await measureRecoveryBoot(shape, limitMiB, restoreNewestSnapshot, options);
-    // A fresh install again: the Undo left the restore's rows as tombstones, and that library plus the file passes the limit.
+
     await measureFreshInstall(limitMiB);
-    // The admitted file itself: a fixture rebuilt from its size comes out larger (step 0 run 6: 11.8 MiB from 10.7, refused).
+
     await restoreFile(fresh.file);
     await restoredOrStop();
     setProp('export_tree', TREE);
@@ -889,9 +792,7 @@ const boundarySequence = async (shape, limitMiB, imports) => {
     await measureRun(shape, 'capture', limitMiB, () => captureLines([`d1mbcap1${run}`, `d1mbcap2${run}`]), () => rowsLike('mb-capture', 'd1mbcap1') === 1, options);
     await measureRun(shape, 'cold-start', limitMiB, ...coldStartRun(), { ...options, again: coldStartRun });
 
-    // A quarter-full library, then a merge and a second restore each as large as admitted over it, and that restore's Undo.
-    // Core admits an operation over a library only when its recovery snapshot (the library's JSON) and the library it leaves
-    // fit the limit together, so a half-full library (step 0 run 6: 9 MiB, its JSON 7.7) admits no merge or restore at 15 MiB.
+
     await measureFreshInstall(limitMiB);
     const base = measureFixture(`d1-mb-${shape}-base-${run}.json`, Math.max(1, Math.floor(limitMiB / 4)), shape, 'd1mh');
     push(base);
@@ -906,7 +807,7 @@ const boundarySequence = async (shape, limitMiB, imports) => {
             await answerQuestion();
         }, (nodes) => hasText(nodes, en['settings.mergeBackup']) && !confirmButton(nodes), { ...options, sourceBytes: bytesOf(file) });
     });
-    // On its own half-full library: the merge's result passed the limit (S + L admits it, and the merge grows L by more than S).
+
     await measureFreshInstall(limitMiB);
     await restoreFile(base);
     await restoredOrStop();
@@ -916,8 +817,7 @@ const boundarySequence = async (shape, limitMiB, imports) => {
             (nodes) => hasText(nodes, en['settings.backupMobile.restoreComplete']) && !confirmButton(nodes), options);
     } else measured.push({ shape, workload: 'undo', sizeMiB: limitMiB, boundary: true, outcome: 'its restore was not admitted', pass: false });
 
-    // Each import (the first shape only: it runs on its own fresh install) as large as admitted: from 5 % past the limit, at
-    // the bytes per task step 0 run 6 measured for its importer, its file shrinks after each refusal.
+
     for (const key of imports ? Object.keys(IMPORT_TITLES) : []) {
         await atAdmittedBoundary(limitMiB * 1.05, async (size) => {
             const tasks = importTasksFor(size, IMPORT_TASK_BYTES_BY_KEY[key]);
@@ -930,14 +830,7 @@ const boundarySequence = async (shape, limitMiB, imports) => {
     }
 };
 
-/**
- * Pass D1c step 0 (design §8, the coordinator's rulings, code review P2). Every workload of MEASURE_WORKLOADS in every shape
- * of MEASURE_SHAPES, at growing sizes: a fresh library restores A, merges B over it, restores A again, undoes that, exports
- * JSON and CSV, takes the capture popup's snapshot, starts cold, and measures the recovery boot of a restore stopped before
- * its send; then, with [imports], each importer's file sized to this size runs on its own fresh install. A shape stops
- * growing once its fresh restore fails. The limit: half of the smallest bound over the whole matrix (data-transfer-limit.mjs),
- * then every workload and shape again at that limit's admitted boundary, which must pass.
- */
+
 const runSequence = async (shape, mib, { imports }) => {
     const boundary = false;
     const a = measureFixture(`d1-m-${shape}-${mib}-a-${run}.json`, mib, shape, 'd1ma');
@@ -945,7 +838,7 @@ const runSequence = async (shape, mib, { imports }) => {
     await measureFreshInstall();
     const fresh = await measureRun(shape, 'restore-fresh', mib, () => restoreFile(a), (nodes) => hasText(nodes, en['settings.backupMobile.restoreComplete']), { sourceBytes: bytesOf(a), boundary });
     if (fresh.row.outcome !== 'done') return false;
-    // TaskNotes keeps its own 12 MiB library bound (dd, 10-18), measured by run 5, so step 0 no longer measures it.
+
     const b = measureFixture(`d1-m-${shape}-${mib}-b-${run}.json`, mib, shape, 'd1mb');
     push(b);
     await measureRun(shape, 'merge-over', mib, async () => {
@@ -968,12 +861,11 @@ const runSequence = async (shape, mib, { imports }) => {
     await toInbox();
     await measureRun(shape, 'capture', mib, () => captureLines(lines), () => rowsLike(`m-capture-${mib}`, `d1mcap1${mib}`) === 1, { boundary });
     await measureRun(shape, 'cold-start', mib, ...coldStartRun(), { boundary, again: coldStartRun });
-    // A restore stopped with its commit journaled, never sent: the next start's recovery boot replays it.
+
     await measureRecoveryBoot(shape, mib, () => restoreFile(a2), { boundary });
     sh(`rm -f ${PHONE_DIR}/${a.name} ${PHONE_DIR}/${b.name}`);
-    // Each import on its own fresh install (step 0 run 5: one import's 100 MiB of rows ran every later row on its library),
-    // its file grown to about the library this size's other rows reach (IMPORT_SCALE). The first shape only: the library's
-    // shape does not reach an import on an empty library.
+
+
     if (imports) {
         const tasks = importTasksFor(IMPORT_SCALE * mib);
         for (const item of importFixtures(tasks)) {
@@ -984,15 +876,10 @@ const runSequence = async (shape, mib, { imports }) => {
     }
     return true;
 };
-/** An import's library growth per MiB of a matrix size: step 0 run 5's merge, restore and Undo rows left about 3.3 MiB per MiB. */
+
 const IMPORT_SCALE = 3;
-/**
- * TickTick's and Mindwtr CSV's largest files (one ZIP entry of about 80k and 100k rows) on a fresh library at step 0's raised
- * limit: each imports every row (QuickJS refused the one push that took them all, so step 0 read "No importable records"), the
- * toast's recovery snapshot is the newest on disk and in Sync › Recovery snapshots, and its Undo brings the library back.
- * Each import starts on its own fresh install: an Undo leaves the imported rows as tombstones, so on one library the second
- * import's snapshot held the first's 79k (44 MiB) and its Undo passed the 15 min commit budget (batch2: BudgetTooLarge).
- */
+
+
 const largeImports = async () => {
     const live = (label) => sqlite(pullDb(label), 'SELECT count(*) AS n FROM tasks WHERE deletedAt IS NULL')[0].n;
     for (const item of importFixtures().filter(({ key }) => key === 'ticktick' || key === 'mindwtr-csv')) {
@@ -1006,7 +893,7 @@ const largeImports = async () => {
         const imported = Number(/Imported (\d+) task/.exec(words)?.[1] ?? NaN);
         const snapshot = /data\.[\dT.-]+\.snapshot\.json/.exec(words)?.[0];
         const after = live(`li-${item.key}-after`);
-        // The fixture's own rows (data-measure-fixtures.mjs: one task per line after the header), not the importer's count.
+
         const rows = { ticktick: 79_477, 'mindwtr-csv': 99_999 }[item.key];
         check(imported === rows && after === before + rows, `(LI ${item.key}) every one of the fixture's ${rows} rows is a live task: ${imported} imported, ${before} -> ${after}`);
         check(snapshot && [...snapshots()].sort().at(-1) === snapshot, `(LI ${item.key}) the toast's recovery snapshot ${snapshot} is the newest on disk`);
@@ -1015,12 +902,8 @@ const largeImports = async () => {
         check(undone === before, `(LI ${item.key}) the Undo brings the library back: ${after} -> ${undone} (before: ${before})`);
     }
 };
-/**
- * Large-library pass b's memory rows (D1C_PART=no-undo): at the 15 MiB limit, a merge over a library whose recovery snapshot
- * plus the library left after comes to about 14.9 and about 20 MiB (the coordinator's ruling C). Each row restores the base
- * library on a fresh install, then merges the file, answering the no-Undo question with Continue when it comes; it logs the
- * recovery snapshot's size and whether the question came.
- */
+
+
 const NO_UNDO_ROWS = [['rows', 2.8, 6.3, 14.9], ['rows', 4, 8, 20], ['notes', 3, 8.5, 14.9], ['notes', 5, 9.5, 20]];
 const noUndoRows = async () => {
     const limitMiB = 15;
@@ -1051,8 +934,8 @@ const noUndoRows = async () => {
 const measure = async () => {
     console.log(`heap limits: dalvik.vm.heapgrowthlimit=${sh('getprop dalvik.vm.heapgrowthlimit')} heapsize=${sh('getprop dalvik.vm.heapsize')}; ${sh('grep MemTotal /proc/meminfo')}`);
     const shapes = (process.env.D1_MEASURE_SHAPES ?? MEASURE_SHAPES.join(',')).split(',');
-    // Run 5 (512 MiB native ceiling): rows passed every Data workload at 8 MiB and failed restore-over and Undo at 16; notes
-    // passed at 16 but its Java heap passed 128 MiB there.
+
+
     const sizesOf = (shape) => (process.env[`D1_MEASURE_SIZES_${shape.toUpperCase()}`] ?? process.env.D1_MEASURE_SIZES ?? (shape === 'notes' ? '4,8,12,16' : '8,12,16')).split(',').map(Number);
     const atLimit = async (limitMiB) => {
         for (const shape of shapes) await boundarySequence(shape, limitMiB, shape === shapes[0]);
@@ -1060,7 +943,7 @@ const measure = async () => {
         console.log(verdict.established ? `T established: ${limitMiB} MiB`
             : `T not established at ${limitMiB} MiB: failed ${verdict.failed.join(', ') || 'none'}; below its boundary ${verdict.belowBoundary.join(', ') || 'none'}; missing ${verdict.missing.join(', ') || 'none'}`);
     };
-    // D1_MEASURE_LIMIT=<MiB>: only the boundary reruns, at that limit (an earlier run's matrix proposed it).
+
     const given = Number(process.env.D1_MEASURE_LIMIT ?? '');
     if (given > 0) await atLimit(given);
     else {
@@ -1094,9 +977,8 @@ const cleanup = cleanupOnExit([
 try {
     console.log(`device: ${sh('getprop ro.product.model')} / Android ${sh('getprop ro.build.version.release')} (API ${sh('getprop ro.build.version.sdk')})`);
     console.log(`apk: ${apk}\nrun: ${run}`);
-    // A native test build another check left in front (step 0 runs outside the batch runner, which would press Home first):
-    // it goes the way the checks stop an app (device.stopApp), and the phone shows Home. Any other app in front still stops
-    // the check; dd's own apps are never touched.
+
+
     const leftInFront = /(tech\.dongdongbh\.mindwtr\.nativeclient[\w.]*)\//.exec(front())?.[1];
     if (leftInFront?.startsWith(NATIVE_TEST_PREFIX)) {
         await connect({ serial, pkg: leftInFront, uiFile: UI_FILE }).stopApp();
@@ -1134,7 +1016,7 @@ try {
         console.log('Transfer limit measurement finished');
         break steps;
     }
-    // The throwaway package, fresh (as each check-upgrade-device scenario starts).
+
     if (sh(`pm list packages ${PKG}`).split('\n').some((line) => line.trim() === `package:${PKG}`)) sh(`pm uninstall ${PKG}`);
     adbRaw('install', '-g', apk);
     clearLogs();
@@ -1143,29 +1025,28 @@ try {
     await launch();
     check(snapshots().length === 0 && journal().length === 0, 'a fresh library: no recovery snapshot, an empty journal');
 
-    // ---- D0 (pass D1c): the data channel through the real QuickJS bridge: a read chunk that starts with the bridge's error
-    // marker, and a write chunk that ends inside a surrogate pair, come back byte for byte ----
+
     setProp('channel_roundtrip', '1');
     await relaunch();
     await until('the channel round trip', () => allLogs().includes('Native Android channel roundtrip ok='), 60_000, 500);
     check(allLogs().includes('Native Android channel roundtrip ok=true'), '(D0) the file came back through the bridge byte for byte');
     setProp('channel_roundtrip', '');
 
-    // ---- E3: Merge backup, Undo, Restore backup ----
+
     const a = fixture(`d1-merge-a-${run}.json`, [task(`d1a${run}`), task(`d1b${run}`, { description: '日本語 🦉' })]);
     push(a);
     await merge(a);
     await confirmQuestion(en['settings.mergeBackup']);
     let nodes = await toastWith(en['settings.mergeBackup']);
     check(Boolean(undoButton(nodes)), '(E3) the merge result shows RN\'s Undo');
-    // Undo straight away (RN's toast lasts 5.6 s): RN's "Undo this change?" with the snapshot's label, then Restore.
+
     await tap(undoButton(nodes));
     await confirmQuestion(en['settings.undoImportConfirmTitle']);
     await toastWith(en['settings.backupMobile.restoreComplete']);
     check(liveTitles('undo').length === 0, '(E3) Undo restored the snapshot taken before the merge: no merged row is live');
     check(snapshots().length === 1, `(E3) one recovery snapshot (the merge's; a snapshot restore takes none): ${snapshots().join(' ')}`);
     check(journal().length === 0 && operations().length === 0, '(E3) the journal and the operation folder are empty');
-    // The same file again: Undo deleted its rows here, and RN's merge keeps a local delete ("items you deleted here stay deleted").
+
     await merge(a);
     await confirmQuestion(en['settings.mergeBackup']);
     await toastWith(en['settings.mergeBackup']);
@@ -1177,7 +1058,7 @@ try {
     await toastWith(en['settings.mergeBackup']);
     check(JSON.stringify(liveTitles('merge')) === JSON.stringify([`d1a${run}`, `d1b${run}`]), '(E3) Merge backup added both rows once');
 
-    // ---- E1: the three exports into the folder RN's picker grants ----
+
     setProp('export_tree', TREE);
     const json = await exportFile('data-transfer-export', '.json');
     const exported = JSON.parse(readFileSync(json.local, 'utf8'));
@@ -1188,14 +1069,14 @@ try {
     check(allLogs().includes('"releaseCheck":"v1.3.5/android-backup-export"') && allLogs().includes('"route":"saf"'), '(E1) the export line says route=saf');
     const csv = await exportFile('data-transfer-export-csv', '.csv');
     const csvText = readFileSync(csv.local, 'utf8');
-    // Core's header (mindwtr-csv-columns.ts) starts with its Title column; one line per live row of this run.
+
     check(csvText.startsWith('Title,Description,Status,') && [`d1a${run}`, `d1b${run}`].every((title) => csvText.includes(`\n${title},`)),
         `(E1) ${csv.name} is Mindwtr CSV with this run's rows`);
     const zip = await exportFile('data-transfer-export-tasknotes', '-tasknotes.zip');
     const entries = execFileSync('unzip', ['-Z1', zip.local], { encoding: 'utf8' });
     check(entries.includes(`d1a${run}`), `(E1) ${zip.name} holds a TaskNotes file per task`);
-    // The three exports are core's bytes: data-export-expected.ts loads the database pulled after the JSON export through core's
-    // store (bun) and runs core's serializers; the library does not change between the three exports.
+
+
     const expected = JSON.parse(execFileSync('bun', [resolve(app, 'scripts/data-export-expected.ts'), db], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
     check(readFileSync(json.local, 'utf8') === expected.json, `(E1) ${json.name} is byte for byte core's serializeBackupData of the library`);
     check(csvText === expected.csv, `(E1) ${csv.name} is byte for byte core's serializeMindwtrCsv`);
@@ -1203,17 +1084,17 @@ try {
     check(JSON.stringify(zipPaths) === JSON.stringify(expected.tasknotes.map((file) => file.path).sort())
         && expected.tasknotes.every((file) => execFileSync('unzip', ['-p', zip.local, file.path], { encoding: 'utf8' }) === file.content),
         `(E1) ${zip.name} holds core's serializeTaskNotesExport files byte for byte (${zipPaths.length})`);
-    // RN's folder grant: Expo takes the picked tree as a persistable grant; so does the native app (design §5).
+
     check(persistedGrant('Download%2Fmtd1'), '(E1) the picked folder is a persisted grant of the app, as RN\'s Expo takes it');
 
-    // ---- E2: no folder picked: RN's share fallback; nothing is created ----
+
     setProp('export_tree', '');
     const beforeShare = exportsOnPhone();
     await openData();
     await tap(tagged(await screen(), 'data-transfer-export'));
     await until('the folder picker', otherAppFront, 15_000, 500);
     await sleep(1200);
-    // Back walks up the picker's folders first (it reopens in the last folder, Download/mtd1); it cancels at the top.
+
     const pickerFront = () => front().includes('documentsui');
     for (let step = 0; step < 8 && pickerFront(); step += 1) { sh('input keyevent KEYCODE_BACK'); await sleep(1200); }
     await until('the share sheet', () => sh('dumpsys activity activities').includes('act=android.intent.action.CHOOSER'), 15_000, 500);
@@ -1222,7 +1103,7 @@ try {
     requireAppFront();
     check(JSON.stringify(exportsOnPhone()) === JSON.stringify(beforeShare), '(E2) nothing was written into the folder, and no target was picked');
 
-    // ---- E3: Restore backup from the E1 file replaces the library ----
+
     const b = fixture(`d1-merge-b-${run}.json`, [task(`d1c${run}`)]);
     push(b);
     await merge(b);
@@ -1241,12 +1122,12 @@ try {
     check(JSON.stringify(liveTitles('restore')) === JSON.stringify([`d1a${run}`, `d1b${run}`]), '(E3) Restore backup gave the exported library: the later row is gone');
     check(appLock('lock-after') === lockBefore, `(E3) the restore left App Lock as it was (${lockBefore})`);
 
-    // ---- Sync › Recovery snapshots: RN's rows and question ----
+
     nodes = await openRow(en['settings.sync'], onSync, 'Sync');
     for (let step = 0; step < 10 && !shown(nodes, 'recovery-snapshots-disclosure'); step += 1) nodes = await device.swipe(nodes, 'down');
     nodes = await tapExpecting(tagged(nodes, 'recovery-snapshots-disclosure') ?? fail('no Recovery snapshots card'),
         (current) => current.some((node) => (node['resource-id'] ?? '').includes('recovery-snapshot-data.')), 'the snapshot rows');
-    // A dump holds only the rows on screen: gather them while scrolling down, then come back to the newest (the first row).
+
     const snapshotRows = (current) => current.filter((node) => (node['resource-id'] ?? '').includes('recovery-snapshot-data.'));
     const onDisk = snapshots();
     const newest = [...onDisk].sort().at(-1);
@@ -1264,7 +1145,7 @@ try {
     nodes = await toastWith(en['settings.backupMobile.restoreComplete']);
     check(!undoButton(nodes), '(snapshots) a snapshot restore offers no Undo, as RN');
 
-    // ---- E5: a merge held before its commit: one busy row, the others off ----
+
     const c = fixture(`d1-merge-c-${run}.json`, [task(`d1d${run}`)]);
     push(c);
     setProp('delay_before_ms', '8000');
@@ -1280,7 +1161,7 @@ try {
     await toastWith(en['settings.mergeBackup']);
     setProp('delay_before_ms', '');
 
-    // ---- E4: process death at each step ----
+
     const crash = async (label, props, file, { landed, expectReplay }) => {
         for (const [name, value] of Object.entries(props)) setProp(name, value);
         push(file);
@@ -1291,7 +1172,7 @@ try {
         for (const name of Object.keys(props)) setProp(name, '');
         const replays = replayLines().length;
         await launch();
-        // The leftover result shows once, for RN's 5.6 s, right after the start: watch for it before the slow database reads.
+
         if (landed) await toastWith(en['settings.mergeBackup'], 60_000);
         const mine = file.tasks.map((item) => item.title);
         const settledAs = (titles) => mine.every((title) => titles.filter((seen) => seen === title).length === (landed ? 1 : 0));
@@ -1305,13 +1186,12 @@ try {
     await crash('after-snapshot', { backup_stop: 'after-snapshot' }, fixture(`d1-crash-1-${run}.json`, [task(`d1e${run}`)]), { landed: false });
     await crash('mid-plan', { backup_stop: 'mid-plan' }, fixture(`d1-crash-2-${run}.json`, [task(`d1f${run}`)]), { landed: false });
     await crash('before-commit', { journal_stop: 'before:backupDocumentCommit' }, fixture(`d1-crash-3-${run}.json`, [task(`d1g${run}`)]), { landed: true, expectReplay: true });
-    // E4c: the data and its receipt are committed in SQL; the process dies before core reloads or replies.
+
     await crash('after-sql-commit', { commit_stop: 'backupDocumentCommit' }, fixture(`d1-crash-8-${run}.json`, [task(`d1n${run}`)]), { landed: true, expectReplay: true });
     await crash('after-commit', { journal_stop: 'after:backupDocumentCommit' }, fixture(`d1-crash-4-${run}.json`, [task(`d1h${run}`)]), { landed: true, expectReplay: true });
     await crash('after-settle', { backup_stop: 'after-settle' }, fixture(`d1-crash-5-${run}.json`, [task(`d1i${run}`)]), { landed: true });
 
-    // A plan changed on disk while the process was dead is never sent (the identity check): the start shows RN's Merge failed
-    // with core's reason before the record goes, and nothing lands (review 2, #7).
+
     setProp('journal_stop', 'before:backupDocumentCommit');
     const changed = fixture(`d1-crash-9-${run}.json`, [task(`d1o${run}`)]);
     push(changed);
@@ -1327,7 +1207,7 @@ try {
     await until('(E4 changed plan) the journal and the operation folder to empty', () => journal().length === 0 && operations().length === 0, 30_000);
     check(!liveTitles('changed-plan').includes(`d1o${run}`), '(E4 changed plan) the changed plan was never sent: nothing landed');
 
-    // settle-fail: the merge shows its result, but its entry and plan stay until the next start replays them from the receipt.
+
     setProp('backup_stop', 'settle-fail');
     const f = fixture(`d1-crash-6-${run}.json`, [task(`d1j${run}`)]);
     push(f);
@@ -1340,7 +1220,7 @@ try {
     await until('(E4 settle-fail) the replay to empty them', () => journal().length === 0 && operations().length === 0, 30_000);
     check(liveTitles('settle-fail').filter((title) => title === `d1j${run}`).length === 1, '(E4 settle-fail) the replay answered from the receipt: the row is there once');
 
-    // E4a: a task that becomes due while the commit waits in the journal; the recovery boot replays before the promotion.
+
     const due = fixture(`d1-due-${run}.json`, [task(`d1k${run}`, { status: 'inbox', startTime: new Date(Date.now() + 45_000).toISOString() })]);
     push(due);
     await merge(due);
@@ -1363,7 +1243,7 @@ try {
         .catch(() => undefined);
     check(promoted === 'next', `(E4a) normal activation ran after the replay: the due task is promoted (${promoted})`);
 
-    // ---- E2b: a death in the middle of a folder write ----
+
     setProp('export_tree', TREE);
     setProp('backup_stop', 'mid-export');
     const beforeKill = exportsOnPhone();
@@ -1378,7 +1258,7 @@ try {
     check(allLogs().includes('v1.3.5/android-export-cleanup'), '(E2b) the start removed it and logged android-export-cleanup');
     setProp('export_tree', '');
 
-    // ---- Pass D1b: Getting Started and the five imports ----
+
     const freshInstall = async () => {
         if (sh(`pm list packages ${PKG}`).split('\n').some((line) => line.trim() === `package:${PKG}`)) sh(`pm uninstall ${PKG}`);
         adbRaw('install', '-g', apk);
@@ -1401,7 +1281,7 @@ try {
         return tagged(nodes, 'add-getting-started-content') ?? fail('no Getting Started row');
     };
 
-    // G1: the row seeds once; RN's toast offers Open; a second tap adds nothing.
+
     check(starterRows('g1-before').projects === 0, '(G1) the library has no Getting Started project before the tap');
     const created = seededLines('created');
     await tap(await gettingStartedRow());
@@ -1409,7 +1289,7 @@ try {
     const open = nodes.find((node) => node.text === en['common.open']);
     check(Boolean(open), '(G1) the toast offers RN\'s Open');
     await tap(open);
-    // The project screen shows its title in an editable field, which hasText skips.
+
     await waitFor('the Getting Started project', (current) => tagged(current, 'project-title-input')?.text === en['starter.projectTitle'], 30_000);
     let seeded = starterRows('g1-after');
     check(seeded.projects === 1 && seeded.tasks === 7 && seeded.samples === 2, `(G1) one project with 7 tasks and 2 Inbox samples: ${JSON.stringify(seeded)}`);
@@ -1422,7 +1302,7 @@ try {
     await until('(G1) the second seed\'s log line', () => seededLines('unchanged') === unchanged + 1, 15_000);
     check(true, '(G1) the second tap logs outcome=unchanged');
 
-    // The import fixtures (titles d1…<run>; dates relative to now): written here, pushed to the test folder.
+
     const binary = (name, bytes) => { writeFileSync(resolve(work, name), bytes); return { name, tasks: [] }; };
     const csvLine = (cells) => cells.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',');
     const tickTime = new Date().toISOString().replace(/\.\d{3}Z$/, '+0000');
@@ -1464,7 +1344,7 @@ try {
     const committedLines = (operation) => allLogs().split('\n').filter((line) => line.includes('v1.3.4/native-backup-document') && line.includes(`"operation":"${operation}"`)).length;
     const receiptCount = (label, operation) => sqlite(pullDb(label), `SELECT count(*) AS n FROM native_request_receipts WHERE method LIKE '["backupDocument","${operation}",%'`)[0].n;
 
-    // I1: each importer's rows are core's own import of the fixture over the library just before; Undo leaves none.
+
     for (const item of imports) {
         const before = pullDb(`i1-${item.key}-before`);
         const beforeRows = JSON.stringify(taggedRows(before));
@@ -1483,16 +1363,15 @@ try {
         check(journal().length === 0 && operations().length === 0 && staged().length === 0, `(I1 ${item.key}) the journal, the operation folder and the staging folder are empty`);
     }
 
-    // I2: a TickTick file on the DGT row: core's invalid-file warning; the staged copy goes.
+
     await importPick('dgt', imports[1].file);
     await waitFor('the invalid-file warning', (current) => hasText(current, en['settings.backupMobile.importFailed']), 60_000);
     check(staged().length === 0 && !confirmButton(await screen()), '(I2) a TickTick file on the DGT row asks nothing and leaves no staged copy');
 
-    // I3: a file one byte past core's 16 MiB import cap (pass D1c: the cap holds whatever the transfer limit) is refused while
-    // it is copied: core's limit text, no copy left.
+
     const big = binary(`d1-big-${run}.csv`, Buffer.alloc(16 * 1024 * 1024 + 1, 'x'));
     push(big);
-    // A transfer limit above 16 MiB (code review P3): only the import's own staging cap can refuse this file here.
+
     setProp('transfer_limit_mb', '32');
     await importPick('mindwtr-csv', big);
     await waitFor('the limit refusal', (current) => hasText(current, en['settings.backupMobile.importFailed']) && hasText(current, en['settings.importDiagnostics.limitExceeded']), 60_000);
@@ -1500,9 +1379,7 @@ try {
     check(staged().length === 0 && !confirmButton(await screen()), '(I3) under a 32 MiB transfer limit, a 16 MiB + 1 byte import is refused while copied, with core\'s limit text and no staged copy');
     sh(`rm -f ${PHONE_DIR}/${big.name}`);
 
-    // I4: a Todoist import stopped before the journal; then one stopped right after its COMMIT. Each time the files are read
-    // while the process is dead (the disk as the next start finds it), then the start is watched, dump by dump, until the
-    // Inbox shows and the leftovers are cleaned: a result toast in any dump is caught however briefly it shows.
+
     const importCrash = async (label, props, file) => {
         push(file);
         for (const [name, value] of Object.entries(props)) setProp(name, value);
@@ -1513,11 +1390,8 @@ try {
     };
     const hasResult = () => listing('no_backup/backup-operations').includes('result.json');
     const resultToast = (nodes) => hasText(nodes, en['settings.backupMobile.importComplete']) || hasText(nodes, en['settings.backupMobile.importFailed']);
-    /**
-     * Starts the app and reads every screen until the app logs that its start's leftover step is over (a debug build's
-     * `Native Android data leftover done result=…`) and [settled] holds; then, when that step handed a toast over, until the
-     * toast is seen. Answers the step's result (`none`, `result`, `failure`) and whether any dump showed a result toast.
-     */
+
+
     const leftoverDone = () => allLogs().split('\n').filter((line) => line.includes('Native Android data leftover done result='));
     const watchStart = async (settled) => {
         const before = leftoverDone().length;
@@ -1541,8 +1415,8 @@ try {
         const lines = committedLines('todoist');
         const replays = replayLines().length;
         await importCrash(label, { backup_stop: stop }, binary(`d1-i4-${label}-${run}.zip`, zipSync({ [`d1i4proj${run}.csv`]: todoistCsv(titles) })));
-        // Dead: no journal entry, no result record. Since pass D1c the operation's folder exists from before its prepare (its
-        // snapshot name's reservation), so either stop leaves one folder with no manifest; the next start deletes it.
+
+
         check(journal().length === 0 && !hasResult(), `(I4 ${label}) while stopped: no journal entry and no result record`);
         const folders = operations();
         check(folders.length === 1 && !listing(`no_backup/backup-operations/${folders[0]}`).includes('manifest.json'),
@@ -1558,7 +1432,7 @@ try {
         const replays = replayLines().length;
         const receipts = receiptCount('i4-receipts-before', 'todoist');
         await importCrash('after-commit', { commit_stop: 'backupDocumentCommit' }, binary(`d1-i4-after-commit-${run}.zip`, zipSync({ [`d1i4proj${run}.csv`]: todoistCsv(titles) })));
-        // Dead right after COMMIT: the rows and the receipt are in SQLite, the entry still journaled, no result record yet.
+
         check(journal().length === 1 && operations().length === 1 && !hasResult(), '(I4 after-commit) while stopped: the entry and its folder, no result record');
         const landed = taggedRows(pullDb('i4-after-commit')).filter((row) => titles.includes(row.title));
         check(landed.length === 1, `(I4 after-commit) while stopped: the import landed exactly once: ${JSON.stringify(landed)}`);
@@ -1575,13 +1449,11 @@ try {
         check(again.found === 'none' && !again.toast, `(I4 after-commit) a second start's leftover step found nothing to show: ${JSON.stringify(again)}`);
     }
 
-    // I5: Codex's 60 000-row Mindwtr CSV grows the library past what its Undo could admit. Large-library pass b: it is never
-    // refused for that; core's question says Undo may not be available, Cancel lands nothing, Continue runs it, and the commit's
-    // real bytes leave it without Undo.
+
     const expansion = binary(`d1-expansion-${run}.csv`, strToU8(`Title\n${Array.from({ length: 60_000 }, (_, index) => `d1x${index}x${run}`).join('\n')}\n`));
     push(expansion);
     const csvReceipts = receiptCount('i5-before', 'csv');
-    // The 12 MiB limit this row was built for (pass D1c raises the default; the Undo's room is what it checks).
+
     setProp('transfer_limit_mb', '12');
     const noUndoQuestion = (current) => hasText(current, en['settings.backupMobile.undoUnavailableTitle'])
         && hasText(current, en['settings.backupMobile.undoUnavailableConfirm']);
@@ -1607,26 +1479,24 @@ try {
     check(receiptCount('i5-after', 'csv') === csvReceipts + 1, '(I5) with one receipt');
     check(/large-library-no-undo.*"outcome":"after-save"/.test(allLogs()), '(I5) the log names the commit\'s no-Undo decision (v1.3.7/large-library-no-undo, after-save)');
     await until('(I5) the journal and the operation folder to empty', () => journal().length === 0 && operations().length === 0, 60_000);
-    // The 60 000 rows stay; I6 and on need a small library again (its recovery snapshot alone passes the limit).
+
     setProp('transfer_limit_mb', '');
     sh(`rm -f ${PHONE_DIR}/${expansion.name}`);
     await fresh();
 
-    // I6: sentinels in a dropped repeat rule, a renamed project and a skipped archive entry's name. The durable files are read
-    // while the process is dead at the two points they exist: right after the commit's reply (journal entry, plan, manifest and
-    // receipt on disk) and right after the result record is written (before its toast).
+
     const S1 = `TOKEN=d1sentinelone${run}`;
     const S2 = `d1sentineltwo${run}`;
     const S3 = `d1sentinelthree${run}`;
     const holders = (sentinel) => runAs(`sh -c 'grep -rl "${sentinel}" files no_backup databases 2>/dev/null || true'`).split(/\s+/).filter(Boolean);
     const receiptReplies = (label) => JSON.stringify(sqlite(pullDb(label), 'SELECT reply FROM native_request_receipts'));
-    // A project titled S2 made by a Mindwtr CSV import: an unrelated id, so the Todoist file named S2 collides by title.
+
     const seed = binary(`d1-seed-${run}.csv`, strToU8(`Title,Project\nd1s2seed${run},${S2}\n`));
     push(seed);
     await importPick('mindwtr-csv', seed);
     await confirmQuestion(en['settings.backupMobile.importMindwtrCsvData']);
     await toastWith(en['settings.backupMobile.importComplete']);
-    // The colliding Todoist import, stopped once its result record is written: it renamed the project (the warning ran).
+
     const renamed = binary(`d1-renamed-${run}.zip`, zipSync({ [`${S2}.csv`]: todoistCsv([`d1s2b${run}`]) }));
     push(renamed);
     setProp('backup_stop', 'after-settle');
@@ -1642,8 +1512,8 @@ try {
     check(!receiptReplies('i6-rename-receipts').includes(S2), '(I6 rename) while stopped: no receipt reply names the project');
     check(holders(S2).every((path) => path.startsWith('files/SQLite/') || path.startsWith('files/snapshots/')), `(I6 rename) while stopped: the name is only in the library and its snapshots: ${holders(S2).join(' ')}`);
     check((await watchStart(() => !hasResult())).found === 'result', '(I6 rename) the start showed its result once');
-    // The dropped rule and the skipped entry, stopped right after the commit's reply: the journal entry, the plan, the manifest
-    // and the receipt are all on disk.
+
+
     const rule = binary(`d1-rule-${run}.zip`, zipSync({ 'tasks.csv': strToU8(`Title,Recurrence\nd1s1a${run},${S1}\n`), [`${S3}.zip`]: zipSync({ 'inner.csv': strToU8('Title\nx') }) }));
     push(rule);
     setProp('journal_stop', 'after:backupDocumentCommit');
@@ -1658,7 +1528,7 @@ try {
     check(holders(S1).length === 0 && holders(S3).length === 0, '(I6 rule) after the replay too');
     check(![S1, S2, S3].some((sentinel) => allLogs().includes(sentinel)), '(I6) no log line names a sentinel');
 
-    // G3: a seed stopped with its entry on disk, before core saw it: the next start replays it once.
+
     await freshInstall();
     const g3Created = seededLines('created');
     setProp('journal_stop', 'before:gettingStarted');
@@ -1670,8 +1540,7 @@ try {
     check(seeded.projects === 1 && seeded.tasks === 7 && seeded.samples === 2, `(G3) the replay seeded once: ${JSON.stringify(seeded)}`);
     check(journal().length === 0 && seededLines('created') === g3Created + 1, '(G3) the journal is empty and the replay logged outcome=created once');
 
-    // G2: a seed stopped right after its COMMIT: the rows and the receipt are in one transaction, so the next start answers from
-    // the receipt (gettingStarted:<hash> under the journal's request UUID) and writes and logs nothing.
+
     await freshInstall();
     const g2Lines = seededLines('created') + seededLines('unchanged');
     setProp('commit_stop', 'gettingStarted');
@@ -1687,11 +1556,9 @@ try {
     check(receipt.length === 1 && receipt[0].method.startsWith('gettingStarted:'), `(G2) its receipt is gettingStarted:<hash> under the journal's request UUID: ${JSON.stringify(receipt)}`);
     check(seededLines('created') + seededLines('unchanged') === g2Lines, '(G2) no seed line: the stop came right after COMMIT and the replay answered from the receipt');
 
-    // ---- Pass D1c: larger transfers, a replay whose plan cannot be read, and the size-scaled deadlines ----
-    // L1: a share of the limit restored over another, every row multi-byte: each row lands byte for byte, and the new
-    // log line names the operation, its sizes and a Java peak far below the file.
+
     await fresh();
-    // A fifth of the limit each: SQLite keeps multi-byte rows with their full-text index, larger than their JSON.
+
     const share = Math.max(2, Math.floor(limitMiB / 5));
     const l1a = measureFixture(`d1-l1-a-${run}.json`, share, 'emoji', 'd1la');
     const l1b = measureFixture(`d1-l1-b-${run}.json`, share, 'emoji', 'd1lb');
@@ -1699,7 +1566,7 @@ try {
     await restore(l1a);
     await toastWith(en['settings.backupMobile.restoreComplete'], 600_000);
     await restore(l1b);
-    // Large-library pass b: the admission before it kept this restore's Undo, so it keeps it now, with no question first.
+
     const l1toast = await waitFor('the second restore\'s toast or the no-Undo question', (current) => (hasText(current, en['settings.backupMobile.restoreComplete'])
         && !confirmButton(current)) || hasText(current, en['settings.backupMobile.undoUnavailableTitle']), 600_000);
     check(!hasText(l1toast, en['settings.backupMobile.undoUnavailableTitle']), '(L1) the restore asked no no-Undo question');
@@ -1714,8 +1581,7 @@ try {
         `(L1) the v1.3.7/native-large-transfer line says replace, committed, a Java peak under 128 MiB: ${l1line.slice(-260)}`);
     sh(`rm -f ${PHONE_DIR}/${l1a.name} ${PHONE_DIR}/${l1b.name}`);
 
-    // R1: a merge stopped right after its COMMIT; the next start's replay cannot read its plan (a debug read failure): the
-    // entry stays, nothing shows; the start after answers the first success from the receipt, writes nothing again, and offers Undo.
+
     await fresh();
     const r1 = fixture(`d1-r1-${run}.json`, [task(`d1r1a${run}`), task(`d1r1b${run}`)]);
     push(r1);
@@ -1728,7 +1594,7 @@ try {
     const receiptsAfterCommit = sqlite(pullDb('r1-commit'), `SELECT count(*) AS n FROM native_request_receipts WHERE method LIKE '["backupDocument","merge",%'`)[0].n;
     check(receiptsAfterCommit === 1 && journal().length === 1, `(R1) the stop came after COMMIT: one receipt, the entry still journaled (${receiptsAfterCommit}, ${journal().length})`);
     setProp('channel_fail', 'read-once');
-    // The replay keeps its entry, so this start never resumes normal activation: no Inbox wait.
+
     device.launch(ACTIVITY);
     await sleep(20_000);
     setProp('channel_fail', '');
@@ -1747,12 +1613,12 @@ try {
     }
 } catch (error) {
     evidenced(error);
-    // The app's own log lines (this tag) beside the screen evidence: a refusal's class name shows why an operation stopped.
+
     try {
         const logFile = resolve(work, `logcat-${run}.txt`);
         writeFileSync(logFile, allLogs());
         console.error(`app log: ${logFile}`);
-    } catch { /* evidence only */ }
+    } catch {                     }
     console.error(error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Stopped ? 3 : 1;
 } finally {

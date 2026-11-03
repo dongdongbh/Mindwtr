@@ -12,7 +12,7 @@ import { TaskEditModal } from '@/components/task-edit-modal';
 import { useThemeColors } from '@/hooks/use-theme-colors';
 import { useToast } from '@/contexts/toast-context';
 
-/** Internal development harness. The root MobileAppLockGate owns access. */
+
 export default function AppleEvaluationRoute() {
   if (!__DEV__ || Platform.OS !== 'ios') return <Redirect href="/inbox" />;
   return <AppleEvaluationScreen />;

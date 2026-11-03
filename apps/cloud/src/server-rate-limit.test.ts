@@ -54,7 +54,7 @@ describe('createRateLimiter', () => {
         limiter.prune(clock.now() + 60_001);
         clock.advance(60_001);
 
-        // A fresh window: the earlier hit no longer counts against the key.
+
         expect(limiter.check('k', 1)).toBeNull();
     });
 
@@ -66,15 +66,15 @@ describe('createRateLimiter', () => {
         clock.advance(10);
         limiter.check('newer', 5);
         clock.advance(10);
-        // Touch 'old' so 'newer' becomes least recently used.
+
         limiter.check('old', 5);
         clock.advance(10);
 
-        // Inserting a third key evicts 'newer'; 'old' keeps its count.
+
         limiter.check('third', 5);
-        // 'old' survived with count 2: this third hit exceeds max 2.
+
         expect(limiter.check('old', 2)?.status).toBe(429);
-        // 'newer' was evicted: had it survived, this second hit would be 429.
+
         expect(limiter.check('newer', 1)).toBeNull();
     });
 });

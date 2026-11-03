@@ -9,10 +9,6 @@ import { createNativeHostContract } from './native-host-contract';
 import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from './store';
 import type { AppSettings, Project, Task } from './types';
 
-// The reminder plan, frozen before its hot path was trimmed (the lookup maps built on demand, undated tasks skipped): core's
-// planReminderAlarms on a seeded 5,000-task store, and the native contract's plan (its delivered and Snooze judging) on a
-// smaller one, at instants around New York's midnights and both DST changes. Every output must stay byte-identical: RN, iOS
-// and Android share it. Regenerate only on purpose: UPDATE_REMINDER_CORPUS=1.
 
 const corpusFile = join(dirname(fileURLToPath(import.meta.url)), 'reminder-plan-corpus.json');
 const ZONE = 'America/New_York';
@@ -28,7 +24,7 @@ const pad = (value: number) => String(value).padStart(2, '0');
 const localDay = (at: Date) => `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
 const localDateTime = (at: Date) => `${localDay(at)}T${pad(at.getHours())}:${pad(at.getMinutes())}:00`;
 
-/** Dated, undated, recurring, start-only, due-only, review, lead and repeat minutes; values clustered around [from, to). */
+
 function store(count: number, from: number, to: number, seed: number, datedShare = 0.5): { tasks: Task[]; projects: Project[] } {
     const next = random(seed);
     const pick = <T,>(values: readonly T[]) => values[Math.floor(next() * values.length)];
@@ -46,7 +42,7 @@ function store(count: number, from: number, to: number, seed: number, datedShare
     const tasks: Task[] = Array.from({ length: count }, (_, index) => {
         const status = pick(['next', 'next', 'next', 'inbox', 'waiting', 'someday', 'done', 'reference'] as const);
         const shape = next();
-        // [datedShare] of the tasks dated (half by default, as a real library): due-only, start-only, both, or review-only.
+
         const kind = next();
         const dated = shape >= datedShare ? {} : kind < 0.3 ? { dueDate: date() } : kind < 0.5 ? { startTime: date() }
             : kind < 0.8 ? { dueDate: date(), startTime: date() } : { reviewAt: date() };
@@ -73,7 +69,7 @@ const SETTINGS: Array<[string, Partial<AppSettings>]> = [
     ['no review notifications', { reviewAtNotificationsEnabled: false }],
     ['notifications off', { notificationsEnabled: false }],
 ];
-// New York: midnight, the spring-forward night (2026-03-08 02:00), the fall-back night (2026-11-01 02:00), a plain afternoon.
+
 const INSTANTS = (): Array<[string, Date]> => [
     ['before midnight', new Date(2026, 2, 6, 23, 59, 59, 999)],
     ['midnight', new Date(2026, 2, 7, 0, 0, 0, 0)],
@@ -92,7 +88,7 @@ const serialize = (value: unknown) => JSON.stringify(value, (_key, item) => {
 });
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 
-/** The alarms a plan an hour earlier would have made: held entries as Android stores them (ids, signatures, fire times). */
+
 const heldFrom = (plan: ReturnType<typeof planReminderAlarms>): Map<string, ReminderAlarmEntry> => new Map(
     [...plan.recurring, ...plan.oneShot].map((request, index) => [request.key, { id: 1000 + index, signature: request.signature, fireAtMs: request.config.fireAt.getTime() }]));
 
@@ -140,12 +136,11 @@ describe('reminder plan corpus (frozen before the plan was trimmed)', () => {
                 check(`core ${settingsName} ${instantName} revoked`, planReminderAlarms({ ...input, now, alarms: heldFrom(earlier), permissionGranted: false }), saved);
             }
         }
-        // The corpus plans real alarms.
+
         expect(requests).toBeGreaterThan(1000);
     }, 120_000);
 
-    // Old against new in three shapes: no task dated, about 20% dated, every task dated (lead minutes, repeats and recurrence
-    // also on undated tasks, which must schedule and count nothing).
+
     it('core planReminderAlarms on 5,000-task stores with no, 20% and all tasks dated', () => {
         process.env.TZ = ZONE;
         const saved = frozen();
@@ -171,7 +166,7 @@ describe('reminder plan corpus (frozen before the plan was trimmed)', () => {
         let delivered = 0, snoozes = 0;
         for (const [settingsName, settings] of SETTINGS.slice(0, 3)) {
             for (const [instantName, now] of INSTANTS()) {
-                // A store dense around this instant, so alarms fired in the six hours before it.
+
                 const data = store(400, now.getTime() - 12 * 60 * MINUTE, now.getTime() + 12 * 60 * MINUTE, 11);
                 await flushPendingSave();
                 resetForTests();
@@ -188,7 +183,7 @@ describe('reminder plan corpus (frozen before the plan was trimmed)', () => {
                 vi.setSystemTime(new Date(now.getTime() - 6 * 60 * MINUTE));
                 const earlier = await host.planReminderAlarms({ storedAlarms: null, permissionGranted: true, storedState: null });
                 if (!earlier.ok) throw new Error(earlier.error.message);
-                // Delivered entries for what fired since, Snoozes ahead and behind, and the held map as the earlier plan left it.
+
                 const state: Record<string, unknown> = {};
                 let id = 5000;
                 const soonest = [...earlier.value.schedule].sort((a, b) => (a as { fireAtMs: number }).fireAtMs - (b as { fireAtMs: number }).fireAtMs);
@@ -213,13 +208,13 @@ describe('reminder plan corpus (frozen before the plan was trimmed)', () => {
                 vi.useRealTimers();
             }
         }
-        // The judging ran: delivered reminders and Snoozes were in the stored state.
+
         expect(delivered).toBeGreaterThan(20);
         expect(snoozes).toBeGreaterThan(20);
     }, 240_000);
 });
 
-// The plan's lookup maps (getActiveCancelReason's tasks and projects by id) are built only when a held alarm is judged.
+
 describe('planReminderAlarms lookup maps', () => {
     it('builds no task or project map for a plan that holds no alarm, and both once an alarm is held', async () => {
         const translations = await loadTranslations('en');
@@ -239,9 +234,7 @@ describe('planReminderAlarms lookup maps', () => {
     });
 });
 
-// The undated skip in buildReminderSchedule rests on one rule: a task's reminders and counts come only from dueDate,
-// startTime and reviewAt. A dateless task with every other reminder field set plans and counts nothing; and every task date
-// the planner parses is one of those three, so a new date source fails here until the skip names it too.
+
 describe('the undated skip in the reminder plan', () => {
     it('plans and counts nothing for a dateless task with every other reminder field set', async () => {
         const translations = await loadTranslations('en');

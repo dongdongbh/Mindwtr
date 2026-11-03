@@ -86,11 +86,11 @@ describe('resolveRowFocusStarAction', () => {
     });
 
     it('refuses an Inbox task the Next rules refuse', () => {
-        // The plain resolver refuses every Inbox task; the row judges it as Next instead.
+
         expect(resolveFocusStarAction(makeTask({ status: 'inbox' }), baseContext()).blockedReason).toBe('clarify');
         const refused = resolveRowFocusStarAction(makeTask({ status: 'inbox' }), baseContext({ focusedCount: 3 }));
         expect(refused).toMatchObject({ canToggle: false, blockedReason: 'limit' });
-        // A refused star carries no status: nothing in its patch may move the task out of Inbox.
+
         expect(refused.patch).toEqual({ isFocusedToday: true });
     });
 

@@ -264,7 +264,7 @@ const createChecklistState = (checklist = [{ id: 'check-1', title: 'Item 1', isC
 
 describe('TaskEditContentField', () => {
   it('lets the user remove a missing file the sync location could not find', () => {
-    // A remote "not found" keeps the row; Remove is how a truly lost file goes.
+
     const removeAttachment = vi.fn();
     const missing = { id: 'gone', kind: 'file' as const, title: 'scan.pdf', uri: '', cloudKey: 'attachments/gone.pdf',
       localStatus: 'missing' as const, createdAt: '2026-10-20T00:00:00.000Z', updatedAt: '2026-10-20T00:00:00.000Z' };
@@ -301,7 +301,7 @@ describe('TaskEditContentField', () => {
 
   afterEach(() => {
     try {
-      // Flush delayed caret restoration before Vitest closes the worker console RPC.
+
       act(() => {
         vi.runOnlyPendingTimers();
         for (const tree of renderedTrees.splice(0)) tree.unmount();
@@ -332,7 +332,7 @@ describe('TaskEditContentField', () => {
       accessibilityRole: 'checkbox',
     });
     const checkboxVisual = checkbox.findByType(View);
-    // A vector check, not a "✓" text glyph: text glyphs depend on the device font.
+
     const checkmark = checkbox.findByType('Icon' as never);
 
     expect(checkbox.props.accessibilityState).toEqual({ checked: true });
@@ -839,6 +839,46 @@ describe('TaskEditContentField', () => {
     expect(getState().checklist[0].title).toBe('(');
   });
 
+  it.each(['()', '[]', '``'])('deletes an empty checklist %s pair after stale native echoes', (pair) => {
+    withPlatform('android', () => {
+      for (const prefix of ['', 'note ']) {
+        const { getState, applyChecklistUpdate } = createChecklistState([
+          { id: 'check-1', title: prefix, isCompleted: false },
+        ]);
+        let tree!: ReturnType<typeof create>;
+        const render = () => (
+          <TaskEditContentField {...baseProps} fieldId="checklist"
+            checklist={getState().checklist} applyChecklistUpdate={applyChecklistUpdate} />
+        );
+        act(() => { tree = create(render()); });
+        const input = () => tree.root.findByProps({ accessibilityLabel: 'taskEdit.checklist 1' });
+        const rawInsertion = prefix + pair[0];
+        act(() => { input().props.onChangeText(rawInsertion); });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(prefix + pair);
+        act(() => { input().props.onChangeText(rawInsertion); });
+        act(() => { input().props.onChangeText(rawInsertion); });
+        expect(getState().checklist[0].title).toBe(prefix + pair);
+
+        const preventDefault = vi.fn();
+        act(() => {
+          input().props.onKeyPress?.({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(rawInsertion);
+        });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(rawInsertion);
+        act(() => {
+          input().props.onKeyPress?.({ nativeEvent: { key: 'Backspace' }, preventDefault });
+          input().props.onChangeText(prefix);
+        });
+        act(() => { tree.update(render()); });
+        expect(input().props.value).toBe(prefix);
+        expect(preventDefault).not.toHaveBeenCalled();
+        act(() => { tree.unmount(); });
+      }
+    });
+  });
+
   it('keeps Android checklist cursor inside a collapsed pair and ignores duplicate native insertion', () => {
     const { getState, applyChecklistUpdate } = createChecklistState([
       { id: 'check-1', title: '', isCompleted: false },
@@ -1312,7 +1352,7 @@ describe('TaskEditContentField', () => {
     });
     expect(baseProps.setShowDescriptionPreview).toHaveBeenCalledTimes(1);
 
-    // In preview mode the same control reads as Edit and shows a pencil.
+
     let previewTree!: ReturnType<typeof create>;
     act(() => {
       previewTree = create(

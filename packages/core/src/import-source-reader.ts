@@ -1,7 +1,6 @@
-// Shared file-reading frontend for the third-party importers (OmniFocus, Todoist, TickTick,
-// DGT). Every importer used to hand-write its own copy of "sniff bytes -> unzip or decode ->
-// sanitize -> split CSV into rows/header index" — this module owns that once. Per-format parse
-// logic (what a row/record MEANS) stays in each importer; only the byte/CSV mechanics move here.
+
+
+
 import { inflateSync, strFromU8 } from 'fflate';
 
 const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
@@ -50,8 +49,7 @@ export const DEFAULT_IMPORT_CSV_LIMITS: Readonly<ImportCsvLimits> = {
 
 export const DEFAULT_IMPORT_CHECKLIST_ITEM_LIMIT = 1_000;
 
-// These are archive-wide ceilings. Per-entry CSV limits still protect the parser, while this
-// budget prevents many individually valid entries from multiplying retained records/checklists.
+
 export const DEFAULT_IMPORT_ARCHIVE_BUDGET_LIMITS: Readonly<ImportArchiveBudgetLimits> = {
     maxChecklistItems: 100_000,
     maxEntities: 100_000,
@@ -182,9 +180,7 @@ export const toImportBytes = (value?: ArrayBuffer | Uint8Array | null): Uint8Arr
 export const isZipBytes = (bytes: Uint8Array): boolean =>
     bytes.length >= ZIP_SIGNATURE.length && ZIP_SIGNATURE.every((byte, index) => bytes[index] === byte);
 
-// Every importer's non-UTF-8 fallback is identical; OmniFocus additionally sniffs a UTF-16 BOM
-// before falling back to this for the rest, so it keeps its own richer decoder that calls this
-// one for the shared tail.
+
 export const decodeTextBytes = (bytes: Uint8Array): string => {
     try {
         return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
@@ -304,9 +300,7 @@ export const parseCsvRows = (
     };
 };
 
-// Local-time formatting shared by importers that preserve an offset-less datetime as-is instead
-// of normalizing it through UTC (OmniFocus, Mindwtr CSV) — pure format mechanics, which is what
-// this module exists to own (see header comment).
+
 export const pad = (value: number, width = 2): string => String(value).padStart(width, '0');
 
 export const formatLocalDate = (date: Date): string =>
@@ -335,18 +329,14 @@ export const getCell = (row: string[], headerIndex: Map<string, number>, key: st
     return String(row[index] ?? '').trim();
 };
 
-// Same concept in OmniFocus and DGT: normalize a free-text context name to Mindwtr's `@name`
-// convention. (Not the same as OmniFocus's/DGT's *own* `normalizeContexts`/`normalizeTags`
-// functions, which parse an entire CSV token list or a whole JSON array respectively — those
-// happen to share a name across formats but do genuinely different things, so they stay local.)
+
 export const normalizeContextName = (value: string): string | undefined => {
     const trimmed = value.trim();
     if (!trimmed) return undefined;
     return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
 };
 
-// Trim + dedupe case-insensitively, keeping the first-seen casing. Every importer had its own
-// copy of this (some under a different local name, e.g. OmniFocus's `dedupeCaseInsensitive`).
+
 export const dedupeStrings = (values: Array<string | undefined>): string[] => {
     const seen = new Set<string>();
     const result: string[] = [];
@@ -366,8 +356,7 @@ export const joinDescription = (parts: Array<string | undefined>): string | unde
     return normalized.length > 0 ? normalized.join('\n\n') : undefined;
 };
 
-// Every importer's warning list is built from its own counters and its own message strings —
-// only this "if count > 0, push singular/plural" shape was byte-identical across all four.
+
 export const appendWarning = (warnings: string[], count: number, singular: string, plural = singular): void => {
     if (count <= 0) return;
     warnings.push(count === 1 ? singular : plural.replace('{count}', String(count)));
@@ -390,7 +379,7 @@ const ZIP_CENTRAL_HEADER = 0x02014b50;
 const ZIP_END_RECORD = 0x06054b50;
 const readU16 = (bytes: Uint8Array, at: number): number => bytes[at] | (bytes[at + 1] << 8);
 const readU32 = (bytes: Uint8Array, at: number): number => (readU16(bytes, at) | (readU16(bytes, at + 2) << 16)) >>> 0;
-// No file content or name in the message: the error can reach a toast and a stored result.
+
 const damagedArchive = (): never => {
     throw new Error('The selected archive is damaged or uses an unsupported ZIP feature.');
 };
@@ -399,14 +388,7 @@ type ZipCentralEntry = {
     compressedSize: number; flags: number; localOffset: number; method: number; name: string; nameBytes: Uint8Array; size: number;
 };
 
-/**
- * A ZIP's entries, reading only sizes the data itself proves. The central directory's sizes are checked against each local
- * header (unless a data descriptor follows the data), every entry's bytes lie apart from every other's (one local entry listed
- * twice is refused), the count and size budgets run on those checked sizes before anything is inflated, a STORE entry is
- * exactly its size, and a DEFLATE entry is inflated into a buffer one byte larger than declared and refused unless exactly the
- * declared size came out. fflate's own unzip trusted the declared sizes: a forged header imported part of a file, or one entry
- * many times over the budget. Encrypted, ZIP64 and multi-disk archives are refused.
- */
+
 const readZipEntries = (bytes: Uint8Array, limits: Readonly<ImportSourceLimits>): ImportArchiveEntry[] => {
     let end = -1;
     for (let at = bytes.length - 22; at >= Math.max(0, bytes.length - 22 - 0xffff); at -= 1) {
@@ -473,7 +455,7 @@ const readZipEntries = (bytes: Uint8Array, limits: Readonly<ImportSourceLimits>)
     for (let index = 1; index < ordered.length; index += 1) {
         if (ordered[index].header < ordered[index - 1].dataEnd) damagedArchive();
     }
-    // fflate's unzip kept the last entry of a repeated name; so does this.
+
     const entries = new Map<string, Uint8Array>();
     for (const { entry, dataStart, dataEnd } of spans) {
         const data = bytes.subarray(dataStart, dataEnd);
@@ -494,11 +476,7 @@ const readZipEntries = (bytes: Uint8Array, limits: Readonly<ImportSourceLimits>)
     return [...entries].map(([entryName, entryBytes]) => ({ entryName, entryBytes }));
 };
 
-// Bytes -> either a decoded single-file text blob or the raw entries of a ZIP archive. Each
-// importer still walks `entries` itself and owns its own per-entry extension/counter logic
-// (nested zip, wrong extension, invalid parse) since the exact warning message and which
-// extension is expected (.csv vs .json) differs per format; this only removes the byte-sniffing
-// and generic UTF-8 decode that were duplicated verbatim in all four parsers.
+
 export const readImportSource = (
     input: ImportSourceInput,
     decodeText: (bytes: Uint8Array) => string = decodeTextBytes,

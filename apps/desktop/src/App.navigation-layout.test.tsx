@@ -26,9 +26,7 @@ const lazyViews = vi.hoisted(() => {
     };
 });
 
-// This regression exercises the real App/Layout transition boundary. Keep the
-// initial page small so unrelated calendar-grid rendering and role queries do
-// not consume the test's timeout under CI coverage instrumentation.
+
 vi.mock('./components/views/CalendarView', () => ({
     CalendarView: () => React.createElement('h1', null, 'Calendar'),
 }));

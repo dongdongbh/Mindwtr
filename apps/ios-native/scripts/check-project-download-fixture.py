@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only preflight of a stopped app's fresh capture and scoped HTTP evidence."""
+COMMAND_DESCRIPTION = """Read-only preflight of a stopped app's fresh capture and scoped HTTP evidence."""
 import argparse
 import hashlib
 import json
@@ -42,7 +42,7 @@ def check(capture, state, targets, requests, expected_gets):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=COMMAND_DESCRIPTION)
     parser.add_argument("--capture", required=True, type=Path)
     parser.add_argument("--state", required=True, choices=("absent", "cached"))
     parser.add_argument("--targets", required=True, type=Path, help="JSON mapping of attachment-files relative paths to SHA-256")

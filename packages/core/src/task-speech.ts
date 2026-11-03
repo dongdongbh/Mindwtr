@@ -1,6 +1,6 @@
-// Speech-to-task field mapping: turns a transcription/parse result into a task
-// patch. Split out of task-utils.ts, which the whole app imports; this slice has
-// only three exports and one consumer path (the audio capture surfaces).
+
+
+
 import { hasTimeComponent, safeParseDate } from './date';
 import { formatLocalDate } from './import-source-reader';
 import type { AppData, Task } from './types';
@@ -107,8 +107,7 @@ export function buildTaskUpdatesFromSpeechResult(
         }
     }
 
-    // A source value with no clock time stays date-only: any stored time
-    // schedules a reminder and moves the task off the end of its day.
+
     if (result.dueDate) {
         const parsed = safeParseDate(result.dueDate);
         if (parsed) updates.dueDate = hasTimeComponent(result.dueDate) ? parsed.toISOString() : formatLocalDate(parsed);

@@ -87,12 +87,7 @@ const flushScheduledTimers = async () => {
     await __localDataWatcherTestUtils.waitForPendingMergeForTests();
 };
 
-// Like flushScheduledTimers, but yields a few extra microtask ticks per round.
-// A single retry cycle (reject → catch → reschedule → registration cleanup)
-// is several hops; this fake zero-delay scheduler can fire the NEXT queued
-// retry timer before that chain settles, finding the previous attempt's
-// re-entrancy guard (channel.registration) still set and silently no-op'ing
-// instead of retrying. Only tests that chain multiple retries need this.
+
 const flushScheduledTimersSlowly = async () => {
     let guard = 0;
     let idleRounds = 0;
@@ -178,9 +173,8 @@ beforeEach(() => {
     __localDataWatcherTestUtils.setDependenciesForTests({
         now: () => nowMs,
         readDataJson: async () => externalData,
-        // Legacy refresh tests exercise the refresh lane itself; the no-op
-        // probe fails open so they keep their original semantics. The probe's
-        // own behavior has dedicated tests below.
+
+
         readStorageSnapshot: async () => {
             throw new Error('storage snapshot probe unavailable');
         },
@@ -271,8 +265,8 @@ describe('local-data-watcher', () => {
         const sort = vi.spyOn(Array.prototype, 'sort');
         try {
             markLocalWrite(data);
-            // Root, settings, task property names and the ID-keyed task array;
-            // not one property-name sort for every task.
+
+
             expect(sort.mock.calls.length).toBeLessThan(10);
         } finally {
             sort.mockRestore();
@@ -362,8 +356,8 @@ describe('local-data-watcher', () => {
         });
 
         await controller.start('/tmp/mindwtr/data.json');
-        await flushScheduledTimersSlowly(); // retry #1
-        await flushScheduledTimersSlowly(); // retry #2 — exhausts the budget
+        await flushScheduledTimersSlowly();
+        await flushScheduledTimersSlowly();
 
         expect(attempts).toBe(3);
         expect(logWarn).toHaveBeenCalledWith(
@@ -371,12 +365,12 @@ describe('local-data-watcher', () => {
             expect.anything(),
         );
 
-        // Exhausted: the channel is now blind, nothing left scheduled on its own.
+
         logWarn.mockClear();
         await flushScheduledTimers();
         expect(attempts).toBe(3);
 
-        // The coarse trigger re-arms it without a new timer kind.
+
         await controller.refreshFromDiskNow();
         expect(attempts).toBe(4);
 
@@ -400,7 +394,7 @@ describe('local-data-watcher', () => {
         expect(healthyAttempts).toBe(1);
 
         healthyController.rearmExhaustedWatchers();
-        expect(healthyAttempts).toBe(1); // O(1) no-op: nothing exhausted
+        expect(healthyAttempts).toBe(1);
 
         healthyController.stop();
 
@@ -418,10 +412,10 @@ describe('local-data-watcher', () => {
         await controller.start('/tmp/mindwtr/data.json');
         await flushScheduledTimersSlowly();
         await flushScheduledTimersSlowly();
-        expect(attempts).toBe(3); // exhausted
+        expect(attempts).toBe(3);
 
         controller.rearmExhaustedWatchers();
-        expect(attempts).toBe(4); // one fresh attempt
+        expect(attempts).toBe(4);
 
         controller.stop();
     });
@@ -499,9 +493,8 @@ describe('local-data-watcher', () => {
             watchFile,
             schedule: scheduleMock,
             cancelSchedule: cancelScheduleMock,
-            // start() now ends with one immediate merge check (#S11); give it
-            // a real read so it resolves as a clean no-op instead of hitting
-            // the unconfigured default Tauri invoke.
+
+
             readDataJson: async () => emptyData(),
             logInfo: () => undefined,
             logWarn: () => undefined,
@@ -670,9 +663,8 @@ describe('local-data-watcher', () => {
             watchFile,
             schedule: scheduleMock,
             cancelSchedule,
-            // start() now ends with one immediate merge check (#S11); give it
-            // a real read so it resolves as a clean no-op instead of hitting
-            // the unconfigured default Tauri invoke.
+
+
             readDataJson: async () => emptyData(),
             logInfo: () => undefined,
             logWarn: () => undefined,
@@ -1330,11 +1322,10 @@ describe('local-data-watcher', () => {
             },
         });
 
-        // Nothing was dropped by a prior stop(), so this first start() does
-        // not run its trailing immediate check (#S11/C2).
+
         await start('/tmp/mindwtr/data.json');
 
-        // A write lands while the watcher is up: debounced, not yet merged.
+
         externalData = {
             ...emptyData(),
             tasks: [
@@ -1350,12 +1341,10 @@ describe('local-data-watcher', () => {
         capturedCallback?.({ path: '/tmp/mindwtr/data.json' });
         expect(saveCalls).toHaveLength(0);
 
-        // stop() today drops pendingExternalChange and cancels the debounce
-        // timer (StrictMode/HMR/teardown can hit this window) — the change
-        // is now unobserved unless data.json changes again.
+
         stop();
 
-        // start() must observe it without needing a fresh filesystem event.
+
         await start('/tmp/mindwtr/data.json');
 
         expect(saveCalls).toHaveLength(1);
@@ -1367,10 +1356,7 @@ describe('local-data-watcher', () => {
             watchFile: async () => () => undefined,
         });
 
-        // Disk differs from the (still unhydrated) local store — if start()
-        // ran its trailing check unconditionally here, it would find a
-        // difference and persist a full-document save with no CAS baseline,
-        // stomping whatever fetchData is about to load.
+
         externalData = {
             ...emptyData(),
             tasks: [

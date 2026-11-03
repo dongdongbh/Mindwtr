@@ -30,8 +30,7 @@ private actor MindwtrAppleTaskSearchCoordinator {
     private var activeRequest: (id: String, task: Task<[[String: String]], Error>)?
     private var cancelledBeforeStart = MindwtrAppleTaskSearchCancellationTombstones<String>()
 
-// The iOS 27 SDK exposes the Spotlight search tool only for ARM64;
-// Intel simulators keep the bridge but report the evaluation unavailable.
+
 #if compiler(>=6.4) && canImport(FoundationModels) && arch(arm64)
     @available(iOS 27.0, *)
     func search(requestId rawRequestId: String, query rawQuery: String) async throws -> [[String: String]] {
@@ -122,9 +121,7 @@ private actor MindwtrAppleTaskSearchCoordinator {
         _ = try await session.respond(to: query)
         try Task.checkCancellation()
 
-        // The result stream may deliver its final batches just after respond returns.
-        // Drain for a bounded interval, then atomically close the collector so a
-        // long-lived stream cannot hold this request open or append after return.
+
         var previousRevision = -1
         var stableCompletedChecks = 0
         var completedResults: [[String: String]]?
@@ -140,8 +137,8 @@ private actor MindwtrAppleTaskSearchCoordinator {
                         completedResults = results
                         break
                     }
-                    // A partial reply for a new or existing query token landed
-                    // between the poll and finish attempt. Start a fresh drain.
+
+
                     stableCompletedChecks = 0
                     previousRevision = -1
                     continue
@@ -180,8 +177,8 @@ private actor MindwtrAppleTaskSearchCoordinator {
         if activeRequest?.id == requestId {
             activeRequest?.task.cancel()
         } else {
-            // Expo async functions can reach this actor out of order. Retain a
-            // bounded tombstone so cancellation before registration is not lost.
+
+
             cancelledBeforeStart.insert(requestId)
         }
     }

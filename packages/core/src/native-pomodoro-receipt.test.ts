@@ -80,12 +80,12 @@ afterEach(() => {
 describe('native Pomodoro integration with the SQLite and store write gates', () => {
     it('cold-loads and replays a committed schema4 receipt unchanged after policy and advance-reminder edits', async () => {
         const env = await open(); const legacy = structuredClone(env.plan);
-        expect(TASK_SQLITE_COLUMNS).toHaveLength(48); expect(TASK_SQLITE_COLUMNS[46]).toBe('reminderPolicy');
+        expect(TASK_SQLITE_COLUMNS).toHaveLength(49); expect(TASK_SQLITE_COLUMNS[46]).toBe('reminderPolicy');
         legacy.target!.row = legacy.target!.row!.slice(0, 46);
         const payload = JSON.stringify(['pomodoroTransition', legacy]);
-        await env.sql.client.run('UPDATE tasks SET timeSpentMinutes=?,rev=?,revBy=?,updatedAt=?,reminderPolicy=?,dueReminderLeadMinutes=?,title=? WHERE id=?',
+        await env.sql.client.run('UPDATE tasks SET timeSpentMinutes=?,rev=?,revBy=?,updatedAt=?,reminderPolicy=?,dueReminderLeadMinutes=?,startReminderLeadMinutes=?,title=? WHERE id=?',
             [legacy.taskPatch!.timeSpentMinutes, legacy.taskPatch!.rev, legacy.taskPatch!.revBy, legacy.taskPatch!.updatedAt,
-                'skip', 15, 'Later policy edit', 'task']);
+                'skip', 15, 30, 'Later policy edit', 'task']);
         await env.sql.client.run('UPDATE native_pomodoro_session SET state_json=? WHERE id=1', [legacy.sessionAfter]);
         await env.sql.client.run('INSERT INTO native_request_receipts (request_id,method,reply,saved_at) VALUES (?,?,?,?)',
             [legacy.request.requestId, payload, JSON.stringify(legacy.result), AT]);
@@ -103,6 +103,7 @@ describe('native Pomodoro integration with the SQLite and store write gates', ()
         expect(nativePomodoroReceiptPayload(legacy)).toBe(payload);
         expect(useTaskStore.getState()._tasksById.get('task')!.reminderPolicy).toBe('skip');
         expect(useTaskStore.getState()._tasksById.get('task')!.dueReminderLeadMinutes).toBe(15);
+        expect(useTaskStore.getState()._tasksById.get('task')!.startReminderLeadMinutes).toBe(30);
     });
     it('refuses a receiptless schema4 plan and a changed schema5 policy without domain SQL writes', async () => {
         const env = await open(); const legacy = structuredClone(env.plan); legacy.target!.row = legacy.target!.row!.slice(0, 46);
@@ -236,7 +237,7 @@ describe('legacy Pomodoro adoption through the unchanged atomic SQLite owner', (
         return { ...env, adopt };
     }
     it.each(['second UPDATE tasks', 'COMMIT'])('applies RN owed credits with the adoption once; a crash at %s leaves the RN record to adopt again', async (fault) => {
-        // The RN record: a stop after the session save left both credits owed.
+
         const env = await openOwed([{ taskId: 'task', from: 4, to: 54 }, { taskId: 'other', from: 10, to: 60 }]);
         const { adopt } = env;
         const plan = await adopt(); const before = await env.state(); let updates = 0; let once = true;
@@ -247,7 +248,7 @@ describe('legacy Pomodoro adoption through the unchanged atomic SQLite owner', (
         await expect(env.adapter.savePomodoroTransitionWithReceipt(plan)).rejects.toThrow(/Pomodoro/);
         expect(once).toBe(false); expect(await env.state()).toEqual(before);
         env.hooks.run = undefined;
-        // Nothing of the adoption landed, so the same RN record adopts again to the same plan.
+
         const retry = await adopt(); expect(retry).toEqual(plan); const info = vi.spyOn(logger, 'logInfo');
         expect((await env.adapter.savePomodoroTransitionWithReceipt(retry)).result.creditedMinutes).toBe(50);
         expect(info).toHaveBeenCalledWith('Native Pomodoro adoption settled owed credits', { scope: 'storage', force: true,
@@ -261,7 +262,7 @@ describe('legacy Pomodoro adoption through the unchanged atomic SQLite owner', (
         expect(await env.state()).toEqual(after); expect(env.events.some((sql) => /^(UPDATE|INSERT)/u.test(sql))).toBe(false);
     });
     it.each(['other task', 'device'])('refuses an owed-only adoption whose %s changed after prepare, with no writes', async (change) => {
-        // Paused: only the other task's owed credit writes anything.
+
         const env = await openOwed([{ taskId: 'other', from: 10, to: 35 }], { timerState: { phase: 'focus', remainingSeconds: 60, isRunning: false, completedFocusSessions: 3 } });
         const plan = await env.adopt(); expect(plan.taskPatch).toBeNull(); expect(plan.owed![0].taskPatch).not.toBeNull();
         if (change === 'other task') await env.sql.client.run('UPDATE tasks SET title=? WHERE id=?', ['Edited elsewhere', 'other']);
@@ -287,7 +288,7 @@ describe('legacy Pomodoro adoption through the unchanged atomic SQLite owner', (
         resetNativeRequestReceipts(); await loadNativeRequestReceipts(env.sql.client, { durableCommands: ['pomodoroTransition'] });
         const cold = new NativeReceiptSqliteAdapter(env.client, { rejectConcurrentWrites: true }); setStorageAdapter(cold);
         const before = await env.state(); env.events.length = 0;
-        // Only the retained request is supplied: replay has no source I/O dependency.
+
         expect(await cold.readPomodoroTransitionOutcome(env.plan)).toEqual(env.plan.result);
         expect((await cold.savePomodoroTransitionWithReceipt(env.plan)).replayed).toBe(true);
         expect(await env.state()).toEqual(before); expect(env.events.some((sql) => /^(UPDATE|INSERT)/u.test(sql))).toBe(false);
@@ -500,7 +501,7 @@ describe('native Pomodoro atomic storage over real SQLite', () => {
             expect(generationWrite).not.toHaveBeenCalled();
         } finally { held.release(); }
         env.hooks.run = undefined; await write;
-        // Force a cold proof-based reload against a new adapter, then retire its owner mid-read.
+
         const fresh = new NativeReceiptSqliteAdapter(env.client, { rejectConcurrentWrites: true }); setStorageAdapter(fresh);
         const load = gate(); env.hooks.all = async (statement) => { if (statement.includes('FROM tasks') && !statement.includes('WHERE id')) await load.hold(); };
         const replay = fresh.savePomodoroTransitionWithReceipt(env.plan); await load.waiting;

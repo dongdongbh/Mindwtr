@@ -2,10 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// UI text carries no emoji. An emoji is drawn by whatever font the device has: newer ones are
-// empty boxes on older phones, custom system fonts drop some, and next to the app's vector icons
-// they looked like a second icon set (a button once showed an emoji AND an icon). Surfaces add a
-// vector icon instead; native alerts and action sheets, which cannot draw one, go without.
+
 const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{23E9}-\u{23FF}\u{FE0F}]/u;
 
 describe('locale strings', () => {

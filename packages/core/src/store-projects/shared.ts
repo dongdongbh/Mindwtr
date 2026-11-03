@@ -140,7 +140,7 @@ export type { AppData, Area, Person, Project, Section, Task, TaskStatus };
 
 export type DetachedProjectTask = { id: string; sectionId?: string };
 
-/** RN Undo's eligible-current-Task rule, shared with the native prepared effect. */
+
 export function projectDeleteUndoReattachments(projectId: string, links: readonly DetachedProjectTask[],
     sections: readonly Section[], tasks: readonly Task[]): { id: string; updates: Pick<Task, 'projectId' | 'sectionId'> }[] {
     const liveSectionIds = new Set(sections

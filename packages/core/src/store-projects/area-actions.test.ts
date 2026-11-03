@@ -140,7 +140,7 @@ describe('area actions', () => {
         saveData.mockClear();
         const before = useTaskStore.getState()._allAreas;
 
-        // New Area "home" with the editor's default color, while "Home" exists.
+
         expect(await addArea(' home ', { color: '#94a3b8' })).toBe(before[0]);
         await flushPendingSave();
 
@@ -169,9 +169,8 @@ describe('area actions', () => {
     });
 
     it('detaches already-trashed tasks from a deleted area, the same as the sync merge would', async () => {
-        // The merge clears a link to a non-live area on every device and restoreArea
-        // never re-links children, so keeping the link here only produced a
-        // non-canonical document that the next sync had to repair (#1001).
+
+
         const { addArea, addTask, deleteTask, deleteArea } = useTaskStore.getState();
         const area = await addArea('Work');
         expect(area).not.toBeNull();

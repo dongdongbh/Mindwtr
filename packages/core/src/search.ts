@@ -153,10 +153,7 @@ export function parseSearchQuery(query: string): SearchQuery {
         token = decodeSearchValue(token);
         if (!token) continue;
 
-        // The quick-add prefixes work in search too (#1264): `@home` is
-        // `context:@home`, `#tag` is `tag:#tag`, `%name` is `person:name`.
-        // Parse them before fields so a colon inside a quoted value stays data.
-        // A bare prefix stays a text term.
+
         const colonIndex = token.indexOf(':');
         const shorthand = SHORTHAND_FIELDS[token[0]];
         if (shorthand && token.length > 1 && (colonIndex < 0 || token[1] === '"')) {
@@ -196,8 +193,8 @@ export function parseSearchQuery(query: string): SearchQuery {
 }
 
 function matchesText(haystack: unknown, needle: string): boolean {
-    // Persisted/API data can predate validation. Ignore malformed text without
-    // coercing arrays/objects into searchable content or mutating the record.
+
+
     if (typeof haystack !== 'string' || !haystack) return false;
     return haystack.toLowerCase().includes(needle.toLowerCase());
 }
@@ -225,7 +222,7 @@ function matchDateField(dateStr: string | undefined, comparator: SearchComparato
     if (!target) return false;
 
     if (effectiveComparator === '=') {
-        // Compare on day granularity.
+
         const start = startOfDay(target);
         const end = endOfDay(target);
         return (isAfter(date, start) || isEqual(date, start)) && (isBefore(date, end) || isEqual(date, end));
@@ -298,7 +295,7 @@ export function matchesTask(term: SearchTerm, task: Task, projectById: Map<strin
         else if (field === 'review') result = matchDateField(task.reviewAt, term.comparator, value, now);
         else if (field === 'created') result = matchDateField(task.createdAt, term.comparator, value, now);
     } else {
-        // Unknown field: treat as text search against title/description.
+
         result = matchesText(task.title, `${field}:${value}`)
             || matchesText(task.description, `${field}:${value}`)
             || matchesChecklist(task.checklist, `${field}:${value}`);

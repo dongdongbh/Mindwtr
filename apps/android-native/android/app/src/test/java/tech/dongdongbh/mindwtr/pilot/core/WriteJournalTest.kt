@@ -9,11 +9,11 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** The journal's file rules: order, the atomic write, drop and keep, and moving damaged entries aside. */
+
 class WriteJournalTest {
     @get:Rule val folder = TemporaryFolder()
 
-    /** Each directory sync, with the journal's files at that moment. */
+
     private val syncs = mutableListOf<List<String>>()
     private val logged = mutableListOf<String>()
 
@@ -32,9 +32,9 @@ class WriteJournalTest {
         val reopened = open()
         assertEquals(listOf("complete", "menuCommand", "taskFocus"), reopened.pending().map { it.method })
         assertEquals(listOf("task-2", true, "4:dev:2026"), reopened.pending()[2].args)
-        // The exact request, requestId included, is what goes back to the engine.
+
         assertEquals(listOf("bulkAction", bulk("r-1")), reopened.pending()[1].args)
-        // A later entry sorts after every entry already on disk.
+
         reopened.append("update", listOf("""{"id":"t","base":{},"patch":{},"requestId":"r-9"}"""))
         assertEquals(listOf("complete", "menuCommand", "taskFocus", "update"), open().pending().map { it.method })
     }
@@ -42,8 +42,8 @@ class WriteJournalTest {
     @Test fun anEntryIsDurableBeforeAppendReturns() {
         val dir = File(folder.root, "journal")
         val entry = open(dir).append("complete", listOf("task-1", "3:dev:2026"))!!
-        // Written whole under a temporary name, synced, renamed into place, then the directory synced: the last
-        // directory sync already sees the entry under its final name, and no temporary file is left.
+
+
         assertTrue(entry.file.exists())
         assertEquals(listOf(entry.file.name), syncs.last())
         assertEquals(listOf(entry.file.name), names(dir))
@@ -52,7 +52,7 @@ class WriteJournalTest {
 
     @Test fun aWriteCutShortIsNeverAnEntry() {
         val dir = File(folder.root, "journal").apply { mkdirs() }
-        // A process that died after writing the temporary file but before the rename never sent that request.
+
         File(dir, "0000000000000001.json.tmp").writeText("""{"method":"compl""")
         val journal = open(dir)
         assertEquals(emptyList<WriteJournal.Entry>(), journal.pending())
@@ -75,7 +75,7 @@ class WriteJournalTest {
         val entry = journal.append("menuCommand", listOf("bulkAction", bulk("r-2")))!!
         journal.settle(entry, "SAVE_FAILED: disk full")
         assertTrue(entry.file.exists())
-        // The owed retry sends the same request: no second entry, so no second replay.
+
         val again = journal.append("menuCommand", listOf("bulkAction", bulk("r-2")))!!
         assertSame(entry, again)
         assertEquals(1, File(folder.root, "journal").listFiles()!!.count { it.isFile })
@@ -98,11 +98,11 @@ class WriteJournalTest {
         val journal = open(dir)
         assertEquals(listOf(good.text), journal.pending().map { it.text })
         val aside = File(dir, WriteJournal.ASIDE)
-        // Kept as they were, never deleted.
+
         for ((name, text) in damaged) assertEquals(text, File(aside, name).readText())
         assertEquals(listOf(good.file.name), names(dir))
         assertTrue(logged.any { it.contains("aside=5") })
-        // A second damaged entry of the same name never replaces the first one set aside.
+
         File(dir, "0000000000000002.json").writeText("also not json")
         open(dir)
         assertEquals(setOf("not json", "also not json"), aside.listFiles()!!.filter { it.name.startsWith("0000000000000002.json") }.map { it.readText() }.toSet())
@@ -117,7 +117,7 @@ class WriteJournalTest {
         assertEquals(emptyList<WriteJournal.Entry>(), journal.pending())
     }
 
-    // Review 2: a journal that cannot be listed is never read as empty (its next entry would take the name of one on disk).
+
     @Test fun aJournalThatCannotBeListedRefusesToOpen() {
         val notADirectory = File(folder.root, "journal").apply { writeText("") }
         val refused = runCatching { open(notADirectory) }.exceptionOrNull()
@@ -127,7 +127,7 @@ class WriteJournalTest {
     @Test fun anAppendNeverReplacesAnEntryOnDisk() {
         val dir = File(folder.root, "journal")
         val journal = open(dir)
-        // An entry the journal did not list (it appeared after the open): the next append must not take its place.
+
         val stray = File(dir, "0000000000000001.json").apply { writeText("""{"method":"complete","args":["a","1:x:t"]}""") }
         val refused = runCatching { journal.append("complete", listOf("task-1", "3:dev:2026")) }.exceptionOrNull()
         assertTrue("the append refuses: $refused", refused != null)
@@ -142,7 +142,7 @@ class WriteJournalTest {
         assertEquals("0000000000000013.json", entry.file.name)
     }
 
-    // Review 3: an entry leaves (in memory too) only once its unlink is on disk: deleted, then the folder synced.
+
     @Test fun aDropIsDurableBeforeTheEntryLeaves() {
         val dir = File(folder.root, "journal")
         val journal = open(dir)
@@ -176,8 +176,7 @@ class WriteJournalTest {
         assertEquals(listOf(entry), journal.pending())
     }
 
-    // Review 4: an entry is replayed only if it still fits a write as host-entry takes it; any other one is set aside intact,
-    // and the log names the file, never its request.
+
     @Test fun entriesThatNoLongerFitAWriteMoveAsideIntact() {
         val dir = File(folder.root, "journal").apply { mkdirs() }
         val misfits = mapOf(
@@ -199,11 +198,10 @@ class WriteJournalTest {
         assertFalse(logged.any { it.contains("secret-title") || it.contains("task-1") })
     }
 
-    // Verification 4: Kotlin's shapes are only a first filter. A replay core refuses as malformed (INVALID_INPUT, an unknown
-    // Menu command too) is not a request core takes: it moves aside intact, never deleted. A first send's refusal still drops.
+
     @Test fun aReplayCoreRefusesAsMalformedMovesAsideIntact() {
         val dir = File(folder.root, "journal")
-        // Fits the Kotlin shape (a request UUID and task ids) but lacks the taskRevisions core requires.
+
         val move = """{"taskIds":["a"],"requestId":"r-5","sectionId":null}"""
         val text = open(dir).append("menuCommand", listOf("somedayMove", move))!!.text
         val journal = open(dir)
@@ -214,11 +212,11 @@ class WriteJournalTest {
         assertEquals(emptyList<String>(), syncs.last())
         assertEquals(emptyList<WriteJournal.Entry>(), journal.pending())
         assertEquals(emptyList<WriteJournal.Entry>(), open(dir).pending())
-        // An unknown Menu command is host-entry's INVALID_INPUT too.
+
         val retired = journal.append("menuCommand", listOf("bulkAction", bulk("r-6")))!!
         assertTrue(journal.settle(retired, "INVALID_INPUT: no menu command bulkAction", replay = true))
         assertTrue(File(dir, "${WriteJournal.ASIDE}/${retired.file.name}").exists())
-        // The first send's INVALID_INPUT is a refusal like any other: the entry goes.
+
         val sent = journal.append("complete", listOf("task-1", "3:dev:2026"))!!
         assertTrue(journal.settle(sent, "INVALID_INPUT: no"))
         assertFalse(sent.file.exists())
@@ -230,7 +228,7 @@ class WriteJournalTest {
         for (error in listOf(null, "STALE_REVISION: x", "INVALID_INPUT: x", "ACTION_FAILED: x", "Incomplete tasks load")) assertFalse(WriteJournal.keeps(error))
     }
 
-    /** Settings › Sync's screen commands can carry a password: never on disk, and one planted there is never replayed. */
+
     @Test fun aSyncScreenCommandNeverReachesTheDisk() {
         val dir = File(folder.root, "journal")
         val journal = open(dir)
@@ -238,10 +236,10 @@ class WriteJournalTest {
         assertEquals(null, journal.append("menuCommand", listOf("saveSyncBackend", save)))
         assertEquals(emptyList<String>(), names(dir))
         for (command in WriteJournal.UNJOURNALED) assertTrue(command, WriteJournal.unjournaled("menuCommand", listOf(command, "{}")))
-        // The settings sync option is a synced write: journaled like any other, and never on the long path.
+
         assertFalse(WriteJournal.unjournaled("menuCommand", listOf("syncPreference", """{"requestId":"r-2"}""")))
         assertTrue(journal.append("menuCommand", listOf("syncPreference", """{"requestId":"r-2","key":"appearance","value":true}""")) != null)
-        // A file of an unjournaled command found at open (an older build's, or planted) is set aside, never replayed.
+
         File(dir, "0000000000000099.json").writeText("""{"method":"menuCommand","args":["saveSyncBackend",${org.json.JSONObject.quote(save)}]}""")
         val reopened = open(dir)
         assertEquals(listOf("menuCommand"), reopened.pending().map { it.method })
@@ -249,10 +247,7 @@ class WriteJournalTest {
         assertTrue(File(dir, "${WriteJournal.ASIDE}/0000000000000099.json").exists())
     }
 
-    /**
-     * A Project details edit is the user's intent (`projectEdit`: request UUID, project, field, value), journaled ahead of its
-     * send: a kill at any later step finds it on disk, in order, and the send itself finds the same entry, never a second one.
-     */
+
     @Test fun aProjectEditJournaledAheadSurvivesAKillAndIsSentOnce() {
         val dir = File(folder.root, "journal")
         val title = """{"requestId":"r-1","projectId":"p","kind":"title","title":"New"}"""
@@ -260,13 +255,13 @@ class WriteJournalTest {
         val journal = open(dir)
         val first = journal.append("menuCommand", listOf("projectEdit", title))!!
         journal.append("menuCommand", listOf("projectEdit", notes))
-        // Killed before anything was sent: both edits wait for the boot's replay, in the order they were made.
+
         assertEquals(listOf(title, notes), open(dir).pending().map { it.args[1] })
-        // The send appends the same request and finds its entry; once core answered, a kill leaves only the notes.
+
         assertSame(first, journal.append("menuCommand", listOf("projectEdit", title)))
         assertTrue(journal.settle(first, null))
         assertEquals(listOf(notes), open(dir).pending().map { it.args[1] })
-        // An edit without its project or field never replays.
+
         File(dir, "0000000000000099.json").writeText("""{"method":"menuCommand","args":["projectEdit",${org.json.JSONObject.quote("""{"requestId":"r-3","projectId":"p"}""")}]}""")
         assertEquals(listOf(notes), open(dir).pending().map { it.args[1] })
     }

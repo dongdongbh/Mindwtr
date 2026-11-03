@@ -47,29 +47,24 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's project next-action prompt (project-next-action-prompt.tsx): after a row's Done leaves its project, or its sequential
- * section, without a next action, core's prompt (getProjectNextActionPrompt) asks what comes next. Choose, Add (Save & edit opens
- * the new task's Form tab) and Complete project are one journaled command each ([command], runProjectNextAction); Skip, Back and
- * the scrim close it. It lives on the shell, so it stays open when the completed row leaves its list (RN 754d2b719).
- */
+
 class NextActionPromptModel(
-    /** Core's projectNextAction command with this input (MenuModel.command). */
+
     private val command: (JSONObject) -> Unit,
-    /** RN's failure toast: its title and message. */
+
     private val toast: (title: String, message: String) -> Unit,
-    /** The new task's editor on its Form tab, once no command runs. */
+
     private val openEditor: (String) -> Unit,
 ) {
-    /** Core's prompt, or null when none shows. */
+
     var prompt by mutableStateOf<JSONObject?>(null); private set
-    /** The new next action as typed. */
+
     var title by mutableStateOf(""); private set
-    /** The prompt the last action was sent from: its reply changes only that prompt, still open (RN's promptOwnerRef). */
+
     private var sentFrom: JSONObject? = null
     private val owned get() = prompt != null && prompt === sentFrom
 
-    /** A completion's prompt (null: the project still has a next action). An open prompt's typed text is never replaced. */
+
     fun show(next: JSONObject?) {
         if (next == null || (prompt != null && title.isNotBlank())) return
         prompt = next
@@ -86,7 +81,7 @@ class NextActionPromptModel(
     fun choose(item: JSONObject) = send(JSONObject().put("action", "choose").put("candidateId", item.getString("id"))
         .put("candidateRevision", item.getString("taskRevision")))
 
-    /** RN's Add next action, or Save & edit ([openAfterSave]), into the prompt's project and section; nothing while the text is blank. */
+
     fun add(openAfterSave: Boolean) {
         val shown = prompt ?: return
         if (title.isBlank()) return
@@ -105,18 +100,14 @@ class NextActionPromptModel(
         command(action.put("taskId", shown.getString("taskId")))
     }
 
-    /** Core's answer: its prompt closes; Save & edit opens the new task on its Form tab (RN 9dea771b5), only if that prompt was still open. */
+
     internal fun done(reply: JSONObject) {
         if (!owned) return
         close()
         if (reply.optString("action") == "add" && reply.optBoolean("openAfterSave")) openEditor(reply.getString("id"))
     }
 
-    /**
-     * A refusal wrote nothing: RN's failure toast, and the prompt stays open with its text (RN 1eb06e017). A stale one ([stale]: a
-     * candidate or the project changed since) takes core's prompt read again for the same task ([fresh]), keeping the typed text,
-     * and closes when that task needs none now.
-     */
+
     internal fun refused(stale: Boolean = false, fresh: JSONObject? = null) {
         val failure = prompt?.optJSONObject("failure")
         if (failure != null) toast(failure.getString("title"), failure.getString("message"))
@@ -124,11 +115,11 @@ class NextActionPromptModel(
         if (fresh == null) close() else prompt = fresh
     }
 
-    /** A failure that leaves a retry owed (SAVE_FAILED: it landed): the prompt closes, so the failure banner's Try again is reachable. */
+
     internal fun owed() { if (owned) close() }
 }
 
-/** RN's ProjectNextActionPromptModal: its card over a 50% scrim, as RN's Modal over the whole app. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun NextActionPrompt(model: InboxViewModel) {
@@ -166,7 +157,7 @@ fun NextActionPrompt(model: InboxViewModel) {
                                 .semantics { contentDescription = item.getString("title") }.padding(horizontal = 12.dp, vertical = 10.dp)
                                 .testTag("next-action-candidate")) {
                                 Text(item.getString("title"), style = rnText(14, 600, 19), color = c.text)
-                                // RN's textTransform capitalize on the status words.
+
                                 Text(item.getString("statusLabel").split(" ").joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } },
                                     style = rnText(12, 400), color = c.secondaryText, modifier = Modifier.padding(top = 2.dp))
                             }
@@ -201,7 +192,7 @@ fun NextActionPrompt(model: InboxViewModel) {
                         .testTag("next-action-complete-project"), contentAlignment = Alignment.Center) {
                         Text(complete.getString("label"), style = rnText(14, 700), color = if (submitting) c.secondaryText else c.tint)
                     }
-                    // RN's marginRight: 'auto' pushes Complete project left, away from Skip and Add.
+
                     Spacer(Modifier.weight(1f))
                 }
                 Box(Modifier.heightIn(min = 44.dp).clip(button).background(c.filterBg).rnBorder(1.dp, c.border, button)

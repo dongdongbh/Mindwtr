@@ -40,7 +40,7 @@ private final class ProjectDownloadHTTPProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Real native JSC/Bearer/source/publication/SQLite boundaries, with synthetic credentials only.
+
 final class ProjectFileDownloadHostTests: XCTestCase {
     private var fixtureRoot: URL!
     private var root: URL!, bundle: URL!, hostname: String!, namespace: String!, remote: ProjectDownloadHTTPState!
@@ -165,7 +165,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         current["@mindwtr_sync_encryption_key_v1"] = value
         try Data(json(current).utf8).write(to: manifest, options: .atomic)
     }
-    /// Independent CryptoKit seal, not the production bridge or shared decoder.
+
     private func encryptedWire(_ key: Data) throws -> Data {
         let salt = Data((1...16).map { UInt8($0) }), nonce = Data((33...44).map { UInt8($0) })
         var header = Data("MWENC1".utf8); header.append(contentsOf: [1, 1, 64, 0, 0, 0, 1, 0, 0, 0, 1, 1])
@@ -230,7 +230,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
 
     func testKnownFilledProofColdRetryDoesNotRepeatGETAndCleansAdoptedSource() async throws {
         try await seed(status: "archived")
-        // RN cells need not use the sorted object order of the native recovery journal.
+
         var item = try selected()
         let raw = try "[{" + item.keys.sorted(by: >).map { try json($0) + ":" + json(item[$0]!) }.joined(separator: ",") + "}]"
         XCTAssertNotEqual(raw, try json([item]))
@@ -330,7 +330,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         let retained = try state(), id = try XCTUnwrap(retained["requestId"] as? String)
         XCTAssertFalse(try String(contentsOf: journal).contains("synthetic-token-405"))
         await core.close()
-        // Simulate a changed legacy value after releasing the host; native KV never writes secrets.
+
         var legacy = try object(String(decoding: Data(contentsOf: manifest), as: UTF8.self))
         legacy["@mindwtr_cloud_token"] = "fresh-synthetic-token-405"
         try Data(json(legacy).utf8).write(to: manifest, options: .atomic)
@@ -420,7 +420,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
                 XCTAssertFalse(FileManager.default.fileExists(atPath: stage.deletingLastPathComponent().path))
                 XCTAssertEqual(try inode(target), identity); XCTAssertEqual(try Data(contentsOf: target), foreignBytes)
                 XCTAssertEqual(try rows(), external); XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes)
-                // Remove only this test's injected unsafe leaf; the exact recorded operation can then settle.
+
                 try FileManager.default.removeItem(at: target)
                 _ = try await cold.abandonProjectFileAvailability(requestId: id)
                 XCTAssertFalse(FileManager.default.fileExists(atPath: target.path)); XCTAssertEqual(try Data(contentsOf: foreign), foreignBytes)
@@ -663,7 +663,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
             ("whitespace", " \n" + String(canonical.prefix(20)) + "\t" + String(canonical.dropFirst(20)) + "\r ", encryptionKey, "enabled"),
             ("unpadded", String(canonical.dropLast()), encryptionKey, "remote-plaintext"),
             ("ignored", "文!" + String(canonical.prefix(13)) + "_-" + String(canonical.dropFirst(13)) + "?", encryptionKey, "enabled"),
-            // Shared base64ToBytes allocates 32 zero bytes, then stops at the first padding.
+
             ("embedded-padding", "=" + String(repeating: "A", count: 42) + "=", zeros, "enabled")]
         for (name, stored, decoded, posture) in vectors {
             scenario(name); try await seed()
@@ -706,7 +706,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
             try assertUnpublished(before, other, configuration)
             await core.close(); let cold = host(); _ = try await cold.start()
             try assertUnpublished(before, other, configuration); XCTAssertEqual(remote.counts, [count + 1, 0])
-            // The debt probe intentionally cycles the filter; verify cold preservation first.
+
             try await noProgressDebt(cold, expectedRows: before); await cold.close()
         }
     }
@@ -785,7 +785,7 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         await refused { _ = try await XCTUnwrap(operation).value }; XCTAssertTrue(fired); XCTAssertEqual(operations, ["aesGcmOpen"])
         XCTAssertEqual(crypto?.counters.jobs, 0); XCTAssertEqual(crypto?.counters.running, 0); XCTAssertEqual(crypto?.counters.bytes, 0)
         try assertUnpublished(before, other, configuration); try await noProgressDebt(core, expectedRows: before)
-        // This successful filter command owns its settings change, not the cancelled download.
+
         let afterProbe = try others()
         let fresh = try await request(core), reply = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: fresh))
         XCTAssertEqual(reply["ok"] as? Bool, true); XCTAssertEqual(remote.counts, [2, 0]); XCTAssertEqual(operations, ["aesGcmOpen", "aesGcmOpen"])
@@ -850,8 +850,8 @@ final class ProjectFileDownloadHostTests: XCTestCase {
             jobs.beforeWork = { _, installer in if installer { installerWork += 1 } }
         }
         let core = host(faults: faults); try await core.configureAttachmentHost(hooks); _ = try await core.start()
-        // Warm the ordinary persistence path before taking exact raw-row/config
-        // snapshots, and retain the SAME selection for the post-refusal probe.
+
+
         let filter = try object(await core.call("areaFilter"))
         let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "__none__" })
         let sameSelection = try json(XCTUnwrap(option["next"]))
@@ -862,8 +862,8 @@ final class ProjectFileDownloadHostTests: XCTestCase {
         do {
             let response = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
             if response["ok"] as? Bool == true {
-                // Shared on-demand refusal is a successful command envelope
-                // carrying unavailable, never an availability acknowledgment.
+
+
                 XCTAssertEqual(Set(response.keys), Set(["ok", "value"]))
                 let value = try XCTUnwrap(response["value"] as? [String: Any])
                 XCTAssertEqual(Set(value.keys), Set(["status", "message", "update"]))
@@ -1004,12 +1004,12 @@ final class ProjectFileDownloadHostTests: XCTestCase {
     }
 
     func testWebDAVConfirmed404IsRefusedAndLeavesTheRowWithoutAJournal() async throws {
-        // A remote 404 never deletes the attachment (core handleRemoteAttachmentNotFound): that delete would sync to every device.
+
         scenario("404"); let count = remote.counts[0]
         try await seedWebDAV416(hash: false); remote.status = 404
         let core = host(); _ = try await core.start(); let input = try await request(core)
         let before = try projectRows416(), other = try others(), config = try Data(contentsOf: manifest)
-        // Shared on-demand refusal: a successful command envelope carrying unavailable, never an availability acknowledgment.
+
         let response = try object(await core.foregroundSync(command: "projectAttachmentDownload", requestJSON: input))
         let value = try XCTUnwrap(response["value"] as? [String: Any])
         XCTAssertEqual(value["status"] as? String, "unavailable"); XCTAssertTrue(value["update"] is NSNull)

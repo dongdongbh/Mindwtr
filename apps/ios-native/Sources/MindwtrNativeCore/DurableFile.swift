@@ -7,7 +7,7 @@ struct HostFailure: LocalizedError {
     var errorDescription: String? { message }
 }
 
-// All callers, including teardown, run on CoreHost's serial queue.
+
 enum DurableFile {
     static func sync(_ url: URL, directory: Bool = false) throws {
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW)
@@ -25,7 +25,7 @@ enum DurableFile {
         guard fd >= 0 else { throw HostFailure("Cannot create pending command journal") }
         defer { Darwin.close(fd); try? FileManager.default.removeItem(at: temporary) }
         if privateDraft {
-            // Protect the empty inode before the first byte of task text is written.
+
             #if os(iOS)
             try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                                                   ofItemAtPath: temporary.path)
@@ -40,9 +40,7 @@ enum DurableFile {
         try sync(url.deletingLastPathComponent(), directory: true)
     }
 
-    // The caller owns the directory lease and the duplicated creation FD, even
-    // if promotion succeeded but directory synchronization failed. No pathname
-    // protection/backup mutation is performed through a possibly replaced root.
+
     static func write(_ data: Data, to name: String, in directoryFD: Int32,
                       retainingFile: inout Int32, preservingProtectionFrom sourceFD: Int32? = nil) throws {
         guard !name.isEmpty, name != ".", name != "..", !name.contains("/"), !name.utf8.contains(0),
@@ -98,11 +96,11 @@ enum DurableFile {
 }
 
 #if DEBUG
-// IO boundary only; no fixtures, domain mutation hooks, or release-build knobs.
+
 final class HostIOFaults {
-    // Weak lifetime observation only; the selected test must not retain these runtime owners.
+
     var configureRuntimeLifetime: ((AnyObject, AnyObject, AnyObject?) -> Void)?
-    // Selected ownership regression holds boxed callbacks, with a queue-only fence outside the Engine queue.
+
     var configureAIProviderDeviceStateCallbacks: ((AnyObject, AnyObject, @escaping () -> Void) -> Void)?
     var notificationPermissionRead: NativeNotificationPermission.Reader?
     var notificationAuthorizationRequest: NativeNotificationAuthorization.Requester?

@@ -1,5 +1,5 @@
-// The widget payload builder lives in core (widget-payload.ts), so the native
-// app publishes the same payload; the storage keys below are this app's own IO.
+
+
 import {
     buildAndroidQuickCaptureLabels,
     buildAndroidTaskPeekLabels,
@@ -63,11 +63,8 @@ export const IOS_WIDGET_PAYLOAD_KEY_SMALL = 'mindwtr-ios-widget-payload-small';
 export const IOS_WIDGET_PAYLOAD_KEY_MEDIUM = 'mindwtr-ios-widget-payload-medium';
 export const IOS_WIDGET_PAYLOAD_KEY_LARGE = 'mindwtr-ios-widget-payload-large';
 export const IOS_WIDGET_PAYLOAD_KEY_EXTRA_LARGE = 'mindwtr-ios-widget-payload-extra-large';
-// Read-only substrate for the "Get Mindwtr Tasks" Shortcuts action and
-// Spotlight indexing (#980). Written alongside the widget payloads into the
-// same App Group UserDefaults the widget already uses, so the App Intents
-// running in the main app process can read it with the same access pattern
-// -- no second storage mechanism, no live database read from an intent.
+
+
 export const IOS_SHORTCUTS_SNAPSHOT_KEY = 'mindwtr-ios-shortcuts-snapshot';
 export const IOS_WIDGET_KIND = 'MindwtrTasksWidget';
 export const IOS_WIDGET_COMPACT_KIND = 'MindwtrCompactWidget';

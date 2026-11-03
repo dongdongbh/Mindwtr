@@ -2,36 +2,18 @@ import type { AppSearchDoc } from './app-search-projection';
 import { buildAppSearchDelta, buildFullAppSearchIndex } from './app-search-projection';
 import type { Area, Project, Task } from './types';
 
-/**
- * Orchestrates the Android AppSearch secondary index (#1017): arms a debounced
- * store subscription that keeps the disposable projection in sync with the
- * visible tasks/projects/areas, with a zero-overhead early exit whenever the
- * feature is off or unsupported. AppSearch is a mirror, not a source of
- * truth — every failure here is logged and swallowed, never surfaced as a
- * core-data error.
- *
- * Mutation-hook placement: subscribes to the same whole-store `useTaskStore`
- * used by the mobile reminder rescheduler
- * (`lib/notification-service-local.ts`), reference-comparing only the
- * `tasks`/`projects`/`areas` slices so unrelated store writes (sync status,
- * editor UI state) are free. Work is debounced so a bulk edit does one index
- * round-trip, not N.
- *
- * Moved from React Native's lib/app-search-service.ts (pass O2c): each app binds the ports (its AppSearch module, its
- * device keys, its log and its store), so React Native and the native Android app index the same way.
- */
 
 const REINDEX_DEBOUNCE_MS = 2_000;
 
 type IndexedState = { tasks: Task[]; projects: Project[]; areas: Area[] };
 
-/** Each app's side. The device-key ports never reject (a key that cannot be stored only loses a retry at the next start). */
+
 export type AppSearchIndexingPorts = {
-    /** Android 12 (API 31) or later; below that nothing runs. */
+
     isSupported(): boolean;
     readEnabled(): Promise<boolean>;
     readWipeOwed(): Promise<boolean>;
-    /** Stores that a wipe is due, before it is sent: a death or failure before it lands leaves it for the next start. */
+
     markWipeOwed(): Promise<void>;
     clearWipeOwed(): Promise<void>;
     upsert(docs: AppSearchDoc[]): Promise<unknown>;
@@ -43,9 +25,9 @@ export type AppSearchIndexingPorts = {
         getState(): IndexedState;
         subscribe(listener: (state: IndexedState, prevState: IndexedState) => void): () => void;
     };
-    /** Names the store listener for the notify profiler (core's nameNotifyListener). */
+
     nameListener<L>(name: string, listener: L): L;
-    /** The link scheme a result opens; 'mindwtr' unless the build has its own. */
+
     scheme?: string;
 };
 
@@ -70,9 +52,8 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
             scheme: ports.scheme,
         });
         if (delta.upserts.length === 0 && delta.removeIds.length === 0) return;
-        // Removals are the privacy-relevant half (a completed/deleted task must
-        // stop appearing in system search): run both independently so a failed
-        // upsert can never suppress a removal that was due in the same batch.
+
+
         const [upsertResult, removeResult] = await Promise.allSettled([
             ports.upsert(delta.upserts),
             ports.remove(delta.removeIds),
@@ -83,7 +64,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         }
     };
 
-    /** Arms the debounced store subscription. Idempotent and a no-op when unsupported. */
+
     const arm = (): void => {
         if (!ports.isSupported()) return;
         if (storeUnsubscribe) return;
@@ -110,7 +91,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         }));
     };
 
-    /** Disarms the subscription without touching the native index (see `wipe` for toggle-off). */
+
     const disarm = (): void => {
         storeUnsubscribe?.();
         storeUnsubscribe = null;
@@ -120,16 +101,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         }
     };
 
-    /**
-     * Rebuilds the index from scratch: wipe, then upsert every currently
-     * indexable task/project/area. Used on toggle-on and as the drift-recovery
-     * strategy (called again whenever indexing is (re-)armed after being off —
-     * simplest way to guarantee the on-device index matches the store after any
-     * period of not observing it, at the cost of one full rewrite rather than a
-     * cleverer drift-detection pass).
-     */
-    // Rebuilds still running: a toggle-off's wipe that lands meanwhile leaves its owed wipe owed, since this rebuild's upsert
-    // lands after that wipe (enable() then wipes again, owed first).
+
     let rebuilding = 0;
     const runFullReindex = async (): Promise<void> => {
         if (!ports.isSupported()) return;
@@ -137,7 +109,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         const docs = buildFullAppSearchIndex({ tasks: state.tasks, projects: state.projects, areas: state.areas, scheme: ports.scheme });
         rebuilding += 1;
         try {
-            // An owed wipe stays owed: a toggle-off can land while this runs, and this upsert lands after its wipe.
+
             await ports.wipe();
             await ports.upsert(docs);
         } catch (error) {
@@ -147,13 +119,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         }
     };
 
-    /**
-     * Runs a full reindex, then arms — but only if the device-local preference
-     * still reads on by the time the reindex finishes. A toggle-off landing
-     * mid-reindex must win: the reindex's own upserts just repopulated the
-     * index, so this re-checks and wipes again rather than leaving documents
-     * behind (and a live subscription) while the setting reads OFF.
-     */
+
     const enable = async (): Promise<void> => {
         if (!ports.isSupported()) return;
         await runFullReindex();
@@ -161,7 +127,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
             arm();
             return;
         }
-        // A mark that fails anyway never stops the wipe; only its retry at the next start is lost.
+
         await ports.markWipeOwed().catch(() => undefined);
         try {
             await ports.wipe();
@@ -171,7 +137,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         }
     };
 
-    /** Wipes the native index and disarms — used when the user turns the setting off. */
+
     const wipe = async (): Promise<void> => {
         disarm();
         if (!ports.isSupported()) return;
@@ -183,16 +149,12 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
         }
     };
 
-    /**
-     * Reads the persisted device-local preference and arms (with a seeding full
-     * reindex) or leaves the index disarmed to match it. Safe to call from
-     * multiple mount points — arming is idempotent.
-     */
+
     const syncWithPreference = async (): Promise<void> => {
         if (!ports.isSupported()) return;
         const enabled = await ports.readEnabled();
         if (!enabled) {
-            // A toggle-off whose wipe never landed: finish it now, so titles do not stay in system search.
+
             if (!(await ports.readWipeOwed())) return;
             let outcome = 'wiped';
             try {
@@ -205,7 +167,7 @@ export function createAppSearchIndexing(ports: AppSearchIndexingPorts) {
             return;
         }
         if (isArmed()) return;
-        // As turning it on: a toggle-off that lands during this reindex wins.
+
         await enable();
     };
 

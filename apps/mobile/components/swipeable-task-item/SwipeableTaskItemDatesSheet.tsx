@@ -30,18 +30,14 @@ type Props = {
     tc: ThemeColors;
     t: (key: string) => string;
     onClose: () => void;
-    /** Receives only the changed date fields, as the editor would save them. */
+
     onSave: (patch: Partial<Task>) => void;
 };
 
-/**
- * The row's Dates sheet (#1464): Start and Due with the editor's quick dates, its picker and its
- * No date clear. Edits stay in a draft until Save, and Save sends the editor's own patch, so the
- * store applies its usual rules (a start date on an Inbox task makes it Next). Opening changes nothing.
- */
+
 export function SwipeableTaskItemDatesSheet({ task, tc, t, onClose, onSave }: Props) {
-    // The task as it was at open: Save diffs against it, as the editor does with its baseTaskRef,
-    // so a sync edit made while the sheet is open (a rename, a completion) is never reverted.
+
+
     const [baseTask] = useState(task);
     const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(baseTask));
     const [pickerField, setPickerField] = useState<DateField | null>(null);
@@ -125,12 +121,12 @@ export function SwipeableTaskItemDatesSheet({ task, tc, t, onClose, onSave }: Pr
     return (
         <Modal visible transparent animationType="fade" onRequestClose={onClose} accessibilityViewIsModal>
             <Pressable style={styles.modalOverlay} onPress={onClose}>
-                {/* A tap inside the card must not reach the backdrop's close. */}
+                {                                                                }
                 <Pressable style={[styles.menuContainer, { backgroundColor: tc.cardBg }]} onPress={() => undefined}>
                     <Text style={[styles.menuTitle, { color: tc.text }]} accessibilityRole="header">
                         {tFallback(t, 'filters.taskDates', 'Task dates')}
                     </Text>
-                    {/* The iOS inline calendar is tall: the fields scroll so Save and Cancel stay on screen. */}
+                    {                                                                                           }
                     <ScrollView style={{ maxHeight: windowHeight * 0.6 }} keyboardShouldPersistTaps="handled">
                         {renderField('startTime')}
                         {renderField('dueDate')}

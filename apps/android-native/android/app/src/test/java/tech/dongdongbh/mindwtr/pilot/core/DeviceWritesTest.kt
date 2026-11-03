@@ -10,7 +10,7 @@ import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
 
-/** A setting's device-local part and the journal sequence of the write that set it: a replay never undoes a newer setting. */
+
 class DeviceWritesTest {
     @get:Rule val folder = TemporaryFolder()
 
@@ -24,7 +24,7 @@ class DeviceWritesTest {
     private fun gtd(mode: String, requestId: String) = listOf("gtdSetting", """{"edit":{"type":"taskOpenMode","value":"$mode"},"requestId":"$requestId"}""")
     private fun journal(dir: File) = WriteJournal(dir, syncDirectory = {}, floor = devices.highestSequence())
 
-    // The reviewer's sequence: Preview acknowledged but its delete fails, Automatic acknowledged, restart: it stays Automatic.
+
     @Test fun aReplayNeverUndoesANewerSetting() {
         val dir = File(folder.root, "journal")
         val journal = journal(dir)
@@ -39,14 +39,13 @@ class DeviceWritesTest {
         val automatic = journal.append("menuCommand", gtd("automatic", "r-2"))!!
         devices.store(openMode("automatic"), automatic.sequence, replay = false)
         assertTrue(journal.settle(automatic, null))
-        // The restart replays Preview's entry, and core answers its first reply: Preview's deviceWrites.
+
         val left = journal(dir).pending().single()
         devices.store(openMode("preview"), left.sequence, replay = true)
         assertEquals("automatic", prefs[key])
     }
 
-    // An empty journal after a restart starts above every sequence a setting holds, so a new write's replay (its process died
-    // before its device write) is never taken for an older one.
+
     @Test fun theJournalStartsAboveEverySequenceASettingHolds() {
         devices.store(openMode("preview"), 10, replay = false)
         val entry = journal(File(folder.root, "journal")).append("menuCommand", gtd("automatic", "r-3"))!!

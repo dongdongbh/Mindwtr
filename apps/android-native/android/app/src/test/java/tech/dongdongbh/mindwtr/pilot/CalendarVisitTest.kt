@@ -5,7 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Settings › Calendar's visits (C3 review): an open that ends after Back counts for nothing, and the next visit opens afresh. */
+
 class CalendarVisitTest {
     @Test fun anOpenThatEndsAfterTheScreenLeftCountsForNothing() {
         val visits = CalendarVisit()
@@ -29,9 +29,7 @@ class CalendarVisitTest {
         assertTrue(visits.isCurrent(second))
     }
 
-    // RN's 5bfa6bf6b: a picked local .ics stays readable after a reboot only through a persisted read grant. The pick is an
-    // ACTION_OPEN_DOCUMENT (OpenDocument), whose result allows one; addFile takes it for reading only, and a refusal is logged
-    // while the feed is still added.
+
     @Test fun aPickedCalendarFileKeepsAPersistedReadGrant() {
         val taken = mutableListOf<Int>()
         assertEquals(null, keepPickedFileReadable { flags -> taken += flags })

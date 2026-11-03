@@ -376,24 +376,16 @@ export default function ArchivedScreen() {
         });
     }, []);
 
-    // A stored 'timeEstimate' sort falls back to default while the feature is
-    // off, so the chip row and the ordering agree (#1107).
+
     const sortBy: TaskSortBy = resolveArchiveSortBy(viewState.sortBy, settings);
-    // Sorted once, then narrowed in stages. Every stage below only filters, and
-    // filtering preserves relative order, so the visible order is the same as
-    // sorting last would give — but the O(n log n) sort now hangs off _allTasks and
-    // the chosen order alone. Hung off anything that churns per render (the area
-    // maps, the filter criteria), it re-sorts the whole archive several times per
-    // interaction and blows the large-store select-all budget: 5000 archived tasks
-    // measured ~360ms against a 150ms budget, from 5 sorts where 1 was needed.
+
+
     const archivedByStatus = useMemo(() => selectArchivedTasks(_allTasks), [_allTasks]);
-    // Archive is a log like Done: with no explicit sort, newest completion first
-    // beats the global task sort, which ranks by due date and priority — neither
-    // of which means anything once a task is filed away.
+
+
     const sortedArchivedTasks = useMemo(() => sortArchivedTasks(archivedByStatus, sortBy), [archivedByStatus, sortBy]);
-    // Everything archived in the current area, before the filter sheet and search
-    // narrow it. The bulk "select all" and the counts work off the narrowed list
-    // below, so acting on a filtered view never reaches a row that is not on screen.
+
+
     const allArchivedTasks = useMemo(
         () => filterArchivedTasksByArea(sortedArchivedTasks, resolvedAreaFilter, projectById, areaById),
         [sortedArchivedTasks, resolvedAreaFilter, projectById, areaById],
@@ -407,16 +399,15 @@ export default function ArchivedScreen() {
         }),
         [allArchivedTasks, resolvedFeatureFlags.priorities, resolvedFeatureFlags.timeEstimates],
     );
-    // view: 'list' on purpose — Archive shares its filter selections with the other
-    // task lists, the same way desktop does, so a context picked in Next narrows
-    // Archive too rather than each list holding a private set.
+
+
     const selections = useTaskFilterSelections({
         view: 'list',
         t,
         visibility: metadataFilterVisibility,
     });
-    // Only worth scanning every row for its tokens once the sheet is open; until
-    // then the selected ones are the only chips anybody can see.
+
+
     const tokenFilterOptions = useMemo(() => getArchiveTokenFilterOptions(allArchivedTasks, filtersVisible, {
         tokens: selections.tokens,
         excludedTokens: selections.excludedTokens,
@@ -430,10 +421,10 @@ export default function ArchivedScreen() {
     const groupBy = viewState.groupBy;
     const { collapsedGroupIds, toggleGroup } = useCollapsedTaskGroups('archived', groupBy);
     const localDayKey = useLocalDayKey(groupBy === 'completedDate');
-    // Always the grouped row shape, even ungrouped: one list type keeps the FlatList
-    // monomorphic instead of switching its data/renderItem/keyExtractor together.
+
+
     const listItems = useMemo<TaskGroupItem[]>(() => {
-        // localDayKey is not read; it is a dependency so crossing midnight re-buckets.
+
         void localDayKey;
         return buildArchiveTaskItems({
             groupBy,
@@ -444,8 +435,8 @@ export default function ArchivedScreen() {
             collapsedGroupIds,
         });
     }, [archivedTasks, areas, collapsedGroupIds, groupBy, localDayKey, projectById, t]);
-    // Rows a folded heading has removed are not "on screen", so Select all and the
-    // selection prune below both work off this rather than the filtered list.
+
+
     const visibleTaskIds = useMemo(() => getTaskGroupItemIds(listItems), [listItems]);
     const archivedProjects = useMemo(
         () => selectArchivedProjects(projects, resolvedAreaFilter, areaById),
@@ -705,9 +696,7 @@ export default function ArchivedScreen() {
         return renderArchivedTask({ item: item.task });
     }, [renderArchivedTask, tc.secondaryText, tc.text, toggleGroup]);
 
-    // A multi-tag task appears under several headings, so its group is part of
-    // the row identity. Prefix headings as well so no group id can collide with
-    // a task row.
+
     const groupedKeyExtractor = useCallback(
         (item: TaskGroupItem) => (
             item.type === 'section'

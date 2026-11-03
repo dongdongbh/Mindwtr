@@ -25,7 +25,7 @@ const fixture = JSON.parse(
 const t = (key: string) => fixture.translations[key] ?? key;
 const visibleSections = fixture.sections.filter((section) => !section.deletedAt);
 
-/** The mobile project workspace defaults (ProjectDetailModal -> ProjectTaskList -> TaskList), through core. */
+
 const buildLikeMobile = (scenario: Scenario, overrides: Partial<ProjectTaskListModelInput> = {}) => {
     const project = fixture.projects.find(({ id }) => id === scenario.projectId)!;
     const options = getProjectDetailTaskListOptions(project, scenario.showCompletedTasks);
@@ -76,8 +76,8 @@ describe('project task list model', () => {
         'matches the frozen list with the #1401 reference-sort correction: %s',
         (name, item) => {
             const { model, cues } = buildLikeMobile(item);
-            // Keep the historical fixture intact; #1401 deliberately corrects only
-            // the title-sorted Reference pile (Loose reading precedes Style guide).
+
+
             const expected = name === 'live-sorted-title'
                 ? fixture.mobileSnapshot[name].map((row) => {
                     const item = row as { id?: string };

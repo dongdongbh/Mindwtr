@@ -135,8 +135,7 @@ describe('SyncBackupSection', () => {
     }
   });
 
-  // The split the maintainer asked for: opening one card must not drag the
-  // other errand's rows in with it.
+
   it('reveals only the backup rows when the backup header is pressed', () => {
     const handleBackup = vi.fn();
     let tree!: renderer.ReactTestRenderer;

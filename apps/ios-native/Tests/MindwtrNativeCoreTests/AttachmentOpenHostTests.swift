@@ -233,8 +233,7 @@ final class AttachmentOpenHostTests: XCTestCase {
         XCTAssertEqual(try markers(), 1)
     }
 
-    // A private bundle extension drives real asynchronous JSC tickets. It adds
-    // no production evaluator or command and leaves taskView/SQLite unchanged.
+
     private func probeBundle(_ answers: [[String: Any]], method: String = "attachmentRequest") throws -> URL {
         let suffix = """
         ;(() => {
@@ -274,8 +273,8 @@ final class AttachmentOpenHostTests: XCTestCase {
         let host = core(bundleURL: try probeBundle(answers + [answer(plan)])); _ = try await host.start()
         let before = try rows(), identity = try inode(file)
         for _ in answers { await refused { _ = try await self.opened(host, [attachment], id: "live") } }
-        // The same valid request must consume the final successful ticket,
-        // proving earlier refusals actually reached each forged shared answer.
+
+
         let accepted = try await opened(host, [attachment], id: "live")
         XCTAssertEqual(accepted["status"] as? String, "available")
         XCTAssertEqual(try rows(), before); XCTAssertEqual(try inode(file), identity); XCTAssertEqual(try Data(contentsOf: file), bytes)
@@ -464,8 +463,8 @@ final class AttachmentOpenHostTests: XCTestCase {
         try seedProject([attachment]); try bytes.write(to: file)
         let tasks = try rows(), projects = try projectRows(), identity = try inode(file)
         for point in [2, 3, 5] {
-            // The first complete Open is a control (five exact option reads).
-            // Only the second Open's selected boundary returns a changed token.
+
+
             let suffix = """
             ;(() => {
               const oldOptions = MindwtrHost.projectAttachmentEditOptions, oldPoll = MindwtrHost.poll, tracked = new Set();

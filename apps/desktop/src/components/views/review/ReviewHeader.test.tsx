@@ -85,8 +85,7 @@ describe('ReviewListControls', () => {
         expect(screen.getByRole('button', { name: 'Show details' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'View options' })).not.toBeInTheDocument();
 
-        // Status grouping is disabled while a single-status filter is active:
-        // the option is inert and clicking it must not change the axis.
+
         openToolbarSelect('Group');
         const statusOption = screen.getByRole('option', { name: 'Status' });
         expect(statusOption).toHaveAttribute('aria-disabled', 'true');

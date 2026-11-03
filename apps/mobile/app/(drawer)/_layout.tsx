@@ -66,18 +66,13 @@ function DrawerHeader({
   );
 }
 
-// Screens whose lists follow the area filter show it, as the tab headers do,
-// so a task hidden by it has a visible reason (#1448). Widget lists use the widget's
-// own scope, and Settings has no header.
+
 const AREA_FILTERED_ROUTES = new Set([
   'board', 'calendar', 'review', 'contexts', 'waiting', 'someday', 'reference', 'done',
   'history', 'projects-screen', 'archived', 'trash', 'saved-search/[id]',
 ]);
 
-// Cold starts and deep links that land directly on a stack screen (session
-// restore to Archive, widget/notification links) must still have the tabs
-// beneath them, so the header back button and Android system back return to
-// the app instead of exiting it (#842).
+
 export const unstable_settings = {
   anchor: '(tabs)',
 };
@@ -87,7 +82,7 @@ export default function AppLayout() {
   const { t } = useLanguage();
   const backAccessibilityLabel = t('common.back');
   const { pending: widgetLaunch } = React.useContext(WidgetLaunchContext);
-  // Linking may change the route before the root hook's effect runs. Read the already-held native token in that commit.
+
   const widgetTransition = widgetLaunch || getWidgetLaunchState()?.stage === 'pending';
 
   return (

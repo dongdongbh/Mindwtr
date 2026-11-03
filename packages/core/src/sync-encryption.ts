@@ -1,16 +1,5 @@
-// Sync encryption wiring (#1056, phase 2 of 3). Builds on the MWENC1 format from
-// sync-crypto.ts to add: the device-local encryption-state model, `.enc` filename
-// mapping, and the enable/disable/passphrase-change transition orchestration that is
-// shared between the WebDAV and Dropbox backends (both TS, both desktop+mobile).
-//
-// The File Sync backend does NOT use the generic transition functions here — its
-// transition logic lives in Rust (apps/desktop/src-tauri/src/sync.rs) and mobile's own
-// storage-file.ts, per the task handoff ("Rust necessarily duplicates the seam logic
-// for the file backend — keep its surface minimal and mirror core naming"). Those
-// implementations mirror the naming and semantics defined here (see their own files).
-//
-// Merge, revision, signature, and fingerprint logic are untouched by this module —
-// encryption lives strictly at the storage seam, wrapping already-serialized bytes.
+
+
 
 import {
     SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
@@ -28,62 +17,37 @@ import {
 } from './sync-crypto';
 import { normalizeCloudUrl, normalizeWebdavUrl } from './sync-helpers';
 
-/** `remote-plaintext` is the inverse of `remote-encrypted-no-key`: this device holds a key
- *  and the sync location has gone back to plaintext (a peer disabled encryption there). It
- *  behaves exactly like `enabled` wherever key material is resolved — the key is still valid
- *  and the user's remedy (disabling encryption here too) needs it — and differs only in what
- *  status reports and in that sync is terminal until the user acts. */
+
 export type SyncEncryptionState = 'off' | 'enabled' | 'remote-encrypted-no-key' | 'remote-plaintext';
 export type SyncEncryptionTransitionKind = 'enable' | 'disable' | 'change-passphrase';
 
-/** The states in which this device owns a usable key. Every material/key resolver must treat
- *  them alike: dropping to "off" for `remote-plaintext` is precisely the silent downgrade
- *  that state exists to prevent. */
+
 export const SYNC_ENCRYPTION_KEYED_STATES: readonly SyncEncryptionState[] = ['enabled', 'remote-plaintext'];
 
 export type SyncEncryptionStatus = {
     state: SyncEncryptionState;
     kdfParams?: SyncCryptoKdfParams;
     incompleteTransition?: SyncEncryptionTransitionKind;
-    /** This device left a change unfinished at a location ("Abandon setup") or met ciphertext there with no key: sync stays
-     *  paused at that location until it is shown whole again. */
+
+
     partlyEncrypted?: boolean;
 };
 
-/** Device-local, never-synced persisted shape. Salt/params are not secret (they live in
- * every artifact's header anyway) — only the derived key is secret, and that lives in
- * the platform's key-cache port (OS keyring / SecureStore), never here. */
+
 export type SyncEncryptionLocalState = {
     state: SyncEncryptionState;
-    discoveredSalt?: string; // hex
+    discoveredSalt?: string;
     discoveredParams?: SyncCryptoKdfParams;
-    /** Which sync location the discovery states (`remote-encrypted-no-key`, `remote-plaintext`)
-     * were discovered on (#1138). A lock must not outlive the location it was set for: the
-     * flag is device-global and checked before any remote read, so without this a user who
-     * empties the encrypted folder — or points the device at a different backend entirely —
-     * can never clear it (Unlock, the only exit, needs an encrypted document at the CURRENT
-     * location). Absent on states written by 1.2.6 and earlier; see
-     * `isSyncEncryptionStateBlocked` for why absent means "re-check", not "blocked". */
+
+
     discoveredScope?: string;
     incompleteTransition?: SyncEncryptionTransitionKind;
-    /** A location holding MWENC1 artifacts beside plaintext ones (an encryption change cut off), with `state: 'off'`: this
-     *  device must not sync there, or its plaintext attachments land beside ciphertext. Bound to the location like
-     *  `discoveredScope`; cleared once a check finds the location whole (all plaintext or all encrypted). */
+
+
     partlyEncryptedScope?: string;
 };
 
-/** Identity of the sync location a cycle runs against (#1138): the backend plus whatever
- * addresses the folder/account within it. Deliberately excludes every secret (WebDAV
- * password, cloud token, Dropbox credentials) — it is persisted in the clear in the
- * device-local encryption sidecar, and no secret changes WHICH remote a location names.
- *
- * Only the dimensions the ACTIVE backend addresses are included: a stale WebDAV URL left
- * behind by a user who moved to File Sync must not change the identity of the folder they
- * sync now, and an activation probe carrying no `cloudProvider` for a WebDAV candidate must
- * produce the same string the committed configuration produces afterwards.
- *
- * Rust mirrors the `file` branch for the desktop file backend
- * (`file_sync_location_scope` in sync.rs); keep the two shapes identical. */
+
 export type SyncLocationScopeInput = {
     backend?: string | null;
     webdavUrl?: string | null;
@@ -111,8 +75,8 @@ export const buildSyncLocationScope = (input: SyncLocationScopeInput): string =>
     }
     if (backend === 'cloud') {
         const provider = scopeValue(input.cloudProvider) ?? 'selfhosted';
-        // Dropbox is one app folder per linked account per device, so the provider alone
-        // names the location; a self-hosted server is named by its URL.
+
+
         if (provider === 'dropbox') return JSON.stringify(['cloud', 'dropbox']);
         const url = scopeValue(input.cloudUrl);
         return JSON.stringify(['cloud', provider, url ? normalizeCloudUrl(url) : null]);
@@ -120,22 +84,7 @@ export const buildSyncLocationScope = (input: SyncLocationScopeInput): string =>
     return JSON.stringify([backend]);
 };
 
-/**
- * The one home for "must this device refuse to sync before touching the remote?" (#1138).
- * Mirrored by Rust's `sync_encryption_state_blocked` for the desktop file backend.
- *
- * `activeScope` identifies the backend + location this cycle is about to run against, in the
- * same derivation the discovery seams stamp with. Three cases, in order:
- *
- *  - No persisted scope: state written before scopes existed. NOT blocked — the cycle
- *    proceeds exactly like a fresh device's first sync against this location, the read seams
- *    re-discover and re-mark WITH a scope, and either throw again (still encrypted) or sync
- *    normally (emptied / plaintext). This is what unwedges existing victims via one manual
- *    "Sync now" instead of clearing app data.
- *  - Scope persisted but the active one is unknown (`null`, e.g. the config could not be
- *    read): blocked. "Don't know" must not license a plaintext write beside ciphertext.
- *  - Otherwise: blocked only when the location matches the one the discovery was made on.
- */
+
 export const isSyncEncryptionStateBlocked = (
     state: SyncEncryptionLocalState | null | undefined,
     activeScope: string | null,
@@ -151,22 +100,16 @@ export const isSyncEncryptionStateBlocked = (
 
 export type SyncEncryptionLocalStatePort = {
     read(): SyncEncryptionLocalState | null;
-    /** `null` clears back to the implicit 'off' default. */
+
     write(state: SyncEncryptionLocalState | null): void | Promise<void>;
 };
 
 export const SYNC_ENCRYPTION_PARTLY_ENCRYPTED = 'SYNC_ENCRYPTION_PARTLY_ENCRYPTED';
 
-/**
- * The order an encryption transition walks a File Sync folder's artifacts in: plain code-unit order, the same on every engine
- * (localeCompare differs between Hermes and QuickJS) and, for ASCII names, the byte order desktop's Rust transition sorts by.
- * File Sync's keyless upload check (mobile-attachment-backends.ts assertFolderHoldsNoCiphertext) relies on it: a cut-off Enable
- * has always sealed the first entry.
- */
+
 export const compareSyncTransitionEntryNames = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
-/** The sync location holds encrypted files beside plaintext ones (an encryption change was cut off) while this device has
- *  no key: it never writes there, so plaintext never lands beside ciphertext. */
+
 export class SyncEncryptionPartlyEncryptedError extends Error {
     constructor() {
         super(`${SYNC_ENCRYPTION_PARTLY_ENCRYPTED}: This sync location is partly encrypted. Sync stays paused here so plain files never land beside encrypted ones. Finish or undo the encryption change from a device that can reach it.`);
@@ -217,8 +160,7 @@ export const assertNoIncompleteSyncEncryptionTransition = (
     if (kind) throw new SyncEncryptionTransitionIncompleteError(kind);
 };
 
-/** Secret key cache — OS keyring on desktop (via Tauri commands), expo-secure-store on
- * mobile. Never persist the passphrase itself; only the derived 32-byte key. */
+
 export type SyncEncryptionKeyCachePort = {
     getKey(): Promise<Uint8Array | null>;
     setKey(key: Uint8Array): Promise<void>;
@@ -227,31 +169,22 @@ export type SyncEncryptionKeyCachePort = {
 
 export type SyncEncryptionRemoteEntryKind = 'document' | 'attachment';
 
-/** One artifact as it currently exists on the remote, named relative to the sync root
- * (e.g. `data.json`, `data.json.bak`, `attachments/<id>.png`). `kind` decides whether a
- * transition renames it (`document`) or rewrites it in place (`attachment`, per the
- * pinned decision that attachments keep their exact names since `cloudKey` is
- * identity-keyed and immutable-once-uploaded). */
+
 export type SyncEncryptionRemoteEntry = { name: string; kind: SyncEncryptionRemoteEntryKind };
 
-/** Opaque backend generation captured by the same operation that returned `bytes`.
- * WebDAV uses a strong ETag, Dropbox a file rev, and File Sync a content fingerprint.
- * `null` is reserved for a confirmed-missing artifact and therefore means create-only. */
+
 export type SyncEncryptionRemoteRead = {
     bytes: Uint8Array | null;
     version: string | null;
 };
 
-/** One coherent remote inventory. Blob adapters derive `entries` from the document bytes in
- * `snapshot`; core then reuses those exact document generations for every later CAS instead
- * of listing from one generation and silently preflighting a newer one. */
+
 export type SyncEncryptionRemoteInventory = {
     entries: SyncEncryptionRemoteEntry[];
     snapshot: ReadonlyMap<string, SyncEncryptionRemoteRead>;
 };
 
-/** Raised when a transition observes that another writer changed an artifact after the
- * transition read it. The transition must stop before committing its device-local key/state. */
+
 export class SyncEncryptionRemoteConflictError extends Error {
     constructor(message = 'sync encryption remote artifact changed during transition') {
         super(message);
@@ -259,7 +192,7 @@ export class SyncEncryptionRemoteConflictError extends Error {
     }
 }
 
-/** A host cannot write one of the encrypted artifacts in the captured generation. */
+
 export class SyncEncryptionArtifactCapacityError extends Error {
     constructor() {
         super('SYNC_ENCRYPTION_ARTIFACT_CAPACITY: encrypted artifact exceeds host capacity');
@@ -269,8 +202,7 @@ export class SyncEncryptionArtifactCapacityError extends Error {
 
 export const SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE = 'SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE';
 
-/** Existing remote bytes without an atomic backend generation cannot be mutated safely.
- * WebDAV reaches this when a server omits ETag or returns only a weak validator. */
+
 export class SyncEncryptionRemoteVersionUnavailableError extends Error {
     constructor(name: string) {
         super(`${SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE}: ${name} has no safe backend version`);
@@ -280,8 +212,7 @@ export class SyncEncryptionRemoteVersionUnavailableError extends Error {
 
 export const SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE = 'SYNC_ENCRYPTION_BACKEND_INCOMPATIBLE';
 
-/** The sync location's server cannot keep safe versions (no strong ETags or no enforced conditional writes), found before a
- * transition changed anything: the backend is incompatible, not a change left half done. */
+
 export class SyncEncryptionBackendIncompatibleError extends SyncEncryptionRemoteVersionUnavailableError {
     constructor(cause: SyncEncryptionRemoteVersionUnavailableError) {
         super('');
@@ -296,40 +227,29 @@ export const isSyncEncryptionRemoteVersionUnavailableError = (error: unknown): b
         .includes(SYNC_ENCRYPTION_REMOTE_VERSION_UNAVAILABLE)
 );
 
-/** Generic remote-blob port for the transition orchestration below. WebDAV and Dropbox
- * each implement this with their existing get/put/list primitives (see webdav.ts /
- * dropbox.ts) — this is the ADR 0014 shared-logic seam: one transition implementation,
- * two thin backend adapters, reused by both desktop and mobile. */
+
 export type SyncEncryptionRemotePort = {
-    /** Host transport's maximum encrypted output size, when it has one. Enable checks the full inventory before mutation. */
+
     maxEncryptedArtifactBytes?: number;
     list(): Promise<SyncEncryptionRemoteEntry[]>;
-    /** Blob backends can bind their derived worklist to the document reads that
-     * produced it. File backends retain the `list` + `read` fallback because they enumerate
-     * the storage provider directly. The passphrase is only for decoding an interrupted
-     * transition's authoritative document; it is never persisted by the port. */
+
+
     captureInventory?(recoveryPassphrase?: string): Promise<SyncEncryptionRemoteInventory>;
     read(name: string): Promise<SyncEncryptionRemoteRead>;
-    /** `null` is create-only; a value replaces only the generation returned by `read`. A port that read the written
-     *  artifact back as part of the write may answer that read; core then verifies it instead of reading again. */
+
+
     write(name: string, bytes: Uint8Array, expectedVersion: string | null): Promise<SyncEncryptionRemoteRead | void>;
-    /** Only ever called on a plaintext original after its `.enc` counterpart has been
-     *  written AND read back and verified — never on speculation. */
+
+
     remove(name: string, expectedVersion: string): Promise<void>;
-    /** The artifact's first bytes (at least the MWENC1 magic), or null when absent: enough to tell ciphertext from
-     *  plaintext without downloading a large attachment. A port without it is read whole. */
+
+
     readHead?(name: string): Promise<Uint8Array | null>;
 };
 
 export type SyncEncryptionTransitionProgress = { phase: 'attachments' | 'documents'; completed: number; total: number };
 
-/** Thrown by every seam that decrypts remote bytes when the bytes fail the MWENC1
- * auth/format check. Wraps the underlying SyncCryptoAuthError/SyncCryptoUnsupportedError
- * so callers can catch one type and still inspect `cause` for classification (wrong
- * passphrase vs. corrupted/unsupported container) without ever being tempted to treat
- * either as "invalid JSON, try to repair" — that repair affordance must never fire for
- * ciphertext. Bytes that fail this check are left exactly where they are by every seam;
- * nothing here ever rotates a backup or deletes anything on this path. */
+
 export class SyncEncryptionTerminalError extends Error {
     constructor(public readonly cause: SyncCryptoAuthError | SyncCryptoUnsupportedError) {
         super(cause.message);
@@ -337,13 +257,7 @@ export class SyncEncryptionTerminalError extends Error {
     }
 }
 
-/**
- * Thrown by a read seam that holds a key, finds no encrypted artifact, and finds a plaintext
- * document in its place — a peer disabled encryption at the sync location. Terminal on
- * purpose: merging would fork the folder into two generations, and following the remote down
- * to plaintext automatically would let anyone with write access to the storage strip
- * encryption from every device. The user disables encryption here (or re-enables it there).
- */
+
 export class SyncEncryptionRemotePlaintextError extends Error {
     constructor(message = 'the sync location is no longer encrypted') {
         super(message);
@@ -351,17 +265,14 @@ export class SyncEncryptionRemotePlaintextError extends Error {
     }
 }
 
-/** True when `bytes` are a present, non-empty, non-MWENC1 artifact — i.e. a plaintext sync
- * document sitting where a keyed device expects ciphertext. An empty or whitespace-only file
- * is not evidence of anything and stays "empty remote". */
+
 export function isPlaintextSyncArtifact(bytes: Uint8Array | null | undefined): boolean {
     if (!bytes || bytes.length === 0) return false;
     if (inspectSyncArtifact(bytes).kind !== 'plaintext') return false;
     return bytes.some((byte) => byte > 0x20);
 }
 
-/** Decrypt-or-fail-closed: the one function every storage seam should call instead of
- * `decryptSyncArtifact` directly, so every seam raises the same terminal-error class. */
+
 export async function decryptRemoteArtifactOrThrow(
     bytes: Uint8Array,
     key: Uint8Array,
@@ -377,14 +288,7 @@ export async function decryptRemoteArtifactOrThrow(
     }
 }
 
-/** The MWENC1 header info when `bytes` are a valid encrypted artifact sealed under a
- * DIFFERENT salt than `material` — proof the caller's key belongs to another encryption
- * generation (a passphrase set before the first sync on a device joining an already-
- * encrypted remote, or a peer's passphrase rotation while this device was offline).
- * Decrypting would only fail as Auth, indistinguishable from a wrong passphrase; the salt
- * comparison is what lets callers route to "enter the passphrase for THIS remote" instead
- * of a dead-end terminal error. Returns `null` for plaintext/unsupported bytes and for the
- * matching-salt case (where an Auth failure really is wrong-passphrase-or-corruption). */
+
 export function detectForeignSaltArtifact(
     bytes: Uint8Array,
     material: SyncKeyMaterial,
@@ -398,17 +302,11 @@ export function detectForeignSaltArtifact(
     return { salt: inspected.salt, params: inspected.params };
 }
 
-/** An artifact whose MWENC1 header is present but unreadable (truncated, a future format
- * version, a cost above the accepted ceiling) is neither plaintext to seal nor ciphertext we
- * can open. Every transition raises this instead of guessing: sealing it would double-wrap a
- * container nothing can recover, and skipping it would silently leave it behind. */
+
 const unsupportedArtifact = (name: string, reason: string): SyncEncryptionTerminalError =>
     new SyncEncryptionTerminalError(new SyncCryptoUnsupportedError(`${name}: ${reason}`));
 
-/** Trial-decrypt used only for resume detection (e.g. "is this artifact already sealed
- * under the new passphrase-change key?"). A wrong-key auth failure means "not yet
- * migrated" — normal during resume. An unsupported/corrupt container is a real problem
- * and must not be swallowed as "not yet migrated". */
+
 async function triesDecrypt(bytes: Uint8Array, key: Uint8Array, prims: SyncCryptoPrimitives): Promise<boolean> {
     try {
         await decryptSyncArtifact(bytes, key, prims);
@@ -421,9 +319,7 @@ async function triesDecrypt(bytes: Uint8Array, key: Uint8Array, prims: SyncCrypt
 
 const KNOWN_ARTIFACT_SUFFIXES = ['.bak', '.tmp', '.previous'];
 
-/** Peels every trailing known suffix off `name` (repeatedly — `.bak.previous` is two),
- * returning the bare stem plus the peeled suffixes in their ORIGINAL left-to-right order
- * (peeling happens right-to-left, so the collected list is reversed before returning). */
+
 function splitTrailingSuffixChain(name: string): { stem: string; suffixChain: string } {
     let stem = name;
     const peeled: string[] = [];
@@ -436,20 +332,13 @@ function splitTrailingSuffixChain(name: string): { stem: string; suffixChain: st
     return { stem, suffixChain: peeled.reverse().join('') };
 }
 
-/** `.enc` is inserted immediately after the data-file stem, and the FULL trailing suffix
- * chain is carried verbatim after it: `data.json` -> `data.json.enc`; `data.json.bak` ->
- * `data.json.enc.bak`; `data.json.bak.previous` -> `data.json.enc.bak.previous` (never
- * `data.json.bak.enc.previous` — that name is read by nothing, since recovery/rotation
- * code matches the `.enc` marker right after the stem, not before the last suffix only).
- * Attachments never go through this — they keep their exact name (see
- * SyncEncryptionRemoteEntryKind). */
+
 export function syncEncryptedArtifactName(plainName: string): string {
     const { stem, suffixChain } = splitTrailingSuffixChain(plainName);
     return `${stem}.enc${suffixChain}`;
 }
 
-/** Inverse of syncEncryptedArtifactName. Returns the input unchanged if it doesn't
- * actually carry an `.enc` marker (defensive; callers should only pass `.enc` names). */
+
 export function syncPlaintextArtifactName(encName: string): string {
     const { stem, suffixChain } = splitTrailingSuffixChain(encName);
     if (!stem.endsWith('.enc')) return encName;
@@ -488,10 +377,7 @@ const requireExistingRemoteVersion = (name: string, read: SyncEncryptionRemoteRe
     return read.version;
 };
 
-/** Capture every listed generation before the first transition write. Blob ports can seed
- * the snapshot with the exact document reads used to derive their attachment worklist; the
- * fallback preserves File Sync's direct-listing contract. Every uncaptured entry is read once,
- * and every captured/read generation becomes the CAS snapshot used by the mutation pass. */
+
 const captureRemoteEntryVersions = async (
     remote: SyncEncryptionRemotePort,
     recoveryPassphrase?: string,
@@ -516,8 +402,7 @@ const snapshotRemoteRead = (
     name: string,
 ): SyncEncryptionRemoteRead => snapshot.get(name) ?? { bytes: null, version: null };
 
-/** Writes `bytes` over the generation `expectedVersion` names and verifies the bytes read back: the port's own read-back
- *  when its write answered one (File Sync reads the installed document before deleting the old copy), else a new read. */
+
 const writeVerifiedRemoteBytes = async (
     remote: SyncEncryptionRemotePort,
     name: string,
@@ -542,10 +427,7 @@ const remoteReadsEqual = (left: SyncEncryptionRemoteRead, right: SyncEncryptionR
         : right.bytes !== null && bytesEqual(left.bytes, right.bytes))
 );
 
-/** Revalidate the complete managed inventory the transition is about to make authoritative on
- * this device. Mutating calls update `expected` with their verified post-write state; entries
- * that required no work keep their captured version. The final authoritative list also catches
- * a peer-created attachment or document name that did not exist in the captured inventory. */
+
 const revalidateRemoteInventory = async (
     remote: SyncEncryptionRemotePort,
     expected: Map<string, SyncEncryptionRemoteRead>,
@@ -590,19 +472,10 @@ const revalidateRemoteInventory = async (
     }
 };
 
-/** ASCII space — the byte a non-truncating write pads a shrinking artifact with (see
- * `padBytesForNonTruncatingOverwrite` on mobile and the MWENC1 header comment for the
- * ciphertext-domain equivalent). */
+
 const PLAINTEXT_PAD_BYTE = 0x20;
 
-/** True when `actual` starts with exactly `expected` and everything after that is a clean
- * run of the padding byte. A disable-transition write-back is verified with this instead
- * of raw byte-equality specifically so a non-truncating provider's padded write still
- * verifies — the plaintext-domain analogue of the MWENC1 format's own
- * ignore-trailing-bytes rule. A tail that is present but is NOT clean padding is genuine
- * corruption (e.g. a stale slice of the OLD ciphertext an un-padded write left behind)
- * and must fail here, not be silently accepted (S2: a corrupted attachment that a
- * length-blind byte-equal check, or a later resume pass, would otherwise miss). */
+
 function bytesMatchWithTrailingPadding(actual: Uint8Array, expected: Uint8Array): boolean {
     if (actual.length < expected.length) return false;
     for (let i = 0; i < expected.length; i += 1) {
@@ -626,20 +499,12 @@ export function getSyncEncryptionStatusFromLocalState(localState: SyncEncryption
     };
 }
 
-/** Called from a read seam (webdav.ts / dropbox.ts) the moment it discovers ciphertext
- * it has no key for. Persists immediately (per the pinned "state persisted, survives
- * restart" requirement) — this is what makes discovery durable without requiring the
- * user to acknowledge a prompt first. Never overwrites a keyed local state whose salt
- * matches the discovery (a device that already has THIS remote's key does not need to be
- * told it is encrypted) — but a keyed state under a DIFFERENT salt is provably a foreign
- * key (see detectForeignSaltArtifact) and downgrades to `remote-encrypted-no-key`, which
- * is the only state that surfaces the unlock prompt able to re-derive the key from the
- * remote's own salt. */
+
 export function markRemoteEncryptionDiscovered(
     localState: SyncEncryptionLocalStatePort,
     discovered: { salt: Uint8Array; params: SyncCryptoKdfParams },
-    // Optional so a seam that cannot name its location still persists the discovery; the
-    // resulting scope-less state re-checks on the next cycle rather than blocking forever.
+
+
     scope?: string | null,
 ): void {
     const current = localState.read();
@@ -653,12 +518,7 @@ export function markRemoteEncryptionDiscovered(
     });
 }
 
-/** The inverse direction of `markRemoteEncryptionDiscovered`, called from a read seam that
- * holds a key and finds the sync location back in plaintext. Only an `enabled` device can
- * reach this state — a device with no key of its own has nothing to fork. Salt and params are
- * carried over deliberately: the key must stay resolvable for a disable transition or
- * recovery after a verified encrypted read. Mirrored by Rust's
- * `mark_remote_plaintext` for the file backend. */
+
 export function markRemotePlaintextDiscovered(
     localState: SyncEncryptionLocalStatePort,
     scope?: string | null,
@@ -672,8 +532,7 @@ export function markRemotePlaintextDiscovered(
     });
 }
 
-/** Called only after authenticated decryption and parsing, never header discovery.
- * Preserve credentials and refuse stale evidence from another location/generation. */
+
 export async function restoreVerifiedRemoteEncryption(
     localState: SyncEncryptionLocalStatePort,
     material: SyncKeyMaterial,
@@ -690,7 +549,7 @@ export async function restoreVerifiedRemoteEncryption(
     return true;
 }
 
-/** A "not now" dismissal must never clear the persisted no-key state. */
+
 export function reaffirmRemoteEncryptionNoKey(localState: SyncEncryptionLocalStatePort): void {
     const current = localState.read();
     if (!current || current.state !== 'remote-encrypted-no-key') return;
@@ -699,19 +558,7 @@ export function reaffirmRemoteEncryptionNoKey(localState: SyncEncryptionLocalSta
 
 export type EnableRemoteEncryptionResult = { salt: Uint8Array; params: SyncCryptoKdfParams };
 
-/**
- * Enable encryption while no sync backend is configured (#1001): there is no remote to
- * convert, so the transition is pure local key material — derive under a fresh salt,
- * cache the key, persist `enabled`. The first sync a later-activated backend runs then
- * writes ciphertext from its first byte, which is the point: a passphrase set before the
- * first sync means plaintext never reaches the server at all.
- *
- * Refuses every state except off: `remote-encrypted-no-key` / `remote-plaintext` describe
- * a KNOWN remote, and enabling blind there would cache a key no artifact ever validated —
- * the unlock flow is the only honest entry from those states. `enabled` cannot re-enable
- * either, so a second passphrase can never silently replace the one an existing remote
- * may already be sealed under.
- */
+
 export async function runEnableSyncEncryptionLocalOnly(
     passphrase: string,
     keyCache: SyncEncryptionKeyCachePort,
@@ -734,12 +581,7 @@ export async function runEnableSyncEncryptionLocalOnly(
     return { salt: material.salt, params: material.params };
 }
 
-/**
- * Disable while no sync backend is configured: nothing remote is touched — this only
- * removes the key and state from this device. If a previously used sync location still
- * holds ciphertext, it stays ciphertext and reconnecting rediscovers it (fail closed);
- * the UI copy for this path says exactly that instead of promising a decrypt pass.
- */
+
 export async function runDisableSyncEncryptionLocalOnly(
     keyCache: SyncEncryptionKeyCachePort,
     localState: SyncEncryptionLocalStatePort,
@@ -749,13 +591,7 @@ export async function runDisableSyncEncryptionLocalOnly(
     await keyCache.clearKey();
 }
 
-/**
- * "Abandon setup": this device drops an unfinished change (its server is gone, or the user gave up on it). It goes back to
- * off and forgets the key, without contacting the sync location, which may stay partly encrypted: a device that can reach it
- * has to finish or undo the change there. The location ([activeScope]) is remembered as partly encrypted, so this device
- * never syncs there (its plaintext would land beside ciphertext) until a check finds it whole again. Returns the change it
- * abandoned, or null for none.
- */
+
 export async function runAbandonSyncEncryptionTransition(
     keyCache: SyncEncryptionKeyCachePort,
     localState: SyncEncryptionLocalStatePort,
@@ -768,21 +604,7 @@ export async function runAbandonSyncEncryptionTransition(
     return abandoned;
 }
 
-/**
- * Enable encryption over a generic remote (WebDAV or Dropbox). Order: every attachment
- * first, then non-base documents (`.bak`/snapshots), then the base document (`data.json`)
- * last — a reader that finds `data.json.enc` should never find it referencing an
- * attachment or `.bak` that isn't itself already migrated. Each artifact is written,
- * read back, and decrypt-verified before its plaintext original is removed, so a crash
- * mid-run leaves both generations present and a re-run resumes: it re-derives the same
- * key from whichever `.enc` document (if any) already exists, and skips any artifact
- * whose current bytes already decrypt successfully.
- *
- * ponytail: this does not run items in parallel (one artifact at a time) — a single
- * shared HTTP/Dropbox connection with no per-artifact concurrency limit already existed
- * for these backends' attachment sync; add a bounded-concurrency queue if transition
- * time on large attachment sets becomes a real complaint.
- */
+
 export async function runEnableSyncEncryptionOverRemote(
     passphrase: string,
     remote: SyncEncryptionRemotePort,
@@ -790,8 +612,8 @@ export async function runEnableSyncEncryptionOverRemote(
     localState: SyncEncryptionLocalStatePort,
     onProgress?: (progress: SyncEncryptionTransitionProgress) => void,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
-    // Writer-side KDF cost for the fresh salt. Readers always honor header params, so this
-    // only affects newly written artifacts; tests inject cheap params to stay under timeouts.
+
+
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<EnableRemoteEncryptionResult> {
     const maxEncryptedArtifactBytes = remote.maxEncryptedArtifactBytes;
@@ -801,12 +623,7 @@ export async function runEnableSyncEncryptionOverRemote(
     }
     const { entries, snapshot } = await captureRemoteEntryVersions(remote, passphrase);
 
-    // Authenticate every encrypted generation before the first transition write. A partial
-    // enable can leave only encrypted attachments (no `.enc` document yet), or several
-    // abandoned salts after repeated interruptions. Merely inspecting a public header is not
-    // proof of the passphrase: derive once per salt and open every encrypted artifact now, so
-    // a later encrypted attachment/document cannot reveal a typo after an earlier plaintext
-    // attachment has already been rewritten.
+
     const recoveredMaterialBySalt = new Map<string, SyncKeyMaterial>();
     const plaintextLengths = new Map<string, number>();
     const recoverMaterialForSalt = async (salt: Uint8Array, params: SyncCryptoKdfParams): Promise<SyncKeyMaterial> => {
@@ -818,9 +635,7 @@ export async function runEnableSyncEncryptionOverRemote(
         return recovered;
     };
 
-    // Resume: an `.enc` document is authoritative when present. If the interruption happened
-    // earlier, the first encrypted attachment supplies the generation instead. Reusing either
-    // avoids inventing a fresh salt and needlessly rewrapping the partial generation.
+
     const isBaseEncryptedDocument = (name: string) =>
         !KNOWN_ARTIFACT_SUFFIXES.some((suffix) => name.endsWith(`.enc${suffix}`));
     let baseDocumentMaterial: SyncKeyMaterial | null = null;
@@ -855,16 +670,15 @@ export async function runEnableSyncEncryptionOverRemote(
         material = await deriveSyncKeyMaterial(passphrase, salt, kdfParams, prims);
     }
 
-    // No journal, key, or artifact has been changed yet. Check every captured generation
-    // that Enable may seal, including a later base document and a foreign-salt rewrap.
+
     if (maxEncryptedArtifactBytes !== undefined) {
         for (const entry of entries) {
             const plaintextLength = plaintextLengths.get(entry.name);
             if (plaintextLength === undefined) continue;
             const bytes = snapshotRemoteRead(snapshot, entry.name).bytes!;
             const inspected = inspectSyncArtifact(bytes);
-            // A ciphertext under a plain document name is left in place. Already-sealed
-            // artifacts under the selected key are read but not written by this run.
+
+
             if (inspected.kind === 'encrypted'
                 && (entry.kind === 'document' && !entry.name.includes('.enc')
                     || await triesDecrypt(bytes, material.key, prims))) continue;
@@ -930,10 +744,7 @@ export async function runEnableSyncEncryptionOverRemote(
         completed += 1;
     }
 
-    // A resumed enable may contain several authenticated salts (for example a base document
-    // from one interrupted attempt and a backup from another). The selected base generation
-    // is what this device will cache, so converge every other encrypted document to it before
-    // processing/removing plaintext counterparts.
+
     for (const entry of encryptedDocuments) {
         report('documents');
         const current = snapshotRemoteRead(snapshot, entry.name);
@@ -970,9 +781,8 @@ export async function runEnableSyncEncryptionOverRemote(
             const bytes = current.bytes;
             const inspected = inspectSyncArtifact(bytes);
             if (inspected.kind === 'unsupported') throw unsupportedArtifact(entry.name, inspected.reason);
-            // Ciphertext under a PLAIN name is a peer's in-flight generation, not ours (this
-            // function only ever writes to `.enc` names). Leave it exactly where it is rather
-            // than double-wrapping it or removing it — same call the Rust file backend makes.
+
+
             if (inspected.kind === 'plaintext') {
                 const encName = syncEncryptedArtifactName(entry.name);
                 const sealed = await encryptSyncArtifact(bytes, material, prims);
@@ -1012,9 +822,7 @@ export async function runEnableSyncEncryptionOverRemote(
     return { salt: material.salt, params: material.params };
 }
 
-/** Disable mirrors enable: same ordering (attachments, then non-base documents, then the
- * base document last), same read-back-and-verify-before-remove discipline, same
- * resumability (an artifact whose current bytes are already plaintext is skipped). */
+
 export async function runDisableSyncEncryptionOverRemote(
     remote: SyncEncryptionRemotePort,
     keyCache: SyncEncryptionKeyCachePort,
@@ -1033,10 +841,7 @@ export async function runDisableSyncEncryptionOverRemote(
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
     const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
 
-    // Build the complete decrypt plan before starting the journal or writing an early
-    // artifact. A folder containing a later foreign/abandoned generation must fail with every
-    // byte untouched; otherwise Disable can strand a plaintext prefix plus ciphertext suffix
-    // under a `disable` journal that blocks the required passphrase-change recovery.
+
     const plaintextByName = new Map<string, Uint8Array>();
     for (const entry of [...attachments, ...encDocuments]) {
         const current = snapshotRemoteRead(snapshot, entry.name);
@@ -1086,13 +891,8 @@ export async function runDisableSyncEncryptionOverRemote(
                 snapshot.set(entry.name, verified);
             }
         }
-        // ponytail: an attachment already lacking MWENC1 magic is treated as "already
-        // disabled" — correct for anything THIS code wrote (the write above always
-        // verifies with bytesMatchWithTrailingPadding before returning, so a completed
-        // write is never left with a non-padding tail). A file corrupted some OTHER way
-        // (pre-fix legacy state, an exotic provider) has no length reference to validate
-        // against here; `validateAttachmentHash` catches it downstream. Add a stored
-        // expected-length/hash check here if that ever needs closing.
+
+
         completed += 1;
     }
 
@@ -1131,9 +931,7 @@ export async function runDisableSyncEncryptionOverRemote(
     await keyCache.clearKey();
 }
 
-/** Passphrase change: decrypt-with-old, re-encrypt-with-new, under a fresh salt, over
- * the same total artifact set. Resumable the same way as enable/disable: an artifact
- * that already trial-decrypts under the NEW key is treated as already migrated. */
+
 export async function runChangeSyncEncryptionPassphraseOverRemote(
     currentPassphrase: string,
     nextPassphrase: string,
@@ -1142,15 +940,13 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     localState: SyncEncryptionLocalStatePort,
     onProgress?: (progress: SyncEncryptionTransitionProgress) => void,
     prims: SyncCryptoPrimitives = defaultSyncCryptoPrimitives,
-    // Same writer-side-only knob as runEnableSyncEncryptionOverRemote.
+
     kdfParams: SyncCryptoKdfParams = SYNC_CRYPTO_DEFAULT_KDF_PARAMS,
 ): Promise<void> {
     const oldKey = await keyCache.getKey();
     if (!oldKey) throw new Error('sync encryption passphrase change requires a cached key');
-    // Verify `currentPassphrase` actually derives the cached key rather than trusting it
-    // blindly — otherwise a typo'd "current" passphrase would silently proceed (the
-    // cache doesn't care what string produced it) and report success while the caller
-    // believes they confirmed their old passphrase.
+
+
     const persisted = localState.read();
     if (persisted?.discoveredSalt && persisted.discoveredParams) {
         const claimedOldMaterial = await deriveSyncKeyMaterial(
@@ -1163,12 +959,8 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
             && persisted.incompleteTransition !== 'change-passphrase') {
             throw new Error('sync encryption passphrase change: current passphrase does not match');
         }
-        // A failed final state commit can durably install the candidate key and then fail
-        // to restore the predecessor (keyring/SecureStore is a separate persistence domain).
-        // The durable change-passphrase journal proves that the original current passphrase
-        // was accepted before remote mutation began. In that one recovery state, allow the
-        // cached candidate key to enter the full all-generation authentication plan below;
-        // without the journal the same mismatch remains a hard wrong-passphrase failure.
+
+
     }
 
     const isBaseEncDocument = (name: string) => !KNOWN_ARTIFACT_SUFFIXES.some((s) => name.endsWith(`.enc${s}`));
@@ -1179,11 +971,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         .sort((a, b) => Number(isBaseEncDocument(a.name)) - Number(isBaseEncDocument(b.name)));
     const expectedKinds = new Map(entries.map((entry) => [entry.name, entry.kind] as const));
 
-    // A plaintext-named document means another device left an interrupted disable (or is
-    // actively disabling). Rotation must not report success while that exposed generation
-    // remains beside the ciphertext: the user must finish/retry the disable or enable
-    // transition that owns the rename first. Fixed-name inventories include confirmed-missing
-    // plaintext counterparts, so only a generation with bytes is rejected here.
+
     for (const entry of entries) {
         if (entry.kind !== 'document' || entry.name.includes('.enc')) continue;
         if (snapshotRemoteRead(snapshot, entry.name).bytes) {
@@ -1207,12 +995,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         transitionJournalStarted = true;
     };
 
-    // Resume self-heal, same reasoning as runEnableSyncEncryptionOverRemote's attachment
-    // loop: an artifact left over from an earlier, interrupted passphrase-change attempt
-    // decrypts under neither `oldKey` nor this run's `newMaterial.key`. That abandoned
-    // intermediate salt was derived from `nextPassphrase` (a passphrase change always
-    // re-derives from the NEW passphrase, never the old one) — recover it from the
-    // artifact's own header using the same `nextPassphrase` this call was given.
+
     const recoveredMaterialBySalt = new Map<string, SyncKeyMaterial>();
     const recoverMaterialForSalt = async (salt: Uint8Array, params: SyncCryptoKdfParams): Promise<SyncKeyMaterial> => {
         const cacheKey = bytesToHex(salt);
@@ -1223,10 +1006,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         return recovered;
     };
 
-    // Authenticate and decrypt the entire fixed inventory before the first write. Retrying an
-    // interrupted O→A rotation as O→B must not rewrite an early O artifact under B and only
-    // then discover a later A artifact that B cannot open. The plan also avoids repeating the
-    // expensive decrypt/KDF work in the mutation pass.
+
     const rewrapPlan = new Map<string, Uint8Array | null>();
     for (const entry of [...attachments, ...encDocuments]) {
         const current = snapshotRemoteRead(snapshot, entry.name);
@@ -1258,7 +1038,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
         if (!current.bytes) return;
         const version = requireExistingRemoteVersion(name, current);
         const plain = rewrapPlan.get(name);
-        if (!plain) return; // absent or already migrated under this run's new material
+        if (!plain) return;
         const sealed = await encryptSyncArtifact(plain, newMaterial, prims);
         await ensureTransitionJournal();
         const verified = await writeVerifiedRemoteBytes(remote, name, sealed, version, async (verify) => {
@@ -1290,11 +1070,8 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
             discoveredParams: newMaterial.params,
         });
     } catch (stateError) {
-        // The remote is already fully under `newMaterial`, but the durable journal still
-        // describes a retry from `oldKey`. Restore that key so the same current/next inputs
-        // can authenticate the journal and converge the remote generation on retry. Mobile
-        // SecureStore and the desktop keyring are separate from their state stores, so this
-        // compensating write is the atomicity boundary available to the shared port contract.
+
+
         try {
             await keyCache.setKey(oldKey);
         } catch (rollbackError) {
@@ -1310,17 +1087,7 @@ export async function runChangeSyncEncryptionPassphraseOverRemote(
     }
 }
 
-/** Validates a passphrase against the remote's current `.enc` base document (never
- * mutates the remote either way) and, on success, caches the key and clears the no-key
- * state. `baseDocumentPlainName` is the un-suffixed document name (e.g. `data.json`) —
- * the caller doesn't need to know the `.enc` name itself.
- *
- * `'no-encrypted-remote'` (#1138): there is nothing encrypted here to unlock. From
- * `remote-encrypted-no-key` that is the stale-lock exit — the discovery describes a location
- * this device is no longer pointed at (or one that has since been emptied), this device holds
- * no key, so nothing is lost by clearing back to off and saying so. Never taken from a keyed
- * state: there the missing `.enc` means a peer disabled encryption, which is
- * `remote-plaintext`'s business and must not silently drop a key the user still needs. */
+
 export async function runProvideSyncEncryptionPassphraseOverRemote(
     passphrase: string,
     baseDocumentPlainName: string,
@@ -1359,10 +1126,7 @@ export async function runProvideSyncEncryptionPassphraseOverRemote(
             else throw err;
         }
 
-        // Authentication can be expensive enough for a peer to rotate the generation while
-        // it runs. Retry once on a changed snapshot so a passphrase valid for the new current
-        // generation is not rejected because we authenticated the stale one; never persist a
-        // key unless the exact bytes/version remain authoritative.
+
         const current = await remote.read(encName);
         if (!remoteReadsEqual(captured, current)) {
             if (attempt === 0) continue;

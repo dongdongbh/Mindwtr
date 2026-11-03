@@ -1,27 +1,6 @@
-// External calendars check for the isolated native Android development app (pass C3): Settings › Advanced › Calendar's ICS
-// subscriptions, and their events in the Calendar and the reviews, against a local ICS server only.
-//
-//   node apps/android-native/scripts/check-calendar-feeds-device.mjs <adb-serial> [apk]
-//
-// Serves a calendar on this computer (calendar-feed-server.mjs, 127.0.0.1:<port>, MINDWTR_CALENDAR_PORT or 18783) and maps the
-// phone's port to it (`adb reverse`). Then, through the app's own screens:
-//   (1) Settings › Advanced › Calendar opens with the device calendars card (no push card until calendar push, C4) and the subscription form; the device
-//       calendars stay off (this check never reads the phone's own calendars);
-//   (2) Add stores the subscription under RN's key in RKStorage and in the synced settings, and the list shows it; a URL with a
-//       user name and password shows masked, and neither URL reaches the write journal, the diagnostics log or logcat;
-//   (3) Test answers RN's toast ("Loaded N events"); no request carries an Origin header (#1309);
-//   (4) the Calendar's week shows the feed's events, the load's diagnostics line names it, and an event's sheet offers RN's
-//       Create task (no Open in calendar: a subscription's event has no calendar app to open it);
-//   (5) the Weekly and the Daily Review load their own external calendars;
-//   (6) a subscription answering 403, 500, a body cut short, or a declared body past the limit: Test answers RN's failure toast,
-//       nothing stored changes, and the Calendar shows the feed's events no more;
-//   (7) Remove takes the subscription out of RKStorage and the synced settings;
-//   (8) on an emulator only (never the test phone: it would read the owner's calendars): a local calendar and event seeded
-//       through the calendar provider; the device calendars switch asks with the system prompt (Don't allow: RN's denied
-//       text; Grant access asks again; Allow: the calendar listed), the Calendar's week shows the device event, and its sheet
-//       offers Open in calendar, which hands it to the calendar app. The switch goes off and the seeded calendar is deleted.
-// It installs with `install -r` (development data stays), touches only the development package, and on exit removes the port
-// mapping and stops the server. Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -54,7 +33,7 @@ const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/calendar-check');
 const { en } = await import(resolve(repo, 'packages/core/src/i18n/locales/en.ts'));
 
-// This run's names: letters and digits only for what the phone types.
+
 const run = `${String(Date.now()).slice(-6)}${String(randomInt(1_000_000)).padStart(6, '0')}`;
 const PORT = Number(process.env.MINDWTR_CALENDAR_PORT ?? 18783);
 const FEED = `feed${run}`;
@@ -62,16 +41,16 @@ const URL = `http://127.0.0.1:${PORT}/${FEED}.ics`;
 const SECRET = `pw${run}`;
 const AUTH_URL = `http://u${run}:${SECRET}@127.0.0.1:${PORT}/auth${run}.ics`;
 const NAME = `Team${run}`;
-// Three all-day events stack in the day view's card: a tap on each row's node must open that row's event (10-14).
+
 const EVENTS = { timed: `Standup ${run}`, allDay: `Offsite ${run}`, moreAllDay: [`Retreat ${run}`, `Holiday ${run}`] };
-/** Events this month the Test counts (core's getCalendarTestRange): today's, and tomorrow's when it is still this month. */
+
 const thisMonth = new Date(Date.now() + 86_400_000).getMonth() === new Date().getMonth() ? 2 + EVENTS.moreAllDay.length : 1;
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpecting, settle } = device;
 const logs = () => device.logs(pid(), TAG);
 
-// ---- The phone's storage (run-as copies, read on this computer) ----
+
 const pullFile = (remote, name) => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -92,7 +71,7 @@ const deviceCopy = () => JSON.parse(Object.fromEntries(sqlite(pullFile('database
 const stored = () => JSON.stringify({ synced: synced(), device: deviceCopy() });
 const grepApp = (text, folders) => sh(`run-as ${PKG} sh -c "grep -rl '${text}' ${folders} 2>/dev/null || true"`).split(/\s+/).filter(Boolean);
 
-// ---- UI (core's English) ----
+
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const onCalendarSettings = (nodes) => Boolean(tagged(nodes, 'settings-calendar'));
 const onCalendar = (nodes) => Boolean(tagged(nodes, 'calendar'));
@@ -151,10 +130,10 @@ const tapTag = async (tag, expected, description, timeoutMs = 30_000) => {
     await hideKeyboard();
     return tapExpecting(await reveal((current) => tagged(current, tag), tag), expected, description, timeoutMs);
 };
-/** The subscription list's row whose name is [name] (its index tag `calendar-feed-<n>`). */
+
 const feedRow = (nodes, name) => nodes.find((node) => /calendar-feed-\d+$/.test(node['resource-id'] ?? '')
     && nodes.some((inner) => inner.text === name && box(inner)[1] >= box(node)[1] && box(inner)[3] <= box(node)[3]));
-/** Add, until core answered it (the command's saved line), then the new row revealed in the list (a long list puts it below the fold). */
+
 const feedAdds = () => logs().replace(/\\/g, '').split('\n').filter((line) => line.includes('"operation":"calendarFeedAdd"') && line.includes('"outcome":"saved"')).length;
 const addTapped = async (name) => {
     const before = feedAdds();
@@ -168,7 +147,7 @@ const removeFeed = async (name) => {
     const index = /calendar-feed-(\d+)$/.exec(row['resource-id'])[1];
     await tapTag(`calendar-feed-${index}-remove`, (current) => !current.some((node) => node.text === name), `${name} removed`);
 };
-/** Test, and the toast it shows (CalendarSettings.kt logs each toast: it is gone before a slow screen dump): RN's [expected] message. */
+
 const testFeeds = async (expected) => {
     const lines = () => logs().split('\n').filter((line) => line.includes('command=testCalendarFeeds'));
     const before = lines().length;
@@ -182,10 +161,8 @@ const calendarMode = async (label) => {
     if (!chipOn(nodes, label)) await tap(withDescription(nodes, label));
     return waitFor(`the ${label} view`, (current) => chipOn(current, label), 15_000);
 };
-/**
- * The Calendar's day view on today (its timeline scrolled to now, where the timed events sit: the week's columns widen to
- * 260 dp beside a deadline, which can leave a day off screen), or on tomorrow ([tomorrow]).
- */
+
+
 const dayView = async (tomorrow = false) => {
     await calendarMode(en['calendar.mobile.day']);
     await tapExpecting(withDescription(await screen(), en['calendar.today']) ?? fail('no Today'), (current) => Boolean(withDescription(current, en['calendar.nextDay'])), 'today');
@@ -207,7 +184,7 @@ const restart = async () => {
 
 let server = null;
 const added = new Set();
-/** The emulator's seeded calendar (step 8), deleted on any exit. */
+
 let seededCalendar = null;
 const cleanup = cleanupOnExit([
     () => execFileSync(adbBin, ['-s', serial, 'reverse', '--remove', `tcp:${PORT}`], { stdio: 'ignore' }),
@@ -226,17 +203,17 @@ try {
     execFileSync(adbBin, ['-s', serial, 'install', '-r', apk], { stdio: 'inherit' });
     await restart();
 
-    // A subscription an earlier run of this check left (it stopped before its Remove) goes first: Test counts every feed.
+
     for (const feed of deviceCopy() ?? []) {
         if (/^(Team|Auth)\d{12}$/.test(feed.name)) { await removeFeed(feed.name); console.log(`note - removed an earlier run's ${feed.name}`); }
     }
-    // (1) The screen, RN's cards; the device calendars are never turned on here.
+
     let nodes = await openCalendarSettings();
     check(!tagged(nodes, 'calendar-push'), '(1) Settings › Calendar opens without the push card (until calendar push, C4)');
     check(Boolean(tagged(nodes, 'calendar-device')), '(1) and the device calendars card');
     check(Boolean(await reveal((current) => tagged(current, 'calendar-url'), 'URL field')), '(1) and the subscription form');
 
-    // (2) Add, and a URL with credentials.
+
     await typeInto('calendar-name', NAME);
     await typeInto('calendar-url', URL);
     await addTapped(NAME);
@@ -257,12 +234,12 @@ try {
     await removeFeed(authName);
     added.delete(authName);
 
-    // (3) Test; no Origin header.
+
     await testFeeds(`Loaded ${thisMonth} events`);
     check(true, `(3) Test answers RN's toast "Loaded ${thisMonth} events"`);
     check(server.state.seen.length > 0 && server.state.seen.every((entry) => entry.origin === null), `(3) no request carries an Origin header (${server.state.seen.length} requests)`);
 
-    // (4) The Calendar's week: the feed's events; the event's sheet.
+
     const linesBefore = feedLines('calendar').length;
     nodes = await openTile(en['nav.calendar'], onCalendar, 'the Calendar');
     await dayView();
@@ -274,17 +251,17 @@ try {
     const line = feedLines('calendar').at(-1);
     check(line.includes('"outcome":"ready"') && line.includes('"releaseCheck":"v1.3.5/native-android-calendar-feeds"') && !line.includes('127.0.0.1'),
         '(4) the load\'s line: slot calendar, outcome ready, no URL');
-    // The all-day event (always in view; the timed block may sit above the timeline's scroll), from a screen that holds still.
+
     nodes = await settle(await screen());
     const offsite = eventBlock(nodes, EVENTS.allDay) ?? fail(`no "${EVENTS.allDay}" on screen`);
-    // 10-14: Compose's widened touch target shifted each stacked row's node about 14 dp above its row, so the tap missed. The
-    // card's rows: one height, each starting where the one above ends; a tap on each row's node opens that row's event.
+
+
     const rows = nodes.filter((node) => node['resource-id'] === 'calendar-block' && box(node)[0] === box(offsite)[0])
         .sort((a, b) => box(a)[1] - box(b)[1]);
     const stacked = rows.every((row, index) => box(row)[3] - box(row)[1] === box(rows[0])[3] - box(rows[0])[1]
         && (index === 0 || box(row)[1] === box(rows[index - 1])[3]));
     check(rows.length >= 3 && stacked, `(4) the all-day card stacks ${rows.length} rows, each node its own row's box (${rows.map((row) => row.bounds).join(' ')})`);
-    // Core's order (calendar-day-items.ts: same start, then title by localeCompare): Holiday, Offsite, Retreat.
+
     const expected = [EVENTS.allDay, ...EVENTS.moreAllDay].sort((a, b) => a.localeCompare(b));
     const shown = rows.map((row) => row['content-desc']).filter((label) => expected.includes(label));
     check(JSON.stringify(shown) === JSON.stringify(expected), `(4) the feed's all-day rows show in core's order (${shown.join(', ')})`);
@@ -300,10 +277,10 @@ try {
         '(4) the event\'s sheet offers RN\'s Create task, and no Open in calendar for a subscription\'s event');
     await tapExpecting(button(nodes, en['common.cancel']) ?? fail('no Cancel'), (current) => !tagged(current, 'calendar-sheet'), 'the sheet closed');
 
-    // (5) The reviews load their own.
+
     for (const [label, slot, tag] of [[en['review.openGuide'], 'weeklyReview', 'weekly-review'], [en['dailyReview.title'], 'dailyReview', 'daily-review']]) {
         const before = feedLines(slot).length;
-        // Review is the quick-access tab, or the More sheet's tile.
+
         const onReview = (current) => Boolean(tagged(current, 'review-list'));
         const tabs = await toTabs();
         if (tab(tabs, en['tab.review'])) await tapExpecting(tab(tabs, en['tab.review']), onReview, 'the Review tab');
@@ -316,7 +293,7 @@ try {
         await toTabs();
     }
 
-    // (6) A subscription that fails: RN's failure toast, nothing stored changes, the Calendar shows its events no more.
+
     for (const mode of ['403', '500', 'truncated', 'oversized']) {
         server.state.mode(FEED, mode);
         const before = stored();
@@ -329,14 +306,14 @@ try {
     check(!eventBlock(await screen(), EVENTS.timed), '(6) the Calendar shows the failing subscription\'s events no more');
     server.state.mode(FEED, 'ok');
 
-    // (7) Remove.
+
     await removeFeed(NAME);
     added.delete(NAME);
     check(!deviceCopy()?.some((feed) => feed.url === URL) && !synced()?.some((feed) => feed.url === URL), '(7) Remove took it out of RKStorage and the synced settings');
     check(server.state.seen.every((entry) => entry.origin === null), `(3) still no Origin header after ${server.state.seen.length} requests`);
     await toTabs();
 
-    // (8) Device calendars: an emulator only.
+
     if (serial.startsWith('emulator-')) {
         const CAL = `Check${run}`;
         const DEVICE_EVENT = `Dentist ${run}`;
@@ -354,13 +331,13 @@ try {
         await restart();
         const prompt = (current) => current.find((node) => /permission_(allow|deny)_button$/.test(node['resource-id'] ?? '')) !== undefined;
         const promptButton = (current, which) => current.find((node) => (node['resource-id'] ?? '').endsWith(`permission_${which}_button`));
-        /** The system prompt is the permission controller's window, not the app's: its button is tapped by position. */
+
         const answerPrompt = (current, which) => {
             const [left, top, right, bottom] = box(promptButton(current, which) ?? fail(`no ${which} button on the prompt`));
             sh(`input tap ${Math.round((left + right) / 2)} ${Math.round((top + bottom) / 2)}`);
         };
         nodes = await openCalendarSettings();
-        // An earlier run stopped with the device calendars on: off first (no prompt), so turning them on asks.
+
         const deviceOn = () => JSON.parse(Object.fromEntries(sqlite(pullFile('databases/RKStorage', 'rk'), 'SELECT key, value FROM catalystLocalStorage')
             .map((row) => [row.key, row.value]))['mindwtr-system-calendar-settings'] ?? '{}').enabled === true;
         if (deviceOn()) {
@@ -401,7 +378,7 @@ try {
     try {
         console.log(`evidence - server saw: ${JSON.stringify(server?.state.seen.map(({ path, mode, origin, at }) => `${at} ${path?.replace(/\d{6,}/, '<run>')} ${mode} ${origin}`))}`);
         console.log(`evidence - app log (calendar, core failures):\n${logs().split('\n').filter((line) => /alendar|Core action failed|AndroidRuntime/.test(line)).slice(-40).map((line) => line.slice(0, 300)).join('\n')}`);
-    } catch { /* the app is gone */ }
+    } catch {                       }
     evidenced(error);
     for (const name of added) {
         try { await removeFeed(name); console.log(`note - removed this run's subscription ${name}`); } catch (cleanupError) { console.error(`RESTORE FAILED: ${name} stays: ${cleanupError.message}`); }

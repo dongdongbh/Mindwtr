@@ -13,9 +13,7 @@ type Props = {
     inputClassName?: string;
 };
 
-/** The next-action list shown while an Inbox item becomes a project: one
- *  required action plus any number of extra rows. Shared by the guided wizard
- *  and the quick panel so both modes offer the same conversion (#1167). */
+
 export function InboxNextActionDrafts({
     t,
     nextActionDraft,

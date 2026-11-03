@@ -60,7 +60,7 @@ const readRequest = (value: unknown): NativeProjectFlowRequest | null => {
         && iso(expected.updatedAt) ? input as NativeProjectFlowRequest : null;
 };
 
-/** Pure cold-journal validation before SQLite opens. */
+
 const readPrepared = (value: unknown): NativePreparedProjectFlow | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -100,7 +100,7 @@ export function createProjectFlowMethods(deps: {
     revision: () => string;
 }) {
     return {
-        /** iOS reads exactly revision, project and canChange; Android's Menu read passes [flowMode] for RN's Flow Mode (#1429). */
+
         getProjectFlowOptions(input: { projectId: string; flowMode?: true }): NativeHostResult<{ revision: string;
             project: { id: string } & NativeProjectFlowToken; canChange: boolean; flowMode?: ProjectFlowMode }> {
             const ready = deps.readiness();

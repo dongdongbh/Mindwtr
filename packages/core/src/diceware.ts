@@ -1,9 +1,5 @@
-// The EFF "long" Diceware wordlist, bundled verbatim (7776 words) so passphrase
-// generation needs neither a network fetch nor a dependency. Source:
-// https://www.eff.org/files/2016/07/18/eff_large_wordlist.txt
-// (sha256 addd35536511597a02fa0a9ff1e5284677b8883b83e986e43f15a3db996b903e).
-// The list's five-digit dice columns are dropped: an index into this array is
-// the same thing as a dice roll, and we draw indices from a CSPRNG instead.
+
+
 
 import { defaultSyncCryptoPrimitives } from './sync-crypto';
 
@@ -678,22 +674,15 @@ const WORDS = `
 
 let wordlist: readonly string[] | null = null;
 
-/** The 7776 words, split on first use: split at module load, they cost every native app start about 12 ms. */
+
 export function dicewareWordlist(): readonly string[] {
     return wordlist ??= WORDS.trim().split(/\s+/);
 }
 
-/** Six words out of 7776 is ~77 bits, the EFF's own recommendation for a
- *  passphrase a human still has to be able to write down and retype. */
+
 export const DICEWARE_DEFAULT_WORD_COUNT = 6;
 
-// Whole 32-bit draws at or above `limit` are discarded and redrawn. `value %
-// 7776` on its own would over-represent the first 2560 words, because 2^32 is
-// not a multiple of 7776 — small, but this is the one number the passphrase's
-// strength claim rests on.
 
-// Rejection runs at p ≈ 6e-7 per draw against a real CSPRNG; the bound only
-// exists so a stuck or misconfigured RNG surfaces as an error instead of a hang.
 const MAX_DRAWS_PER_WORD = 128;
 
 function drawWordIndex(randomBytes: (n: number) => Uint8Array, count: number): number {
@@ -707,11 +696,7 @@ function drawWordIndex(randomBytes: (n: number) => Uint8Array, count: number): n
     throw new Error('Diceware: the random source never produced an unbiased draw');
 }
 
-/**
- * A space-separated Diceware passphrase. `randomBytes` is injected so each
- * platform passes the crypto source it already uses for sync encryption
- * (WebCrypto on desktop, the native module on mobile) — never Math.random.
- */
+
 export function generateDicewarePassphrase(
     words: number = DICEWARE_DEFAULT_WORD_COUNT,
     randomBytes: (n: number) => Uint8Array = defaultSyncCryptoPrimitives.randomBytes,

@@ -9,8 +9,7 @@ import CryptoKit
 import UIKit
 #endif
 
-/// Controlled callbacks exercise the actual native load frame and descriptors.
-/// Only the UIKit cases establish actual photo encoding/V3 producer behavior.
+
 final class NativePhotoProviderHostTests: XCTestCase {
     private final class Provider: NSItemProvider, @unchecked Sendable {
         private let stateLock = NSLock()
@@ -124,7 +123,7 @@ final class NativePhotoProviderHostTests: XCTestCase {
         frame = NativeAttachmentPhotoLoadFrame { url in
             captures += 1
             let receipt = try files.copyProviderSource(url, checkCancellation: {})
-            frame.cancel() // Creation succeeded; copying frame must retain the receipt.
+            frame.cancel()
             return receipt
         }
         let receipt = try await frame.load(provider, typeIdentifier: UTType.png.identifier)

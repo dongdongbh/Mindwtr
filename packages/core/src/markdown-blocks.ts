@@ -2,12 +2,6 @@ import { parseInlineMarkdown, parseMarkdownReferenceHref } from './markdown';
 import { isSafeMarkdownExternalHref } from './markdown-links';
 import type { Project, Task } from './types';
 
-/**
- * Task notes as the React Native Markdown preview draws them: lines grouped into
- * blocks, and each block's text split into inline runs with its links resolved.
- * Markdown is user text: nothing here runs or fetches anything, and a link is
- * data the host opens when tapped.
- */
 
 const TASK_LIST_RE = /^(\s*)(?:[-*+]\s+)?\[( |x|X)\]\s+(.+)$/;
 const BULLET_LIST_RE = /^(\s*)[-*+]\s+(.+)$/;
@@ -19,17 +13,17 @@ const BULLET_MARKERS = ['•', '◦', '▪'];
 
 export type MarkdownListItem = { depth: number; marker: string; text: string };
 export type MarkdownTaskListItem = { depth: number; checked: boolean; text: string };
-/** `start` is the block's first line and `end` the line after its last. */
+
 export type MarkdownBlock = { start: number; end: number } & (
     | { type: 'blank' }
     | { type: 'heading'; level: 1 | 2 | 3; text: string }
     | { type: 'rule' }
     | { type: 'code'; text: string }
-    /** "- [ ] item" lines. The preview shows them ticked or not; they are not tappable. */
+
     | { type: 'taskList'; items: MarkdownTaskListItem[] }
-    /** `marker` is •, ◦ or ▪ by depth. */
+
     | { type: 'bulletList'; items: MarkdownListItem[] }
-    /** `marker` is the number and its separator as typed: "1." or "2)". */
+
     | { type: 'orderedList'; items: MarkdownListItem[] }
     | { type: 'paragraph'; text: string }
 );
@@ -45,14 +39,14 @@ function isBlockBoundary(line: string): boolean {
         || ORDERED_LIST_RE.test(line);
 }
 
-// Two spaces (a tab counts four) per level.
+
 const getListIndentDepth = (indent: string): number => Math.max(0, Math.floor(indent.replace(/\t/g, '    ').length / 2));
 
-/** Split notes into the blocks the preview draws, in order. */
+
 export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
     const lines = (markdown || '').replace(/\r\n/g, '\n').split('\n');
     const blocks: MarkdownBlock[] = [];
-    // Consecutive lines that match `re`, from line i.
+
     const collect = <T,>(start: number, re: RegExp, read: (match: RegExpExecArray) => T): { items: T[]; end: number } => {
         const items: T[] = [];
         let i = start;
@@ -90,7 +84,7 @@ export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
                 code.push(lines[i]);
                 i += 1;
             }
-            // An unclosed fence runs to the end.
+
             if (i < lines.length) i += 1;
             blocks.push({ type: 'code', start, end: i, text: code.join('\n') });
             continue;
@@ -129,7 +123,7 @@ export function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
 export type MarkdownLinkTarget =
     | { kind: 'project'; id: string }
     | { kind: 'task'; id: string; projectId: string | null }
-    /** http(s), mailto:, tel: or upnote:// only. */
+
     | { kind: 'external'; href: string };
 
 export type MarkdownInline =
@@ -139,10 +133,10 @@ export type MarkdownInline =
     | { type: 'strike'; text: string }
     | { type: 'code'; text: string }
     | { type: 'link'; text: string; target: MarkdownLinkTarget }
-    /** A reference to a task or project that is gone: struck `text`, then " (deleted task)" or " (deleted project)". */
+
     | { type: 'deletedReference'; text: string; entityType: 'task' | 'project' };
 
-/** Live tasks and projects by ID, for task and project references. */
+
 export type MarkdownLinkLookup = {
     task: (id: string) => Pick<Task, 'projectId'> | null;
     project: (id: string) => Pick<Project, 'id'> | null;
@@ -157,7 +151,7 @@ export function createMarkdownLinkLookup(tasks: readonly Task[], projects: reado
     };
 }
 
-/** One block's text as inline runs. A link the preview cannot open is plain text. */
+
 export function resolveMarkdownInline(text: string, lookup: MarkdownLinkLookup): MarkdownInline[] {
     return parseInlineMarkdown(text).map((token): MarkdownInline => {
         if (token.type !== 'link') return token;
@@ -185,7 +179,7 @@ export type ResolvedMarkdownBlock =
     | (Omit<Extract<MarkdownBlock, { type: 'taskList' }>, 'items'> & { items: ResolvedText<MarkdownTaskListItem>[] })
     | (Omit<Extract<MarkdownBlock, { type: 'bulletList' | 'orderedList' }>, 'items'> & { items: ResolvedText<MarkdownListItem>[] });
 
-/** The blocks with their text as inline runs, for a host that draws them. */
+
 export function resolveMarkdownBlocks(markdown: string, lookup: MarkdownLinkLookup): ResolvedMarkdownBlock[] {
     const resolve = <T extends { text: string }>({ text, ...rest }: T) => ({ ...rest, inline: resolveMarkdownInline(text, lookup) });
     return parseMarkdownBlocks(markdown).map((block): ResolvedMarkdownBlock => {

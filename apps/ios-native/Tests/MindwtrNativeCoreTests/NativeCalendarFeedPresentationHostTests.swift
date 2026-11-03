@@ -34,8 +34,7 @@ private final class CalendarFeedPresentationNoHTTP: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Uses the unmodified production bundle and public closed native methods.
-/// Injected feeds prove JSC admission/presentation/availability, not EventKit.
+
 final class NativeCalendarFeedPresentationHostTests: XCTestCase {
     private var root: URL!, bundle: URL!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -100,8 +99,8 @@ final class NativeCalendarFeedPresentationHostTests: XCTestCase {
     }
     private func taskRows() throws -> String {
         let sqlite = try SQLiteBridge(url: database); defer { sqlite.close() }
-        // SQLiteBridge serializes dictionary members in arbitrary order. Keep
-        // every persisted column, with deterministic object-member ordering.
+
+
         return try json(NativeJSON.jsonObject(with: Data(sqlite.execute("SELECT * FROM tasks ORDER BY id").utf8)))
     }
     private func receipts() throws -> String {
@@ -312,17 +311,16 @@ final class NativeCalendarFeedPresentationHostTests: XCTestCase {
             await refused { _ = try await core.retryPending() }
             let terminalRaw = try String(contentsOf: journal, encoding: .utf8)
             XCTAssertNotNil(try object(terminalRaw)["terminal"]); XCTAssertFalse(terminalRaw.contains("PRIVATE_TRANSIENT"))
-            // Prepared Calendar families use the full stamped task row as their
-            // receipt, rather than adding an ordinary native_request_receipts row.
+
+
             let receiptRows = try receipts(); XCTAssertEqual(receiptRows, beforeReceipts); XCTAssertFalse(receiptRows.contains("PRIVATE_TRANSIENT"))
             let stampedRows = try taskRows(); XCTAssertNotEqual(stampedRows, before); XCTAssertFalse(stampedRows.contains("PRIVATE_TRANSIENT"))
             let logs = (try? String(contentsOf: root.appendingPathComponent("logs/mindwtr.log"), encoding: .utf8)) ?? ""
             XCTAssertFalse(logs.contains("PRIVATE_TRANSIENT"))
             faults.journalRemove = nil
             await core.close()
-            // Recreate the lost-terminal window with the exact original journal,
-            // whose prepared request bytes have no transient feed. Cold commit
-            // must recognize the complete saved row without applying it again.
+
+
             try Data(pendingRaw.utf8).write(to: journal)
             io.reset(); core = host(io, faults: faults)
             let reopened = try object(await core.start()), recovery = try XCTUnwrap(reopened["recovery"] as? [String: Any])

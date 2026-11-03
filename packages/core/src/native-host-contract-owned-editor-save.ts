@@ -31,15 +31,15 @@ const exact = (value: unknown, fields: readonly string[]): value is Record<strin
     && Object.keys(value).length === fields.length && fields.every((field) => own(value, field));
 const invalid = (): NativeHostResult<never> => ({ ok: false, error: { code: 'INVALID_INPUT', message: 'A bounded owned-editor file Add Save and complete checkpoint are required' } });
 
-/** Unbound metadata authority: current native library/workspace/file proof remains mandatory. */
+
 export function createOwnedEditorFileAddTaskDraftSaveMethods(deps: NativeTaskDraftSaveDependencies) {
     const readSaveRequest = (input: unknown): OwnedEditorFileAddSaveRequest['saveRequest'] | null => {
         if (!record(input) || !exact(input, ['id', 'base', 'patch', 'scheduleBase', 'attachments',
             ...(own(input, 'recurrenceBase') ? ['recurrenceBase'] : [])]) || !record(input.patch)
             || LIFECYCLE.some((field) => own(input.patch as object, field))) return null;
         const { attachments, ...fieldHalf } = input;
-        // Empty fields are legal only because this independent entry proves a
-        // nonempty frozen Add half. The old parser never receives real files.
+
+
         const fields = readNativeTaskDraftSaveRequest(fieldHalf, deps.validateField, true, true);
         const half = readNativeOwnedFileAddHalf(attachments);
         return fields && half ? { ...fields, attachments: half } : null;
@@ -115,8 +115,8 @@ export function createOwnedEditorFileAddTaskDraftSaveMethods(deps: NativeTaskDra
             const ready = deps.readiness();
             if (!ready.ok) return ready;
             const checked = readEnvelope(input);
-            // Failed Save ownership includes exact editor bytes and history,
-            // not merely a file half or a SQL effect with equivalent fields.
+
+
             return checked ? authority.commit(checked.prepared, checked.envelope) : invalid();
         },
     };

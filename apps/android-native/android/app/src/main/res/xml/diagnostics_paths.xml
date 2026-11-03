@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Only the diagnostics log's folder (core's DIAGNOSTICS_LOG_RELATIVE_PATH) and Settings › Data's shared export (its cache
-     folder, emptied before each export): the database and every other file stay private. -->
+
+
 <paths>
     <files-path name="logs" path="logs/" />
     <cache-path name="exports" path="exports/" />

@@ -60,7 +60,7 @@ const makeFileAttachment = (overrides: Pick<Attachment, 'id'> & Partial<Attachme
 
 const emptyAppData = (): AppData => ({ tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} });
 
-// Ages a file past garbageCollectOrphanAttachments' 5-minute GC grace window.
+
 const expireFile = (path: string): void => {
     const staleTime = new Date(Date.now() - 10 * 60 * 1000);
     utimesSync(path, staleTime, staleTime);
@@ -154,9 +154,7 @@ describe('collectReferencedAttachmentCloudKeys', () => {
         expect(referenced).toEqual(new Set(['live-task/keep.bin', 'live-project/keep.bin']));
     });
 
-    // S1: a soft-deleted (Trash, restorable) owner is NOT purgedAt. Its attachment
-    // bytes must stay referenced so the orphan GC never unlinks them out from under
-    // a restore — only purgedAt (the 90-day cascade) makes them eligible.
+
     test('retains attachments belonging to a soft-deleted-but-not-purged owner', () => {
         const data = emptyAppData();
         data.tasks = [
@@ -205,8 +203,8 @@ describe('collectRetainedAttachmentCloudKeysForProjectPurge', () => {
         ];
 
         const retained = collectRetainedAttachmentCloudKeysForProjectPurge(data, 'purging');
-        // 'shared.bin' survives because the sibling project also references it; the
-        // purging project's own reference to it does not count towards retention.
+
+
         expect(retained).toEqual(new Set(['shared.bin', 'from-task.bin']));
     });
 });
@@ -317,7 +315,7 @@ describe('garbageCollectOrphanAttachments', () => {
             writeFileSync(freshOnlyPath, 'fresh');
             expireFile(staleSiblingPath);
             expireFile(staleOnlyPath);
-            // freshOnlyPath keeps its just-written mtime, inside the grace window.
+
 
             const data = emptyAppData();
             data.tasks = [makeTask({
@@ -335,9 +333,8 @@ describe('garbageCollectOrphanAttachments', () => {
             expect(existsSync(staleSiblingPath)).toBe(false);
             expect(existsSync(staleOnlyPath)).toBe(false);
             expect(existsSync(freshOnlyPath)).toBe(true);
-            // 'mixed' still has the referenced file, so it survives; 'stale-only' lost
-            // its one (deleted) file and is pruned; 'fresh-only' keeps its one
-            // (still-within-grace) file, so it survives too.
+
+
             expect(existsSync(join(attachmentsRoot, 'mixed'))).toBe(true);
             expect(existsSync(join(attachmentsRoot, 'stale-only'))).toBe(false);
             expect(existsSync(join(attachmentsRoot, 'fresh-only'))).toBe(true);
@@ -451,13 +448,7 @@ describe('garbageCollectOrphanAttachments', () => {
         });
     });
 
-    // S7: GC batches removals per directory into one trailing durablySyncDirectory
-    // call instead of a per-entry parent fsync, so a batched publish failure is
-    // attributed to the directory, not to whichever file happened to be removed
-    // last — and a successful unlink still counts as deleted even though the
-    // directory's publish for it failed (the bytes really are gone; only the
-    // crash-durability guarantee for that is what failed, and it's retried on
-    // the next GC pass — see the retry test below).
+
     test('reports a batched directory publish failure without discarding files it already unlinked', () => {
         withSandbox((dataDir) => {
             const key = 'gc-file-durability-failure';
@@ -487,7 +478,7 @@ describe('garbageCollectOrphanAttachments', () => {
 
             expect(result.deleted).toBe(1);
             expect(result.errors).toHaveLength(1);
-            // S9: the error code ('EIO', from the injected failure), not a raw message.
+
             expect(result.errors[0]).toBe('mixed: EIO');
             expect(existsSync(stalePath)).toBe(false);
             expect(existsSync(retainedPath)).toBe(true);
@@ -555,18 +546,13 @@ describe('garbageCollectOrphanAttachments', () => {
 
             expect(result.deleted).toBe(1);
             expect(result.errors).toHaveLength(1);
-            // S9: the error code, not a raw message.
+
             expect(result.errors[0]).toBe('.: EIO');
             expect(existsSync(staleOnlyDir)).toBe(false);
         });
     });
 
-    // S9: real Node fs errors embed the absolute path (and, inside the namespace
-    // directory, the token-derived key) in .message — e.g. "EACCES: permission denied,
-    // unlink '/data/<key>/attachments/leaky/stale.bin'". Prove GC reports only the
-    // error code plus the already-namespace-relative path, never that message. (ENOENT
-    // is excluded here because durablyRemoveEntry treats it as an idempotent no-op,
-    // not a reportable failure — see server-storage.ts's durablyRemoveEntry.)
+
     test('reports removal failures by error code, never by the raw fs error message that could carry an absolute path', () => {
         withSandbox((dataDir) => {
             const key = 'gc-path-leak-key';
@@ -600,9 +586,7 @@ describe('garbageCollectOrphanAttachments', () => {
         });
     });
 
-    // S7: the core fix — removing several stale files from one directory must
-    // publish that directory exactly once (the trailing batch sync), not once
-    // per removed file (the old N+1 behavior).
+
     test('fsyncs a directory exactly once per pass no matter how many stale files it removes', () => {
         withSandbox((dataDir) => {
             const key = 'gc-batch-fsync-key';
@@ -625,12 +609,7 @@ describe('garbageCollectOrphanAttachments', () => {
         });
     });
 
-    // S7-CORRECTION: with syncParent:false, a removal failure can no longer mean "the
-    // directory's own fsync already failed" — it only ever means "this one entry
-    // couldn't be removed". The trailing durablySyncDirectory must still run for every
-    // OTHER entry this pass successfully removed from the same directory, or their
-    // removal is never durably published (regresses on power loss, and every later
-    // pass repeats identically since nothing converges).
+
     test('still fsyncs the directory once when one removal fails and a sibling in the same directory succeeds', () => {
         withSandbox((dataDir) => {
             const key = 'gc-partial-failure-key';
@@ -687,8 +666,7 @@ describe('handleAttachmentPathRequest DELETE', () => {
     });
 });
 
-// #1119 attachment presence pass: a client that cannot stop a response body early must be
-// able to ask whether a blob is still there without downloading it.
+
 describe('handleAttachmentPathRequest HEAD', () => {
     const withSandbox = async (
         run: (paths: { rootRealPath: string; filePath: string }) => Promise<void>,
@@ -853,7 +831,7 @@ describe('historical capture audio reads', () => {
 
     test('a canonical file wins, including when its directory or broken symlink prevents a read', async () => {
         await withHistoricalFile(async (paths) => {
-            // Canonical reads never need to inspect metadata, even when it is invalid.
+
             writeFileSync(paths.dataFilePath, 'invalid JSON fixture');
             writeFileSync(paths.filePath, 'current bytes');
             const current = await read('GET', paths);

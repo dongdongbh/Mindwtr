@@ -59,7 +59,7 @@ final class SQLiteBridgeReadOnlyTests: XCTestCase {
         XCTAssertEqual(try NativeAISummaryEvidence.observeDefaults(suite: suite, preferencesURL: url, expectedDomain: expected), captured)
         defaults.set("changed", forKey: "unknown")
         XCTAssertNotEqual(try NativeAISummaryEvidence.typedDomain(defaults.persistentDomain(forName: suite)), expected)
-        // This test never writes or substitutes the real system plist and never synchronizes it.
+
         #endif
     }
 
@@ -122,7 +122,7 @@ final class SQLiteBridgeReadOnlyTests: XCTestCase {
         let evidence = try Data(contentsOf: target)
         XCTAssertThrowsError(try db.captureAISummaryEvidence(at: target))
         XCTAssertEqual(try Data(contentsOf: target), evidence)
-        // Only a disposable exported working copy is opened by the offline auditor.
+
         let workingCopy = root.appendingPathComponent("offline-auditor-copy.sqlite")
         try FileManager.default.copyItem(at: target, to: workingCopy)
         var reader: OpaquePointer?
@@ -138,13 +138,13 @@ final class SQLiteBridgeReadOnlyTests: XCTestCase {
         XCTAssertEqual(sqlite3_step(row), SQLITE_DONE)
         XCTAssertThrowsError(try db.captureAISummaryEvidence(at: root.appendingPathComponent("oversize.sqlite"), maximumBytes: 1))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("oversize.sqlite").path))
-        // A failed capture rolled back only its own read transaction: ordinary writes remain available.
+
         _ = try db.execute("BEGIN IMMEDIATE")
         XCTAssertThrowsError(try db.captureAISummaryEvidence(at: root.appendingPathComponent("caller-transaction.sqlite")))
         _ = try db.execute("INSERT INTO proof VALUES (2, 'caller-owned', NULL)")
         _ = try db.execute("COMMIT")
         XCTAssertEqual(try db.execute("SELECT count(*) AS n FROM proof"), "[{\"n\":2}]")
-        // Existing destination refusal also unwinds its own source transaction.
+
         XCTAssertThrowsError(try db.captureAISummaryEvidence(at: target))
         _ = try db.execute("BEGIN IMMEDIATE"); _ = try db.execute("ROLLBACK")
         #endif

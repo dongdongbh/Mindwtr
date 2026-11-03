@@ -7,8 +7,6 @@ import {
   type SyncFileLockNativePort,
 } from '@mindwtr/core';
 
-// The File Sync lease's rules live in core (mobile-file-sync-lease.ts); this binds them to the
-// SyncFileLock Expo module (SyncFileLockCore.kt, and SyncFileLockModule.swift on iOS).
 
 export { SyncFileLockIdentityLostError };
 export type { MobileFileSyncLease };

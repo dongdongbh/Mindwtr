@@ -509,7 +509,7 @@ describe('speech-to-text', () => {
   });
 });
 
-// #930: point OpenAI-shaped speech-to-text at a self-hosted server.
+
 describe('processAudioCapture openai transcription against a custom base URL', () => {
   beforeEach(() => {
     constantsMock.default.expoConfig.extra.isFossBuild = false;
@@ -591,8 +591,7 @@ describe('processAudioCapture openai transcription against a custom base URL', (
     expect(init.headers.Authorization).toBe('Bearer secret-key');
   });
 
-  // gpt-transcribe-generation models take a `languages` array; earlier
-  // models keep the singular `language` field (#984).
+
   it('sends languages[] for gpt-transcribe and language for earlier models', async () => {
     const fetchMock = stubFetch();
 

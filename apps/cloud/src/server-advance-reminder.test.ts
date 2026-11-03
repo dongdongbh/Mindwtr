@@ -20,3 +20,20 @@ describe('advance reminder trust boundaries', () => {
         }
     });
 });
+
+describe('start advance reminder trust boundaries', () => {
+    test('allows old documents, explicit clear, and bounded minute values', () => {
+        for (const lead of [undefined, null, 0, 5, 15, 30, 60]) {
+            expect(validateAppData({ ...document(undefined), tasks: [{ ...task, startReminderLeadMinutes: lead }] }).ok).toBe(true);
+            expect(validateEntityProps('task', 'create', { startReminderLeadMinutes: lead }).ok).toBe(true);
+            expect(validateEntityProps('task', 'patch', { startReminderLeadMinutes: lead }).ok).toBe(true);
+        }
+    });
+    test('rejects invalid offsets before REST and sync document writes', () => {
+        for (const lead of [-1, 1, 1.5, 61, 1440, Infinity, NaN, '15', true]) {
+            expect(validateAppData({ ...document(undefined), tasks: [{ ...task, startReminderLeadMinutes: lead }] }).ok).toBe(false);
+            expect(validateEntityProps('task', 'create', { startReminderLeadMinutes: lead }).ok).toBe(false);
+            expect(validateEntityProps('task', 'patch', { startReminderLeadMinutes: lead }).ok).toBe(false);
+        }
+    });
+});

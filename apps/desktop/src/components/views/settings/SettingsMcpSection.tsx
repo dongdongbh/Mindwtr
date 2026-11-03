@@ -48,7 +48,7 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
         return () => { cancelled = true; };
     }, [available]);
 
-    // Schedule after each response so slow calls never overlap; disabled integration does no polling.
+
     useEffect(() => {
         if (!available || !status?.enabled || busy) return;
         let cancelled = false;
@@ -102,10 +102,10 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
                     if (!details) throw new Error('MCP connection details unavailable.');
                     return new Blob([details], { type: 'text/plain' });
                 });
-                // Observe data even if construction/write throws or the clipboard rejects before native status arrives.
+
                 void data.catch(() => {});
                 try {
-                    // WebKit requires starting the write in the click gesture; native data resolves afterward.
+
                     clipboardResult = navigator.clipboard.write([new ClipboardItem({ 'text/plain': data })]).then(() => true, () => false);
                 } catch {
                     clipboardResult = Promise.resolve(false);
@@ -153,7 +153,7 @@ export function SettingsMcpSection({ isTauri }: { isTauri: boolean }) {
                 reportOutcome('native-failed');
             }
         } finally {
-            // A rejected native read must not release the action lock while its clipboard write is still settling.
+
             if (clipboardResult) await clipboardResult;
             inFlight.current = false;
             if (mounted.current) setBusy(false);

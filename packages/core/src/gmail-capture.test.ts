@@ -122,8 +122,7 @@ describe('shared Gmail capture runtime', () => {
     });
 });
 
-// After the receipts file is reset (the RN opener carries every readable receipt over), a message whose receipt was lost is
-// fetched again. Its task ID is deterministic, so the store keeps the task the user has, even one they finished or deleted.
+
 describe('a message captured again after its receipt was lost', () => {
     afterEach(async () => {
         await flushPendingSave();

@@ -1,5 +1,5 @@
-// Build picker previews from the real native layouts so typography, spacing,
-// and capture controls stay aligned. Only the sample content is synthetic.
+
+
 const bindSample = (xml, labels, visible = []) => xml
   .replace(/<\?xml[^>]*\?>\s*/, '')
   .replace(/<[A-Za-z][^>]*>/g, (tag) => {
@@ -31,8 +31,8 @@ const buildWidgetPreviewXml = (kind, readLayout) => {
         mindwtr_widget_item_due: index === 0 ? 'Today' : '',
       },
       compact ? [] : ['mindwtr_widget_item_context_row'],
-    // Rows are flattened into one preview layout, unlike runtime ListView
-    // children. Namespace definitions and references to keep IDs unique.
+
+
     ).replace(/@(\+?)id\/([A-Za-z0-9_]+)/g, `@$1id/$2_preview_${index}`));
     if (!compact) rows.unshift(bindSample(readLayout('mindwtr_widget_section'), { mindwtr_widget_section_title: 'Today\'s Focus' }));
     xml = xml.replace(/<ListView\b([^>]*?)\/>/, (_, attributes) => {

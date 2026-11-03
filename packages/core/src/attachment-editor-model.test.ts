@@ -93,7 +93,7 @@ describe('picked attachment preparation and persistence', () => {
         const observed: Attachment[] = [];
         const persist = vi.fn(async (attachment: Attachment) => {
             observed.push({ ...attachment });
-            // Platform code remains free to mutate its argument.
+
             attachment.title = 'Platform mutation';
             return { ...observed.at(-1)!, uri: 'file:///managed/original-id.pdf' };
         });
@@ -191,7 +191,7 @@ describe('picked attachment preparation and persistence', () => {
             persist: async (attachment: Attachment) => attachment,
         };
         const pending = addPickedAttachment(input);
-        expect(newId).not.toHaveBeenCalled(); // Real validation has yielded, before preparation completes.
+        expect(newId).not.toHaveBeenCalled();
         input.t = replacement;
         await expect(pending).resolves.toEqual({ kind: 'refused', message: 'original:attachments.fileNotReadable' });
         expect(original).toHaveBeenCalledWith('attachments.fileNotReadable');
@@ -261,7 +261,7 @@ describe('attachment editor model', () => {
         const downloaded = { ...before, uri: 'file:///x/f.pdf', localStatus: 'available' as const, fileHash: 'a'.repeat(64) };
         const replaced = { ...before, contentRev: 2, fileHash: 'b'.repeat(64) };
         expect(mergeTaskDraftAttachments([replaced], [before], [downloaded])).toEqual([replaced]);
-        // A terminal mark for the old content (cloudKey cleared, removed) is dropped too.
+
         const unrecoverable = { ...before, cloudKey: undefined, deletedAt: AT };
         expect(mergeTaskDraftAttachments([replaced], [before], [unrecoverable])).toEqual([replaced]);
     });

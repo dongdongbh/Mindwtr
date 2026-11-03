@@ -5,7 +5,7 @@ vi.mock('@react-navigation/native', () => ({
   NavigationContext: React.createContext(undefined),
 }));
 
-// Minimal globals for Expo modules in node test env.
+
 const testGlobal = globalThis as typeof globalThis & {
   __DEV__?: boolean;
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -40,14 +40,12 @@ testGlobal.cancelAnimationFrame = testGlobal.cancelAnimationFrame ?? ((id: numbe
   clearTimeout(id);
 });
 
-// Native modules are optional by default in node renders. Tests that exercise a
-// module wrapper replace this with their own hoisted implementation.
+
 vi.mock('expo-modules-core', () => ({
   requireOptionalNativeModule: vi.fn(() => null),
 }));
 
-// Unavailable by default so code under test exercises the AsyncStorage
-// fallback; secure-config tests override this with their own mock.
+
 vi.mock('expo-secure-store', () => ({
   isAvailableAsync: vi.fn().mockResolvedValue(false),
   getItemAsync: vi.fn().mockResolvedValue(null),
@@ -144,8 +142,7 @@ vi.mock('expo-clipboard', () => ({
   setStringAsync: vi.fn().mockResolvedValue(true),
 }));
 
-// Importing the real module pulls in expo's winter runtime, which cannot load
-// under node. Files that assert on haptics still mock it themselves.
+
 vi.mock('expo-haptics', () => ({
   __esModule: true,
   ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
@@ -177,9 +174,8 @@ vi.mock('@expo/vector-icons', () => {
 
 vi.mock('lucide-react-native', () => {
   const Icon = (props: any) => React.createElement('Icon', props, props.children);
-  // Any icon name resolves to the stub, so a new lucide import never needs a
-  // hand-maintained allowlist here. The `then` and symbol guards keep the
-  // module from looking promise-like, which stalls ESM imports in Vitest.
+
+
   const exports: Record<string, unknown> = { __esModule: true };
   const mod: Record<string, unknown> = new Proxy(exports, {
     get: (target, prop) => {

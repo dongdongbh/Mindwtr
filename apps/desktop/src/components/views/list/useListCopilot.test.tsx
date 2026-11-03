@@ -26,7 +26,7 @@ const renderListCopilot = () => renderHook(() => useListCopilot({
     allTags: ['#health'],
 }));
 
-/** The debounced copilot request plus the promise it awaits. */
+
 const settleSuggestion = async () => {
     await act(async () => {
         await vi.advanceTimersByTimeAsync(900);

@@ -89,8 +89,8 @@ const utf8ByteLength = (value: string): number => {
   try {
     return new TextEncoder().encode(value).byteLength;
   } catch {
-    // UTF-8 uses at most four bytes per UTF-16 code unit. This fallback is
-    // conservative and keeps the slot bounded if TextEncoder is unavailable.
+
+
     return value.length * 4;
   }
 };
@@ -223,7 +223,7 @@ const safeSourceName = (raw: string): string | undefined => {
 const technicalStack = (error: unknown, sanitizer: Sanitizer): string | undefined => {
   const rawStack = readStringProperty(error, 'stack');
   if (!rawStack) return undefined;
-  // The first line repeats the raw message and may contain private task text.
+
   const rawLines = boundedUtf16Prefix(rawStack, MAX_STACK_SOURCE_CHARS).split(/\r?\n/).slice(1);
   const frames: string[] = [];
 
@@ -479,8 +479,8 @@ const createExpoCrashStorage = (fileSystem: ExpoFileSystemModule): LocalFatalCra
     },
     writeTextSync(value) {
       if (!directory.exists) directory.create({ intermediates: true, idempotent: true });
-      // File.write is a completed synchronous overwrite. The slot never grows
-      // by appending, so only the newest bounded record is retained.
+
+
       file.write(value);
     },
   };
@@ -490,8 +490,8 @@ export function createDefaultLocalFatalCrashCapture(
   metadata: LocalFatalCrashMetadata = {},
 ): LocalFatalCrashCapture | null {
   try {
-    // This guarded require runs during explicit handler setup, not module
-    // evaluation, so an unavailable optional native capability cannot abort startup.
+
+
     const fileSystem = require('expo-file-system') as ExpoFileSystemModule;
     const storage = createExpoCrashStorage(fileSystem);
     return storage ? createLocalFatalCrashCapture(storage, metadata) : null;

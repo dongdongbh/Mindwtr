@@ -266,8 +266,8 @@ describe('native Task Editor v2 durable SQLite save', () => {
     it('preserves unrelated raw recurrence, false and terminal Focus columns on a title edit', async () => {
         const directory = mkdtempSync(join(root, 'task-draft-v2-')); directories.push(directory);
         const { db, host } = await open(join(directory, 'data.sqlite'), true);
-        // Bootstrap may normalize legacy rows. Restore the actual saved bytes
-        // after activation, then edit through the ordinary projected model.
+
+
         db.prepare('UPDATE tasks SET recurrence = ?, showFutureRecurrence = ?, focusOrder = ?, contexts = ? WHERE id = ?')
             .run('"daily"', 0, 9, '[ "@legacy" ]', 'edit');
         db.prepare('UPDATE tasks SET recurrence = ?, contexts = ? WHERE id = ?')
@@ -287,7 +287,7 @@ describe('native Task Editor v2 durable SQLite save', () => {
         expect(after.recurrence).toBe(before.recurrence);
         expect(after.showFutureRecurrence).toBe(before.showFutureRecurrence);
         expect(after.focusOrder).toBe(before.focusOrder);
-        // JSON spacing is not a Task value; a changed row may serialize it canonically.
+
         expect(JSON.parse(after.contexts as string)).toEqual(JSON.parse(before.contexts as string));
         const otherAfter = db.prepare('SELECT recurrence, contexts FROM tasks WHERE id = ?').get('other') as Record<string, unknown>;
         expect(otherAfter.recurrence).toBe((otherBefore as Record<string, unknown>).recurrence);
@@ -307,8 +307,8 @@ describe('native Task Editor v2 durable SQLite save', () => {
         if (!plan.ok || plan.value.kind !== 'prepared') throw new Error(JSON.stringify(plan));
         const prepared = plan.value.prepared;
         const before = db.prepare('SELECT * FROM tasks ORDER BY id').all();
-        // The persistence queue can retry within one save boundary; keep both
-        // command attempts failed, then release the fault for exact recovery.
+
+
         fault.commits = 10;
         for (let attempt = 0; attempt < 2; attempt += 1) {
             expect(await host.commitPreparedTaskDraftSave({ request, prepared }))

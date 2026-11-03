@@ -118,12 +118,10 @@ export function useListSelection({
     const [selectionScrollVersion, setSelectionScrollVersion] = useState(0);
     const lastFilterKeyRef = useRef('');
     const pendingSelectionScrollRef = useRef(false);
-    // Set by keyboard navigation (selectNext/Prev/First/Last) to request that
-    // DOM focus follow the selection. The follow only happens when focus was
-    // already inside a task title toggle (checked at settle time), so j/k
-    // navigation from the sidebar/body keeps working without focus side effects.
+
+
     const pendingSelectionFocusRef = useRef(false);
-    // Last highlight id whose row was handed DOM focus (#1014).
+
     const focusedHighlightIdRef = useRef<string | null>(null);
     const highlightFocusControllerRef = useRef<AbortController | null>(null);
 
@@ -212,12 +210,7 @@ export function useListSelection({
         }
     }, [filteredTasks, isProcessing, scrollToVirtualIndex, selectedIndex, selectionScrollVersion, shouldVirtualize]);
 
-    // Keyboard navigation moves DOM focus to the newly selected task's title
-    // toggle so no stale input-looking ring lingers on the previously focused
-    // row (#860). We only follow focus when the active element is (or is inside)
-    // a task title toggle: navigating from the sidebar/body leaves focus alone.
-    // Scrolling is handled by the layout effect above, so we focus with
-    // preventScroll to avoid fighting it.
+
     useLayoutEffect(() => {
         if (isProcessing) {
             pendingSelectionFocusRef.current = false;
@@ -248,9 +241,7 @@ export function useListSelection({
 
         if (focusTarget()) return;
 
-        // A virtualized target row may not be mounted this frame. Retry after
-        // the layout effect's scroll mounts it; if it still cannot be found,
-        // blur the stale toggle so no lingering ring remains on the old row.
+
         if (typeof requestAnimationFrame !== 'function') {
             if (typeof activeToggle.blur === 'function') activeToggle.blur();
             return;
@@ -283,9 +274,8 @@ export function useListSelection({
         if (index < 0) return;
 
         setSelectedIndex(index);
-        // Focus once per highlight: the effect re-runs on list changes during
-        // the flash window, and refocusing then could steal focus from a modal
-        // the user already opened on the revealed task.
+
+
         if (focusedHighlightIdRef.current !== highlightTaskId) {
             focusedHighlightIdRef.current = highlightTaskId;
             highlightFocusControllerRef.current = new AbortController();
@@ -323,19 +313,13 @@ export function useListSelection({
 
     useEffect(() => () => highlightFocusControllerRef.current?.abort(), []);
 
-    // Keyboard navigation only requests the follow-up: the layout effects above
-    // own the virtualization-aware scroll and the #860 rule that focus follows
-    // the selection only when it already sits on a task title.
+
     const revealSelected = useCallback(() => {
         requestSelectionScroll();
         pendingSelectionFocusRef.current = true;
     }, [requestSelectionScroll]);
 
-    // Entering the list from the sidebar (ArrowRight / `l`) must land DOM focus
-    // on the selected task's title so its highlight shows and the container
-    // does not paint a focus ring around the whole list (#890). The row is
-    // already highlighted via `selectedIndex`; here we move focus and scroll it
-    // into view. Returns false only when there is nothing to select.
+
     const focusSelected = useCallback((): boolean => {
         if (filteredTasks.length === 0) return false;
         const index = selectedIndex >= 0 && selectedIndex < filteredTasks.length
@@ -351,9 +335,7 @@ export function useListSelection({
         return true;
     }, [filteredTasks, requestSelectionScroll, selectedIndex]);
 
-    // Keyboard multi-select: entering selection mode on first select and
-    // leaving it when the selection empties keeps the mode invisible unless
-    // it is actually in use.
+
     const toggleSelectTask = useCallback((task: Task) => {
         toggleMultiSelect(task.id);
     }, [toggleMultiSelect]);
@@ -405,8 +387,7 @@ export function useListSelection({
         setContextPromptOpen(true);
     }, [selectedIdsArray]);
 
-    // Removal offers only the tags the selection actually carries, so a typo can
-    // never look like a silent no-op.
+
     const removableTagOptions = useMemo(
         () => collectBulkTaskTokens(selectedIdsArray, tasksById, 'tags'),
         [selectedIdsArray, tasksById],

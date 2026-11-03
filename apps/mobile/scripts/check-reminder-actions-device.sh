@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Run from apps/mobile after a development-variant Android prebuild.
-# Only the disposable Mindwtr Dev app is installed/modified. No production data is touched.
+
+
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/default}"

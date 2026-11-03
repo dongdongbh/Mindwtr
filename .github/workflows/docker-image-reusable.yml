@@ -25,8 +25,8 @@ env:
 
 jobs:
   build-and-push-image:
-    # Pinned on purpose: this job builds or packages with tools from the runner image,
-    # and `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19. Bump CI first, then this.
+
+
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -38,7 +38,7 @@ jobs:
       IMAGE_SUFFIX: ${{ inputs.image_name }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -144,7 +144,7 @@ jobs:
 
       - name: Log in to GitHub Package Container registry
         if: ${{ steps.rc_changes.outputs.skip != 'true' }}
-        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -152,21 +152,20 @@ jobs:
 
       - name: Set up QEMU
         if: ${{ steps.rc_changes.outputs.skip != 'true' }}
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
 
       - name: Set up Docker Buildx
         if: ${{ steps.rc_changes.outputs.skip != 'true' }}
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
       - name: Extract metadata (tags, labels) for Docker
         if: ${{ steps.rc_changes.outputs.skip != 'true' }}
         id: meta
-        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051
         with:
           images: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          # Every version tag (RC and stable) moves the floating `beta` tag so
-          # beta-tag users track RCs and still pick stable back up without
-          # switching tags; `latest` stays on stable semver only.
+
+
           tags: |
             type=semver,pattern={{version}}
             type=ref,event=branch
@@ -192,7 +191,7 @@ jobs:
 
       - name: Build and push Docker image
         if: ${{ steps.rc_changes.outputs.skip != 'true' && steps.existing_image.outputs.exists != 'true' }}
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           platforms: linux/amd64,linux/arm64
           context: .

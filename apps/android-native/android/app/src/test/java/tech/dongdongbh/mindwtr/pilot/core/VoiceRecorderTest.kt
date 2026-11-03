@@ -15,7 +15,7 @@ import org.junit.Test
 import tech.dongdongbh.mindwtr.androidwidget.QuickCaptureAudioRecorder
 import tech.dongdongbh.mindwtr.androidwidget.QuickCaptureWave
 
-/** Voice pass V2: the microphone's ownership, its staged files and their names, and leaving the app. No device: stand-in encoders. */
+
 class VoiceRecorderTest {
     private val direct = Executor { it.run() }
     private fun folder(): File = File(Files.createTempDirectory("mindwtr-voice").toFile(), VoiceRecorder.DIRECTORY)
@@ -46,7 +46,7 @@ class VoiceRecorderTest {
         override fun abandon() { abandoned += 1 }
     }
 
-    /** A take whose stop answers only when the test says so (a WAV worker still finishing). */
+
     private class HeldTake(private val staged: File) : VoiceTake {
         var finish: (() -> Unit)? = null
         var cancelled = false
@@ -98,7 +98,7 @@ class VoiceRecorderTest {
         worker.shutdown()
     }
 
-    // RN's m4a fallback when its Whisper start fails: the caller learns it at the start, and the device is free for m4a.
+
     @Test fun aWavStartWhoseMicrophoneCannotOpenOrStartAnswersStartFailedAndFreesTheDevice() {
         val dir = folder()
         val worker = Executors.newSingleThreadExecutor()
@@ -131,7 +131,7 @@ class VoiceRecorderTest {
         worker.shutdown()
     }
 
-    // RN 9604387e4 and c5fc870fe: one owner; a second start, or another id's stop, is refused.
+
     @Test fun aSecondStartIsRefusedWhileARecordingRunsOrEnds() {
         val dir = folder()
         var next = 0
@@ -142,7 +142,7 @@ class VoiceRecorderTest {
         assertTrue(answer<File> { recorder.stop("someone-else", it) }.exceptionOrNull() is VoiceRecorder.Refused)
         val stopping = AtomicReference<Result<File>>()
         recorder.stop(first) { stopping.set(it) }
-        // Still ending: the device is not free yet.
+
         assertTrue(answer<String> { recorder.start(VoiceFormat.WAV, it) }.exceptionOrNull() is VoiceRecorder.Refused)
         held!!.finish!!()
         assertEquals(File(dir, "$first.m4a"), stopping.get().getOrThrow())
@@ -162,7 +162,7 @@ class VoiceRecorderTest {
         assertTrue(answer<String> { failing.start(VoiceFormat.M4A, it) }.isFailure)
         assertEquals(emptyList<String>(), filesUnder(dir))
         assertEquals(2, focus.abandoned)
-        // The failed start left the device free.
+
         val working = m4aRecorder(dir, focus, ids = { "id-3" })
         assertTrue(answer<String> { working.start(VoiceFormat.M4A, it) }.isSuccess)
     }
@@ -200,7 +200,7 @@ class VoiceRecorderTest {
         assertEquals(File(dir, "id-9.m4a"), kept.get().getOrThrow())
     }
 
-    // RN d596ecce6: the recorder is stopped and released before anyone transcribes the file.
+
     @Test fun aStopAnswersOnlyOnceTheRecorderIsReleased() {
         val dir = folder()
         val sink = FakeSink()
@@ -211,8 +211,7 @@ class VoiceRecorderTest {
         assertEquals(listOf("start", "stop", "release"), eventsAtAnswer)
     }
 
-    // Voice V3 review N6: a recording left by an earlier process (its transcription died with it) or a staged .tmp is swept when
-    // the recorder is made; a file this recorder did not name, or a folder, is left alone.
+
     @Test fun aNewRecorderSweepsLeftoverRecordingsAndStagedFilesOnly() {
         val dir = folder()
         val id = "01234567-89ab-cdef-0123-456789abcdef"
@@ -241,7 +240,7 @@ class VoiceRecorderTest {
     }
 
     @Test fun m4aUsesRnsExpoHighQualityPreset() {
-        // expo-audio 1.1.1 src/RecordingConstants.ts HIGH_QUALITY: 44100 Hz, 2 channels, 128000 bps, mpeg4 + aac on Android.
+
         assertEquals(44_100, ExpoHighQuality.SAMPLE_RATE)
         assertEquals(2, ExpoHighQuality.CHANNELS)
         assertEquals(128_000, ExpoHighQuality.BIT_RATE)
@@ -257,7 +256,7 @@ class VoiceRecorderTest {
         override fun release() = Unit
     }
 
-    /** One 0.2 s chunk of PCM, then silence until the recorder stops it. */
+
     private class OneChunkSource : QuickCaptureAudioRecorder.PcmSource {
         val delivered = CountDownLatch(1)
         private val stopped = CountDownLatch(1)

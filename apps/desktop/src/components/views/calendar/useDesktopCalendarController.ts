@@ -1,14 +1,6 @@
-/**
- * Composition root for the desktop calendar.
- *
- * The four things the calendar actually does live in their own hooks — where
- * the date is ({@link useCalendarMonthNavigation}), what the subscribed
- * calendars say ({@link useCalendarExternalEvents}), composing a task
- * ({@link useCalendarComposer}) and the selected-day panel
- * ({@link useCalendarSelectedDay}). This file reads the store once, derives the
- * task buckets both the grid and the panels share, wires the four together and
- * hands the view a single object.
- */
+
+
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     buildCalendarEventTaskDraft,
@@ -71,11 +63,10 @@ import { useCalendarExternalEvents } from './use-calendar-external-events';
 import { useCalendarMonthNavigation } from './use-calendar-month-navigation';
 import { useCalendarScheduleFeedback, useCalendarSelectedDay } from './use-calendar-selected-day';
 
-/** Per-device like the planning panel and the timeline day count: revealing the
- *  look-back is a property of this window, not of the user's data. */
+
 const CALENDAR_SHOW_COMPLETED_KEY = 'mindwtr.calendar.showCompleted';
-/** Same per-device family: hiding start-date entries to read only deadlines is
- *  a lens on this window, not data. Defaults to showing them. */
+
+
 const CALENDAR_SHOW_SCHEDULED_KEY = 'mindwtr.calendar.showScheduled';
 
 const readShowCompletedPreference = (): boolean => {
@@ -109,9 +100,8 @@ export function useDesktopCalendarController() {
             addTask: state.addTask,
             people: state.people,
             tasks: state.tasks,
-            // The completed look-back needs archived tasks, and the visible
-            // `tasks` projection drops those (store-helpers' isTaskVisible) —
-            // the Archive view reads `_allTasks` for the same reason (#955).
+
+
             allTasks: state._allTasks,
             projects: state.projects,
             sections: state.sections,
@@ -143,9 +133,8 @@ export function useDesktopCalendarController() {
         [allTasks, people, settings, tasks],
     );
     const areaById = useMemo(() => new Map(areas.map((area) => [area.id, area])), [areas]);
-    // The identity color a task chip's left bar carries — project first, then
-    // area — mirroring how external events carry their source calendar's color.
-    // Undefined (no project or area color) keeps the chip's themed fallback.
+
+
     const getTaskAccentColor = useCallback(
         (task: Task): string | undefined => resolveTaskAccentColor(task, projectMap, areaById),
         [areaById, projectMap],
@@ -176,7 +165,7 @@ export function useDesktopCalendarController() {
             try {
                 getWorkspaceCache()?.setItem(CALENDAR_SHOW_COMPLETED_KEY, String(next));
             } catch {
-                // A blocked storage quota must not stop the toggle from working.
+
             }
             return next;
         });
@@ -188,7 +177,7 @@ export function useDesktopCalendarController() {
             try {
                 getWorkspaceCache()?.setItem(CALENDAR_SHOW_SCHEDULED_KEY, String(next));
             } catch {
-                // A blocked storage quota must not stop the toggle from working.
+
             }
             return next;
         });
@@ -212,9 +201,7 @@ export function useDesktopCalendarController() {
         return () => window.clearTimeout(timer);
     }, [perf.enabled]);
 
-    // The selected-day panel's transient state is created before navigation
-    // because every navigation clears it, and navigation's selected date is in
-    // turn what the selected-day hook reads.
+
     const feedback = useCalendarScheduleFeedback();
     const nav = useCalendarMonthNavigation({
         calendarLocale,
@@ -231,11 +218,7 @@ export function useDesktopCalendarController() {
     });
     const { getExternalEventsForDay } = external;
 
-    // The project/area half of calendar visibility, split out because the
-    // completed look-back (#955) obeys it too and must not inherit the status
-    // rule that hides done and archived tasks from the schedulable buckets.
-    // The derived `projectMap` on purpose: it carries tombstones, so a task
-    // under a just-deleted project is hidden rather than treated as loose.
+
     const visibility = useMemo(
         () => ({ areaById, projectById: projectMap, resolvedAreaFilter }),
         [areaById, projectMap, resolvedAreaFilter],
@@ -263,9 +246,8 @@ export function useDesktopCalendarController() {
         const deadlinesByDay = new Map<string, Task[]>();
         const scheduledByDay = new Map<string, Task[]>();
         const completedByDay = new Map<string, Task[]>();
-        // Completed tasks are filed by when they were finished, not by the
-        // start/due dates they may still carry, and never expand into recurrence
-        // projections — a finished occurrence is one event (#955).
+
+
         if (showCompleted) {
             for (const task of allTasks) {
                 if (!isCompletedCalendarTask(task) || !isCalendarTaskInScope(task)) continue;
@@ -277,15 +259,8 @@ export function useDesktopCalendarController() {
                 else completedByDay.set(completedKey, [task]);
             }
         }
-        // Recurrence projections now cover the whole visible range (#calendar-range-projection)
-        // instead of just the single next occurrence, so a daily "show future recurrence" task
-        // paints every visible day. Month mode's grid renders week-aligned spill days from the
-        // adjacent months (`nav.days`), which is wider than `visibleRange` (first-to-last of the
-        // month) -- use the grid bounds there so a spill-day occurrence doesn't vanish; every
-        // other view mode's visibleRange already matches what's rendered exactly. Widened to
-        // whole calendar days the same way visibleSearchMatchCount below does, and a shared
-        // budget across this loop keeps one render from enumerating without bound when many
-        // tasks are all opted in (P19).
+
+
         const useGridBounds = viewMode === 'month' && days.length > 0;
         const recurrenceRangeStart = new Date(useGridBounds ? days[0]! : visibleRange.start);
         recurrenceRangeStart.setHours(0, 0, 0, 0);
@@ -295,11 +270,8 @@ export function useDesktopCalendarController() {
         const tasksInScope = tasks.filter(isCalendarTaskVisible);
         const expandedTasks = expandCalendarRecurringTaskSetInRange(tasksInScope, recurrenceRange, projectedAtIso);
         for (const calendarTask of expandedTasks) {
-            // Every field isCalendarTaskVisible reads (status, deletedAt, projectId, areaId,
-            // title) is copied unchanged onto every projected occurrence, so its verdict is the
-            // same for the source task and all of its occurrences -- check it once here and skip
-            // the expansion walk entirely for tasks that won't be shown, instead of paying for it
-            // and then filtering per occurrence below.
+
+
             visibleTasks.push(calendarTask);
             if (calendarTask.dueDate) {
                 const dueDate = safeParseDueDate(calendarTask.dueDate);
@@ -310,9 +282,8 @@ export function useDesktopCalendarController() {
                     else deadlinesByDay.set(dueKey, [calendarTask]);
                 }
             }
-            // Hiding starts empties every scheduled surface (month cells, the
-            // timeline, the selected-day panel) at this single source; a task
-            // with a due date keeps its deadline entry above.
+
+
             if (calendarTask.startTime && showScheduled) {
                 const startTime = safeParseDate(calendarTask.startTime);
                 if (startTime) {
@@ -410,9 +381,8 @@ export function useDesktopCalendarController() {
 
         const taskIds = new Set<string>();
         for (const task of calendarTaskData.visibleTasks) {
-            // Each projected occurrence has its own synthetic id (#calendar-range-projection), so
-            // a daily recurring task would otherwise count once per painted day instead of once
-            // per source task -- key on the real task so every occurrence collapses to one match.
+
+
             const matchId = isProjectedRecurringTask(task) ? task.sourceTaskId : task.id;
             const dueDate = task.dueDate ? safeParseDueDate(task.dueDate) : null;
             const startTime = task.startTime ? safeParseDate(task.startTime) : null;
@@ -427,8 +397,7 @@ export function useDesktopCalendarController() {
             }
         }
 
-        // Completed items are matches too whenever the look-back is on, or the
-        // count would contradict what the grid is showing (#955).
+
         for (const [, dayTasks] of calendarTaskData.completedByDay) {
             for (const task of dayTasks) {
                 const completedAt = getTaskCompletionInstant(task);
@@ -513,8 +482,7 @@ export function useDesktopCalendarController() {
         updateTask,
     });
 
-    // Clicking anywhere outside the calendar closes the selected day — unless
-    // the composer is open, which lives in a portal outside this subtree.
+
     useEffect(() => {
         if (!selectedDate) return;
         const handleClickOutside = (event: MouseEvent) => {
@@ -527,7 +495,7 @@ export function useDesktopCalendarController() {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [selectedDate, composer.taskComposer]);
 
-    // A drop must never leave the start after the due date; the timeline refuses the same edit.
+
     const saveDroppedDates = useCallback(async (task: Task, updates: Pick<Task, 'startTime'> | Pick<Task, 'dueDate'>, revealAt: Date) => {
         if (!isTaskDateCoherent({ startTime: task.startTime, dueDate: task.dueDate, ...updates })) {
             useUiStore.getState().showToast(t('timeline.dateEditFailed'), 'error');
@@ -543,8 +511,8 @@ export function useDesktopCalendarController() {
         if (!task) return;
 
         try {
-            // An all-day start row can also carry a timed due date; the date-only
-            // drop fallback must never erase that clock.
+
+
             if (hasTimeComponent(task.dueDate) && (itemKind === 'deadline' || !hasTimeComponent(task.startTime))) return;
             if (itemKind !== 'deadline' && hasTimeComponent(task.startTime)) {
                 const existingStart = task.startTime ? safeParseDate(task.startTime) : null;
@@ -707,10 +675,7 @@ export function useDesktopCalendarController() {
         return () => window.removeEventListener('keydown', handleCalendarShortcut, true);
     }, [currentMonth, selectedDate, viewMode]);
 
-    // Listed rather than spread: the sub-hooks expose a few members purely so
-    // this file can wire them together (`revealDate`, `visibleRange`,
-    // `openTaskComposerAt`, the per-day task lookups), and those have no
-    // business in the view's surface.
+
     return {
         areas,
         beginEditScheduledTime: selectedDay.beginEditScheduledTime,

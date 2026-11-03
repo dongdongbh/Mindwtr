@@ -42,12 +42,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/**
- * RN's Daily Review (components/daily-review-modal.tsx) on core's getDailyReview and runReviewAction: the header (Close, core's
- * title, the step's title and "Step n of m"), core's step (Today with its count and the calendar's two days, Focus with RN's
- * stars, Inbox with Process Inbox, Waiting with Follow up today), RN's toast, and Back and Next (or Finish) at core's
- * checkpoints. The step is core's checkpoint, kept on the device under core's key.
- */
+
 @Composable
 fun DailyReview(model: InboxViewModel) = with(model.menu) {
     val theme = LocalTheme.current
@@ -98,7 +93,7 @@ fun DailyReview(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's Daily Review footer button: filled (Next, Finish) or the filter background (Back), dimmed while unavailable. */
+
 @Composable
 private fun FooterButton(label: String, filled: Boolean, modifier: Modifier, enabled: Boolean, onClick: () -> Unit) {
     val theme = LocalTheme.current
@@ -109,7 +104,7 @@ private fun FooterButton(label: String, filled: Boolean, modifier: Modifier, ena
     }
 }
 
-/** RN's info box: core's count in bold with its noun, then the step's description. */
+
 private fun LazyListScope.infoBox(count: Int, unit: String, description: String) = item(key = "info") {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(14.dp)
@@ -120,7 +115,7 @@ private fun LazyListScope.infoBox(count: Int, unit: String, description: String)
     }
 }
 
-/** A step's empty state: RN's 48 glyph at stroke 1.5 over core's line. */
+
 private fun LazyListScope.dailyEmpty(icon: ImageVector, text: String) = item(key = "empty") {
     val c = LocalTheme.current.colors
     Column(Modifier.fillMaxWidth().padding(vertical = 30.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -129,7 +124,7 @@ private fun LazyListScope.dailyEmpty(icon: ImageVector, text: String) = item(key
     }
 }
 
-/** Core's step content, as RN's renderStep draws it. */
+
 private fun LazyListScope.dailyContent(model: InboxViewModel, shown: MenuPage) {
     val menu = model.menu
     val view = shown.view
@@ -175,7 +170,7 @@ private fun LazyListScope.dailyContent(model: InboxViewModel, shown: MenuPage) {
     }
 }
 
-/** RN's Follow up today on a waiting row: core's label; disabled (and dimmed) once the task is due for review, as core says. */
+
 @Composable
 private fun FollowUpButton(menu: MenuModel, row: TaskRow, followUp: JSONObject) {
     val c = LocalTheme.current.colors
@@ -190,7 +185,7 @@ private fun FollowUpButton(menu: MenuModel, row: TaskRow, followUp: JSONObject) 
     }
 }
 
-/** RN's Today calendar: the Events toggle with core's count, then today's and tomorrow's cards with core's notice or events. */
+
 @Composable
 private fun TodayCalendar(menu: MenuModel, calendar: JSONObject) {
     val c = LocalTheme.current.colors

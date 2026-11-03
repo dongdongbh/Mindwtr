@@ -6,14 +6,12 @@ import { join } from 'node:path';
 import { gmailCaptureIdFor } from '@mindwtr/core';
 import { createNativeGmail, type GmailStatusView, type NativeGmailBindings } from './host-gmail';
 
-// Native Gmail capture (design pass G3): RN's controller on this host's bindings. The receipts file is a real SQLite file in a
-// folder of its own, as HostGmailReceipts keeps it; Gmail's answers come from a fake authorization.
 
 const ACCOUNT = 'f'.repeat(64);
 const message = (id: string, text = 'Body') => ({ id, labelIds: ['label'], payload: { mimeType: 'text/plain',
     headers: [{ name: 'Subject', value: `Subject ${id}` }], body: { data: Buffer.from(text).toString('base64url'), size: Buffer.byteLength(text) } } });
 
-/** HostGmailReceipts' calls on a temporary folder, with bun's SQLite for the bundled driver. */
+
 const receiptFolder = () => {
     const folder = mkdtempSync(join(tmpdir(), 'gmail-receipts-'));
     const open = new Map<string, Database>();
@@ -46,7 +44,7 @@ const receiptFolder = () => {
     return { folder, file, sql, receipts, dispose: () => { open.forEach((db) => db.close()); rmSync(folder, { recursive: true, force: true }); } };
 };
 
-/** The host: Gmail connected with label "label", the store's save and its failure, manual timers, and every log line. */
+
 const harness = (options: { messages?: string[]; sandbox?: boolean } = {}) => {
     const receipts = receiptFolder();
     let listed = options.messages ?? ['m1'];
@@ -86,7 +84,7 @@ const harness = (options: { messages?: string[]; sandbox?: boolean } = {}) => {
         clearTimer: ((id: number) => { const at = timers.findIndex((timer) => timer.id === id); if (at >= 0) timers.splice(at, 1); }) as never,
     });
     const settle = async () => { for (let i = 0; i < 50; i += 1) await new Promise((resolve) => setTimeout(resolve, 0)); };
-    /** Runs every timer due within [ms], then lets the cycle it started finish. */
+
     const advance = async (ms: number) => {
         now += ms;
         for (const timer of timers.filter((item) => item.at <= now)) {

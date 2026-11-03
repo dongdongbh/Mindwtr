@@ -11,7 +11,7 @@ const makeDescriptor = (overrides: DescriptorOverrides): StartupPromptDescriptor
     ...overrides,
 });
 
-// The native hosts' run of the queue (all inputs known at the start): the same rules as useStartupPromptQueue's tests.
+
 describe('runStartupPromptsOnce', () => {
     beforeEach(() => {
         vi.useFakeTimers();

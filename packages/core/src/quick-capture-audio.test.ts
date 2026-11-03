@@ -15,9 +15,7 @@ import {
 } from './quick-capture-audio';
 import type { AppSettings, Project, Task } from './types';
 
-// Moved from apps/mobile (pass V1): the speech settings tests from lib/speech-to-text.test.ts, the readiness tests from
-// components/quick-capture-sheet.utils.test.ts. RN's hook tests (use-quick-capture-audio.test.tsx) still cover the rest
-// through the hook.
+
 describe('speech-to-text runtime settings (moved from RN)', () => {
     it('forces synced remote speech settings to local Whisper in FOSS builds', () => {
         expect(
@@ -72,7 +70,7 @@ describe('quick-capture speech readiness (moved from RN)', () => {
             provider: 'whisper',
             whisperModelReady: false,
         })).toBe(false);
-        // RN voice bug 1: a stored model path whose file is gone is not ready (the caller's whisperModelReady checked the file).
+
         const storedPathOnly = {
             speechEnabled: true, provider: 'whisper', whisperModelReady: false, whisperModelPath: 'file:///document/whisper-models/ggml-tiny.en.bin',
         };
@@ -166,7 +164,7 @@ describe('quick-capture audio rules', () => {
             id: 'id-1', kind: 'file', title, uri: 'file:///a.m4a', mimeType: 'audio/mp4',
             createdAt: '2026-06-29T09:00:27.000Z', updatedAt: '2026-06-29T09:00:27.000Z', localStatus: 'available',
         });
-        // RN's Whisper path reads the size at once, so the key is there even when the size is unknown.
+
         const unknownSize = buildQuickCaptureAudioAttachment({ title, uri: 'file:///a.wav', mimeType: 'audio/wav', size: undefined, now, newId: () => 'id-2' });
         expect(Object.keys(unknownSize)).toEqual(['id', 'kind', 'title', 'uri', 'mimeType', 'size', 'createdAt', 'updatedAt', 'localStatus']);
         expect(buildQuickCaptureAudioAttachment({ title, uri: 'file:///a.wav', mimeType: 'audio/wav', size: 154668, now }).size).toBe(154668);
@@ -207,7 +205,7 @@ describe('quick-capture audio rules', () => {
     });
 });
 
-// RN voice bug 3: two mime tables disagreed on .webm (the capture attachment said audio/mp4, the speech upload audio/webm).
+
 describe('the audio mime table', () => {
     it('names each recording extension once, for the attachment and the upload alike', () => {
         expect(getAudioMimeType('.webm')).toBe('audio/webm');
@@ -221,13 +219,12 @@ describe('the audio mime table', () => {
     });
 });
 
-// RN voice bug 2: the suggested project was made before the store command decided, so a project a sync gave the task
-// meanwhile left the new one orphaned. Voice V3 review N11 (both apps): a transcript never replaces a title the user typed meanwhile. N11 (review of voice V3): a transcript never replaces a title the user typed meanwhile.
+
 describe('a late transcript on the task as stored', () => {
     const syncLanding = (tasks: Task[], landing: (task: Task) => Task) => {
         const { state, store } = fakeStore(tasks);
         let reads = 0;
-        // The first read is applySpeechResult's; the sync lands before the store command reads again.
+
         const landed = { getState: () => {
             reads += 1;
             if (reads === 2) state.tasks = state.tasks.map(landing);

@@ -104,7 +104,7 @@ describe('Focus controls', () => {
         expect(applied).toEqual({ filters: { ...EMPTY_LIST_FILTER_STATE, tokens: ['@a'] }, savedFilterId: 's', sortBy: 'due' });
         const resolved = { state: applied, activeSavedFilter: saved, effectiveSortBy: 'due' as const };
         expect(applyFocusControlEdit(resolved, { type: 'filter', edit: { type: 'toggleToken', value: '@b' } }, [saved])?.savedFilterId).toBeNull();
-        // The same sort as the saved filter's still detaches it.
+
         expect(applyFocusControlEdit(resolved, { type: 'sort', sortBy: 'due' }, [saved])).toEqual({ ...applied, savedFilterId: null });
         expect(applyFocusControlEdit({ ...resolved, activeSavedFilter: null, state: { ...applied, savedFilterId: null } }, { type: 'sort', sortBy: 'due' }, [saved]))
             .toEqual({ ...applied, savedFilterId: null });
@@ -141,7 +141,7 @@ describe('Focus controls', () => {
     });
 
     it('removes an advanced criterion from the stored filter, keeping what this build does not know', () => {
-        // A newer app's field and criterion on a Focus filter this build can show.
+
         const stored = {
             id: 's', name: 'S', view: 'focus', color: 'red',
             criteria: { areas: [' area ', 'other'], futureCriterion: 'keep' },
@@ -179,7 +179,7 @@ describe('Focus controls', () => {
 
 describe('the empty Focus screen', () => {
     const t = (key: string) => key;
-    // #592: a library with no tasks yet points the user at capture; one with tasks says nothing is due.
+
     it('says how to start when the library has no tasks, and that nothing is due when it has some', () => {
         expect(getFocusEmptyState({ hasActiveFilters: false, hasAnyTasks: false, t })).toEqual({ title: 'agenda.allClear', subtitle: 'agenda.emptyStart' });
         expect(getFocusEmptyState({ hasActiveFilters: false, hasAnyTasks: true, t })).toEqual({ title: 'agenda.allClear', subtitle: 'agenda.noTasks' });

@@ -7,8 +7,6 @@ use crate::install::is_windows_store_install;
 use crate::storage::{get_config_path, get_secrets_path};
 use tauri_plugin_autostart::ManagerExt;
 
-/// Task id declared as <uap5:StartupTask> in the Microsoft Store AppxManifest
-/// (generated in .github/workflows/release-windows.yml). Keep both in sync.
 #[cfg(target_os = "windows")]
 const STORE_STARTUP_TASK_ID: &str = "MindwtrStartup";
 const AUTOSTART_MIGRATION_COMPLETE: &str = "true";
@@ -19,10 +17,6 @@ fn autostart_error(error: tauri_plugin_autostart::Error) -> String {
 
 #[tauri::command]
 pub(crate) async fn get_launch_at_startup_enabled(app: tauri::AppHandle) -> Result<bool, String> {
-    // MSIX virtualizes HKCU writes, so the registry Run key the autostart
-    // plugin manages never reaches the real hive in Store installs — Windows
-    // ignores it while is_enabled() happily reads it back as on. Store builds
-    // must go through the declared StartupTask instead.
     #[cfg(target_os = "windows")]
     if is_windows_store_install() {
         return get_store_launch_at_startup_enabled().await;
@@ -55,7 +49,6 @@ pub(crate) async fn set_launch_at_startup_enabled(
     autostart.is_enabled().map_err(autostart_error)
 }
 
-/// Re-register one pre-`--startup` entry using injected OS/config operations.
 fn migrate_autostart_entry_with(
     already_migrated: bool,
     mut is_enabled: impl FnMut() -> Option<bool>,
@@ -66,8 +59,6 @@ fn migrate_autostart_entry_with(
         return true;
     }
 
-    // Never turn on an entry that the user already had off. enable() rewrites
-    // an existing entry in place, so failure leaves the working entry intact.
     if is_enabled() != Some(true) {
         return false;
     }
@@ -77,12 +68,6 @@ fn migrate_autostart_entry_with(
     persist_state(AUTOSTART_MIGRATION_COMPLETE)
 }
 
-/// One-time migration, run at boot: `tauri_plugin_autostart` only writes the
-/// `--startup` command line on `enable()`, so an entry created before that
-/// flag existed and left on would otherwise never pick it up, and the
-/// tray-start behavior derived from it would never trigger for that install
-/// (#928). The marker is written only after enable succeeds; a failed rewrite
-/// leaves the old working entry intact and retries on the next launch.
 pub(crate) fn migrate_autostart_entry_if_pending(app: &tauri::AppHandle) {
     #[cfg(target_os = "linux")]
     if is_flatpak() {
@@ -174,9 +159,8 @@ async fn set_store_launch_at_startup_enabled(enabled: bool) -> Result<bool, Stri
             .map_err(|error| error.to_string())?
             .get()
             .map_err(|error| error.to_string())?;
-        // Windows will not let an app re-enable a task the user disabled in
-        // Task Manager / Settings; surface where to flip it back instead of
-        // pretending the toggle worked.
+
+
         if state == StartupTaskState::DisabledByUser {
             return Err(
                 "Startup for Mindwtr is turned off in Windows. Enable it under Settings > Apps > Startup, then try again.".to_string(),

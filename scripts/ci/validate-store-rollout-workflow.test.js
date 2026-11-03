@@ -30,12 +30,11 @@ test('an open production rollout fails the stable release before any build job',
   const preflight = stable.jobs['rollout-preflight'];
   expect(preflight.needs).toBe('validate');
   expect(preflight.if).toContain("needs.validate.outputs.rollout_mode == 'staged'");
-  // Forks hold no Store credentials, so the check is skipped there, not failed.
+
   expect(preflight.if).toContain("github.repository == 'dongdongbh/Mindwtr'");
   expect(preflight.concurrency.group).toBe('google-play-production');
 
-  // A recovery dispatch that reaches no store must not be refused by its own
-  // tag's open rollout, so only a publishing run is checked, store by store.
+
   const selected = new Function('github', 'inputs', 'needs', `return Boolean(${
     preflight.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/always\(\)/g, 'true')
       .replace(/\bneeds\.([\w-]+)/g, 'needs["$1"]')
@@ -77,7 +76,7 @@ test('an open production rollout fails the stable release before any build job',
     'android', 'android-foss', 'ios-appstore', 'macos-appstore',
   ]) {
     expect(stable.jobs[job].needs).toContain('rollout-preflight');
-    // A skipped preflight (immediate mode or a fork) must not skip the builds.
+
     expect(stable.jobs[job].if).toContain(
       "(needs['rollout-preflight'].result == 'success' || needs['rollout-preflight'].result == 'skipped')",
     );
@@ -117,7 +116,7 @@ test('the Windows stable Store path fails instead of exiting zero on an open rol
   expect(publish.if).toContain("steps.version.outputs.store_stable == 'true'");
   const refusals = [...publish.run.matchAll(/if \(& \$is(RolloutOpen|StoreBusy) \$errText\) \{\n(.*)\n/g)]
     .map((match) => [match[1], match[2].trim()]);
-  // Every tolerated store-busy skip is preceded by the rollout-open failure.
+
   expect(refusals.map(([matcher]) => matcher)).toEqual([
     'RolloutOpen', 'StoreBusy', 'RolloutOpen', 'StoreBusy',
   ]);
@@ -196,7 +195,7 @@ test('rollout workflow schedules one automatic stage per day and retains explici
   expect(rollout.jobs.msstore.if).toContain("github.event_name == 'schedule'");
   expect(rollout.jobs.play.if).toContain("needs.promotion-gate.outputs.ready == 'true'");
   expect(rollout.jobs.msstore.if).toContain("needs.promotion-gate.outputs.ready == 'true'");
-  // A fork holds no Store credentials, so the daily schedule must not run there.
+
   for (const job of [rollout.jobs.play, rollout.jobs.msstore]) {
     expect(job.if).toContain("github.repository == 'dongdongbh/Mindwtr'");
   }
@@ -295,7 +294,7 @@ test('all Play edit sessions share the rollout lock, including RC and version lo
   ]) {
     const release = workflow(name);
     for (const job of jobs) expect(release.jobs[job].concurrency).toEqual(expected);
-    // The enclosing workflow never reacquires a child's lock.
+
     expect(release.concurrency.group).not.toBe(expected.group);
   }
 });

@@ -27,7 +27,7 @@ export function ProjectToSectionDialog({ source, projects, onCancel, onSuccess, 
     const [busy, setBusy] = useState(false);
     const [retryOnly, setRetryOnly] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    // Typing the section name re-renders; rebuild the destination list only when its inputs change.
+
     const { _allProjects, _allSections, _allTasks } = useTaskStore.getState();
     const previewDestination = useMemo(() => createProjectToSectionPreviewer({ _allProjects, _allSections, _allTasks }, source.id),
         [_allProjects, _allSections, _allTasks, source.id]);

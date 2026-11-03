@@ -15,7 +15,7 @@ const payload = (prepared: PreparedNativeAppleReminderImportItem): string => JSO
         value && typeof value === 'object' && !Array.isArray(value)
             ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value);
 
-/** Inactive item persistence only. The native journal owns registry publication and fresh task liveness. */
+
 export function createNativeAppleReminderImportOwner(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
 }) {
@@ -81,7 +81,7 @@ export function createNativeAppleReminderImportOwner(deps: {
         },
         receiptOnly: async (requestId, encoded) => {
             const owned = pending;
-            // New tasks must carry their receipt in the task transaction, never a later receipt-only save.
+
             return Boolean(owned && owned.prepared.mode === 'existing' && owned.prepared.request.requestId === requestId
                 && payload(owned.prepared) === encoded && getStorageAdapter() === owned.adapter
                 && await owned.adapter.commitReceiptOnly(requestId, encoded));

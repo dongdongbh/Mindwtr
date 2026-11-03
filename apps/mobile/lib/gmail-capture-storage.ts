@@ -3,14 +3,14 @@ import {
     type GmailReceiptFiles, type GmailReceiptStore,
 } from '@mindwtr/core/gmail-receipt-store';
 
-// The store and its reset rule live in core (gmail-receipt-store.ts); RN passes its Expo file calls.
+
 export type { GmailReceiptDatabase, GmailReceiptStore } from '@mindwtr/core/gmail-receipt-store';
 
 const storageFailure = () => ({ kind: 'storage', message: 'Gmail capture could not save securely.' });
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fileSystem = () => require('expo-file-system') as typeof import('expo-file-system');
-// RN URL pathname mutation does not update href; avoid Expo multipart path joining.
+
 const folderUri = (paths: typeof import('expo-file-system').Paths) => `${paths.document.uri.replace(/\/$/, '')}/GmailCapture`;
 const receiptFiles = (): GmailReceiptFiles => {
     const { Directory, File, Paths } = fileSystem();
@@ -39,7 +39,7 @@ export function getGmailReceiptStore(): GmailReceiptStore {
     if (initializationFailed) throw storageFailure();
     let stage = 'module';
     try {
-        // Load only when native Gmail is available, including outside Expo Go/FOSS.
+
         const { Directory, Paths } = fileSystem();
         stage = 'directory';
         const directory = new Directory(folderUri(Paths));
@@ -62,11 +62,11 @@ export function getGmailReceiptStore(): GmailReceiptStore {
     }
 }
 
-/** True after a damaged receipts file was moved aside and capture restarted off, until [clearGmailReceiptsReset]. */
+
 export function gmailReceiptsWereReset(): boolean {
     try { return wereReset(receiptFiles()); } catch { return false; }
 }
-/** Capture was started again (or the account disconnected): Settings no longer explains the reset. */
+
 export function clearGmailReceiptsReset(): void {
-    try { clearReset(receiptFiles()); } catch { /* the notice shows again; nothing is lost */ }
+    try { clearReset(receiptFiles()); } catch {                                               }
 }

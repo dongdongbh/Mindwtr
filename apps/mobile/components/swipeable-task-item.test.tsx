@@ -126,11 +126,8 @@ vi.mock('@mindwtr/core', async (importOriginal) => {
   storeState.addTask = addTask;
   storeState.updateTask = updateTask;
   storeState.restoreTask = restoreTask;
-  // Core is real on purpose: the stubs this replaced included a
-  // `getTaskDateCoherenceIssues` hardcoded to one fixture's dates. The row's
-  // labels come from core's buildTaskRowMeta, which formats inside core where a
-  // mock of this module cannot reach, so date and age expectations below are
-  // computed with the same real formatters.
+
+
   return mockCore(importOriginal, () => storeState, {
     getTaskStaleness,
     undoTaskCompletion,
@@ -635,8 +632,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       deleteAction.props.onPress();
     });
 
-    // Deleting moves the task to Trash immediately; the undo toast replaces a
-    // confirmation prompt.
+
     expect(alertSpy).not.toHaveBeenCalled();
 
     await renderer.act(async () => {
@@ -1027,10 +1023,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(row).toBeTruthy();
   });
 
-  // Urgency is derived by core from the due date against the clock — there is no
-  // `urgency` field on Task. This test used to set one and the core mock echoed
-  // it back, so every case shared a single past due date and the assertion only
-  // ever proved the stub returned what it was handed.
+
   it('colors due date metadata by urgency', () => {
     const hoursFromNow = (hours: number) => (
       new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
@@ -1333,14 +1326,14 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(hasText(hidden, 'Prep the deck')).toBe(false);
     expect(hasText(hidden, start)).toBe(true);
     expect(hasText(hidden, age)).toBe(false);
-    // #1287: the hidden description leaves one cue; the shown preview needs none.
+
     const alignLeft = (tree: renderer.ReactTestRenderer) => tree.root.findAll((node) => String(node.type) === 'AlignLeft').length;
     expect(alignLeft(hidden)).toBe(1);
     expect(alignLeft(shown)).toBe(0);
 
     const waiting = renderRow(true, true);
     expect(hasText(waiting, 'Sam')).toBe(true);
-    // #1282: the waiting name reads at full contrast and weight, not as grey meta.
+
     const name = waiting.root.findAll((node) => node.props.children === 'Sam' && Array.isArray(node.props.style))[0];
     expect(Object.assign({}, ...name.props.style.flat())).toMatchObject({ color: '#ffffff', fontWeight: '600' });
     expect(waiting.root.findAll((node) => String(node.type) === 'UserRound')).toHaveLength(1);
@@ -1412,7 +1405,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     expect(tree.root.findAllByProps({ accessibilityLabel: 'Edit completion time' })).toHaveLength(0);
   });
 
-  // #1164: Waiting For completes from the quick action; #1464: Someday does too.
+
   it.each([
     ['waiting', 'Done action', 'done'],
     ['someday', 'Done action', 'done'],
@@ -1492,7 +1485,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     );
     expect(taskButton.props.accessibilityHint).not.toContain('Swipe right');
 
-    // #1464: an Inbox row completes straight from Done, no detour through Next.
+
     renderer.act(() => {
       doneAction.props.onPress();
     });
@@ -1708,7 +1701,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       );
     });
 
-    // Long-press on the swipe-revealed Done opens the completion-time picker directly.
+
     const doneAction = tree.root.find((node) => (
       node.props.accessibilityLabel === 'Done action' && typeof node.props.onLongPress === 'function'
     ));
@@ -1865,14 +1858,14 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       );
     });
 
-    // Icon variant renders the status dot, not the redundant "Inbox" label.
+
     expect(tree.root.findAll((node) => (node.type as unknown) === 'CircleDot')).toHaveLength(1);
     const statusControl = tree.root.find(
       (node) => node.props.accessibilityLabel === 'Change status. Current status: Inbox'
     );
     expect(flattenText(statusControl.props.children)).not.toContain('Inbox');
 
-    // Tapping the icon still opens the quick-status menu.
+
     renderer.act(() => {
       statusControl.props.onPress({ stopPropagation: vi.fn() });
     });
@@ -2721,9 +2714,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     vi.useRealTimers();
   });
 
-  // #1055: the inline expansion can add items, not just tick them. The add goes
-  // through the same pending/flush pipeline as a tick, so the list-mode status
-  // recomputation (done -> next once an unchecked item exists) comes along free.
+
   it('adds a checklist item from the row expansion and flushes it with the recomputed status', () => {
     vi.useFakeTimers();
     translate.overrides = { 'taskEdit.addItem': 'Add Item' };
@@ -2766,7 +2757,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       && typeof node.props.onSubmitEditing === 'function'
     ));
 
-    // Collapsed rows show no add field, and opening the expansion must not steal focus.
+
     expect(findAddInputs()).toHaveLength(0);
     const checklistProgressButton = tree.root.find((node) => node.props.accessibilityLabel === 'checklist.progress');
     renderer.act(() => {
@@ -2781,7 +2772,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       findAddInputs()[0].props.onSubmitEditing();
     });
 
-    // Field cleared for the next item, keyboard kept up.
+
     expect(findAddInputs()[0].props.value).toBe('');
     expect(findAddInputs()[0].props.blurOnSubmit).toBe(false);
 
@@ -2862,7 +2853,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
 
     expect(updateTask).not.toHaveBeenCalled();
 
-    // Typed-but-unsubmitted text is draft state only: it must not reach the unmount flush.
+
     renderer.act(() => {
       findAddInputs()[0].props.onChangeText('Eggs');
     });
@@ -2875,9 +2866,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     vi.useRealTimers();
   });
 
-  // The #766 boundary itself: a list re-render must not re-render rows whose
-  // task did not change. Guarded with the real render counter. `tc` is one
-  // shared object because that is what resolveThemeTokens now hands callers.
+
   it('re-renders only the row whose task changed', () => {
     const actions: TaskRowActions = {
       edit: vi.fn(),
@@ -2928,7 +2917,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       tree.update(<List tasks={[renamedA, taskB]} />);
     });
 
-    // Exactly one: the renamed row re-rendered, the untouched one did not.
+
     expect(readTaskRowRenderCount() - afterMount).toBe(1);
     expect(hasText(tree, 'Task A renamed')).toBe(true);
   });
@@ -3015,14 +3004,12 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       expect(renderRow({ priority: 'urgent' })).toBeNull();
     });
 
-    // No green, no special case: a done row keeps its priority color and only
-    // the row's own completed styling changes.
+
     it('keeps the priority color on a completed task', () => {
       expect(renderRow({ status: 'done', priority: 'low' })?.backgroundColor).toBe('#3b82f6');
     });
 
-    // The strip is the row's only priority signal here, so the level must not
-    // be color-only: it rides the row's accessibility label.
+
     it('names the priority in the row accessibility label, and only when the strip shows', () => {
       expect(rowAccessibilityLabel({ priority: 'high' })).toContain('Priority: High');
       expect(rowAccessibilityLabel({})).not.toContain('Priority');
@@ -3031,9 +3018,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     });
   });
 
-  // List rows mount and unmount while the user scrolls. A closed row must not
-  // mount the destination picker: each one costs a native reduce-motion call,
-  // a listener, and a pass over every project and area.
+
   it('mounts no destination picker while the row menu is closed', () => {
     const addEventListener = vi.spyOn(AccessibilityInfo, 'addEventListener');
     let tree!: renderer.ReactTestRenderer;
@@ -3129,7 +3114,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
     const rowButton = (tree: renderer.ReactTestRenderer) => tree.root.find((node) => (
       Array.isArray(node.props.accessibilityActions) && typeof node.props.onAccessibilityAction === 'function'
     ));
-    // The store's getFocusStarAction, over an empty store with a limit of 1.
+
     const withFocusStore = async (focusedCount: number, run: () => Promise<void>) => {
       const original = storeState.getFocusStarAction;
       const context = { tasks: [], projects: [], sections: [], focusedCount, focusTaskLimit: 1 };
@@ -3192,7 +3177,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
         button(tree, 'Organize action').props.onPress();
       });
       expect(menu().props.visible).toBe(true);
-      // Status and Destination are two headed groups.
+
       expect(hasText(tree, 'Destination')).toBe(true);
     });
 
@@ -3262,7 +3247,7 @@ it('can keep the focus star without adding a redundant focus outline', () => {
       renderer.act(() => {
         button(tree, 'Dates… action').props.onPress();
       });
-      // A sync renames the task and moves it back to Inbox while the sheet is open.
+
       renderer.act(() => {
         tree.update(rowElement({ title: 'Call the bank today', status: 'inbox', updatedAt: '2026-01-03T00:00:00.000Z' }));
       });

@@ -53,13 +53,13 @@ export async function setMcpServerConfig(config: McpServerConfig): Promise<McpSe
     return normalizeStatus(await invokeNative<McpServerStatus>('set_mcp_server_config', { ...config }));
 }
 
-/** Contains a credential: generate only for an explicit copy action, never for logs or display. */
+
 export function getMcpConnectionDetails(status: McpServerStatus, format: 'json' | 'codex' = 'json'): string | null {
     if (!status.enabled || !status.running || status.error || !status.token
         || !Number.isInteger(status.port) || status.port < 1024 || status.port > 65535
         || status.url !== `http://127.0.0.1:${status.port}/mcp`) return null;
     if (format === 'codex') {
-        // TOML basic strings also require escaping DEL, which JSON leaves literal.
+
         const tomlString = (value: string) => JSON.stringify(value).replace(/\u007f/g, '\\u007f');
         return `[mcp_servers.mindwtr]\nurl = ${tomlString(status.url)}\n\n[mcp_servers.mindwtr.http_headers]\nAuthorization = ${tomlString(`Bearer ${status.token}`)}\n`;
     }

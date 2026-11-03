@@ -30,7 +30,7 @@ type PendingUndo = {
   count: number;
 };
 
-/** Someday's list scope, recomputed from the store at the moment of a write. */
+
 function getLatestEligibleTasks(ids: readonly string[], filter: AreaFilterSelection): Task[] | null {
   const state = useTaskStore.getState();
   return getSomedaySectionMoveTasks({
@@ -65,7 +65,7 @@ export function useSomedaySectionMove(
     try {
       const pending = pendingUndoRef.current?.previous === previous
         && pendingUndoRef.current.destination === destination ? pendingUndoRef.current : null;
-      // Built on the rows as they are when the write is admitted, so a sync save's newer sections stay.
+
       const updates = await runStoreCommand(async () => {
         const latest = useTaskStore.getState();
         const latestTasks = previous.map(({ id }) => latest.tasks.find((task) => task.id === id)).filter((task): task is Task => Boolean(task));
@@ -115,7 +115,7 @@ export function useSomedaySectionMove(
     if (!moveTargetIds?.length || saving) return;
     setSaving(true);
     try {
-      // The read, the plan and the write run as one command, so a sync save's newer rows are what the move builds on.
+
       const planned = await runStoreCommand(async () => {
         const latest = useTaskStore.getState();
         const sortedSections = sortViewSectionDefinitions(latest.settings?.gtd?.viewSections?.someday);

@@ -69,8 +69,8 @@ export function CalendarView() {
     const timelineHourGutterRef = useRef<HTMLDivElement | null>(null);
     const [timelineScrollbarWidth, setTimelineScrollbarWidth] = useState(0);
     const [timelineHeight, setTimelineHeight] = useState<number | null>(null);
-    // The all-day strip shows a few rows and says how many it is holding back; one
-    // click opens every column at once so the week stays aligned.
+
+
     const [allDayExpanded, setAllDayExpanded] = useState(false);
     const [isPlanningPanelCollapsed, setIsPlanningPanelCollapsed] = useState(readPlanningPanelCollapsedPreference);
     const controller = useDesktopCalendarController();
@@ -127,9 +127,8 @@ export function CalendarView() {
         weekdayHeaders,
         yearOptions,
     } = controller;
-    // One registration covers the whole view: the grid, the planning panel and
-    // the selected-day panel all render inside it, so document order already
-    // flattens them in the order the user sees.
+
+
     const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
     useTaskListScope({
         getTasks: collectCalendarKeyboardTasks,
@@ -139,8 +138,8 @@ export function CalendarView() {
     });
     const handleCalendarTaskDragStart = useCallback((event: DragEvent<HTMLElement>, task: Task, itemKind: CalendarCellItem['kind']) => {
         if (itemKind === 'event') return;
-        // A completed task is a record of what happened, not a plan that can be
-        // moved to another day (#955).
+
+
         if (itemKind === 'completed') return;
         if (hasTimeComponent(task.dueDate) && (itemKind === 'deadline' || !hasTimeComponent(task.startTime))) return;
         if (isProjectedRecurringTask(task)) return;
@@ -184,11 +183,8 @@ export function CalendarView() {
         event.stopPropagation();
         void updateTaskStartTimeFromDrop(taskId, start, getCalendarTaskDragItemKind(event.dataTransfer));
     }, [updateTaskStartTimeFromDrop]);
-    // Right-clicking a scheduled block or a due-date chip opens the same
-    // TaskQuickActionMenu the row list uses (via the shared hook), plus a
-    // calendar-only "Remove from calendar" entry. Native HTML5 drag only ever
-    // engages the primary mouse button, so a right-click context menu and an
-    // in-progress drag cannot occur on the same gesture.
+
+
     const [taskQuickActionMenu, setTaskQuickActionMenu] = useState<{
         task: Task;
         x: number;
@@ -206,15 +202,14 @@ export function CalendarView() {
         setTaskQuickActionMenu({ task, x: event.clientX, y: event.clientY, kind });
     }, []);
     const closeTaskQuickActionMenu = useCallback(() => setTaskQuickActionMenu(null), []);
-    // The context menu names no task, so the chip it acts on keeps a ring while
-    // the menu is open (#999). Foreground-based so it reads on solid-primary blocks.
+
+
     const taskMenuRingClass = (taskId: string) => (
         taskQuickActionMenu?.task.id === taskId ? 'ring-2 ring-inset ring-foreground/60' : undefined
     );
     const handleRemoveTaskFromCalendar = useCallback((task: Task, kind: 'scheduled' | 'deadline') => {
-        // Clearing startTime alone does nothing visible: applyTaskUpdates
-        // recomputes it from dueDate whenever relativeStartOffset is set, so
-        // both fields are cleared (and both restored on undo).
+
+
         const previousValues = kind === 'scheduled'
             ? { startTime: task.startTime, relativeStartOffset: task.relativeStartOffset }
             : { dueDate: task.dueDate, relativeStartOffset: task.relativeStartOffset };
@@ -226,9 +221,8 @@ export function CalendarView() {
                 if (!result.success) {
                     throw new Error(result.error || 'Failed to remove task from calendar');
                 }
-                // Reuses the existing "Remove from calendar" string for the toast
-                // too — the locale-parity gate (zh/zh-Hant full parity, pt floor)
-                // does not allow adding an English-only key here.
+
+
                 showUndoToast(tFallback(t, 'calendar.unschedule', 'Remove from calendar'), () => {
                     void updateTask(task.id, previousValues)
                         .catch((error) => reportError('Failed to undo remove from calendar', error));
@@ -256,7 +250,7 @@ export function CalendarView() {
         try {
             getWorkspaceCache()?.setItem(CALENDAR_PLANNING_PANEL_COLLAPSED_KEY, collapsed ? 'true' : 'false');
         } catch {
-            // Ignore storage failures; the in-memory state still updates.
+
         }
     }, []);
     const periodNavigationLabels = viewMode === 'day'
@@ -277,7 +271,7 @@ export function CalendarView() {
     useLayoutEffect(() => {
         const scroller = timelineScrollRef.current;
         if (!timelineScrollKey || !scroller) return;
-        // WebKit does not reliably mirror scrollbar-gutter on non-scrolling rows.
+
         setTimelineScrollbarWidth(Math.max(0, scroller.offsetWidth - scroller.clientWidth));
     }, [timelineScrollKey]);
 
@@ -285,25 +279,20 @@ export function CalendarView() {
         const scroller = timelineScrollRef.current;
         const main = scroller?.closest('main');
         if (!timelineScrollKey || !scroller || !main) return;
-        // Size the hour grid to the space the window actually leaves it instead
-        // of guessing the surrounding chrome with a constant: every chrome
-        // change (the #955 search row, the #977 end gap) silently broke the
-        // `100vh - 20rem` budget and put a second scrollbar on the view.
+
+
         const measure = () => {
             const top = scroller.getBoundingClientRect().top
                 - main.getBoundingClientRect().top
                 + main.scrollTop;
-            // 26rem floor keeps ~6.5 hours visible in short windows while still
-            // fitting 768px-tall laptops. No ceiling: a tall monitor shows more
-            // hours of a class timetable instead of stopping at 48rem with the
-            // rest of the window empty. Reserve LIST_END_GAP (1rem) plus the
-            // card's bottom border and sub-pixel rounding below the scroller.
+
+
             setTimelineHeight(Math.max(416, Math.floor(main.clientHeight - top - 18)));
         };
         measure();
         const observer = new ResizeObserver(measure);
         observer.observe(main);
-        // The card around the scroller re-measures when the all-day row grows.
+
         if (scroller.parentElement) observer.observe(scroller.parentElement);
         return () => observer.disconnect();
     }, [timelineScrollKey, externalError, externalCalendars.length, visibleSearchMatchCount]);
@@ -361,8 +350,8 @@ export function CalendarView() {
                             </button>
                         ))}
                     </div>
-                    {/* Only the week timeline splits its width across days, so the
-                        count is meaningless in Day (always one), Month and Schedule. */}
+                    {
+                                                                                        }
                     {viewMode === 'week' && (
                         <div className="flex items-center gap-1 rounded-md border border-border bg-card p-1">
                             <button
@@ -377,8 +366,8 @@ export function CalendarView() {
                             </button>
                             <span className="min-w-[4.5rem] text-center text-sm font-medium tabular-nums" aria-live="polite">
                                 {formatI18nTemplate(
-                                    // Same string mobile shows for the same setting — one
-                                    // translation, one meaning, on both platforms (#951).
+
+
                                     resolveText('calendar.mobile.visibleDayCount', '{{dayCount}} days'),
                                     { dayCount: timelineDayCount }
                                 )}
@@ -571,9 +560,8 @@ export function CalendarView() {
 
                     {days.map((day, _dayIdx) => {
                         const cellItems = getCalendarItemsForDate(day);
-                        // One-off items claim the cell's three visible rows
-                        // before projected recurring occurrences, which repeat
-                        // on every matching day.
+
+
                         const visibleItems = orderCalendarDayItemsForLimitedSlots(cellItems).slice(0, 3);
                         const overflowCount = Math.max(0, cellItems.length - visibleItems.length);
                         const isSelected = selectedDate && isSameDay(day, selectedDate);
@@ -722,8 +710,8 @@ export function CalendarView() {
                 {(viewMode === 'day' || viewMode === 'week') && (
                     <div className="overflow-x-auto rounded-lg border border-border bg-card shadow-sm"
                         onScroll={(event) => {
-                            // The hours live inside their own vertical scrollport, so CSS
-                            // sticky cannot follow the outer horizontal scroll by itself.
+
+
                             if (timelineHourGutterRef.current) {
                                 timelineHourGutterRef.current.style.transform = `translateX(${event.currentTarget.scrollLeft}px)`;
                             }
@@ -746,9 +734,8 @@ export function CalendarView() {
                                     onClick={() => selectCalendarDate(day)}
                                     className={cn(
                                         "border-r border-border p-2 text-left last:border-r-0 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40",
-                                        // With one visible day the tint marks nothing and just
-                                        // makes the lone column look off; the date bubble
-                                        // already says "today".
+
+
                                         timelineDays.length > 1 && isToday(day) && "bg-primary/5"
                                     )}
                                 >
@@ -926,8 +913,8 @@ export function CalendarView() {
                                             {layoutTimedItems(day).map((item) => {
                                                 const timeLabel = `${safeFormatDate(item.start, 'p')}-${safeFormatDate(item.end, 'p')}`;
                                                 const commonStyle = {
-                                                    // 2px seam so back-to-back blocks read as separate
-                                                    // items instead of one slab (layout floors at 24px).
+
+
                                                     height: item.height - 2,
                                                     left: `calc(${item.leftPercent * durationWidth / 100}% + 3px)`,
                                                     top: item.top,
@@ -952,10 +939,8 @@ export function CalendarView() {
                                                 const projectedLabel = projected
                                                     ? getProjectedRecurrenceDisplayLabel(item.task, resolveText('calendar.projectedRecurrence', 'Projected'), safeFormatDate)
                                                     : '';
-                                                // Timed blocks read like macOS Calendar: a wash of the task's
-                                                // identity color behind theme-colored text, with the color
-                                                // itself as the left bar. A task without a project or area
-                                                // color gets the same shape in the primary color.
+
+
                                                 const accent = projected ? undefined : getTaskAccentColor(item.task);
                                                 const tint = getAccentTint(accent);
                                                 return (

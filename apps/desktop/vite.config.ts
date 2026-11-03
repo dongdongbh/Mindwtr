@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 import fs from 'fs'
 
-// https://vitejs.dev/config/
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -20,16 +20,14 @@ export default defineConfig({
       },
     ],
   },
-  // Prevent vite from obscuring rust errors in the console
+
   clearScreen: false,
-  // Tauri expects a fixed port
+
   server: {
     port: 5173,
     strictPort: true,
-    // Settings is the biggest lazy view (~190 kB chunk, hundreds of modules).
-    // Without this, the dev server transforms that graph on the FIRST click of
-    // Settings, which shows several seconds of skeleton in dev and in the demo
-    // recordings (release builds preload the built chunk and are fine).
+
+
     warmup: {
       clientFiles: ['./src/components/views/SettingsView.tsx'],
     },
@@ -45,7 +43,7 @@ export default defineConfig({
       ],
     },
   },
-  // Test config lives in vitest.config.ts (CONFIG_NAMES order wins over this file); this block is dead.
+
   build: {
     rollupOptions: {
       output: {

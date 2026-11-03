@@ -23,7 +23,7 @@ internal class GmailFailure(val kind: String) : Exception(when (kind) {
 internal data class GmailIdentity(val selectedName: String, val account: String, val accountId: String)
 internal data class GmailSnapshot(val generation: Long, val identity: GmailIdentity?, val token: String?)
 
-/** One monitor guards both generation admission and the durable selected-account write. */
+
 internal class GmailSession {
   private var generation = 0L
   private var identity: GmailIdentity? = null

@@ -2,7 +2,7 @@ import { tFallback } from './i18n';
 
 type CountKind = 'task' | 'project' | 'event' | 'day';
 
-/** A localized noun with its count for list headers and action toasts. */
+
 export function formatListItemCount(count: number, kind: CountKind, t: (key: string) => string): string {
     return `${count} ${formatListItemCountNoun(count, kind, t)}`;
 }

@@ -18,7 +18,7 @@ const value = <T>(result: { ok: true; value: T } | { ok: false; error: { code: s
 };
 const attachment = (id: string, cloudKey = id): Attachment => ({ id, kind: 'file', title: id,
     uri: `file:///local/${id}`, cloudKey, createdAt: DELETED, updatedAt: DELETED });
-// Trashed rows carry tokens: a purge must not write them to the saved list on either path (#828).
+
 const task = (id: string, overrides: Partial<Task> = {}): Task => ({ id, title: id, status: 'next',
     tags: ['#Trashed'], contexts: ['@Trashed'], createdAt: DELETED, updatedAt: DELETED, deletedAt: DELETED,
     rev: 3, revBy: 'device-a', ...overrides });
@@ -43,8 +43,8 @@ const seed = (): Partial<AppData> => ({
 });
 const openSqliteHost: typeof openSqliteHostBase = async (...args) => {
     const sqlite = await openSqliteHostBase(...args);
-    // Normal boot sanitizes live links to deleted parents. Stage the actual saved
-    // legacy/external links afterward so both RN and prepared paths exercise them.
+
+
     const original = new Map((args[0].tasks ?? []).filter((row) => !row.deletedAt).map((row) => [row.id, row]));
     const relink = (row: Task) => original.has(row.id)
         ? { ...row, projectId: original.get(row.id)!.projectId, sectionId: original.get(row.id)!.sectionId } : row;

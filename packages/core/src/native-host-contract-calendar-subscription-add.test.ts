@@ -103,7 +103,7 @@ describe('prepared Calendar subscription URL Add with real SQLite receipts', () 
         const env = await open(), before = await env.data(), raw = env.raw();
         const { request, envelope } = await plan(env);
         const expected = addCalendarFeed(before.settings.externalCalendars!, { ...request, id: request.requestId });
-        expect(JSON.stringify(envelope)).toContain(PRIVATE); // New intent must survive a crash; the old list is not copied.
+        expect(JSON.stringify(envelope)).toContain(PRIVATE);
         expect(JSON.stringify(envelope)).not.toContain(feed.name);
         expect(envelope.prepared).not.toHaveProperty('after');
         expect(env.methods.validatePreparedCalendarSubscriptionAdd(envelope)).toEqual({ ok: true, value: changed });
@@ -120,7 +120,7 @@ describe('prepared Calendar subscription URL Add with real SQLite receipts', () 
 
     it.each(['', '   ', '  Explicit name  '])('uses the captured RN default/trim for name %j after a fresh realm', async (name) => {
         const env = await open(), { envelope } = await plan(env, { name, defaultName: '  冻结 Calendar  ' });
-        await env.restart(); // No translator dependency can select a new fallback during cold replay.
+        await env.restart();
         expect(await env.methods.commitPreparedCalendarSubscriptionAdd(envelope)).toEqual({ ok: true, value: changed });
         const row = (await env.data()).settings.externalCalendars!.at(-1)!;
         expect(row).toEqual({ id: ID, name: name.trim() || '冻结 Calendar', url: PRIVATE, enabled: true });
@@ -396,7 +396,6 @@ describe('prepared Calendar subscription URL Add with real SQLite receipts', () 
         expect(await env.data()).toEqual(before); expect(await env.rows()).toEqual([]); expect(writes(env)).toEqual([]);
     });
 });
-
 
 
 describe('native picked-calendar request naming', () => {

@@ -1,6 +1,6 @@
-// Pass D1c design §3.1-§3.5 and review 2 #14: host-entry's side of Settings › Data's file channel, in the shipped bundle over
-// a bridge that answers as DataChannel.kt does (tagged reads, UTF-8 counted by bytes, a strict encoder that refuses a lone
-// surrogate). Each JS fix has a red run: the same test over a bundle with that fix taken out must fail.
+
+
+
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { createHash } from 'node:crypto';
@@ -46,7 +46,7 @@ const fixture = (bundle = source, onSql: (sql: string) => void = () => undefined
             kvMultiGet: (keys: string) => JSON.stringify((JSON.parse(keys) as string[]).map((key) => [key, null])), kvMultiSet: () => null, kvMultiRemove: () => null,
             fileList: () => 'null', fileRead: () => '', fileDelete: () => null, hostEvent: () => null,
             debugProp: (name: string) => state.debugProps?.[name] ?? '',
-            // DataChannel.kt's answers: reads 1 MiB of bytes at a time, never splitting a character; strict UTF-8 writes.
+
             dataRead: (id: string) => {
                 state.onDataRead?.();
                 const handle = handles.get(id);
@@ -89,7 +89,7 @@ const fixture = (bundle = source, onSql: (sql: string) => void = () => undefined
     return { state, open, poll, handles, written: (id: string) => Buffer.concat((handles.get(id) ?? closed.get(id))?.written ?? []) };
 };
 
-// Hold the requested timer's callback so pending/completed assertions do not depend on wall-clock rounding or runner load.
+
 const holdDelay = (f: ReturnType<typeof fixture>, delay: number) => {
     let release!: () => void;
     const ready = new Promise<void>((resolve) => {
@@ -101,7 +101,7 @@ const holdDelay = (f: ReturnType<typeof fixture>, delay: number) => {
     return { ready, release: () => release() };
 };
 
-// The second 1 MiB read starts with the bridge's error marker; the first 512 Ki-unit write ends inside a surrogate pair.
+
 const head = 'a'.repeat(512 * 1024 - 1) + '🦉';
 const text = head + 'b'.repeat(CHUNK_BYTES - Buffer.byteLength(head)) + `${MARKER}tail`;
 
@@ -158,7 +158,7 @@ describe('the data channel through the shipped bundle (D1c)', () => {
         const refused = f.open({});
         expect((await f.poll(f.state.MindwtrHost.dataExportFile('json', refused, 1))).error).toMatch(/^TOO_LARGE:/);
         expect(f.written(refused).length).toBe(0);
-        // An edit lands while the library's size is read: the export answers NOT_READY and writes nothing.
+
         let touched = false;
         const g = fixture(source, (sql) => { if (sql === 'PRAGMA page_count' && touched) g.state.fixture.touch(); });
         expect((await g.poll(g.state.MindwtrHost.boot('', '', 'journaled'))).ok).toBe(true);
@@ -183,7 +183,7 @@ describe('the data channel through the shipped bundle (D1c)', () => {
         expect((await f.poll(f.state.MindwtrHost.bootRecovery('', '', 'journaled', budget))).ok).toBe(true);
         expect(f.state.fixture.timeout()).toBe(4321);
         expect((await f.poll(f.state.MindwtrHost.resumeActivation())).ok).toBe(true);
-        // The library is under 1 MiB here: one started MiB.
+
         expect(f.state.fixture.timeout()).toBe(1010);
         let during = 0;
         f.state.onDataRead = () => { during = f.state.fixture.timeout(); };
@@ -200,8 +200,7 @@ describe('the data channel through the shipped bundle (D1c)', () => {
         expect(f.state.fixture.timeout()).toBe(15_000);
     });
 
-    // Code review P2: the deadline rows' delays wait on timers, so core's storage timeout and the host's deadline run while they
-    // wait. A delay that blocked inside one bridge call would finish before any timer fired, and these would pass without a fix.
+
     it('a debug read delay lets the storage timeout fire; within a larger budget the load finishes', async () => {
         const slow = fixture();
         slow.state.debugProps = { sql_read_delay_ms: '300' };

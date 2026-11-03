@@ -161,7 +161,7 @@ export const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    // The row card keeps marginBottom 6; the tray matches it so buttons line up with the card.
+
     swipeTrayLeft: {
         flexDirection: 'row',
         marginBottom: 6,
@@ -278,8 +278,8 @@ export const styles = StyleSheet.create({
     },
     nextActionActions: {
         flexDirection: 'row',
-        // Three buttons don't fit a 375pt screen (or long locales) on one
-        // line; without wrap the primary button renders past the card edge.
+
+
         flexWrap: 'wrap',
         gap: 10,
         justifyContent: 'flex-end',
@@ -293,7 +293,7 @@ export const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     nextActionCompleteButton: {
-        // Secondary "escape hatch" pushed to the left, away from Skip/Add.
+
         marginRight: 'auto',
         minHeight: 44,
         paddingHorizontal: 8,

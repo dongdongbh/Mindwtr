@@ -12,8 +12,8 @@ import { MAX_AUDIO_RECORDING_SECONDS } from '../lib/audio-capture-buffer';
 import { useUiStore } from '../store/ui-store';
 import { holdSyncSave } from '../test/hold-sync-save';
 import { writeCloudConfig } from '../lib/sync-service-config';
-// Not re-exported from the core barrel; see focused-count-selector.test.ts
-// for why the relative path (not a re-export) is used here.
+
+
 import { beginNotifyProfile, endNotifyProfile } from '../../../../packages/core/src/store-notify-profiler';
 
 const sandboxState = vi.hoisted(() => ({ enabled: false }));
@@ -598,7 +598,7 @@ describe('QuickAddModal', () => {
         await waitFor(() => {
             expect(addTask).toHaveBeenCalledWith('Draft launch brief', expect.anything());
         });
-        // The editing session starts only after the async save resolves.
+
         await waitFor(() => {
             expect(useUiStore.getState().editingTaskId).toBe('task-shortcut');
         });
@@ -627,8 +627,8 @@ describe('QuickAddModal', () => {
         await waitFor(() => {
             expect(addTask).toHaveBeenCalledWith('First batch entry', expect.anything());
         });
-        // The dialog stays open with a cleared input, ready for the next task.
-        // The clear happens after the async save resolves, so wait for it.
+
+
         await waitFor(() => {
             expect(screen.getByPlaceholderText('Add Task')).toHaveValue('');
         });
@@ -870,8 +870,8 @@ describe('QuickAddModal', () => {
 
     it('falls back to the async clipboard API when the paste event is empty (WebKitGTK)', async () => {
         (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
-        // WebKitGTK delivers no items, no files, and no text for an image paste;
-        // the image is only reachable through navigator.clipboard.read() (#690).
+
+
         const addTask = vi.fn(async () => ({ success: true, id: 'task-id' }));
         act(() => {
             useTaskStore.setState((state) => ({
@@ -1125,9 +1125,8 @@ describe('QuickAddModal', () => {
     });
 
     it('shows a settings notice and keeps the dialog open when speech-to-text is unconfigured', async () => {
-        // #886: voice capture with no STT model/key configured must surface a translated
-        // notice pointing at Settings instead of showing a recording indicator and then
-        // silently aborting.
+
+
         renderQuickAddModal();
 
         await act(async () => {
@@ -1150,17 +1149,15 @@ describe('QuickAddModal', () => {
             ))).toBe(true);
         });
 
-        // Dialog stays open and the recorder never engages.
+
         expect(screen.getByRole('dialog')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Start recording' })).toBeInTheDocument();
         expect(tauriMocks.invoke).not.toHaveBeenCalledWith('start_audio_recording');
     });
 
     it.each(['text', 'audio'] as const)('starts recording with Enter from %s capture when speech-to-text is configured', async (captureMode) => {
-        // The record gate and the transcribe gate both resolve readiness through
-        // resolveSpeechCapture from the same settings snapshot, so a configured
-        // offline provider must let recording proceed rather than showing the
-        // "unconfigured" notice from the test above.
+
+
         (window as typeof window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {};
         act(() => {
             useUiStore.setState({ toasts: [] });
@@ -1225,7 +1222,7 @@ describe('QuickAddModal', () => {
         expect(recorder).toHaveFocus();
         await userEvent.keyboard('{Enter}');
         await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith('start_audio_recording'));
-        // Native disabled buttons lose browser focus; busy controls must retain it.
+
         expect(recorder).not.toBeDisabled();
         expect(recorder).toHaveAttribute('aria-disabled', 'true');
         await userEvent.keyboard('{Enter}');
@@ -1236,7 +1233,7 @@ describe('QuickAddModal', () => {
         await waitFor(() => expect(tauriMocks.invoke).toHaveBeenCalledWith('stop_audio_recording'));
         await userEvent.keyboard('{Enter}');
         expect(tauriMocks.invoke.mock.calls.filter(([name]) => name === 'stop_audio_recording')).toHaveLength(1);
-        // Settle the native operation with an empty capture after checking keyboard behavior.
+
         await act(async () => { stopping.resolve(undefined); });
     });
 
@@ -1538,10 +1535,7 @@ describe('QuickAddModal', () => {
         await waitFor(() => expect(addTask).toHaveBeenCalledTimes(1));
     });
 
-    // #1245 left every stored speech-model path stale, so offline transcription
-    // failed on every recording. With "save audio attachments" off the WAV was
-    // then deleted: no transcript, no file, the words gone for good. A failed
-    // transcription must keep the recording and attach it instead.
+
     it('keeps a voice capture as an attachment when transcription fails', async () => {
         const stoppedCapture = createDeferred<{
             path: string;
@@ -1628,10 +1622,7 @@ describe('QuickAddModal', () => {
         expect(fsMocks.remove).not.toHaveBeenCalledWith('/data/audio-kept.wav');
     });
 
-    // A transcription that resolves without writing anything to the task — an
-    // empty transcript, a refused write, a project that could not be created —
-    // loses the words just as surely as one that throws. "Did not throw" is not
-    // "the words were saved", so the recording is kept in that case too.
+
     it('keeps a voice capture when the transcript never reached the task', async () => {
         const stoppedCapture = createDeferred<{
             path: string;
@@ -1655,8 +1646,8 @@ describe('QuickAddModal', () => {
         tauriMocks.invoke.mockImplementation(async (command?: string) => {
             if (command === 'start_audio_recording') return undefined;
             if (command === 'stop_audio_recording') return stoppedCapture.promise;
-            // Silence, or a recording the model could not make out: it returns
-            // an empty transcript instead of failing.
+
+
             if (command === 'transcribe_whisper') return '';
             return false;
         });
@@ -1833,8 +1824,8 @@ describe('QuickAddModal', () => {
         });
 
         await waitFor(() => expect(addTask).toHaveBeenCalledTimes(1));
-        // The recording is still in the dialog, so the user can retry instead of
-        // losing it to a close that never checked the write.
+
+
         expect(screen.getByRole('dialog')).toBeInTheDocument();
         await waitFor(() => {
             expect(useUiStore.getState().toasts.some((toast) => (
@@ -1979,8 +1970,7 @@ describe('QuickAddModal', () => {
             await Promise.resolve();
         });
 
-        // A per-line write loop still ends with 100 tasks, so counting tasks alone
-        // cannot catch a regression: pin the number of store commits instead.
+
         let commits = 0;
         const unsubscribe = useTaskStore.subscribe((state, prevState) => {
             if (state.lastDataChangeAt !== prevState.lastDataChangeAt) commits += 1;
@@ -1999,14 +1989,7 @@ describe('QuickAddModal', () => {
     });
 });
 
-// PERF-01: the closed Quick Add modal is mounted at the app root and used to
-// call getDerivedState() unconditionally in its render body. QuickAddModal
-// does not itself subscribe to _allTasks, so an ambient re-render of this
-// always-mounted overlay (e.g. its parent, App.tsx, re-rendering for an
-// unrelated reason) is what actually paid the derived-state rebuild in
-// production; the areas write below stands in for that ambient re-render.
-// The gate is `isOpen ? getDerivedState() : EMPTY_QUICK_ADD_DERIVED` in
-// QuickAddModal.tsx.
+
 describe('QuickAddModal closed-overlay derived-state gating (PERF-01)', () => {
     const BASE_ISO = '2026-05-01T09:00:00.000Z';
     const bigTasks: Task[] = Array.from({ length: 7_000 }, (_, index) => ({
@@ -2035,10 +2018,10 @@ describe('QuickAddModal closed-overlay derived-state gating (PERF-01)', () => {
         let profile: ReturnType<typeof endNotifyProfile>;
         try {
             await act(async () => {
-                // Invalidate the derived-state cache the way a task write does…
+
                 await useTaskStore.getState().updateTask('perf-task-3333', { title: 'closed-overlay edit' });
-                // …then re-render this always-mounted overlay while it stays
-                // closed, standing in for an ambient parent re-render.
+
+
                 useTaskStore.setState((state) => ({ areas: [...state.areas] }));
             });
         } finally {
@@ -2047,9 +2030,7 @@ describe('QuickAddModal closed-overlay derived-state gating (PERF-01)', () => {
         expect(profile?.derivedRebuildCount).toBe(0);
     });
 
-    // Canary proving the profiler catches this regression class: reading
-    // getDerivedState() unconditionally on every re-render (the pre-fix
-    // shape) shows up as a rebuild for the same store write (red first).
+
     it('rebuilds when a listener reads getDerivedState() unconditionally (old shape)', async () => {
         const unsubscribe = useTaskStore.subscribe((state) => state.getDerivedState());
         beginNotifyProfile();

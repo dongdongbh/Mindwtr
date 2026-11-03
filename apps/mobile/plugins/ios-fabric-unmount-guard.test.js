@@ -18,7 +18,7 @@ describe('ios-fabric-unmount-guard plugin', () => {
 
     expect(source).toContain('RCTViewComponentView');
     expect(source).toContain('unmountChildComponentView:index:');
-    // The recovery is the unmount the original was about to perform.
+
     expect(source).toContain('removeFromSuperview');
   });
 

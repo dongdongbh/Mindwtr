@@ -139,7 +139,7 @@ const getDropboxAppKeyLocal = (): string => {
 };
 
 const setDropboxAppKeyLocal = (_value: string) => {
-    // Dropbox app key is provided via build env (VITE_DROPBOX_APP_KEY).
+
 };
 
 export async function readSyncBackend(deps: ConfigDeps): Promise<SyncBackend> {
@@ -198,7 +198,7 @@ export async function writeWebDavConfig(
     ].map((field) => [field, localStorage.getItem(field)])) : null;
     const capturedSessionPassword = capturedLegacy ? sessionStorage.getItem(WEBDAV_PASSWORD_KEY) : null;
     const retireLegacy = () => {
-        // Retired renderer credentials must not migrate back after an explicit clear.
+
         for (const [field, value] of capturedLegacy ?? []) {
             if (field === SYNC_BACKEND_KEY && value !== 'webdav') continue;
             if (localStorage.getItem(field) === value) localStorage.removeItem(field);
@@ -220,7 +220,7 @@ export async function writeWebDavConfig(
             try {
                 const persisted = await deps.invokeNative<WebDavConfig>('get_webdav_config');
                 if (!persisted.url && !persisted.username && persisted.hasPassword === false) retireLegacy();
-            } catch { /* Removal remains unconfirmed; keep the captured legacy values for retry. */ }
+            } catch {                                                                               }
         }
         deps.reportError('Failed to set WebDAV config', error);
         throw error;
@@ -290,8 +290,8 @@ export async function writeCloudProvider(provider: CloudProvider, deps: ConfigDe
         if (persistedProvider !== normalizedProvider) {
             throw new Error('Cloud sync provider did not persist correctly');
         }
-        // In Tauri, native state is authoritative. This key exists only long
-        // enough to migrate older renderer-owned installations.
+
+
         localStorage.removeItem(CLOUD_PROVIDER_KEY);
     } catch (error) {
         deps.reportError('Failed to set cloud sync provider', error);

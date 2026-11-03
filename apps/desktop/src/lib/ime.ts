@@ -8,7 +8,7 @@ type ImeKeyboardEvent = {
     };
 };
 
-/** Accept native and React keyboard events, including WebKit's IME key code. */
+
 export function isImeComposing(event: ImeKeyboardEvent): boolean {
     const nativeEvent = event.nativeEvent ?? event;
     return nativeEvent.isComposing === true

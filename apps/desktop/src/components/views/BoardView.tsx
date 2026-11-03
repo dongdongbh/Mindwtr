@@ -105,9 +105,8 @@ function DroppableColumn({
     compact?: boolean;
 }) {
     const { setNodeRef } = useDroppable({ id });
-    // No bottom padding on the card: it sits outside the column's scroller, so
-    // it reads as a strip the list can never reach. The gap lives on the
-    // scrolled content instead (#977).
+
+
     const columnPadding = compact ? 'px-2 pt-2' : 'px-3 pt-3';
     const headerMargin = compact ? 'mb-3' : 'mb-4';
     const listSpacing = compact ? 'space-y-2' : 'space-y-3';
@@ -319,9 +318,8 @@ export function BoardView() {
         const excludeKey = isTag ? 'excludedTags' : 'excludedContexts';
         const included = criteria[includeKey] ?? [];
         const excluded = criteria[excludeKey] ?? [];
-        // Tri-state cycle: neutral → included → excluded → neutral, same as
-        // Focus, the shared list panel and mobile. A token is only ever on one
-        // side, so each transition clears the other.
+
+
         const next = included.includes(token)
             ? { include: included.filter((item) => item !== token), exclude: [...excluded, token] }
             : excluded.includes(token)
@@ -355,7 +353,7 @@ export function BoardView() {
         setActiveTask(event.active.data.current?.task || null);
     };
 
-    // Sort tasks for consistency, filter out deleted
+
     const sortedTasks = React.useMemo(
         () => sortTasksBy(tasks.filter(t => !t.deletedAt), sortBy),
         [tasks, sortBy],
@@ -379,7 +377,7 @@ export function BoardView() {
         if (!normalizedSearchQuery) return criteriaFilteredTasks;
         return criteriaFilteredTasks.filter((task) => task.title.toLowerCase().includes(normalizedSearchQuery));
     }, [criteriaFilteredTasks, normalizedSearchQuery]);
-    // One core answer for which tasks are in a sequence, Per section projects included (#1429).
+
     const sequencing = React.useMemo(() => getTaskSequencing(projects, sections), [projects, sections]);
 
     const sequentialProjectFirstTasks = React.useMemo(() => {
@@ -387,11 +385,8 @@ export function BoardView() {
         return perf.measure('sequentialProjectFirstTasks', () => {
             if (!computeSequential) return new Set<string>();
             if (!hasTaskSequences(sequencing)) return new Set<string>();
-            // Waiting tasks hold their chain slot too (a waiting first step
-            // blocks the later ones), so they join the slot computation even
-            // though the board never renders them in the Next column.
-            // Sequences come from the area-visible list, before criteria and search: a filter
-            // that hides step 1 must hide the step, not promote step 2 (#1429 review N1).
+
+
             const chainTasks = areaFilteredTasks.filter((task) => !task.deletedAt && isSequentialChainStatus(task.status));
             return getSequentialFirstTaskIds(chainTasks, sequencing.sequentialProjectIds, {
                 sectionScopedProjectIds: sequencing.sectionScopedProjectIds,
@@ -424,8 +419,7 @@ export function BoardView() {
         [t]
     );
 
-    // Keyboard order matches the reading order of the board: column by column,
-    // card by card.
+
     const visibleTasks = React.useMemo(
         () => COLUMN_STATUSES.flatMap((status) => getColumnTasks(status)),
         [getColumnTasks],
@@ -446,10 +440,8 @@ export function BoardView() {
         setSelectedIndex: setSelectedTaskIndex,
         t,
     });
-    // Lock onto the column the drag is over, then snap to the closest card *within* that
-    // column (by the dragged item's rect, not the raw pointer). Without this, releasing in
-    // the gap between cards falls through to the column droppable and lands at the bottom,
-    // which made cross-column placement feel inconsistent (#791).
+
+
     const collisionDetection = React.useCallback<CollisionDetection>((args) => {
         const pointerHits = pointerWithin(args);
         const intersections = pointerHits.length > 0 ? pointerHits : rectIntersection(args);
@@ -491,7 +483,7 @@ export function BoardView() {
         } else if (action.type === 'reorder') {
             void reorderBoardTasks(action.status, action.orderedIds);
         } else if (action.type === 'moveAndReorder') {
-            // Change status first (keeps recurrence handling), then place at the dropped index.
+
             void (async () => {
                 await moveTask(action.taskId, action.status);
                 await reorderBoardTasks(action.status, action.orderedIds);
@@ -616,9 +608,8 @@ export function BoardView() {
                         <BoardFiltersPanel
                             activeFilterChips={activeFilterChips}
                             allTokens={allTokens}
-                            // The board filter passes no tokenMatchMode, so core
-                            // matches with "any" — the control shows that, unlike
-                            // the List and Focus panels which filter with "all".
+
+
                             contextMatchMode={criteria.contextMatchMode ?? 'any'}
                             duePresets={DUE_DATE_PRESETS}
                             excludedTokens={excludedTokens}

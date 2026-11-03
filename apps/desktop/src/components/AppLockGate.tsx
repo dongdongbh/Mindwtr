@@ -12,16 +12,12 @@ import {
 } from '../lib/app-lock';
 import { isMacRuntime, isTauriRuntime } from '../lib/runtime';
 
-/** Ctrl+Shift+L / Cmd+Shift+L. Shift keeps it off AltGr layouts and out of text input. */
+
 export function isAppLockShortcut(event: Pick<KeyboardEvent, 'altKey' | 'code' | 'ctrlKey' | 'metaKey' | 'shiftKey'>): boolean {
     return (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && event.code === 'KeyL';
 }
 
-/**
- * Makes every child of <body> except the lock screen inert and hidden from
- * assistive tech, including portals (dialogs, menus) added while locked. The
- * React tree beneath stays mounted, so unsaved edits survive the lock.
- */
+
 function hideEverythingBut(keep: HTMLElement): () => void {
     const changed = new Map<Element, boolean>();
     const hide = (element: Element) => {
@@ -53,10 +49,7 @@ function outcomeMessageKey(outcome: AppLockOutcome): string | null {
     return null;
 }
 
-/**
- * The lock screen plus the triggers that engage it. Mounted next to the app
- * (not around it), from the first render, so nothing unmounts on lock.
- */
+
 export function AppLockGate() {
     const { t } = useLanguage();
     const enabled = useAppLockStore((state) => state.enabled);
@@ -64,7 +57,7 @@ export function AppLockGate() {
     const trigger = useAppLockStore((state) => state.trigger);
     const authInFlight = useAppLockStore((state) => state.authInFlight);
     const [message, setMessage] = useState<string | null>(null);
-    // The OS check answered "unavailable": offer the way out (Rust re-checks).
+
     const [checkUnavailable, setCheckUnavailable] = useState(false);
     const overlayRef = useRef<HTMLDivElement>(null);
     const autoPromptRef = useRef<'armed' | 'waiting' | 'done'>('waiting');
@@ -72,7 +65,7 @@ export function AppLockGate() {
     useLayoutEffect(() => {
         if (!locked || !overlayRef.current) return;
         const restore = hideEverythingBut(overlayRef.current);
-        // Drives the print rule in index.css: only the lock screen prints.
+
         document.documentElement.setAttribute('data-app-locked', 'true');
         overlayRef.current.focus();
         return () => {
@@ -83,7 +76,7 @@ export function AppLockGate() {
 
     const unlock = async () => {
         setMessage(null);
-        // macOS shows the reason after "Mindwtr is trying to …".
+
         const outcome = await unlockApp(t(isMacRuntime() ? 'appLock.macUnlockReason' : 'appLock.prompt'));
         setCheckUnavailable(outcome === 'unavailable');
         const key = outcomeMessageKey(outcome);
@@ -93,14 +86,12 @@ export function AppLockGate() {
     const turnOff = async () => {
         const outcome = await turnOffAppLockWhenUnavailable();
         if (outcome === 'success') return;
-        // The check is available again: stay locked and use Unlock.
+
         setCheckUnavailable(false);
         setMessage(t('appLock.cancelled'));
     };
 
-    // Auto-prompt once per lock, only when the user came back: at startup and
-    // after an away lock as soon as the window has focus; after a manual or idle
-    // lock only once focus has left and returned. Never while unfocused.
+
     useEffect(() => {
         if (!locked) {
             autoPromptRef.current = 'waiting';
@@ -114,14 +105,14 @@ export function AppLockGate() {
             autoPromptRef.current = 'done';
             void unlock();
         };
-        // Leaving and coming back re-arms it, even after a cancelled prompt.
-        // The prompt's own blur happens while authInFlight, so it does not.
+
+
         const onBlur = () => {
             if (!useAppLockStore.getState().authInFlight) {
                 autoPromptRef.current = 'armed';
             }
         };
-        // A timer, not requestAnimationFrame: rAF stalls in a hidden window.
+
         const timer = window.setTimeout(tryPrompt, 0);
         window.addEventListener('focus', tryPrompt);
         window.addEventListener('blur', onBlur);

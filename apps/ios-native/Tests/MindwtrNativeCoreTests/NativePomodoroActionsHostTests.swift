@@ -2,8 +2,7 @@ import Foundation
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Five controls through actual private bundle/JSC, inline journal and SQLite.
-/// This test file does not activate timer UI, alarms or completion feedback.
+
 final class NativePomodoroActionsHostTests: XCTestCase {
     private var root: URL!, bundle: URL!
     private var database: URL { root.appendingPathComponent("core.sqlite") }
@@ -92,7 +91,7 @@ final class NativePomodoroActionsHostTests: XCTestCase {
     private func command() throws -> [String: Any] { try object(String(contentsOf: journal, encoding: .utf8)) }
     private func assertRetainedCommand(_ before: [String: Any], file: StaticString = #filePath, line: UInt = #line) throws {
         let after = try command()
-        // Recovery may re-encode the outer envelope; inner JSON strings remain literal.
+
         XCTAssertEqual(Data(try XCTUnwrap(after["argumentsJSON"] as? String).utf8), Data(try XCTUnwrap(before["argumentsJSON"] as? String).utf8), file: file, line: line)
         XCTAssertEqual(Data(try json(after).utf8), Data(try json(before).utf8), file: file, line: line)
     }
@@ -208,7 +207,7 @@ final class NativePomodoroActionsHostTests: XCTestCase {
         }
         for identity in [NSNull(), "", " task", "__proto__", true, String(repeating: "😀", count: 251)] as [Any] {
             var value = try object(request("selectTask")); value["taskId"] = identity
-            // Explicit null is valid and is checked separately; absence is invalid.
+
             if identity is NSNull { value.removeValue(forKey: "taskId") }
             await failure { _ = try await core.writePomodoroTransition(requestJSON: self.json(value)) }
         }
@@ -423,8 +422,8 @@ final class NativePomodoroActionsHostTests: XCTestCase {
         for action in actions { await failure { _ = try await core.writePomodoroTransition(requestJSON: self.request(action)) } }
         XCTAssertEqual(try Data(contentsOf: editor.url), saved); XCTAssertEqual(try snapshot(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path)); await core.close()
-        // A separate genuine committed control becomes owed before a saved
-        // checkpoint is introduced; startup must preserve both authorities.
+
+
         let previous = try enterCase(); try await seed(); let faults = HostIOFaults(), owed = host(faults); _ = try await owed.start()
         faults.journalRemove = { throw HostFailure("terminal") }
         await failure { _ = try await owed.writePomodoroTransition(requestJSON: self.request("reset")) }; await owed.close()
@@ -494,8 +493,8 @@ final class NativePomodoroActionsHostTests: XCTestCase {
 
     func testActionDiagnosticProvesSQLOnlyIncludingReplayAndLoggerFailureCannotRevokeResult() async throws {
         try await seed(running: false); let faults = HostIOFaults(), core = host(faults); _ = try await core.start()
-        // Enable the real shared diagnostics sink; an arbitrary bridge log is
-        // not the proof. No request or raw provider error belongs in the line.
+
+
         _ = try await core.call("dataSetting", argumentsJSON: json([json(["requestId": UUID().uuidString.lowercased(), "edit": ["type": "debugLogging", "value": true]])]))
         var markers: [String] = []; faults.commandDiagnostic = { if $0.hasPrefix("pomodoroActionConfirmed:") { markers.append($0) } }
         await failure {
@@ -506,7 +505,7 @@ final class NativePomodoroActionsHostTests: XCTestCase {
         faults.journalRemove = { throw HostFailure("terminal cleanup") }
         let original = try request("reset"); await failure { _ = try await core.writePomodoroTransition(requestJSON: original) }
         XCTAssertEqual(markers, ["pomodoroActionConfirmed:reset"])
-        _ = try await core.diagnosticsFileAction("logShare") // flush the shared serialized sink
+        _ = try await core.diagnosticsFileAction("logShare")
         let log = NativeDiagnosticsLogFile(libraryRoot: root)
         let text = try log.perform("read", text: "")
         XCTAssertTrue(text.contains("v1.3.5/ios-pomodoro-actions")); XCTAssertTrue(text.contains("confirmed")); XCTAssertTrue(text.contains("reset"))
@@ -516,8 +515,8 @@ final class NativePomodoroActionsHostTests: XCTestCase {
         XCTAssertEqual(try json(context), try json(["releaseCheck": "v1.3.5/ios-pomodoro-actions", "outcome": "confirmed", "action": "reset"]))
         XCTAssertFalse(text.contains("PRIVATE")); XCTAssertFalse(String(try XCTUnwrap(proofLines.first)).contains(try XCTUnwrap(object(original)["requestId"] as? String)))
         let after = try snapshot(); faults.journalRemove = nil
-        // A directory at the native log file path makes the actual append
-        // refuse; no App or fake acknowledgement replaces the storage proof.
+
+
         try FileManager.default.moveItem(at: log.mainURL, to: root.appendingPathComponent("saved-proof.log"))
         try FileManager.default.createDirectory(at: log.mainURL, withIntermediateDirectories: false)
         let retry = try object(await core.writePomodoroTransition(requestJSON: original))

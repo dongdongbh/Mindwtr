@@ -9,7 +9,7 @@ import type { NativeTaskCompletionEnvelope, NativeTaskCompletionUndoEnvelope } f
 import { SqliteAdapter } from './sqlite-adapter';
 import type { AppData, Task } from './types';
 import { retainTaxonomyEffects } from './taxonomy-catalog';
-// Raw-byte preservation cases catalog existing labels before their baseline; legacy RN/native parity cases remain uncatalogued.
+
 const uuidState = vi.hoisted(() => ({ count: 0 }));
 vi.mock('./uuid', async (original) => ({ ...await original<typeof import('./uuid')>(), generateUUID: () => `00000000-0000-4000-8000-${String(190 + uuidState.count++).padStart(12, '0')}` }));
 const NOW = '2026-10-03T13:00:00.000Z';

@@ -151,7 +151,7 @@ describe('mobile app lock authentication', () => {
     expect(at(5, 4 * 60_000)).toBe(true);
     expect(at(1, 60_000)).toBe(false);
     expect(at(15, 16 * 60_000)).toBe(false);
-    // Immediately, a cold start or a lock left locked, and a clock moved back all ask.
+
     expect(at(0, 0)).toBe(false);
     expect(at(15, 1_000, null)).toBe(false);
     expect(at(15, -1)).toBe(false);

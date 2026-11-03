@@ -13,13 +13,13 @@ const normalizeColorScheme = (value: unknown): WidgetColorScheme | undefined => 
 
 export const getSystemColorSchemeForWidget = (): WidgetColorScheme | undefined => {
     try {
-        // Appearance.getColorScheme() is JS-cached and can become stale in headless tasks.
-        // Read the native module directly first so widget renders match current system mode.
+
+
         const nativeAppearance = (NativeModules.Appearance as NativeAppearanceModule | undefined) ?? undefined;
         const nativeScheme = normalizeColorScheme(nativeAppearance?.getColorScheme?.());
         if (nativeScheme) return nativeScheme;
     } catch {
-        // Fall through to Appearance fallback below.
+
     }
 
     try {

@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** A resume with a recording queued calls core only once core went quiet (or the bound passed); an empty folder never calls it. */
+
 class WidgetAudioDrainTest {
     private class Clock(var now: Long = 10_000) {
         var lastCallAt = 0L
@@ -28,7 +28,7 @@ class WidgetAudioDrainTest {
     @Test fun aQueuedRecordingRunsOnlyAfterTheResumedScreensReads() {
         val clock = Clock()
         val resumedAt = clock.now
-        // The resumed screen's Focus read just went in.
+
         clock.lastCallAt = clock.now
         assertEquals("quiet", WidgetAudioDrain.run({ true }, { clock.awaitQuiet(resumedAt) }, { clock.ingestedAt += clock.now }))
         assertEquals(1, clock.ingestedAt.size)
@@ -51,7 +51,7 @@ class WidgetAudioDrainTest {
     }
 }
 
-/** The drain asks the queue, never the WAV folder: only a queued audio item starts one. */
+
 class WidgetAudioDrainQueueTest {
     @get:org.junit.Rule val folder = org.junit.rules.TemporaryFolder()
 

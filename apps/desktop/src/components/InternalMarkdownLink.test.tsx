@@ -69,7 +69,7 @@ describe('InternalMarkdownLink', () => {
         await waitFor(() => expect(copy).toHaveBeenCalledWith(uri));
     });
 
-    it.each(['javascript:alert(1)', 'data:text/html,bad', 'file:///private/doc', 'obsidian://open?file=a', 'custom://open'])('keeps blocked Markdown href %s inert', (href) => {
+    it.each(['javascript:alert(1)', 'data:text/html,bad', 'file:///private/doc', 'obsidian:open?file=a', 'custom://open'])('keeps blocked Markdown href %s inert', (href) => {
         const { queryByRole } = render(
             <LanguageProvider><InternalMarkdownLink href={href} linkContext={currentLinkContext()}>Blocked</InternalMarkdownLink></LanguageProvider>
         );
@@ -114,8 +114,8 @@ describe('InternalMarkdownLink', () => {
     });
 
     it('gives external links no href for the engine to preconnect to', () => {
-        // #913: WebView2 speculatively resolves and connects to any href's
-        // host on hover/click; the URL must live only in the click handler.
+
+
         const { getByRole, container } = render(
             <LanguageProvider>
                 <InternalMarkdownLink href="https://example.com/page" linkContext={currentLinkContext()}>Example</InternalMarkdownLink>

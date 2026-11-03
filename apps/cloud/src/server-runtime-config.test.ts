@@ -54,7 +54,7 @@ describe('resolveCloudRuntimeConfig', () => {
             new URL(`../../../docker/${name}`, import.meta.url).pathname
         ));
         for (const file of composeFiles) {
-            // Name only: a fixed fallback would hide a raised MINDWTR_CLOUD_MAX_BODY_BYTES.
+
             expect(readFileSync(file, 'utf8')).toMatch(/^ {6}- MINDWTR_CLOUD_MAX_DATA_BODY_BYTES$/m);
         }
         if (spawnSync('docker', ['compose', 'version']).status !== 0) return;
@@ -73,10 +73,10 @@ describe('resolveCloudRuntimeConfig', () => {
         };
         for (const file of composeFiles) {
             expect(render(file, '10000000')).toBe('10000000');
-            // null = name without a value: Docker leaves the variable unset in the container.
+
             expect(render(file)).toBeNull();
         }
-    }, 30_000); // Includes five Docker Compose process launches on shared CI runners.
+    }, 30_000);
 
     test('keeps the deployed defaults and rate-dependent attachment default', () => {
         expect(resolveCloudRuntimeConfig({})).toEqual({

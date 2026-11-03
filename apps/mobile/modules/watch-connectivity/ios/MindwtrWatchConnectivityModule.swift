@@ -15,8 +15,8 @@ public final class MindwtrWatchConnectivityModule: Module {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                // The event is a wake-up edge only. Queue content stays on disk
-                // until the existing pending-capture ingestion path reads it.
+
+
                 self?.sendEvent("onPendingCapture", [:])
             }
         }

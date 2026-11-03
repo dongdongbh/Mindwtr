@@ -10,7 +10,7 @@ const logNotificationOutcome = (message: string, extra: Record<string, string>) 
     void logInfo(`[Local Notifications] ${message}`, { scope: 'notifications', extra });
 };
 
-// One replay owner across foreground hooks and headless wakes; native receipts remain the durable owner.
+
 let completionReplay: Promise<number> | null = null;
 let replayRequested = false;
 export const replayNotificationCompletions = (): Promise<number> => {
@@ -35,8 +35,8 @@ export const replayNotificationCompletions = (): Promise<number> => {
                             const { result } = await runWithImmediateSaveTracking(() => state.updateTask(completion.taskId!, { ...REMINDER_COMPLETE_UPDATE }));
                             if (!result.success) throw new Error('Completion update failed');
                         } else {
-                            // A previous failed save may already have changed memory (including recurrence).
-                            // Save that snapshot again without reapplying completion or generating another instance.
+
+
                             await state.persistSnapshot();
                         }
                         await flushPendingTaskActionSave();
@@ -59,7 +59,7 @@ export const replayNotificationCompletions = (): Promise<number> => {
                         void logWarn('[Local Notifications] Done action retained for retry', {
                             scope: 'notifications', extra: { releaseCheck: 'v1.3.5/reminder-done-durable', outcome: 'retained' },
                         });
-                        // Retry only on another receipt, readiness change, or foreground; no failure loop.
+
                         replayRequested = false;
                         return savedCount;
                     }

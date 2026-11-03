@@ -4,14 +4,7 @@ import { useTaskStore, flushPendingSave, resetForTests, setStorageAdapter } from
 import type { StorageAdapter } from './storage';
 import type { Area, Project, Section, Task } from './types';
 
-// The project counterpart to local-api-action-parity.test.ts: the same shared
-// fixture also carries `kind: "project-action"` cases, asserted on the Rust
-// side by local_api.rs's
-// `local_api_project_delete_or_restore_matches_core_fixture`. The rule both
-// engines implement - delete detaches live tasks and soft-deletes live
-// sections, restore revives only the rows from the same cascade, repairs the
-// area link and stamps a fresh revision on every row it touches - is stated
-// once, here, instead of in two hand-written sets of assertions.
+
 type ProjectActionParityCase = {
     kind: 'project-action';
     name: string;
@@ -26,7 +19,7 @@ type ProjectActionParityCase = {
         tasks?: Task[];
         areas?: Area[];
     };
-    /** Only the rows that changed, each in full. */
+
     expected: {
         projects?: Record<string, unknown>[];
         sections?: Record<string, unknown>[];
@@ -42,8 +35,7 @@ const projectActionCases = allCases.filter(
     (testCase): testCase is ProjectActionParityCase => testCase.kind === 'project-action'
 );
 
-// Consolidation-law pin (COMMON-20260730.md), same as the action-kind roster:
-// a test that just iterates the cases cannot notice the fixture shrinking.
+
 const PINNED_PROJECT_ACTION_CASE_NAMES = [
     'delete: detaches live tasks, soft-deletes live sections, leaves deleted rows alone',
     'restore: revives the same cascade and leaves other deletions alone',
@@ -56,8 +48,7 @@ const PINNED_PROJECT_ACTION_CASE_NAMES = [
     'restore: a purged project is refused',
 ].sort();
 
-// JSON round-trip so `deletedAt: undefined` (how the store clears a field)
-// compares equal to the Rust engine's key removal.
+
 const toPlainRow = (row: unknown): Record<string, unknown> =>
     JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
 
@@ -106,9 +97,8 @@ describe('local API project write-action parity fixture (kind: project-action)',
                 tasks: testCase.data.tasks ?? [],
                 areas: testCase.data.areas ?? [],
             };
-            // Seeded straight into the store's canonical arrays: the fixture
-            // rows are what both engines read, so a load-time normalization
-            // pass would only add fields the Rust side never sees.
+
+
             useTaskStore.setState({
                 tasks: [],
                 projects: [],

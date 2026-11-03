@@ -44,7 +44,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-/** A failure as RN's module rejects it: its fixed code `E_GMAIL_<KIND>`, never its own text (a JSONException can carry mail text). */
+
 internal fun gmailFailureCode(failure: Throwable): String = "E_GMAIL_${classifyGmailFailure(failure).kind}"
 
 private fun classifyGmailFailure(failure: Throwable): GmailFailure {
@@ -60,18 +60,7 @@ private fun classifyGmailFailure(failure: Throwable): GmailFailure {
     }
 }
 
-/**
- * RN's MindwtrGmailAuthorizationModule (apps/mobile/modules/gmail-authorization), ported to this host: the same five calls
- * (`status`, `connect`, `cancel`, `disconnect`, `get`), the same guards, and RN's GmailAuthorizationCore.kt compiled as it is
- * (app/build.gradle.kts rnGmail). Google Identity Services' AuthorizationClient with the account picker (`com.google` only) and
- * the `gmail.readonly` scope only. No token is ever stored or leaves this class: Google's service holds it, and [session] keeps it
- * in memory. RN's SharedPreferences file keeps only the selected account, so an RN user who upgrades stays connected.
- *
- * Process scope, not the Activity's: the account picker and the consent screen answer through MainActivity's two result
- * launchers ([GmailConsentPrompt]), so a rotation during consent still reaches the pending call. Expo's Promise is the host's
- * reply ([call]); every failure replies with RN's fixed `E_GMAIL_<KIND>` code. Reads run on RN's own 3-thread pool, so a 30 s Gmail
- * read never holds the engine thread or the other host calls.
- */
+
 class GmailAuthorization(context: Context) {
     private val context = context.applicationContext
     private val session = GmailSession()
@@ -95,10 +84,7 @@ class GmailAuthorization(context: Context) {
         GmailConsentPrompt.answered = { kind, resultCode, data -> handleActivityResult(kind, resultCode, data) }
     }
 
-    /**
-     * One of RN's five calls: [json] is `{ op, path? }`. [reply] gets its value (JSON) or a failure whose message is the fixed code.
-     * It never waits: each call goes to the Gmail pool, or to the main thread (connect), as RN's module runs it.
-     */
+
     fun call(json: String, reply: (Result<Any?>) -> Unit) {
         val request = try { JSONObject(json) } catch (_: Exception) { return reject(reply, GmailFailure("OTHER")) }
         when (request.optString("op")) {
@@ -109,7 +95,7 @@ class GmailAuthorization(context: Context) {
                 cancel()
                 reply(Result.success(null))
             } catch (failure: Exception) { reject(reply, failure) }
-            // RN's disconnect writes the selection's preferences: off the engine thread here.
+
             "disconnect" -> work(reply, settles = false) { disconnect(reply) }
             else -> reject(reply, GmailFailure("CONFIG"))
         }
@@ -170,8 +156,7 @@ class GmailAuthorization(context: Context) {
         return state(enabled, if (enabled) session.snapshot().identity else null)
     }
 
-    /** RN's closeConsent: the pending connect answers CANCELLED. The picker or consent screen still open is left to the user (a
-     *  result launcher cannot finish it, as RN's finishActivity did); its late answer settles nothing. */
+
     private fun closeConsent(consent: Consent?) {
         if (consent == null) return
         reject(consent.reply, GmailFailure("CANCELLED"))
@@ -192,7 +177,7 @@ class GmailAuthorization(context: Context) {
         cancelConnections()
     }
 
-    /** Main thread. */
+
     private fun connect(reply: (Result<Any?>) -> Unit) {
         var started: Consent? = null
         try {
@@ -214,7 +199,7 @@ class GmailAuthorization(context: Context) {
                 .setAllowableAccountsTypes(listOf("com.google"))
                 .setAlwaysShowAccountPicker(true).build()
             launch(AccountPicker.newChooseAccountIntent(options))
-            // RN's 180 s consent limit.
+
             main.postDelayed({
                 synchronized(session) {
                     if (pending === consent) {
@@ -237,7 +222,7 @@ class GmailAuthorization(context: Context) {
         }
     }
 
-    /** MainActivity's launchers' answers: [kind] "picker" or "consent". Main thread. */
+
     private fun handleActivityResult(kind: String, resultCode: Int, data: Intent?) {
         val consent = synchronized(session) {
             pending?.takeIf {
@@ -398,7 +383,7 @@ class GmailAuthorization(context: Context) {
         }
     }
 
-    /** A Gmail pool thread. */
+
     private fun disconnect(reply: (Result<Any?>) -> Unit) {
         var old: Consent? = null
         try {
@@ -426,7 +411,7 @@ class GmailAuthorization(context: Context) {
         finally { closeConsent(old); cancelConnections() }
     }
 
-    /** [action] on the Gmail pool; its value is the reply unless [settles] is false (it replies itself). */
+
     private fun work(reply: (Result<Any?>) -> Unit, settles: Boolean = true, action: () -> Any?) {
         try {
             io.execute {

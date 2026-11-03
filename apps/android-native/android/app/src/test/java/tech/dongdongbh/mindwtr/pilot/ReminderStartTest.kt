@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
-/** The reminder alarms' start on the process's host (ProcessCoreHost), and what a resume does before and after it. */
+
 class ReminderStartTest {
     private val events = mutableListOf<String>()
     private var startFailure: Throwable? = null

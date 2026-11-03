@@ -64,9 +64,7 @@ export function TrashView() {
         return () => window.clearTimeout(timer);
     }, [perf.enabled]);
 
-    // The area filter applies here as it does everywhere else, and as it does
-    // on mobile's Trash. `isTaskVisibleInArea` cannot be used: it hides deleted
-    // tasks, which are the only ones Trash shows.
+
     const trashedTasks = useMemo(() => {
         const filtered = _allTasks.filter((task) => (
             task.deletedAt
@@ -94,8 +92,7 @@ export function TrashView() {
         [trashedProjects, trashedTasks]
     );
 
-    // The scope navigates tasks only, but it walks them in the order they are
-    // rendered — the deleted-at timeline, not the raw store order.
+
     const timelineTasks = useMemo(
         () => trashItems.flatMap((item) => (item.type === 'task' ? [item.task] : [])),
         [trashItems]
@@ -189,16 +186,15 @@ export function TrashView() {
         exitSelectionMode();
     }, [exitSelectionMode, purgeProject, purgeTasks, requestConfirmation, selectedProjectIds, selectedTaskIds, selectionCount, t]);
 
-    // Purge cannot be undone, so a filtered list may only clear what it shows.
+
     const handleClearTrash = async () => {
         if (trashedItemCount === 0) return;
         const scope = resolveTrashClearScope(trashedTasks, trashedProjects, _allTasks, _allProjects);
         const confirmed = await requestConfirmation(scope.narrowed
             ? {
                 title: t('trash.deleteConfirm'),
-                // Two lines, not one sentence: a hard-coded ". " join would be
-                // user-visible text no locale file controls (zh and ja end a
-                // sentence with 。). The dialog renders \n (whitespace-pre-line).
+
+
                 description: `${scope.taskIds.length} ${t('common.tasks')} · ${scope.projectIds.length} ${t('projects.title')}\n${t('trash.deleteConfirmBody')}`,
                 confirmLabel: t('trash.clearAll'),
                 cancelLabel: tFallback(t, 'common.cancel', 'Cancel'),
@@ -212,8 +208,8 @@ export function TrashView() {
                 cancelLabel: tFallback(t, 'common.cancel', 'Cancel'),
             });
         if (!confirmed) return;
-        // Always the ids the dialog counted, never a fresh whole-store sweep: an
-        // item that arrived while the dialog was open was never shown to the user.
+
+
         await Promise.all([
             scope.taskIds.length > 0 ? purgeTasks(scope.taskIds) : Promise.resolve(),
             ...scope.projectIds.map((projectId) => purgeProject(projectId)),
@@ -244,19 +240,14 @@ export function TrashView() {
         purgeProject(project.id);
     };
 
-    // Trash registers the shared scope by hand instead of through
-    // useTaskListScope: `updateTask`/`moveTask` write to a tombstone just fine,
-    // so the generic "mark done" and the s-chords would silently mutate a task
-    // while its row sat unchanged in Trash. Here the done key restores and the
-    // delete key purges — the only two things this view actually does — and the
-    // status chords stay unbound.
+
     const [selectedTaskIndex, setSelectedTaskIndex] = useState(0);
     const scopeRef = useRef({ timelineTasks, selectedTaskIds, selectedTaskIndex, restoreTask, handlePurgeTask, toggleTaskSelection, t });
     scopeRef.current = { timelineTasks, selectedTaskIds, selectedTaskIndex, restoreTask, handlePurgeTask, toggleTaskSelection, t };
 
     const trashScope = useMemo(() => {
-        // Same resolution rule as the shared scope: DOM focus wins over the
-        // stored index, so the keys act on the row the user is actually on.
+
+
         const actingTask = (): Task | null => {
             const { timelineTasks: tasks, selectedTaskIndex: index } = scopeRef.current;
             if (tasks.length === 0) return null;
@@ -274,8 +265,8 @@ export function TrashView() {
                 getSelectedIndex: () => scopeRef.current.selectedTaskIndex,
                 setSelectedIndex: setSelectedTaskIndex,
                 t: (key) => scopeRef.current.t(key),
-                // Keyboard select reveals the checkboxes: without selection mode
-                // the toggled rows would have nothing to show for it.
+
+
                 toggleSelect: (task) => {
                     setSelectionMode(true);
                     scopeRef.current.toggleTaskSelection(task.id);
@@ -385,8 +376,8 @@ export function TrashView() {
             <div className="relative">
                 <input
                     type="text"
-                    // Same shape and Escape-back-to-the-list behaviour as every
-                    // other view's filter input (#959).
+
+
                     data-view-filter-input
                     placeholder={t('trash.searchPlaceholder')}
                     value={searchQuery}
@@ -448,9 +439,8 @@ export function TrashView() {
 
                             const { task } = item;
                             return (
-                                // data-task-id is what the shared task-list scope resolves
-                                // keyboard actions against; project rows carry none because
-                                // the scope navigates tasks only.
+
+
                                 <div
                                     key={`task-${task.id}`}
                                     data-task-id={task.id}
@@ -472,8 +462,8 @@ export function TrashView() {
                                     {!selectionMode && <div className="flex gap-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
                                         <button
                                             onClick={() => restoreTask(task.id)}
-                                            // A trashed task has no editor, so `e` maps to the
-                                            // one non-destructive row action it does have.
+
+
                                             data-task-edit-trigger
                                             className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-primary transition-colors"
                                             title={t('trash.restore')}

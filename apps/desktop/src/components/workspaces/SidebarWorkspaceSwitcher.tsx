@@ -15,10 +15,7 @@ function ColorDot({ color }: { color: string | null }) {
     );
 }
 
-/**
- * Sidebar workspace switcher (#1473). Renders nothing until a second
- * workspace exists, so a user who never adds one sees no change.
- */
+
 export function SidebarWorkspaceSwitcher({ collapsed = false }: { collapsed?: boolean }) {
     const { t } = useLanguage();
     const { list, nameOf, requestSwitch, confirmModal, switching } = useWorkspaces();

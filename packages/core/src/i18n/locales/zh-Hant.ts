@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const zhHant: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "開始前提醒",
     "taskEdit.advanceReminderLabel": "提前提醒",
     "taskEdit.advanceReminderMinutes": "提前 {count} 分鐘",
     "taskEdit.advanceReminderHour": "提前 1 小時",
@@ -195,7 +196,7 @@ export const zhHant: Record<string, string> = {
         'settings.automationCaptureCopyFailed': "無法複製收集權杖。",
         'settings.automationCaptureLoadFailed': '無法載入自動化擷取設定。',
         'settings.automationCaptureUpdateFailed': '無法更新自動化擷取設定。',
-        // Ratchet backfill (i18n-fallback-20260730-12): new en.ts keys
+
         'accessibility.skipToContent': '跳轉到內容',
         'accessibility.mainContent': '主要內容',
         'quickAdd.pastedImageTitle': '截圖',
@@ -1146,6 +1147,7 @@ export const zhHant: Record<string, string> = {
         'review.projectsStepDesc': '確保每個啟用中的專案都有下一步行動。',
         'review.projectsHint': '回顧每個專案。它至少有一個具體的下一步行動嗎？如果沒有，現在添加一個。將完成的專案標記爲完成。',
         'review.hasNextAction': '有下一步行動',
+    'review.projectDeferred': '已排程',
         'review.needsAction': '需要行動',
         'review.noActiveTasks': '沒有啟用中的任務',
         'review.somedayStep': '將來/也許',
@@ -2282,7 +2284,7 @@ export const zhHant: Record<string, string> = {
         'taskEdit.relativeStartDaysShort': '天',
         'taskEdit.relativeStartWeeksShort': '週',
         'taskEdit.relativeStartBeforeDue': '截止前',
-        // Mobile-only copy migrated from keyed helpers.
+
         'calendar.mobile.1Day': '1 天',
         'calendar.mobile.day': '日',
         'calendar.mobile.dayDetailsPanelHandle': '當天詳情面板把手',
@@ -2581,7 +2583,6 @@ export const zhHant: Record<string, string> = {
         'captureNotification.channelName': '快速收集',
 
 
-        // Mind sweep (guided capture)
         'mindSweep.launchButton': '思緒清掃',
         'mindSweep.title': '思緒清掃',
         'mindSweep.intro': '跟著幾組提示清單，把腦中浮現的事情都寫下來。不用篩選、不用整理——每一條都會進入收集箱，稍後再處理。',
@@ -2732,7 +2733,7 @@ export const zhHant: Record<string, string> = {
         'onboarding.toastReady': '「快速上手」已在專案中就緒。',
         'onboarding.toastFailed': '建立「快速上手」失敗。',
 
-        // Settings — moved from apps/desktop settings/labels.ts (settings-i18n-20260724-01)
+
         'settings.integrations': '集成',
         'settings.searchPlaceholder': '搜索設置…',
         'settings.lookAndFeel': '外觀與風格',

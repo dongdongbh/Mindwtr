@@ -3,7 +3,7 @@ import UserNotifications
 import XCTest
 @testable import MindwtrNativeCore
 
-/// SDK values only: no notification center, host, storage, or scheduling effects.
+
 final class NativeReminderResponseTests: XCTestCase {
     private let namespace = "tech.dongdongbh.mindwtr.native-ui.450"
     private let delivery = Date(timeIntervalSince1970: 1_900_000_000.123)
@@ -179,7 +179,7 @@ final class NativeReminderResponseTests: XCTestCase {
             XCTAssertEqual(Set(fields.allKeys.compactMap { $0 as? String }), Set(["notificationId", "actionIdentifier", "kind", "taskId", "projectId", "context"]))
             XCTAssertEqual(fields["notificationId"] as? String, request.identifier)
             XCTAssertEqual(fields["actionIdentifier"] as? String, "open")
-            XCTAssertEqual(fields["kind"] as? String, "task-review") // Route precedence remains shared core policy.
+            XCTAssertEqual(fields["kind"] as? String, "task-review")
             XCTAssertNil(fields["alarmKey"])
             let complete = try XCTUnwrap(capture(request, NativeReminderResponse.completeActionIdentifier))
             XCTAssertEqual(complete.action, .complete)
@@ -218,7 +218,7 @@ final class NativeReminderResponseTests: XCTestCase {
                                         receivedAt: received.addingTimeInterval(60)))
         XCTAssertEqual(first.requestID, retry.requestID)
         XCTAssertNotEqual(first.requestedAtMs, retry.requestedAtMs)
-        // The inbox must retain the first accepted timestamp/payload for this same request ID.
+
         XCTAssertNotEqual(first.payloadJSON, retry.payloadJSON)
         XCTAssertNotEqual(first.requestID, capture(firstRequest, NativeReminderResponse.snoozeActionIdentifier,
                                                   deliveredAt: delivery.addingTimeInterval(0.000_001))?.requestID)
@@ -238,7 +238,7 @@ final class NativeReminderResponseTests: XCTestCase {
         let response = try XCTUnwrap(capture(fixed, NativeReminderResponse.snoozeActionIdentifier,
                                             deliveredAt: Date(timeIntervalSinceReferenceDate: 123.125)))
         XCTAssertEqual(response.deliveredAtBits, "405ec80000000000")
-        // Independent Python hashlib SHA256 over the six-string compact JSON array.
+
         XCTAssertEqual(response.requestID, "1d96c985-1e73-8cdc-83b8-224bd19f40af")
     }
 
@@ -328,7 +328,7 @@ final class NativeReminderResponseTests: XCTestCase {
         XCTAssertNil(capture(changing(request) { $0.body = "another" }))
         XCTAssertNil(capture(changing(request) { $0.threadIdentifier = "another" }))
         XCTAssertNil(capture(changing(request) { $0.userInfo["data"] = ["alarmKey": "task:synthetic-450", "taskId": "another"] }))
-        // Swift String equality canonically normalizes Unicode; snapshot agreement must retain the bytes.
+
         var original = details(); original["message"] = "é"
         XCTAssertNil(capture(changing(try self.request(original)) { $0.body = "e\u{301}" }))
     }

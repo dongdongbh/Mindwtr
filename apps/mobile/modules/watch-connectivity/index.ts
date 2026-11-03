@@ -43,7 +43,7 @@ function withoutNullValues(value: unknown): unknown {
   return value;
 }
 
-/** True only for an enabled iOS build with the local native module linked. */
+
 export function isWatchConnectivityAvailable(): boolean {
   if (Platform.OS !== 'ios' || !nativeModule) return false;
   try {
@@ -53,13 +53,13 @@ export function isWatchConnectivityAvailable(): boolean {
   }
 }
 
-/** Activates the receiver. It is also activated natively at app launch. */
+
 export async function activateWatchConnectivity(): Promise<void> {
   if (!isWatchConnectivityAvailable()) return;
   await nativeModule?.activateWatchConnectivity?.();
 }
 
-/** Sends the latest bounded Focus/Pomodoro snapshot to the companion Watch. */
+
 export async function updateWatchApplicationContext(
   context: Record<string, unknown>,
 ): Promise<void> {
@@ -68,7 +68,7 @@ export async function updateWatchApplicationContext(
   await nativeModule?.updateWatchApplicationContext?.(sanitized);
 }
 
-/** Wakes JS to drain pending-captures; the native event carries no task content. */
+
 export function addPendingWatchCaptureListener(
   listener: () => void,
 ): WatchConnectivitySubscription {

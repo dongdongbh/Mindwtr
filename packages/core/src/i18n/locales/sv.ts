@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const svOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Före start",
     "taskEdit.advanceReminderLabel": "Förhandspåminnelse",
     "taskEdit.advanceReminderMinutes": "{count} min före",
     "taskEdit.advanceReminderHour": "1 timme före",
@@ -1169,6 +1170,7 @@ export const svOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Säkerställ att varje aktivt projekt har ett nästa steg.',
         'review.projectsHint': 'Granska varje projekt. Har det minst ett konkret nästa steg? Om inte, lägg till ett nu. Markera slutförda projekt som klara.',
         'review.hasNextAction': 'Har nästa steg',
+    'review.projectDeferred': 'Schemalagt',
         'review.needsAction': 'Behöver åtgärd',
         'review.noActiveTasks': 'Inga aktiva uppgifter',
         'review.somedayStep': 'Någon gång/Kanske',

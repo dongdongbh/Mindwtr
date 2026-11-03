@@ -22,7 +22,7 @@ export default function CaptureQuickScreen() {
           ? autoParam === '1' || autoParam.toLowerCase() === 'true'
           : defaultCapture === 'audio';
 
-      // Defer one frame so the tab layout/provider is fully focused before opening the sheet.
+
       const timer = setTimeout(() => {
         openQuickCapture({ autoRecord, preserveDraft: true });
         router.replace('/inbox');

@@ -9,10 +9,7 @@ import java.net.SocketTimeoutException
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeoutException
 
-/**
- * Design rev 1 P2-3: every failure leaves Kotlin as RN's fixed `E_GMAIL_<KIND>` code and never as the failure's own text (a
- * JSONException can carry mail text), since the host's answer forwards a failure's message.
- */
+
 class GmailFailureCodeTest {
     @Test fun eachFailureLeavesAsItsFixedCode() {
         for (kind in listOf("AUTH", "NETWORK", "CONFIG", "CANCELLED", "STORAGE", "OTHER")) {

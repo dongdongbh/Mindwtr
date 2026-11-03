@@ -36,18 +36,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.json.JSONObject
 
-/** One option of core's getAreaFilter: its state (included, excluded, none) and the selection a tap sends ([next], JSON). */
+
 data class AreaOption(val id: String, val label: String, val color: String?, val state: String, val next: String)
 
-/**
- * Core's getAreaFilter reply. Its options come in core's order: "All areas" first, then
- * each area, then "No area" last; [areas] are the middle ones, the choices for a new project.
- */
+
 data class AreaFilter(val label: String, val summary: String, val options: List<AreaOption>) {
-    /** Core marks "All areas" included exactly when no area is selected (RN's default scope). */
+
     val isDefault get() = options.firstOrNull()?.state == "included"
     val areas get() = if (options.size > 2) options.subList(1, options.size - 1) else emptyList()
-    /** RN's new-project default: the one area the filter includes alone, else no area. */
+
     val soleArea: String? get() = options.filter { it.state != "none" }.singleOrNull()?.takeIf { it.state == "included" && it in areas }?.id
 
     companion object {
@@ -63,7 +60,7 @@ data class AreaFilter(val label: String, val summary: String, val options: List<
     }
 }
 
-/** RN's header trigger (MobileAreaSwitcher): core's label and a chevron, tinted when an area is selected. */
+
 @Composable
 fun AreaTrigger(model: InboxViewModel, modifier: Modifier = Modifier) {
     val filter = model.areaFilter ?: return
@@ -81,12 +78,7 @@ fun AreaTrigger(model: InboxViewModel, modifier: Modifier = Modifier) {
     }
 }
 
-/**
- * RN's area sheet: the title, core's summary when an area is selected, then "All areas",
- * each area, and "No area". A tap sends that option's `next` selection to core, and the
- * sheet stays open as in RN; the lists are read again after core saves it. While a failed
- * change's retry is owed, only that exact option works.
- */
+
 @Composable
 fun AreaSheet(model: InboxViewModel) = with(model) {
     val filter = areaFilter ?: return

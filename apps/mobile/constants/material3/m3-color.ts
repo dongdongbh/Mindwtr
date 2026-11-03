@@ -10,9 +10,9 @@ export interface M3ColorRoles {
   outline: string; outlineVariant: string;
   inverseSurface: string; inverseOnSurface: string; inversePrimary: string;
   surfaceTint: string; scrim: string; shadow: string;
-  // app-semantic extras (not part of M3, retained for app needs)
+
   success: string; onSuccess: string; warning: string; onWarning: string;
-  // legacy aliases consumed by the generic ThemeColors mapping
+
   text: string; secondaryText: string;
 }
 

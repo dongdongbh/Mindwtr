@@ -17,8 +17,7 @@ type DraftFile = {
     storeOwned: boolean; uncertain: boolean; removed: boolean;
 };
 
-// A staged image's bytes exist only in its draft until Save uploads them, so the description
-// preview shows it from the draft's File meanwhile (#1433).
+
 const stagedPreviewUrls = new Map<string, string>();
 
 export function getStagedWebAttachmentPreviewUrl(id: string): string | undefined {
@@ -63,7 +62,7 @@ export function pickBrowserAttachmentFiles(onFiles: (files: File[]) => void): vo
     input.click();
 }
 
-/** One live draft owns these Files. Only successful PUTs may enter task metadata. */
+
 export function createWebAttachmentDraft() {
     const files = new Map<string, DraftFile>();
     let generation = 0;
@@ -130,7 +129,7 @@ export function createWebAttachmentDraft() {
                     }
                     if (!entry.uploaded) {
                         try {
-                            // A fresh id names one immutable File; a hash would require another full byte buffer.
+
                             await cloudPutFile(url, entry.file, entry.attachment.mimeType || 'application/octet-stream', { ...target, signal });
                             entry.uploaded = true;
                             void logInfo('Browser attachment bytes uploaded', {
@@ -138,7 +137,7 @@ export function createWebAttachmentDraft() {
                                 extra: { releaseCheck: 'v1.3.7/web-attachment-upload', stage: 'bytes-uploaded', count: 1 },
                             });
                         } catch (error) {
-                            // A rejected/aborted response does not prove the server did not publish.
+
                             entry.uncertain = true;
                             if (isBlockedAttachmentContentRefusal(error)) throw new WebAttachmentUploadError('attachments.invalidFileType');
                             throw error;

@@ -337,8 +337,8 @@ export const TaskEditImagePreviewModal = ({
                     {imagePreviewAttachment?.uri ? (
                         <TouchableOpacity
                             onPress={() => {
-                                // The OS handler (gallery, photo viewer) zooms; the
-                                // in-app preview deliberately stays simple (#1026).
+
+
                                 void shareFileWithFeedback(imagePreviewAttachment.uri, t, (error) =>
                                     logTaskError('Failed to share attachment', error));
                             }}

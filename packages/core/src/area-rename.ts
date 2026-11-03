@@ -24,7 +24,7 @@ export type AreaRenamePlan = AreaRenameRows & {
     repairedDestinationProjects: number;
 };
 
-/** Version 1 retains frozen pre-override journals; new writes use the current color policy. */
+
 export function planAreaRename(rows: AreaRenameRows, areaId: string, updates: Partial<Area>,
     deviceId: string, now: string, version: 1 | 2 = 2): AreaRenamePlan | null {
     const source = rows.areas.find((area) => area.id === areaId);
@@ -101,7 +101,7 @@ export function planAreaRename(rows: AreaRenameRows, areaId: string, updates: Pa
     };
 }
 
-/** The existing updateArea color branch, including its denormalized Project title repair. */
+
 export function planAreaColorChange(area: Area, projects: Project[], color: string | undefined,
     deviceId: string, now: string, version: 1 | 2 = 2): { area: Area; projects: Project[]; projectsChanged: boolean } {
     const targetColor = color ?? DEFAULT_PROJECT_COLOR;
@@ -123,7 +123,7 @@ export function planAreaColorChange(area: Area, projects: Project[], color: stri
         projects: nextProjects, projectsChanged };
 }
 
-/** One Settings editor save, using the same diff policy as the React Native editor. */
+
 export function planAreaEditorSave(rows: AreaRenameRows, areaId: string, name: string,
     manageColor: string | undefined, deviceId: string, now: string, version: 1 | 2 = 2): AreaRenamePlan | null {
     const source = rows.areas.find((area) => area.id === areaId);
@@ -163,7 +163,7 @@ const projectJsonColumns = new Set(['tagIds', 'attachments']);
 const taskJsonColumns = new Set(['relativeStartOffset', 'recurrence', 'tags', 'contexts',
     'checklist', 'attachments', 'viewSectionIds']);
 
-/** SQLite-row equality used by every prepared Area command. */
+
 export const sameAreaAdditionRow = {
     area: (left: Area, right: Area) => JSON.stringify(areaToSqliteRow(left, left.updatedAt))
         === JSON.stringify(areaToSqliteRow(right, right.updatedAt)),

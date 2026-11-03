@@ -113,8 +113,8 @@ describe('project actions', () => {
             isSequential: true,
             isFocused: false,
             tagIds: ['#launch'],
-            // Denormalized copy of the area name; omitting it leaves a project
-            // the sync merge has to repair on the next cycle.
+
+
             areaTitle: 'Home',
         });
 
@@ -422,7 +422,7 @@ describe('project actions', () => {
         expect(placed.rev).toBe((before.rev ?? 0) + 1);
         expect(placed.revBy).toBeTruthy();
         expect(latestSavedData().projects.find((row) => row.id === project.id)).toEqual(placed);
-        // The section is the project's own; its tasks are never written.
+
         expect(useTaskStore.getState()._allTasks).toEqual(tasksBefore);
         expect(buildProjectViewSectionUpdate(placed, 'someday', 'travel')).toBeNull();
 
@@ -453,7 +453,7 @@ describe('project actions', () => {
         expect(await setProjectFlowMode('trip', 'perSection')).toEqual({ success: true });
         let saved = latestSavedData();
         expect(saved.projects[0]).toMatchObject({ isSequential: false, perSectionFlow: true, sequentialScope: 'section', rev: 4 });
-        // The unset section keeps the within-sections behavior; the stored Parallel choice stays.
+
         expect(saved.sections.map((row) => [row.id, row.isSequential, row.rev])).toEqual([['book', true, 2], ['prep', false, 1]]);
         expect(info).toHaveBeenCalledWith('Project flow mode saved', expect.objectContaining({
             context: { releaseCheck: 'v1.3.7/section-flow-mode', mode: 'perSection', sectionDefaults: 1 },

@@ -8,7 +8,7 @@ import {
     toggleContextsToken,
 } from './contexts-view-model';
 
-// #1427: a plain chip press switches to that chip; the additive gesture still toggles.
+
 describe('selectContextsToken', () => {
     it('clears the selection when the chip was the only one selected', () => {
         expect(selectContextsToken(['@home'], '@home')).toEqual([]);
@@ -37,7 +37,7 @@ describe('selectContextsToken', () => {
     });
 });
 
-// #1428: a nested chip that follows its parent chip shows only its last part.
+
 describe('getContextsChipLabels', () => {
     const labels = (tokens: string[]) => getContextsChipLabels(tokens).map(({ label }) => label);
 
@@ -68,7 +68,7 @@ describe('getContextsChipLabels', () => {
         expect(sections[0].tokens).toEqual(['@person', '@person/todd', '@place/us/vermont']);
         expect(labels(sections[0].tokens)).toEqual(['@person', '/todd', '@place/us/vermont']);
         expect(labels(['@person/todd'])).toEqual(['@person/todd']);
-        // A grandparent alone is not the parent.
+
         expect(labels(['@place', '@place/us/vermont', '@place/us/vermont/barn'])).toEqual(['@place', '@place/us/vermont', '/barn']);
     });
 

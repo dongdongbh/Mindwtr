@@ -28,7 +28,7 @@ final class BackupDocumentHostTests: XCTestCase {
     private func json(_ value: Any) throws -> String {
         String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self)
     }
-    /// The stored reply keeps `<code>:<count>` warnings, never the file's words (a519ff462), so 40 renamed projects stay small.
+
     private func assertWarningCodesOnly(_ reply: String, file: StaticString = #filePath, line: UInt = #line) throws {
         XCTAssertLessThan(reply.utf8.count, 4096, file: file, line: line)
         XCTAssertFalse(reply.contains("AAAA"), file: file, line: line)
@@ -202,7 +202,7 @@ final class BackupDocumentHostTests: XCTestCase {
             XCTAssertEqual(try rows("SELECT id FROM tasks WHERE id = ?", [task]).count, 1)
             await reopened.close()
             XCTAssertEqual(try calendarEffect(), effect)
-            // Each iteration needs a fresh pre-effect backup; remove only this closed fixture's effect.
+
             let storage = try NativeDeviceKV(containerURL: root, bundleIdentifier: calendarNamespace)
             let before = try storage.readCalendarPushState()
             var next = before; next[5] = nil
@@ -241,7 +241,7 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertEqual(mutations, 0)
         XCTAssertEqual(try json(rows("SELECT * FROM tasks ORDER BY id")), beforeTasks)
         XCTAssertEqual(journalWrites, 1)
-        // Replay re-encodes the envelope; retain every field and the exact argumentsJSON string.
+
         XCTAssertEqual(try json(object(String(contentsOf: journal, encoding: .utf8))), beforeJournal)
         await reopened.close()
         XCTAssertEqual(try calendarEffect(), effect)
@@ -271,7 +271,7 @@ final class BackupDocumentHostTests: XCTestCase {
         let original = try await capture(core, "Before preview")
         let (url, imported) = try await source(core)
         let preview = try await core.prepareBackupImport(url)
-        // Provider changes after selection must not replace the staged bytes.
+
         try "changed provider".write(to: url, atomically: true, encoding: .utf8)
         let intervening = try await capture(core, "After preview before confirm")
         let reply = try object(await core.mergeBackupImport(preview.id))
@@ -281,8 +281,8 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertEqual(roster.first?["name"] as? String, reply["snapshotName"] as? String)
         let afterMerge = try await capture(core, "After merge must be rolled back by Undo")
         await core.close()
-        // Optional isolated UI seed uses the same real host operation and its
-        // completed recovery files. Refuse overwrite; never target app storage.
+
+
         if let path = ProcessInfo.processInfo.environment["MINDWTR_BACKUP_UI_SEED"] {
             let target = URL(fileURLWithPath: path, isDirectory: true)
             guard path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path + "/"),
@@ -1043,8 +1043,8 @@ final class BackupDocumentHostTests: XCTestCase {
         XCTAssertEqual(firstIDs.count, 2)
         let model = try object(await core.backupDocumentResultModel(json(reply)))
         XCTAssertFalse((model["undoLabel"] as? String ?? "").isEmpty)
-        // A new import intentionally creates new OmniFocus identities; only an
-        // exact request retry reuses the frozen IDs in its prepared document.
+
+
         try omniFocusCSVFixture.write(to: url, atomically: true, encoding: .utf8)
         let repeatedPreview = try await core.prepareBackupImport(url, action: .omnifocus)
         let repeated = try omniFocusResult(object(await core.mergeBackupImport(repeatedPreview.id)))

@@ -5,9 +5,7 @@ import type { AppData, Task } from './types';
 import { buildProcessInboxUndoRestoreUpdates } from './process-inbox-model';
 import { generateUUID } from './uuid';
 
-// RN 23e2102b3, 3b1a3f4f4 and 376c562b5: each Process Inbox decision's toast offers Undo, bound to a receipt of the item as
-// it was before the decision. Undo puts a discarded item back, restores a filed item's fields, and is refused when another
-// device changed the item since. The native session's commit (Android's path) answered the toast with no Undo.
+
 const T0 = '2026-09-01T00:00:00.000Z';
 const inboxTask = (): Task => ({
     id: 'inbox-a', title: 'Call the plumber', status: 'inbox', contexts: [], tags: [],
@@ -43,7 +41,7 @@ describe('native Process Inbox decision Undo', () => {
         if (!result.ok) throw new Error(result.error.message);
         return result.value;
     };
-    // The receipt crosses the Kotlin bridge as JSON, so the tests send it the same way (an undefined field is dropped there).
+
     const wire = <T,>(receipt: T): T => JSON.parse(JSON.stringify(receipt));
     const fileLater = async () => {
         const sessionId = session();
@@ -63,7 +61,7 @@ describe('native Process Inbox decision Undo', () => {
         expect(stored().deletedAt).toBeUndefined();
     });
 
-    // A journal replay after a kill sends the same receipt again: the second Undo must change nothing.
+
     it('changes nothing when the same receipt is sent again', async () => {
         const discarded = await commit(session(), 'actionable', 'trash');
         expect(await host.undoInboxDecision(wire(discarded.toast!.undoReceipt!))).toMatchObject({ ok: true });
@@ -98,8 +96,7 @@ describe('native Process Inbox decision Undo', () => {
         expect(stored().startTime).toBe('2026-10-05');
     });
 
-    // A Done decision on a starred item: its Undo brings the star back only while Focus has room (RN's rule), so a replay after Focus
-    // filled must not read the missing star as an Undo still owed.
+
     it('changes nothing on a resent Done receipt once Focus filled up', async () => {
         const starred = { ...inboxTask(), isFocusedToday: true };
         const focused = (id: string): Task => ({ ...inboxTask(), id, title: id, status: 'next', isFocusedToday: true });

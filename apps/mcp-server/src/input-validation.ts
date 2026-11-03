@@ -5,6 +5,7 @@ import {
   normalizeRelativeStartOffset,
   normalizeRepeatReminderMinutes,
   normalizeDueReminderLeadMinutes,
+  normalizeStartReminderLeadMinutes,
   normalizeTimeSpentMinutes,
   RECURRENCE_INTERVAL_MAX,
   type Recurrence,
@@ -38,7 +39,7 @@ const recurrenceByDaySchema = z.string().regex(
   'Expected an RFC 5545 weekday'
 );
 const recurrenceAnchorDaySchema = z.number().int().min(1).max(31);
-// byMonthDay additionally accepts -1: RFC 5545's "last day of the month".
+
 const recurrenceMonthDaySchema = z.union([recurrenceAnchorDaySchema, z.literal(-1)]);
 const recurrenceUntilPattern =
   /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})?)?$/;
@@ -67,10 +68,7 @@ export const taskRecurrenceInputSchema = z.union([
 
 export type TaskRecurrenceInput = z.infer<typeof taskRecurrenceInputSchema>;
 
-// zod needs each recurrence key's *type*, not just its name, so recurrenceObjectSchema can't
-// be generated from TASK_RECURRENCE_FIELD_KEYS outright — but its key set must still match
-// that shared list exactly (see input-validation.test.ts's consolidation test). Exported so
-// that test can inspect it without duplicating the key list a third time.
+
 export const TASK_RECURRENCE_INPUT_FIELD_KEYS: readonly string[] = Object.keys(recurrenceObjectSchema.shape);
 
 type TaskTokenField = 'contexts' | 'tags';
@@ -229,11 +227,6 @@ export const normalizeNullableTaskRecurrence = (
   value === undefined || value === null ? value : normalizeTaskRecurrence(value)
 );
 
-// --- Task fields that need more than structural (Zod) validation ---
-// The zod schemas below only check shape; normalizeRelativeStartOffset/normalizeTimeSpent
-// Minutes/normalizeRepeatReminderMinutes (imported from core) apply the same semantic checks
-// apps/cloud/src/server-validation.ts already runs (validateTaskRelativeStartOffset etc.),
-// so both MCP backends reject the same malformed values cloud already rejects.
 
 export const relativeStartOffsetInputSchema = z.object({
   amount: z.number(),
@@ -262,11 +255,7 @@ export const normalizeNullableTaskRelativeStartOffset = (
   value === undefined || value === null ? value : normalizeTaskRelativeStartOffset(value)
 );
 
-// Checklist items must carry a real id: core's SQLite read codec (toChecklist in
-// task-sync-schema.ts) silently drops any item whose id isn't a string, so accepting a
-// missing id here would look like a successful write that quietly loses the item on the
-// next read/sync round-trip. isCompleted defaults to false (Task['checklist'] items require
-// a boolean, not `boolean | undefined`).
+
 const checklistItemInputSchema = z.object({
   id: z.string().trim().min(1),
   title: z.string().trim().min(1),
@@ -275,10 +264,7 @@ const checklistItemInputSchema = z.object({
 
 export const taskChecklistInputSchema = z.array(checklistItemInputSchema);
 
-// Mirrors normalizeTaskRepeatReminderMinutesValue below (and cloud's
-// validateTaskTimeSpentMinutes): 0 always means "no time logged" and needs no round-trip
-// check — normalizeTimeSpentMinutes(0) returns undefined (0 is <= 0, "absent"), which would
-// otherwise make a perfectly valid `timeSpentMinutes: 0` fail its own round-trip check.
+
 const normalizeTaskTimeSpentMinutesValue = (value: number): number => {
   if (value === 0) return value;
   if (normalizeTimeSpentMinutes(value) !== value) {
@@ -299,8 +285,7 @@ export const normalizeNullableTaskTimeSpentMinutes = (
   value === undefined || value === null ? value : normalizeTaskTimeSpentMinutesValue(value)
 );
 
-// Mirrors cloud's validateTaskRepeatReminderMinutes: 0 always means "off" and needs no
-// preset check; any other value must round-trip through the same presets core applies.
+
 const normalizeTaskRepeatReminderMinutesValue = (value: number): number => {
   if (value === 0) return value;
   if (normalizeRepeatReminderMinutes(value) !== value) {
@@ -339,4 +324,24 @@ export const normalizeNullableTaskDueReminderLeadMinutes = (
   value: number | null | undefined,
 ): number | null | undefined => (
   value === undefined || value === null ? value : normalizeTaskDueReminderLeadMinutesValue(value)
+);
+
+const normalizeTaskStartReminderLeadMinutesValue = (value: number): number => {
+  if (value === 0) return value;
+  if (normalizeStartReminderLeadMinutes(value) !== value) {
+    throw new ValidationError('Invalid task startReminderLeadMinutes');
+  }
+  return value;
+};
+
+export const normalizeOptionalTaskStartReminderLeadMinutes = (
+  value: number | undefined,
+): number | undefined => (
+  value === undefined ? undefined : normalizeTaskStartReminderLeadMinutesValue(value)
+);
+
+export const normalizeNullableTaskStartReminderLeadMinutes = (
+  value: number | null | undefined,
+): number | null | undefined => (
+  value === undefined || value === null ? value : normalizeTaskStartReminderLeadMinutesValue(value)
 );

@@ -78,8 +78,8 @@ describe('prepared native Project Focus', () => {
         }));
         const deleted = project('deleted', { isFocused: true, deletedAt: now });
         const { methods, request, saves } = await open({ projects: [project(), ...focused, deleted] });
-        // Loading normalizes archived stars off; exercise the derived counter's
-        // actual in-memory policy for an archived focused row after that load.
+
+
         useTaskStore.setState((state) => ({ _allProjects: state._allProjects.map((row) => row.id === 'focused-0'
             ? { ...row, isFocused: true } : row) }));
         expect(methods.getProjectFocusOptions({ projectId: 'target' })).toMatchObject({ ok: true,

@@ -1,17 +1,6 @@
-/**
- * The read-only iCalendar feed the self-hosted server publishes.
- *
- * Inclusion and date mapping deliberately mirror the Calendar view's *default*
- * state (useDesktopCalendarController / useCalendarViewController): the same
- * schedulable-task filter, the same recurrence projections, `startTime` as the
- * scheduled block and `dueDate` as the deadline, and the same
- * one-item-per-task-per-day collapse.
- *
- * Deliberately excluded: the calendar's completed look-back (#955). That toggle
- * is a per-device review affordance, and a published subscription URL has no
- * business republishing finished work to whoever holds it — do not "fix" this
- * by mirroring the toggle.
- */
+
+
+
 import { hasTimeComponent, safeParseDate, safeParseDueDate } from './date';
 import { isTaskInActiveProject } from './project-utils';
 import { expandCalendarRecurringTasks } from './recurrence';
@@ -19,7 +8,7 @@ import { timeEstimateToMinutes } from './calendar-scheduling';
 import { isTaskActionable } from './task-status';
 import type { AppData, Project, Task } from './types';
 
-/** A deadline carrying a time of day still needs a non-zero VEVENT duration. */
+
 const DEADLINE_EVENT_MINUTES = 15;
 
 export type CalendarFeedEvent = {
@@ -36,7 +25,7 @@ export type CalendarFeedInput = Pick<AppData, 'tasks'> & Partial<Pick<AppData, '
 
 export type CalendarFeedOptions = {
     now?: Date;
-    /** Overrides the calendar name external clients display. */
+
     name?: string;
     timeEstimatesEnabled?: boolean;
 };
@@ -59,11 +48,7 @@ const addDays = (date: Date, days: number): Date => {
     return next;
 };
 
-/**
- * The same visibility rule the Calendar view applies before bucketing a task
- * into a day. The view's area filter and search box are transient UI state and
- * are deliberately not part of the published feed.
- */
+
 export const isCalendarFeedTask = (task: Task, projectsById: Map<string, Project>): boolean => {
     if (task.deletedAt) return false;
     if (!isTaskActionable(task)) return false;
@@ -101,9 +86,7 @@ export function buildCalendarFeedEvents(
                 });
             }
 
-            // Without the user's time zone, the server can only prove two
-            // floating date-only values share a calendar day. Timed instants
-            // keep both events rather than letting the server's TZ hide one.
+
             if (!due) continue;
             if (
                 start
@@ -130,12 +113,12 @@ export function buildCalendarFeedEvents(
 
 const pad = (value: number, length = 2): string => String(value).padStart(length, '0');
 
-/** RFC 5545 DATE value, in the generator's local time zone (all-day events are floating). */
+
 const formatIcsDate = (date: Date): string => (
     `${pad(date.getFullYear(), 4)}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
 );
 
-/** RFC 5545 UTC DATE-TIME. Emitting instants as UTC keeps the feed correct without a VTIMEZONE. */
+
 const formatIcsDateTime = (date: Date): string => (
     `${pad(date.getUTCFullYear(), 4)}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}`
     + `T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`
@@ -147,7 +130,7 @@ const escapeIcsText = (value: string): string => value
     .replace(/,/g, '\\,')
     .replace(/\r\n|\r|\n/g, '\\n');
 
-/** RFC 5545 content lines are limited to 75 octets; continuations start with a space. */
+
 const foldIcsLine = (line: string): string[] => {
     const bytes = new TextEncoder().encode(line);
     if (bytes.length <= 75) return [line];
@@ -157,7 +140,7 @@ const foldIcsLine = (line: string): string[] => {
     while (offset < bytes.length) {
         const limit = out.length === 0 ? 75 : 74;
         let end = Math.min(offset + limit, bytes.length);
-        // Never split a multi-byte character: back off to the last lead byte.
+
         while (end > offset && end < bytes.length && (bytes[end] & 0b1100_0000) === 0b1000_0000) end -= 1;
         const chunk = decoder.decode(bytes.slice(offset, end));
         out.push(out.length === 0 ? chunk : ` ${chunk}`);
@@ -204,7 +187,7 @@ export function serializeCalendarFeed(
     return `${lines.flatMap(foldIcsLine).join('\r\n')}\r\n`;
 }
 
-/** Feed body for a whole dataset — what the self-hosted `.ics` endpoint returns. */
+
 export function buildCalendarFeed(data: CalendarFeedInput, options: CalendarFeedOptions = {}): string {
     return serializeCalendarFeed(buildCalendarFeedEvents(data, options), options);
 }

@@ -1,10 +1,10 @@
-// Ensure React Native timer globals (setImmediate/queueMicrotask/etc.) are installed
-// before any startup polyfills that may rely on Promise scheduling.
+
+
 (() => {
     try {
         require('react-native/Libraries/Core/setUpTimers');
     } catch {
-        // Best-effort only; fallback below handles missing globals.
+
     }
 
     const root =

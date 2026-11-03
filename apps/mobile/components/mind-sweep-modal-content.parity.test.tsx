@@ -1,17 +1,6 @@
-/**
- * React Native's Mind Sweep screen, replayed against the frozen parity fixture
- * (packages/core/src/mind-sweep-parity.fixtures.json) that core's
- * mind-sweep-view-model and the native host contract are tested against.
- *
- * The fixture's `provenance` names the commit it was captured at. To recapture,
- * commit every other change first, then run
- *   MINDWTR_CAPTURE_MIND_SWEEP=1 MINDWTR_CAPTURE_MIND_SWEEP_COMMIT=$(git rev-parse HEAD) TZ=UTC bunx vitest run components/mind-sweep-modal-content.parity.test.tsx
- * The capture refuses to run unless that commit is HEAD and the checkout holds
- * nothing but HEAD's code and these parity harnesses, so the provenance always
- * names the code that ran. Each scenario renders the real screen with the real
- * core store, presses its buttons and types into its box, and records what a
- * user sees and what the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -187,7 +176,7 @@ async function perform(root: ReactTestInstance, action: Action) {
   const testID = kind === 'scope' ? `mind-sweep-scope-${action[1]}` : TEST_IDS[kind];
   const node = byTestId(root, testID);
   if (!node) throw new Error(`Nothing to press for ${testID}`);
-  // A disabled button ignores the tap.
+
   if (node.props.disabled === true) return;
   await act(async () => { await node.props.onPress(); });
 }

@@ -1,14 +1,9 @@
 import type { StartupPromptDescriptor } from './startup-prompts';
 
-// The startup prompt queue's plain parts, without React: the hook (startup-prompts.ts) and the native apps' one-shot run
-// share them, so a host bundle that runs the queue never pulls in React.
 
 type RetireStartupPrompt = (descriptor: StartupPromptDescriptor, error: unknown, phase: 'eligible' | 'select' | 'present') => void;
 
-/**
- * The highest-priority descriptor not yet [retired] whose `isEligible()` holds; one whose `isEligible()` throws is retired
- * through [retire] and skipped. Shared by the React queue and {@link runStartupPromptsOnce}.
- */
+
 export function selectStartupPrompt(
     descriptors: StartupPromptDescriptor[],
     retired: Set<string>,
@@ -32,11 +27,7 @@ export function selectStartupPrompt(
 
 type StartupPromptOutcome = { opened: boolean | void } | { error: unknown };
 
-/**
- * After the candidate's `delayMs`, runs its `present()` (raced against `presentTimeoutMs`, which aborts it) and reports the
- * outcome once to [settle]. The returned cancel aborts `present()` and clears both timers; [settle] still runs if a
- * `present()` already started, so the caller decides what a late outcome means.
- */
+
 export function scheduleStartupPrompt(candidate: StartupPromptDescriptor, settle: (outcome: StartupPromptOutcome) => void): () => void {
     let presentTimeoutId: ReturnType<typeof setTimeout> | undefined;
     const presentAbortController = new AbortController();
@@ -70,13 +61,7 @@ export function scheduleStartupPrompt(candidate: StartupPromptDescriptor, settle
     };
 }
 
-/**
- * The queue run to the first prompt that opens, for a host whose inputs are all known when it starts (the native apps,
- * after the validated boot): the same selection, `onSelect`, delay, timeout and retirement as {@link useStartupPromptQueue}.
- * Resolves to the id that opened, or null when none did or [signal] aborted. [retired] is the session's set, kept by the
- * caller: this run adds every prompt it declines, fails or opens, so the next run (the hook goes on to the next prompt once
- * the open one is dismissed) never tries them again.
- */
+
 export async function runStartupPromptsOnce(
     descriptors: StartupPromptDescriptor[],
     options: {
@@ -93,7 +78,7 @@ export async function runStartupPromptsOnce(
             onLog?.(error, { id: descriptor.id, phase });
             descriptor.onError?.(error, phase);
         } catch {
-            // Never let error reporting break startup.
+
         }
     };
     while (!signal?.aborted) {

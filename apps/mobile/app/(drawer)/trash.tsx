@@ -313,7 +313,7 @@ export default function TrashScreen() {
     setSelectedProjectIds(new Set());
   }, []);
 
-  // Android Back leaves selection mode before it leaves the screen (#1415), while Trash is the screen on top.
+
   const navigation = useContext(NavigationContext);
   useEffect(() => {
     if (!selectionMode) return undefined;
@@ -438,7 +438,7 @@ export default function TrashScreen() {
     confirmPurge(getTrashPurgeConfirmation({ kind: 'item' }, t), () => purgeProject(projectId));
   };
 
-  // Purge cannot be undone, so a filtered list may only clear what it shows.
+
   const handleClearAll = () => {
     if (trashItems.length === 0) return;
     const scope = resolveTrashClearScope(trashedTasks, trashedProjects, _allTasks, _allProjects);
@@ -457,8 +457,8 @@ export default function TrashScreen() {
           text: confirmation.confirmLabel,
           style: 'destructive',
           onPress: async () => {
-            // Always the ids the alert was opened for, never a fresh whole-store
-            // sweep: an item that arrived meanwhile was never shown to the user.
+
+
             await runTrashBulkAction(confirmation.confirmLabel, () => purgeTrashItems({ purgeTasks, purgeProject }, scope));
           },
         },

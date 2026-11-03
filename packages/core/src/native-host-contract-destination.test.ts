@@ -121,7 +121,7 @@ describe('native task draft destination picker', () => {
         expect(read(draft).destination.fieldId).toBeNull();
         expect(groupIds(draft)).toEqual({ none: [''] });
         expect(read(draft).destination.groups[0].choices[0]).toMatchObject({ selected: true, label: 'None' });
-        // RN shows a hidden field when it already holds data.
+
         expect(read(draftOf()).destination.fieldId).toBe('project');
         expect(read(draftOf()).section.visible).toBe(true);
         expect(saveData).not.toHaveBeenCalled();

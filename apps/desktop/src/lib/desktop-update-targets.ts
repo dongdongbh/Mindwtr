@@ -13,11 +13,7 @@ import {
     type UpdateSource,
 } from './update-service';
 
-// Channels that update themselves in the background (Flatpak, Snap, App Store)
-// stay quiet, and so does Scoop: any bucket can carry the manifest, so there is
-// no canonical feed to check against and the package manager owns updates.
-// Every other channel where the user must act gets a reminder routed to that
-// channel's own update path.
+
 const UPDATE_REMINDER_DESKTOP_INSTALL_SOURCES = new Set<InstallSource>([
     'direct',
     'portable',
@@ -34,8 +30,7 @@ const UPDATE_REMINDER_DESKTOP_INSTALL_SOURCES = new Set<InstallSource>([
     'rpm',
 ]);
 
-// Channels with their own version feed only remind when that feed reported the
-// update; a GitHub-only result means the channel has not published it yet.
+
 const CHANNEL_PINNED_INSTALL_SOURCES = new Set<InstallSource>([
     'winget',
     'chocolatey',
@@ -45,13 +40,10 @@ const CHANNEL_PINNED_INSTALL_SOURCES = new Set<InstallSource>([
     'aur-source',
 ]);
 
-// Quiet channels never make unsolicited update requests: no reminder and no
-// background badge check. The manual About-page check remains user-initiated.
+
 const AUTO_UPDATE_CHECK_QUIET_INSTALL_SOURCES = new Set<InstallSource>(['scoop']);
 
-// Null/undefined means detection has not settled yet — stay quiet rather than
-// risk phoning home from a quiet channel that just hasn't been identified yet.
-// A resolved 'unknown' source (detection ran, nothing matched) may auto-check.
+
 export const isAutoUpdateCheckAllowed = (
     installSource: InstallSource | null | undefined,
 ): boolean => Boolean(installSource) && !AUTO_UPDATE_CHECK_QUIET_INSTALL_SOURCES.has(installSource as InstallSource);
@@ -85,7 +77,7 @@ export const getDesktopUpdateTarget = (
         case 'winget':
             return { label: UPDATE_NOW_ACTION_LABEL, url: WINGET_PACKAGE_URL };
         case 'scoop':
-            // `scoop update mindwtr` does the install; point at the release notes.
+
             return { label: VIEW_RELEASE_ACTION_LABEL, url: GITHUB_RELEASES_URL };
         case 'chocolatey':
             return { label: UPDATE_NOW_ACTION_LABEL, url: CHOCOLATEY_PACKAGE_URL };

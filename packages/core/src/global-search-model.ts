@@ -119,8 +119,7 @@ export const clearGlobalSearchActiveChip = (filters: GlobalSearchFilterState, ke
     return filters;
 };
 
-// Full-text search drops field filters and the '-' of a negated word, and its hits are
-// unioned into the local result, so either kind of term must stay local-only.
+
 export const shouldRequestGlobalSearchFts = (query: string): boolean => query.length > 0
     && !/\b\w+:/i.test(query)
     && !parseSearchQuery(query).clauses.some((clause) => clause.terms.some((term) => term.field !== null || term.negated));

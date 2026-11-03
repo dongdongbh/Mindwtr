@@ -68,7 +68,7 @@ class WidgetContextSelectionTest {
     val manager = AppWidgetManager.getInstance(context)
     shadowOf(manager).addBoundWidget(42, AppWidgetProviderInfo().apply { provider = ComponentName(context.packageName, "TasksWidgetProvider") })
     val json = root()
-    // Force the established chooser's search affordance visible.
+
     for (i in 1..8) json.getJSONArray("contexts").put(JSONObject().put("id", "context:@other$i").put("name", "@other$i"))
     WidgetPayloadStore.write(context, json.toString())
     WidgetListStore.write(context, 42, "focus")
@@ -79,7 +79,7 @@ class WidgetContextSelectionTest {
     val activity = controller.create().get()
     val list = activity.findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val adapter = list.adapter as WidgetConfigureActivity.ChooserAdapter
-    // A landscape/IME-sized viewport: the list yields height before the Save row.
+
     val root = activity.findViewById<View>(R.id.mindwtr_widget_configure_root)
     val density = context.resources.displayMetrics.density
     val width = (400 * density).toInt()
@@ -120,7 +120,7 @@ class WidgetContextSelectionTest {
     assertEquals(View.VISIBLE, option.visibility)
     assertEquals("Add started", option.text.toString())
     assertFalse(option.isChecked)
-    // Another list hides it; Focus brings it back.
+
     val list = activity.findViewById<ListView>(R.id.mindwtr_widget_configure_lists)
     val adapter = list.adapter as WidgetConfigureActivity.ChooserAdapter
     val inbox = (0 until adapter.count).single { adapter.getItem(it).first == "inbox" }

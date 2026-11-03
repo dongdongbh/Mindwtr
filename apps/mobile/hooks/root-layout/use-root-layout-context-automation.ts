@@ -28,8 +28,8 @@ export function useRootLayoutContextAutomation({
   returnToBackground,
   resolveText,
 }: UseRootLayoutContextAutomationParams) {
-  // Keyed per delivery, not per URL string: the same automation link can
-  // arrive twice in a row and must run both times.
+
+
   const lastHandledKey = useRef<number>(0);
 
   useEffect(() => {

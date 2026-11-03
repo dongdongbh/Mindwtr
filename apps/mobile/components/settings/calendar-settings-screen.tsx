@@ -134,7 +134,7 @@ export function CalendarSettingsScreen() {
     const [isSystemCalendarLoading, setIsSystemCalendarLoading] = useState(false);
     const [systemCalendarOpen, setSystemCalendarOpen] = useState(false);
 
-    // Push-to-calendar state
+
     const [calendarPushEnabled, setCalendarPushEnabledState] = useState(false);
     const [calendarPushPermission, setCalendarPushPermission] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
     const [calendarPushTargetCalendarId, setCalendarPushTargetCalendarIdState] = useState<string | null>(null);
@@ -222,7 +222,7 @@ export function CalendarSettingsScreen() {
             await loadCalendarPushTargetState();
             showToast(calendarSettingsToasts(tr, t).pushColorUpdated(updated));
         } catch (error) {
-            // The device refused: nothing was stored, so picking the color again retries it.
+
             console.error(error);
             await loadCalendarPushTargetState();
             showToast(calendarSettingsToasts(tr, t).pushColorFailed());
@@ -233,8 +233,8 @@ export function CalendarSettingsScreen() {
         if (isDeletingMindwtrCalendar) return;
         setIsDeletingMindwtrCalendar(true);
         try {
-            // Disable push sync first so the calendar is not recreated on the next
-            // startup or task change.
+
+
             await setCalendarPushEnabled(false);
             setCalendarPushEnabledState(false);
             stopCalendarPushSync();
@@ -380,8 +380,7 @@ export function CalendarSettingsScreen() {
         await persistSystemCalendarState({ areaIdsByCalendar: { ...systemCalendarAreaIds, [calendarId]: next } });
     };
 
-    // Each feed edit applies to the latest stored list when its write is admitted, so a feed another device
-    // added, changed or removed since this page loaded stays as synced. Before any sync, the shown list is the base.
+
     const writeCalendarFeeds = (edit: (feeds: ExternalCalendarSubscription[]) => ExternalCalendarSubscription[] | null) => (
         runStoreCommand(async () => {
             const next = edit(useTaskStore.getState().settings.externalCalendars ?? externalCalendars);
@@ -461,8 +460,8 @@ export function CalendarSettingsScreen() {
     };
 
     const handleCalendarColorChange = async (id: string, color: string | undefined) => {
-        // `undefined` is the Auto swatch: drop the pick so the feed hint or
-        // the assigned default applies again (#974).
+
+
         await writeCalendarFeeds((feeds) => setCalendarFeedColor(feeds, id, color));
     };
 
@@ -502,7 +501,7 @@ export function CalendarSettingsScreen() {
         <SafeAreaView style={[styles.container, { backgroundColor: tc.bg }]} edges={['bottom']}>
             <SettingsTopBar title={t('settings.calendar')} />
             <ScrollView style={styles.scrollView} contentContainerStyle={scrollContentStyle}>
-                {/* Push tasks to calendar */}
+                {                            }
                 <View style={[styles.settingCard, { backgroundColor: tc.cardBg, marginBottom: 16 }]}>
                     <CollapsibleSettingHeader
                         title={tr('settings.calendarMobile.pushTasksToCalendar')}

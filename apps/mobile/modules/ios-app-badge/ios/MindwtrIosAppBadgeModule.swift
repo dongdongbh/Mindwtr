@@ -12,7 +12,7 @@ public final class MindwtrIosAppBadgeModule: Module {
             }
         }
 
-        // Only this explicit settings action may prompt. Alerts and sounds are not requested.
+
         AsyncFunction("requestBadgeAuthorization") { (promise: Promise) in
             let center = UNUserNotificationCenter.current()
             center.requestAuthorization(options: [.badge]) { _, error in

@@ -65,8 +65,7 @@ describe('repairMissingRemoteAttachments', () => {
             clear,
         });
 
-        // One "don't know" ends the pass, and an incomplete pass must not advance the
-        // caller's daily stamp.
+
         expect(result).toEqual({ checked: 1, cleared: 0, complete: false });
         expect(clear).not.toHaveBeenCalled();
         expect(first.cloudKey).toBe('attachments/first.txt');
@@ -143,8 +142,8 @@ describe('createDropboxAttachmentPresenceIndex', () => {
     });
 
     it('reports every blob missing when the folder itself came back empty', () => {
-        // `listDropboxFolderFiles` returns [] both for an empty folder and for a folder that
-        // no longer exists; either way Dropbox is not holding the blob.
+
+
         expect(createDropboxAttachmentPresenceIndex([])('attachments/kept.txt')).toBe(false);
     });
 });

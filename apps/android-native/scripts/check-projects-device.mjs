@@ -1,42 +1,6 @@
-// Projects check for the isolated native Android development app.
-//
-//   node apps/android-native/scripts/check-projects-device.mjs <adb-serial> [apk] [--prune-old]
-//
-// Installs the debug APK with `install -r` (existing development data stays).
-// The fixture needs sections and an archived project, which the app cannot make, so the script stops the app and, through
-// core's own store (Bun runs core's TypeScript) on a host copy of the app's
-// database, prepares ONE fixture found by its stable titles (marker 424242424242):
-// a sequential project in its own area with two sections and four tasks, an
-// archived project with one task, and a project with 55 tasks. The first run
-// INJECTS it; every later run REUSES it and only sets the sequential project's
-// tasks back to Next (the run completes two of them), so the development data
-// no longer grows. --prune-old also deletes, through core (tombstones), the
-// projects and areas earlier versions of this check injected per run (titles
-// Area/Seq/Arch/Many plus 12 digits) and their detached tasks (61-66 plus 12 digits),
-// and the tasks earlier lifecycle (81-86), focus (71-72) and editor (91, plus its
-// renames' 7 and 78) runs captured, each with its 12-digit run id; nothing else is touched. It then checks the Projects tab:
-// (a) each project row shows core's task count and next action, and Archived
-// ("Closed") starts closed; (b) the open project shows core's section markers,
-// rows, and sequence cues in core's order; (c) Done from the project stores
-// `done` once; (d) a row opens the editor and Close returns to the project;
-// (e) rotation and (f) process death keep the open project; (g) a failed Done
-// keeps its exact retry through rotation, Back, and a new screen, then stores
-// once; (h) Back returns to the list, which shows core's new count; (i) the
-// archived project shows its rows without Done and opens a read-only editor;
-// (j) More loads the next window of the 55-task project; (k) the project star
-// stores isFocused and a second tap removes it; (l) "Add new project…" with the
-// fixture's area chip stores one project (67 plus the marker) in that area (the
-// next run's prepare deletes it through core first); (m) the area switcher
-// narrows the list to core's projects for the fixture area, and "All areas"
-// widens it again (prepare also resets the filter); (n) restored on Focus after process death (the boot reads only the tab
-// on screen), with a Focus view-options read held 15 s (debug delay_action_ms), Projects chosen meanwhile fills once the
-// read ends, without reopening the tab. Core's expected lists
-// come from core's own contract run on a fresh host copy of the database. It
-// touches only the development package (it refuses any other APK), never
-// launches over another app, leaves the app on its Inbox tab, and restores
-// rotation and clears its debug properties on exit. Leave the device on its
-// home screen before running. It needs host `sqlite3` and `bun`.
-// Exit 0 = pass, 1 = fail, 2 = refused before touching the device, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -57,7 +21,7 @@ const apk = apkArg ?? resolve(app, 'android/app/build/outputs/apk/play/debug/app
 const adbBin = process.env.ADB ?? '/home/dd/Android/Sdk/platform-tools/adb';
 const aapt2 = process.env.AAPT2 ?? '/home/dd/Android/Sdk/build-tools/36.1.0/aapt2';
 const PKG = 'tech.dongdongbh.mindwtr.nativeclient.dev';
-// Never install anything but the development package (install -r would upgrade it).
+
 const apkPackage = execFileSync(aapt2, ['dump', 'packagename', apk], { encoding: 'utf8' }).trim();
 if (apkPackage !== PKG) {
     console.error(`REFUSED: ${apk} is package "${apkPackage}", not ${PKG}`);
@@ -67,29 +31,29 @@ const ACTIVITY = `${PKG}/${PKG}.MainActivity`;
 const TAG = 'MindwtrNativeDev';
 const UI_FILE = '/data/local/tmp/mindwtr-native-dev-ui.xml';
 const STAGED = '/data/local/tmp/mindwtr-native-dev-projects.db';
-// `language` is cleared so the app shows core's English on the (English) test phone.
+
 const PROPS = ['fail_commit', 'delay_before_ms', 'delay_after_ms', 'language', 'delay_action_ms'];
 const DB = 'mindwtr-native-dev.db';
 const work = resolve(app, 'android/build/projects-check');
 const coreSrc = resolve(app, '../../packages/core/src');
-// The fixture's stable marker: every run finds the same projects and tasks, so it injects them only once.
-// Digits only in task titles (the editor step picks a task by its digits-only title).
+
+
 const run = '424242424242';
-const names = { area: `Area${run}`, sequential: `Seq${run}`, archived: `Arch${run}`, many: `Many${run}`, added: `67${run}` };
+const names = { area: `Area${run}`, sequential: `Seq${run}`, archived: `Arch${run}`, many: `Many${run}`, added: `67${run}`, sheetArea: `Sheet${run}` };
 
 const device = connect({ serial, pkg: PKG, uiFile: UI_FILE, adb: adbBin });
 const { adbRaw, sh, home, front, requireAppFront, pid, screen, waitFor, tap, reveal, toTop, completeUntil } = device;
 const setProp = (name, value) => sh(`setprop debug.mindwtr.native.${name} '${value}'`);
 const runAs = (command) => sh(`run-as ${PKG} ${command}`);
 
-// ---- device state ----
+
 const launch = () => device.launch(ACTIVITY);
 const logs = (processId) => device.logs(processId, TAG);
 const count = (text, needle) => text.split('\n').filter((line) => line.includes(needle)).length;
 const boots = (processId) => count(logs(processId), 'Core host boot started');
 const recreations = (processId) => count(logs(processId), 'reason=activity-recreate');
 const newScreens = (processId) => count(logs(processId), 'reason=new-screen');
-// The log's `context` is itself a JSON string, so its quotes arrive escaped.
+
 const completes = (processId, outcome) => logs(processId).replace(/\\/g, '').split('\n').filter((line) => line.includes('native-android-dev-task-command')
     && line.includes('"operation":"complete"') && line.includes(`"outcome":"${outcome}"`)).length;
 const setRotation = (rotation) => {
@@ -112,11 +76,11 @@ const stopApp = async () => {
     await device.stopApp();
 };
 
-// ---- UI (core's English labels: nav.projects, projects.closed, common.back, common.done, common.more, common.close) ----
+
 const inbox = () => waitFor('the Inbox', (nodes) => tabSelected(nodes, 'Inbox') && !inEditor(nodes) && hasText(nodes, 'Inbox'), 60_000);
 const textNode = (nodes, text) => nodes.find((node) => node.text === text && node.class !== 'android.widget.EditText');
-/** The open project: the Projects tab, core's project title as the heading, and Back. */
-// The header's title is RN's editable title field (ProjectDetails.kt's ProjectTitleField).
+
+
 const inProject = (nodes, title) => tabSelected(nodes, 'Projects') && !inEditor(nodes) && projectTitled(nodes, title) && Boolean(button(nodes, 'Back'));
 const openProject = (title, description = `the project ${title}`) => waitFor(description, (nodes) => inProject(nodes, title), 60_000);
 const showTab = async (name) => {
@@ -124,42 +88,46 @@ const showTab = async (name) => {
     if (!tabSelected(nodes, name)) await tap(tab(nodes, name));
     await waitFor(`the ${name} tab`, (current) => tabSelected(current, name), 10_000);
 };
+const hideKeyboard = async () => {
+
+    if (/mInputShown=true/.test(sh('dumpsys input_method'))) { requireAppFront(); sh('input keyevent KEYCODE_BACK'); await sleep(800); }
+};
 const hasError = (nodes) => nodes.some((node) => node.text?.includes('Injected commit failure'));
-/** Taps the control labelled [label] until [done] holds; a tap can land while the list still moves, so tap again. */
+
 const tapUntil = async (label, description, done) => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
         const nodes = await screen();
-        // The last tap took effect after the wait ran out: tapping again would be a second command
-        // (after a failure, its exact retry), so stop here.
+
+
         if (attempt > 0 && done(nodes)) return nodes;
         const control = button(nodes, label);
-        if (!control && attempt > 0) break; // the first tap took effect; only the wait is left
+        if (!control && attempt > 0) break;
         await tap(control ?? fail(`no control labelled ${label}`));
-        try { return await waitFor(description, done, 8_000); } catch { /* tap again */ }
+        try { return await waitFor(description, done, 8_000); } catch {                 }
     }
     return waitFor(description, done, 20_000);
 };
-/** Scrolls the Projects list to [title] and opens it; a tap can land while the list still moves, so tap again. */
+
 const openRow = async (title) => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-        // The last tap opened it after the wait ran out: do not tap the detail screen.
+
         if (attempt > 0 && inProject(await screen(), title)) return screen();
         const nodes = await reveal(title, 80);
         await tap(textNode(nodes, title) ?? fail(`${title} is not on the Projects list`));
-        try { return await waitFor(`the project ${title}`, (current) => inProject(current, title), 8_000); } catch { /* tap again */ }
+        try { return await waitFor(`the project ${title}`, (current) => inProject(current, title), 8_000); } catch {                 }
     }
     return openProject(title);
 };
-/** The content description of the task count on the Projects row titled [title] ("<n> tasks"). */
+
 const rowCount = (nodes, title) => {
     const [, top, , bottom] = box(textNode(nodes, title) ?? fail(`${title} is not on screen`));
     return nodes.find((node) => /^\d+ tasks$/.test(node['content-desc'] ?? '') && box(node)[1] < bottom + 60 && box(node)[3] > top - 20)?.['content-desc'];
 };
-/** The texts of [expected] as the screen shows them, top to bottom. */
+
 const shownOrder = (nodes, expected) => nodes.filter((node) => expected.includes(node.text) && node.class !== 'android.widget.EditText')
     .sort((a, b) => box(a)[1] - box(b)[1]).map((node) => node.text);
 
-// ---- database: a host copy of .db, -wal and -shm; core runs on it in Bun ----
+
 const pullDatabase = (name) => {
     const dir = resolve(work, name);
     rmSync(dir, { recursive: true, force: true });
@@ -171,11 +139,8 @@ const pullDatabase = (name) => {
     return resolve(dir, DB);
 };
 const sqlite = (db, sql) => JSON.parse(execFileSync('sqlite3', ['-json', db, sql], { encoding: 'utf8' }) || '[]');
-/**
- * Runs core's contract on a database copy: `prepare` finds the fixture by its titles (or injects it once) through
- * core's store, resets it, and prints the ids; `projects` and `detail` print core's getProjects row and
- * getProjectDetail items as the app shows them.
- */
+
+
 const core = (db, mode, extra = {}) => JSON.parse(execFileSync('bun', ['-e', `
     import { Database } from 'bun:sqlite';
     import { SqliteAdapter, createNativeHostContract, flushPendingSave, setStorageAdapter, useTaskStore } from '${coreSrc}/index.ts';
@@ -324,6 +289,12 @@ const core = (db, mode, extra = {}) => JSON.parse(execFileSync('bun', ['-e', `
             await store().updateSettings({ appearance: { mobileQuickAccessView: 'projects' } });
             await flushPendingSave();
         }
+        // The Areas sheet's new area (o), left by a run that stopped before its Delete.
+        for (const area of live(store()._allAreas).filter((item) => item.name === names.sheetArea)) {
+            const result = await store().deleteArea(area.id);
+            if (!result.success) throw new Error('removing the sheet area failed: ' + result.error);
+            await flushPendingSave();
+        }
         for (const project of live(store()._allProjects).filter((item) => item.title === names.added)) {
             const result = await store().deleteProject(project.id);
             if (!result.success) throw new Error('removing the added project failed: ' + result.error);
@@ -399,13 +370,13 @@ const core = (db, mode, extra = {}) => JSON.parse(execFileSync('bun', ['-e', `
     encoding: 'utf8', maxBuffer: 64 << 20,
     env: { ...process.env, CHECK_DB: db, CHECK_MODE: mode, CHECK_NAMES: JSON.stringify({ ...names, run }), CHECK_PRUNE: prune ? '1' : '', ...extra },
 }).trim().split('\n').pop());
-const CUES = { available: 'Available next action', later: 'Later in sequence' }; // core's en projects.availableNextAction / laterInSequence
+const CUES = { available: 'Available next action', later: 'Later in sequence' };
 let ids = {};
 const coreDetail = (label, project) => core(pullDatabase(label), 'detail', { CHECK_PROJECT: project });
 const coreRow = (label, project) => core(pullDatabase(label), 'projects', { CHECK_PROJECT: project });
 const storedProjects = (title) => sqlite(pullDatabase('project'), `SELECT id, areaId, isFocused FROM projects WHERE title = '${title}' AND deletedAt IS NULL`);
 const storedTask = (title) => sqlite(pullDatabase('task'), `SELECT status, rev FROM tasks WHERE title = '${title}' AND deletedAt IS NULL`);
-/** The open project shows core's items in core's order, and each cue under its row. */
+
 const expectCoreOrder = (nodes, detail, label) => {
     const expected = detail.items.map((item) => item.text);
     const shown = shownOrder(nodes, expected);
@@ -420,19 +391,19 @@ const expectCoreOrder = (nodes, detail, label) => {
 const originalAccelerometer = sh('settings get system accelerometer_rotation');
 const originalRotation = sh('settings get system user_rotation');
 const restore = async () => {
-    for (const name of PROPS) { try { setProp(name, ''); } catch { /* device gone */ } }
-    // Leave the app on its Inbox tab with no project open: the other checks start there.
+    for (const name of PROPS) { try { setProp(name, ''); } catch {                   } }
+
     try {
         if (front().includes(`${PKG}/`)) {
             let nodes = await screen();
             if (button(nodes, 'Back') && tabSelected(nodes, 'Projects')) { sh('input keyevent KEYCODE_BACK'); await sleep(1000); nodes = await screen(); }
             if (tab(nodes, 'Inbox') && !tabSelected(nodes, 'Inbox')) await tap(tab(nodes, 'Inbox'));
         }
-    } catch { /* the app is gone */ }
+    } catch {                       }
     for (const [name, value] of [['user_rotation', originalRotation], ['accelerometer_rotation', originalAccelerometer]]) {
-        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch { /* device gone */ }
+        try { sh(value === 'null' ? `settings delete system ${name}` : `settings put system ${name} ${value}`); } catch {                   }
     }
-    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch { /* device gone */ }
+    try { sh(`rm -f ${UI_FILE} ${STAGED}`); } catch {                   }
 };
 
 try {
@@ -441,7 +412,7 @@ try {
     console.log(`apk: ${apk}\napk sha256: ${createHash('sha256').update(readFileSync(apk)).digest('hex')}`);
     for (const name of PROPS) setProp(name, '');
 
-    // Setup: upgrade-install, boot once (so the database has this build's schema), stop, prepare the fixture.
+
     const beforeInstall = front();
     if (!beforeInstall.includes(`${PKG}/`) && !beforeInstall.includes(`${home}/`)) {
         throw new Stopped(`another app is in front: ${beforeInstall.trim()}`);
@@ -454,7 +425,7 @@ try {
     await stopApp();
     const db = pullDatabase('inject');
     ids = core(db, 'prepare');
-    // Only the main file goes back, so core's checkpoint must have moved every frame into it.
+
     check(!existsSync(`${db}-wal`) || statSync(`${db}-wal`).size === 0, 'the injected rows are all in the main database file');
     adbRaw('push', db, STAGED);
     try { runAs(`cp ${STAGED} files/${DB}`); } finally { sh(`rm -f ${STAGED}`); }
@@ -472,33 +443,33 @@ try {
     let processId = pid();
     check(boots(processId) === 1 && !bootFailure(nodes), 'boot validation passed on the injected database');
 
-    // (a) The list: core's count and next action on the row; the area header above it; Archived starts closed.
+
     await showTab('Projects');
     let row = coreRow('a', ids.sequential);
     nodes = await reveal(names.sequential, 80);
-    // Found at the top edge, the row's area header can sit just above the screen: one drag toward the top shows both.
+
     if (!textNode(nodes, names.area)) await device.swipe(nodes, 'up');
     nodes = await waitFor(`${names.sequential} with its area`, (current) => textNode(current, names.sequential) && textNode(current, names.area));
     check(box(textNode(nodes, names.area))[1] < box(textNode(nodes, names.sequential))[1], `(a) ${names.sequential} is under core's area ${names.area}`);
     check(rowCount(nodes, names.sequential) === `${row.activeTaskCount} tasks`, `(a) the row shows core's count: ${row.activeTaskCount} tasks`);
     const startCount = row.activeTaskCount;
     check(Boolean(row.nextActionTitle) && hasText(nodes, `↳ ${row.nextActionTitle}`), `(a) the row shows core's next action ${row.nextActionTitle}`);
-    // Archived is core's last group, so a closed "Closed" is the list's last row: nothing is listed below it.
+
     nodes = await reveal('Closed', 80);
     const closedBottom = box(textNode(nodes, 'Closed') ?? fail('no "Closed" group on the list'))[3];
-    // Only the list's own rows count: the tab bar below the list has labels too (a list that fits is not scrollable).
+
     const listBottom = box(tab(nodes, 'Inbox') ?? fail('no tab bar on the Projects tab'))[1];
     const below = nodes.filter((node) => node.package === PKG && node.text && box(node)[1] >= closedBottom && box(node)[3] <= listBottom);
     check(below.length === 0, `(a) Archived ("Closed") is closed (RN's default; every run closes it again): nothing is listed below it${below.length ? ` (${below.map((node) => node.text).join(', ')})` : ''}`);
 
-    // (b) The open project: core's section markers, rows, and cues, in core's order.
+
     nodes = await openRow(names.sequential);
     let detail = coreDetail('b', ids.sequential);
     check(!detail.readOnly && detail.total === detail.items.length && detail.items.length <= 10, `(b) core lists ${detail.items.length} items`);
     expectCoreOrder(nodes, detail, '(b)');
     const firstTask = detail.items.find((item) => item.cue === 'available')?.text ?? fail('core marks no available task');
 
-    // (c) Done from the project: the row leaves, done is stored once, and the project matches core again.
+
     const beforeDone = storedTask(firstTask)[0];
     const savedBefore = completes(processId, 'saved');
     nodes = await completeUntil(firstTask, `${firstTask} to leave the project`, (current) => inProject(current, names.sequential) && !textNode(current, firstTask));
@@ -508,7 +479,7 @@ try {
     detail = coreDetail('c', ids.sequential);
     expectCoreOrder(await screen(), detail, '(c) after Done,');
 
-    // (d) A row opens the editor on its View tab (RN's resolveTaskOpenTab); Close returns to the open project.
+
     const editTask = detail.items.find((item) => item.cue !== undefined && item.text !== firstTask && /^\d+$/.test(item.text))?.text
         ?? fail('core lists no task to edit');
     nodes = await tapUntil(editTask, `the editor for ${editTask} on its View tab`, (current) => inEditor(current) && isOn(withDescription(current, 'Preview')) && hasText(current, editTask));
@@ -516,7 +487,7 @@ try {
     await openProject(names.sequential, 'the project after Close');
     check(true, '(d) the editor opened from the project on its View tab, and Close returned to it');
 
-    // (e) Rotation keeps the open project, on the same process and host.
+
     await rotate(1);
     nodes = await openProject(names.sequential, 'the project in landscape');
     check(hasText(nodes, editTask) || hasText(await toTop(), editTask), '(e) landscape: the project is still open with its rows');
@@ -524,7 +495,7 @@ try {
     nodes = await openProject(names.sequential, 'the project in portrait');
     check(pid() === processId && boots(processId) === 1, '(e) portrait: same process, one host boot');
 
-    // (f) Home, process death, relaunch: the open project comes back with core's rows.
+
     await goHome();
     await sleep(1500);
     sh(`run-as ${PKG} kill -9 ${processId}`);
@@ -535,19 +506,19 @@ try {
     check(boots(processId) === 1, '(f) the open project restored after process death, one host boot');
     expectCoreOrder(nodes, detail, '(f)');
 
-    // (g) A failed Done keeps only its exact retry across rotation, Back, and a new screen.
+
     const beforeFailure = storedTask(editTask)[0];
     setProp('fail_commit', '1');
     await completeUntil(editTask, 'the failed Done', hasError);
     const failedProject = async (description, label) => {
         let current = await waitFor(description, (screenNodes) => inProject(screenNodes, names.sequential) && hasError(screenNodes));
-        // In landscape RN's header, toolbar and Details fill the screen: the list scrolls to the row (it is kept, only lower).
+
         if (label === ' landscape' && !textNode(current, editTask)) current = await reveal(editTask, 10);
         check(Boolean(textNode(current, editTask)), `(g${label}) the row with the owed retry is still shown`);
-        // Every row locks with the owed retry; only the failed row's swipe stays on (the same rule, check-boot-gates.mjs).
+
         const rows = taskRows(current);
         check(rows.length > 0 && rows.every((node) => node.enabled === 'false'), `(g${label}) ${rows.length} rows locked`);
-        // The project's Back stays blocked; the failure offers only the owed Done's exact retry, never a plain read refresh.
+
         check(button(current, 'Back')?.enabled === 'false' && owedRetry(current)?.enabled === 'true' && !readRetry(current),
             `(g${label}) Back blocked; Try again is the owed Done's retry, and no read refresh is offered`);
         check(tab(current, 'Inbox')?.enabled === 'true', `(g${label}) tabs still work`);
@@ -558,7 +529,7 @@ try {
     await failedProject('the failure after rotation', ' landscape');
     await rotate(0);
     await failedProject('the failure after rotating back', ' portrait');
-    // Back is left to the system while the retry is owed, so it leaves the app.
+
     for (let attempt = 0; attempt < 2 && front().includes(`${PKG}/`); attempt += 1) {
         sh('input keyevent KEYCODE_BACK');
         await sleep(1500);
@@ -566,26 +537,26 @@ try {
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
     launch();
     await failedProject('the failure after Back and reopen', ' after Back and reopen');
-    // Android 12+ keeps a root Activity on Back, so also finish it: the new screen gets a new
-    // ViewModel and must restore the Projects tab, the open project, and the retry from the process.
+
+
     const newScreensBefore = newScreens(processId);
     requireAppFront();
-    sh(`am start -W -f 0x10008000 -n ${ACTIVITY}`); // NEW_TASK | CLEAR_TASK
+    sh(`am start -W -f 0x10008000 -n ${ACTIVITY}`);
     await waitFor('a new screen on the running host', () => newScreens(processId) > newScreensBefore, 15_000);
     await failedProject('the failure on a new screen', ' on a new screen');
     check(pid() === processId && boots(processId) === 1 && storedTask(editTask)[0].rev === beforeFailure.rev,
         '(g) same process and host, still nothing stored before the retry');
-    // Reads wait while the retry is owed, so no read failure can have replaced the Done retry.
+
     check(!logs(processId).includes('lock=storage'), '(g) no read failed while the retry was owed (log has no lock=storage)');
     setProp('fail_commit', '');
-    // The failure's Try again re-sends the exact owed Done: one write.
+
     await device.tapExpecting(owedRetry(await screen()) ?? fail('no Try again for the owed Done'),
         (current) => !hasError(current) && !textNode(current, editTask), 'the retry from Try again');
     const retried = storedTask(editTask)[0];
     check(retried.status === 'done' && retried.rev === beforeFailure.rev + 1 && storedTask(editTask).length === 1, '(g) Try again stored done once');
     check(completes(processId, 'failed') >= 1 && completes(processId, 'saved') >= 1, '(g) task-command log shows the failed and the saved complete');
 
-    // (h) Back returns to the list, which shows core's new count.
+
     requireAppFront();
     sh('input keyevent KEYCODE_BACK');
     await waitFor('the Projects list', (current) => tabSelected(current, 'Projects') && !button(current, 'Back'));
@@ -594,14 +565,14 @@ try {
     check(rowCount(nodes, names.sequential) === `${row.activeTaskCount} tasks` && row.activeTaskCount === startCount - 2,
         `(h) Back showed the list; ${names.sequential} shows core's count ${startCount} - 2 = ${row.activeTaskCount}`);
 
-    // (i) The archived project: Closed opens on a tap; rows show without Done; the editor is read-only.
+
     nodes = await reveal('Closed', 80);
     await tap(button(nodes, 'Closed') ?? textNode(nodes, 'Closed'));
     nodes = await openRow(names.archived);
     detail = coreDetail('i', ids.archived);
     check(detail.readOnly, '(i) core marks the archived project read-only');
     expectCoreOrder(nodes, detail, '(i)');
-    // Read-only: RN's status badges show disabled (and the rows have no swipe; check-boot-gates.mjs).
+
     const badges = nodes.filter((node) => node['content-desc']?.startsWith('Change status.')).map((node) => button(nodes, node['content-desc']) ?? node);
     check(badges.length > 0 && badges.every((node) => node.enabled === 'false'), `(i) ${badges.length} status badges are read-only`);
     nodes = await tapUntil(`65${run}`, 'the read-only editor', (current) => inEditor(current) && button(current, 'Close'));
@@ -610,18 +581,18 @@ try {
     await openProject(names.archived, 'the archived project after Close');
     sh('input keyevent KEYCODE_BACK');
     nodes = await waitFor('the Projects list', (current) => tabSelected(current, 'Projects') && !button(current, 'Back'));
-    // Closed stays open on this device (RN keeps it); close it again so the next run starts from RN's default.
+
     nodes = await reveal('Closed', 80);
     await tap(button(nodes, 'Closed') ?? textNode(nodes, 'Closed'));
 
-    // (j) More: the 55-task project opens at core's first window, and More loads the rest.
+
     nodes = await openRow(names.many);
     detail = coreDetail('j', ids.many);
     const last = detail.items.at(-1).text;
     check(detail.total > 50 && !hasText(nodes, last), `(j) core lists ${detail.total} items; the last is not loaded yet`);
     nodes = await reveal(last, 80);
     check(hasText(nodes, last) && !button(nodes, 'More'), `(j) More loaded the rest: ${last} shows and More is gone`);
-    // (j2) RN #765: Task order opens on the task the list shows first (at least 10% of it, RN's viewability rule), not the top.
+
     const listRows = (current) => current.filter((node) => (node['resource-id'] ?? '').endsWith('task-row') && node.text).sort((a, b) => box(a)[1] - box(b)[1]);
     const fullRow = Math.max(...listRows(nodes).map((row) => box(row)[3] - box(row)[1]));
     const viewed = listRows(nodes).find((row) => (box(row)[3] - box(row)[1]) * 10 >= fullRow)?.text ?? fail('(j2) no task row shown');
@@ -641,7 +612,7 @@ try {
     sh('input keyevent KEYCODE_BACK');
     await waitFor('the Projects list', (current) => tabSelected(current, 'Projects') && !button(current, 'Back'));
 
-    // (k) The project star: core stores isFocused, and a second tap removes it (the fixture stays unstarred).
+
     nodes = await reveal(names.sequential, 80);
     const star = besideRow(nodes, names.sequential, 'Add to focus') ?? fail(`no "Add to focus" star beside ${names.sequential}`);
     if (star.enabled !== 'true') {
@@ -656,7 +627,7 @@ try {
         check(true, '(k) the second tap stored the removal');
     }
 
-    // (l) Add new project…: type a title, pick the fixture's area chip, tap +; core stores one project in that area.
+
     check(storedProjects(names.added).length === 0, `(l) no ${names.added} project before the add`);
     nodes = await toTop();
     await tap(field(nodes) ?? fail('no "Add new project…" field'));
@@ -664,7 +635,7 @@ try {
     sh(`input text ${names.added}`);
     nodes = await waitFor('the typed project title and the area chips', (current) => field(current)?.text === names.added
         && current.some((node) => node.text === names.area && node.clickable === 'true'), 10_000);
-    // The chip is the first "Area…" on screen: the area header sits lower in the list.
+
     const chip = nodes.filter((node) => node.text === names.area && node.clickable === 'true').sort((a, b) => box(a)[1] - box(b)[1])[0];
     await tap(chip);
     await tap(button(await screen(), 'Add') ?? fail('no Add button'));
@@ -672,16 +643,16 @@ try {
     const added = storedProjects(names.added);
     check(added.length === 1 && added[0].areaId === ids.area, `(l) core stored ${names.added} once, in ${names.area}`);
 
-    // (m) The area switcher: the fixture's area alone narrows the list to core's projects for it; "All areas" widens it again.
+
     const openSheet = async () => {
         const current = await waitFor('the area switcher', (screenNodes) => screenNodes.some((node) => node['content-desc']?.startsWith('Area filter: ')), 10_000);
         await tap(current.find((node) => node['content-desc']?.startsWith('Area filter: ')));
         return waitFor('the area sheet', (screenNodes) => hasText(screenNodes, 'All areas'), 10_000);
     };
     nodes = await openSheet();
-    // The sheet is drawn last, so its option is the last node with the area's name.
+
     await tap(nodes.filter((node) => node.text === names.area).at(-1));
-    // Core's summary for one included area is its name; the trigger speaks it.
+
     await waitFor('the trigger to name the area', (current) => current.some((node) => node['content-desc'] === `Area filter: ${names.area}`), 15_000);
     sh('input keyevent KEYCODE_BACK');
     const narrowed = core(pullDatabase('m'), 'groups');
@@ -694,22 +665,117 @@ try {
     sh('input keyevent KEYCODE_BACK');
     check(core(pullDatabase('m2'), 'groups').titles.includes(names.many), '(m) "All areas" widens core\'s list again');
 
-    // (n) Startup review 1: the boot leaves Projects for later when Focus shows. Chosen while a user action runs, Projects must
-    // still fill when that action ends (its read waits for idle; it is never dropped).
+
+    const areaProjects = () => sqlite(pullDatabase('o'), `SELECT title FROM projects WHERE areaId = '${ids.area}' AND deletedAt IS NULL AND status = 'active'
+        ORDER BY orderNum, title`).map((row) => row.title);
+    const storedAreas = () => sqlite(pullDatabase('o-areas'), 'SELECT id FROM areas WHERE deletedAt IS NULL ORDER BY orderNum, name').map((row) => row.id);
+    const before = areaProjects();
+    check(before.length === 2 && before.includes(names.added), `(o) ${names.area} holds two active projects: ${before.join(', ')}`);
+    const [upper, lower] = before;
+    nodes = await reveal(lower, 80);
+    const [x1, y1, x2, y2] = box(textNode(nodes, lower) ?? fail(`${lower} is not on the list`));
+    requireAppFront();
+    sh(`input swipe ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)} ${Math.round((x1 + x2) / 2)} ${Math.round((y1 + y2) / 2)} 900`);
+    nodes = await waitFor('RN\'s Move up alert', (current) => Boolean(withDescription(current, 'Move up')) && hasText(current, lower), 10_000);
+    check(!withDescription(nodes, 'Move down'), '(o) the lower project offers Move up only, as RN does at the area\'s end');
+    await tap(withDescription(nodes, 'Move up'));
+    await waitFor(`${lower} stored above ${upper}`, () => areaProjects()[0] === lower, 30_000);
+    nodes = await reveal(upper, 80);
+    check(isDeepStrictEqual(shownOrder(nodes, [upper, lower]), [lower, upper]), `(o) the list shows ${lower} above ${upper}`);
+    const areasBefore = storedAreas();
+
+    const mover = areasBefore.indexOf(ids.area) > 0 ? ids.area : areasBefore[1];
+    const at = areasBefore.indexOf(mover);
+    const expectedAreas = [...areasBefore];
+    [expectedAreas[at - 1], expectedAreas[at]] = [expectedAreas[at], expectedAreas[at - 1]];
+    nodes = await toTop();
+    await tap(tagged(nodes, 'projects-manage-areas') ?? fail('no Areas button'));
+    const sheetRow = async (id) => {
+        let current = await waitFor('the Areas sheet', (screenNodes) => Boolean(tagged(screenNodes, 'project-area-manager')), 15_000);
+        for (let step = 0; step < 40 && !tagged(current, `project-area-move-up-${id}`); step += 1) {
+            const [l, t, r, b] = box(tagged(current, 'project-area-manager'));
+            requireAppFront();
+            sh(`input swipe ${Math.round((l + r) / 2)} ${Math.round(t + (b - t) * 0.7)} ${Math.round((l + r) / 2)} ${Math.round(t + (b - t) * 0.45)} 600`);
+            await sleep(500);
+            current = await screen();
+        }
+        return current;
+    };
+    nodes = await sheetRow(mover);
+    await tap(tagged(nodes, `project-area-move-up-${mover}`) ?? fail(`no ↑ for area ${mover}`));
+    await waitFor('the area order stored', () => isDeepStrictEqual(storedAreas(), expectedAreas), 30_000);
+    check(true, `(o) the Areas sheet's ↑ stored area ${mover} one place up`);
+    sh('input keyevent KEYCODE_BACK');
+    await waitFor('the Areas sheet to close', (current) => !tagged(current, 'project-area-manager'), 10_000);
+
+    await stopApp();
+    launch();
+    await showTab('Projects');
+    nodes = await reveal(upper, 80);
+    check(isDeepStrictEqual(shownOrder(nodes, [upper, lower]), [lower, upper]) && areaProjects()[0] === lower, `(o) after a restart ${lower} is still above ${upper}`);
+    nodes = await toTop();
+    await tap(tagged(nodes, 'projects-manage-areas') ?? fail('no Areas button'));
+    nodes = await sheetRow(mover);
+    const rowTop = (id) => box(tagged(nodes, `project-area-row-${id}`) ?? fail(`area ${id} is not in the sheet`))[1];
+    check(rowTop(mover) < rowTop(expectedAreas[at]) && isDeepStrictEqual(storedAreas(), expectedAreas),
+        '(o) after a restart the reopened sheet shows the moved area above its old neighbour, as stored');
+
+    const storedArea = (name) => sqlite(pullDatabase('o-area'), `SELECT id, color FROM areas WHERE name = '${name}' AND deletedAt IS NULL`);
+    nodes = await sheetRow(ids.area);
+    check(tagged(nodes, `project-area-delete-${ids.area}`)?.enabled === 'false', `(o) ${names.area} holds projects: its Delete is off, as RN's`);
+    await tap(tagged(nodes, 'project-area-new-name') ?? fail('no new area field'));
+    requireAppFront();
+    sh(`input text ${names.sheetArea}`);
+    await waitFor('the typed area name', (current) => tagged(current, 'project-area-new-name')?.text === names.sheetArea, 10_000);
+    await hideKeyboard();
+    nodes = await screen();
+    const swatches = nodes.filter((node) => (node['resource-id'] ?? '').startsWith('project-area-new-color-'));
+    const picked = swatches.at(-1) ?? fail('no new area swatches');
+    const pickedColor = picked['resource-id'].replace('project-area-new-color-', '');
+    await tap(picked);
+    await tap(tagged(await screen(), 'project-area-save') ?? fail('no Save'));
+    await waitFor(`${names.sheetArea} stored`, () => storedArea(names.sheetArea).length === 1, 30_000);
+    check(storedArea(names.sheetArea)[0].color === pickedColor, `(o) Save stored ${names.sheetArea} once with the swatch ${pickedColor}; the sheet closed`);
+    await waitFor('the sheet closed after Save', (current) => !tagged(current, 'project-area-manager'), 10_000);
+    const sheetAreaId = storedArea(names.sheetArea)[0].id;
+    nodes = await toTop();
+    await tap(tagged(nodes, 'projects-manage-areas') ?? fail('no Areas button'));
+    nodes = await sheetRow(sheetAreaId);
+    await tap(tagged(nodes, `project-area-color-${sheetAreaId}`));
+    nodes = await waitFor('the area\'s swatch row', (current) => Boolean(tagged(current, `project-area-color-none-${sheetAreaId}`)), 10_000);
+    const other = nodes.find((node) => (node['resource-id'] ?? '').startsWith(`project-area-swatch-${sheetAreaId}-`) && !node['resource-id'].endsWith(pickedColor))
+        ?? fail('no other swatch');
+    const otherColor = other['resource-id'].replace(`project-area-swatch-${sheetAreaId}-`, '');
+    await tap(other);
+    await waitFor(`${names.sheetArea} colored ${otherColor}`, () => storedArea(names.sheetArea)[0]?.color === otherColor, 30_000);
+    check(true, `(o) the swatch row stored ${otherColor}`);
+    nodes = await sheetRow(sheetAreaId);
+    await tap(tagged(nodes, `project-area-color-${sheetAreaId}`));
+    await tap(tagged(await waitFor('the None swatch', (current) => Boolean(tagged(current, `project-area-color-none-${sheetAreaId}`)), 10_000), `project-area-color-none-${sheetAreaId}`));
+    await waitFor(`${names.sheetArea} without a color`, () => storedArea(names.sheetArea)[0]?.color === null, 30_000);
+    check(true, '(o) None cleared the area\'s color, as RN\'s None does');
+    nodes = await sheetRow(sheetAreaId);
+    await tap(tagged(nodes, `project-area-delete-${sheetAreaId}`) ?? fail('no Delete for the new area'));
+    await waitFor(`${names.sheetArea} deleted`, () => storedArea(names.sheetArea).length === 0, 30_000);
+    check(true, `(o) Delete removed ${names.sheetArea}`);
+    sh('input keyevent KEYCODE_BACK');
+    await waitFor('the Areas sheet to close', (current) => !tagged(current, 'project-area-manager'), 10_000);
+
+
     await showTab('Focus');
     processId = pid();
     await goHome();
     await sleep(1500);
     sh(`run-as ${PKG} kill -9 ${processId}`);
     await waitFor('process death', () => pid() !== processId, 10_000);
-    // Long enough for the Done tap and the tab switch, each through a UI dump of a few seconds.
+
     const HOLD_MS = 15_000;
     setProp('delay_action_ms', String(HOLD_MS));
     launch();
     nodes = await waitFor('Focus restored with its View options', (current) => tabSelected(current, 'Focus') && button(current, 'View options'), 60_000);
     processId = pid();
     await tap(button(nodes, 'View options'));
-    // The chosen sort chip: a selectable chip is a checked node (its label is a child), between "SORT" and the group heading.
+
     const chosenSort = (current) => {
         const top = current.find((node) => node.text === 'SORT');
         const end = current.find((node) => /^GROUP /.test(node.text ?? ''));
@@ -717,7 +783,7 @@ try {
             && box(node)[1] > box(top)[1] && box(node)[3] < box(end)[1]);
     };
     nodes = await waitFor('the view options sheet', (current) => button(current, 'Done') && chosenSort(current), 10_000);
-    // The current sort again: a read-only Focus controls request (no command, so no full refresh follows it).
+
     await tap(chosenSort(nodes));
     const heldAt = Date.now();
     await tap(button(await screen(), 'Done'));
@@ -728,7 +794,7 @@ try {
     check(listed(nodes) && pid() === processId, '(n) Projects filled after the held action, without reopening the tab, on the same process');
     setProp('delay_action_ms', '');
 
-    // Relaunch: boot validation passes on the final data.
+
     requireAppFront();
     await stopApp();
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);

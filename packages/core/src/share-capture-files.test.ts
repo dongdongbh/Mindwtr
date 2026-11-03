@@ -5,7 +5,7 @@ import type { Attachment } from './types';
 
 const MANAGED = 'file:///data/files/attachments/';
 
-/** A host whose copy puts each file in the managed folder, revealing [sizes] (by name) a sizeless share had. */
+
 const host = (sizes: Record<string, number> = {}, failing: string[] = []) => {
     let next = 0;
     const deleted: string[] = [];

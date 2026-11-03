@@ -1,9 +1,6 @@
-/**
- * Replays React Native's frozen widget publications
- * (widget-payload-parity.fixtures.json, captured by
- * apps/mobile/lib/widget-payload.parity.test.ts) through core alone: every
- * payload string must match byte for byte, on Android and iOS alike.
- */
+
+
+
 import { readFileSync } from 'node:fs';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { loadTranslations } from './i18n/i18n-loader';
@@ -45,7 +42,7 @@ const fixture = JSON.parse(readFileSync(new URL('./widget-payload-parity.fixture
     observations: Record<string, unknown>;
 };
 
-// The iOS families in the order React Native writes them, then the Shortcuts snapshot.
+
 const IOS_FAMILIES = ['default', 'small', 'medium', 'large', 'extraLarge'] as const;
 
 const storeFor = (scenario: { store: string; settings: Settings }): AppData => {
@@ -115,7 +112,7 @@ function replay(scenario: Scenario): unknown {
 
 describe('widget payload parity with React Native', () => {
     const originalTz = process.env.TZ;
-    // The device locale the React Native harness pins (its DEVICE_LOCALE).
+
     const resolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
     const deviceLocale = vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions');
     beforeAll(async () => {

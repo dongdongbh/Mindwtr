@@ -7,7 +7,7 @@ public enum NativeCalendarEventOpenError: Error, Equatable, Sendable {
     case invalidRequest, denied, unavailable, missingOccurrence, ambiguousOccurrence
 }
 
-/// The original feed occurrence, without display IDs, content or source URLs.
+
 public struct NativeCalendarEventOpenRequest: Sendable {
     public let calendarID: String
     public let calendarItemIdentifier: String
@@ -15,7 +15,7 @@ public struct NativeCalendarEventOpenRequest: Sendable {
     public let end: Date
     public let allDay: Bool
 
-    // Match NativeCalendarJobs' supported provider date range and ID byte limit.
+
     static let minimumSeconds: TimeInterval = -62_135_596_800
     static let maximumSeconds: TimeInterval = 253_402_300_799.999
 
@@ -33,7 +33,7 @@ public struct NativeCalendarEventOpenRequest: Sendable {
 
     private static func validID(_ value: String) -> Bool {
         guard !value.isEmpty, value.utf8.count <= 1_024 else { return false }
-        // Test blankness without changing the raw identity (including padding).
+
         return value.unicodeScalars.contains {
             !CharacterSet.whitespacesAndNewlines.contains($0) && $0.value != 0xfeff
         }
@@ -45,8 +45,7 @@ public struct NativeCalendarEventOpenRequest: Sendable {
     }
 }
 
-/// Retain this owner through actual EventKitUI dismissal. Its resources stay on
-/// the MainActor and never come from NativeCalendarReader's serial worker.
+
 @MainActor
 public final class NativeCalendarEventOpenOwner {
     #if os(iOS) && canImport(EventKit)
@@ -62,8 +61,7 @@ public final class NativeCalendarEventOpenOwner {
     #endif
 }
 
-/// Passive exact-occurrence lookup only; presentation and its lifetime belong
-/// to the App. Resolving never invokes CoreHost/JSC or requests authorization.
+
 @MainActor
 public final class NativeCalendarEventOpenResolver {
     public init() {}
@@ -87,8 +85,7 @@ struct NativeCalendarEventOpenOccurrence {
     let allDay: Bool
 }
 
-/// Internal provider seam exercises the same selection policy as EventKit.
-/// It deliberately has no authorization request, identifier lookup or writes.
+
 @MainActor
 protocol NativeCalendarEventOpenProviding: AnyObject {
     associatedtype CalendarValue
@@ -113,8 +110,7 @@ enum NativeCalendarEventOpenPolicy {
             guard let calendar = calendars.first else { throw NativeCalendarEventOpenError.missingOccurrence }
             guard calendars.count == 1 else { throw NativeCalendarEventOpenError.ambiguousOccurrence }
 
-            // Permission can be revoked after enumeration. Never query another
-            // calendar or use an empty/nil all-calendar predicate as a fallback.
+
             try requireReadAccess(provider)
             let queryStart = Date(timeIntervalSince1970: max(
                 NativeCalendarEventOpenRequest.minimumSeconds, request.start.timeIntervalSince1970 - 1))
@@ -124,8 +120,7 @@ enum NativeCalendarEventOpenPolicy {
             let events = try provider.events(in: calendar, start: queryStart, end: queryEnd)
             try requireReadAccess(provider)
 
-            // Use NativeCalendarReader's actual millisecond representation,
-            // rather than independently rounding fractional provider instants.
+
             let formatter = DateFormatter()
             formatter.timeZone = TimeZone(identifier: "UTC")
             formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ"
@@ -150,7 +145,7 @@ enum NativeCalendarEventOpenPolicy {
         } catch NativeCalendarReadError.denied {
             throw NativeCalendarEventOpenError.denied
         } catch {
-            // Provider failures never carry calendar identifiers or content.
+
             throw NativeCalendarEventOpenError.unavailable
         }
     }

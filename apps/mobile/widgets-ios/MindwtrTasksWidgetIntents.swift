@@ -70,7 +70,7 @@ struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent {
     @Parameter(title: "List")
     var list: MindwtrWidgetListEntity?
 
-    // #1468: Focus only. Off keeps the Focus widget as it was.
+
     @Parameter(
         title: "Include available actions",
         description: "Focus only: adds Next Actions whose start date has arrived. Not tasks marked in progress.",
@@ -84,7 +84,7 @@ struct MindwtrTasksWidgetConfigurationIntent: WidgetConfigurationIntent {
         self.list = list
     }
 
-    /// The payload list this widget draws: Focus with available actions has its own.
+
     var payloadListId: String {
         let listId = list?.id ?? mindwtrDefaultWidgetListId
         return listId == mindwtrDefaultWidgetListId && includeAvailableActions ? mindwtrFocusAvailableListId : listId
@@ -132,7 +132,7 @@ struct MindwtrTasksWidgetAppIntentProvider: AppIntentTimelineProvider {
     }
 }
 
-// The app target has the same intent and opens the task through its existing launcher.
+
 @available(iOSApplicationExtension 17.0, iOS 17.0, *)
 struct MindwtrOpenWidgetTaskIntent: AppIntent {
     static var title: LocalizedStringResource = "Open Task"

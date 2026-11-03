@@ -31,7 +31,7 @@ describe('native Project task order read', () => {
         const base = { projectId: 'p', showCompleted: true, filters: {} };
         const first = host.getProjectTaskOrderView({ ...base, offset: 0, limit: 17 });
         if (!first.ok) throw new Error(first.error.code);
-        expect(first.value.total).toBe(56); // 53 tasks plus 3 headers; Done and Reference are excluded.
+        expect(first.value.total).toBe(56);
         expect(first.value.canReorder).toBe(true);
         expect(first.value.items[0]).toMatchObject({ type: 'section', id: 's1', sectionId: 's1' });
         const all = [...first.value.items];
@@ -47,7 +47,7 @@ describe('native Project task order read', () => {
                 ...Array.from({ length: 26 }, (_, i) => `t${i + 27}`)]);
         expect(all.find((item) => item.type === 'task' && item.row.id === 't27'))
             .toMatchObject({ type: 'task', sectionId: null });
-        // RN's reorder headers show each section's task count beside its title.
+
         expect(all.filter((item) => item.type === 'section').map((item) => [item.id, item.count]))
             .toEqual([['s1', 27], ['empty', 0], ['no-section', 26]]);
         expect(saveData).not.toHaveBeenCalled();

@@ -8,9 +8,7 @@ import {
     hasAttachmentDownloadIdentity,
 } from './attachment-sync-availability';
 
-// The on-demand download and its identity rules, as core's attachment editor model asks for
-// them (resolveAttachmentAvailability). Each binding calls the import when used, so tests that
-// replace attachment-sync-availability still reach their mocks.
+
 export const attachmentAvailabilityPort: AttachmentAvailabilityPort = {
     ensureAttachmentAvailableDetailed: (attachment) => ensureAttachmentAvailableDetailed(attachment),
     getAttachmentDownloadIdentity: (attachment) => getAttachmentDownloadIdentity(attachment),

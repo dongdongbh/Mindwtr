@@ -18,8 +18,7 @@ const makeTask = (id: string): Task => ({
     updatedAt: '2026-07-15T00:00:00.000Z',
 } as Task);
 
-// Builds a `[data-task-id] > [data-task-view-toggle]` row per task, matching the
-// DOM the hook queries against, and returns the toggle buttons by task id.
+
 const mountTaskRows = (tasks: Task[]): Map<string, HTMLButtonElement> => {
     const toggles = new Map<string, HTMLButtonElement>();
     for (const task of tasks) {
@@ -119,7 +118,7 @@ describe('useListSelection keyboard focus follows selection (#860)', () => {
         const toggles = mountTaskRows(tasks);
         const { getScope } = renderListSelection(tasks);
 
-        // Focus lives on the document body (e.g. j/k from the sidebar).
+
         (document.activeElement as HTMLElement | null)?.blur?.();
         expect(document.activeElement === toggles.get('one')).toBe(false);
         expect(document.activeElement === toggles.get('two')).toBe(false);
@@ -138,8 +137,8 @@ describe('highlight reveal moves keyboard focus (#1014)', () => {
     it('focuses the highlighted task row even when a stale row still holds focus', () => {
         const tasks = [makeTask('one'), makeTask('two')];
         const toggles = mountTaskRows(tasks);
-        // The closing search dialog restores focus to the previously focused
-        // row; the highlight reveal must override it.
+
+
         toggles.get('one')!.focus();
 
         renderListSelection(tasks, 'two');

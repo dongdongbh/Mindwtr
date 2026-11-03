@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DONE_AXES, FOCUS_AXES, REFERENCE_AXES, SOMEDAY_AXES } from '../components/views/list/next-grouping';
 
-// The `===` chains these sanitizers used before the rosters were unified,
-// copied verbatim. Shipped builds persisted exactly what these accepted, so
-// anything they accept must still hydrate — a narrower roster would silently
-// reset a real user's saved grouping on next launch.
+
 const legacyAcceptedNextGroupBy = (value: unknown): boolean => (
     value === 'none'
     || value === 'context'
@@ -50,16 +47,16 @@ describe('useUiStore list options', () => {
 
         expect(useUiStore.getState().listOptions).toEqual({
             showDetails: true,
-            // Written before the per-view split (#1063): every list seeds from
-            // the one axis the blob has, so nothing looks reset after upgrade.
+
+
             focusGroupBy: 'project',
             inboxGroupBy: 'project',
             nextGroupBy: 'project',
             waitingGroupBy: 'project',
             somedayGroupBy: 'project',
             referenceGroupBy: 'context',
-            // Written by a build that predates the Done and Archive axes:
-            // defaulted, not undefined.
+
+
             doneGroupBy: 'none',
             archivedGroupBy: 'none',
         });
@@ -110,8 +107,8 @@ describe('useUiStore list options', () => {
         for (const axis of SOMEDAY_AXES) {
             expect((await hydrate({ somedayGroupBy: axis })).somedayGroupBy).toBe(axis);
         }
-    // One module reload per axis (13) — well under a second idle, but the
-    // default 5s timeout is not enough when another suite has the CPU.
+
+
     }, 20000);
 
     it('accepts exactly what the pre-roster === chains accepted', () => {
@@ -165,8 +162,7 @@ describe('useUiStore per-view grouping axes (#1063)', () => {
         expect((await hydrate({ somedayGroupBy: 'viewSection' })).somedayGroupBy).toBe('viewSection');
     });
 
-    // Before the split every list read nextGroupBy, so an upgrade that ignored
-    // it would read as "the app forgot my grouping" on four views at once.
+
     it('seeds every new axis from the legacy shared key', async () => {
         const options = await hydrate({ nextGroupBy: 'project' });
 
@@ -255,7 +251,7 @@ describe('useUiStore hidden sidebar views', () => {
         vi.resetModules();
         window.localStorage.setItem('mindwtr:sidebar:hiddenViews:v1', JSON.stringify(['someday', 'inbox', 42]));
         const { useUiStore } = await import('./ui-store');
-        // 'inbox' is structural and 42 is junk — neither may hydrate.
+
         expect(useUiStore.getState().hiddenSidebarViews).toEqual(['someday']);
 
         useUiStore.getState().setSidebarViewHidden('board', true);

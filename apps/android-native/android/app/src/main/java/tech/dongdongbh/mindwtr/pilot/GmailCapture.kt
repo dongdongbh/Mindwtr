@@ -48,12 +48,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import tech.dongdongbh.mindwtr.pilot.core.CoreHost
 
-/**
- * RN's GmailCaptureSection (apps/mobile/components/settings/gmail-capture-section.tsx) under Settings › GTD › Capture: its state,
- * its calls (host-gmail.ts's requests through CoreHost.gmailRequest, off the main thread) and its generation rule, so an answer that
- * comes after a newer operation or after Back counts for nothing. Every word is one of RN's keys; a failure is the key host-gmail.ts
- * gives (RN's gmailCaptureErrorTranslation). Main thread, but the calls.
- */
+
 class GmailCaptureModel(private val menu: MenuModel) {
     private val shell get() = menu.shell
 
@@ -62,13 +57,13 @@ class GmailCaptureModel(private val menu: MenuModel) {
     var labels by mutableStateOf<List<JSONObject>>(emptyList()); private set
     var labelId by mutableStateOf(""); private set
     var pickerOpen by mutableStateOf(false); private set
-    /** "connect", "cancel", "save", "check" or "disconnect" while one runs. */
+
     var operation by mutableStateOf<String?>(null); private set
     var error by mutableStateOf<String?>(null); private set
     var notice by mutableStateOf<String?>(null); private set
-    /** Shown until capture starts again or the account disconnects (RN's receiptsReset). */
+
     var receiptsReset by mutableStateOf(false); private set
-    /** host-gmail.ts's status view: RN's status, its "Last checked" text and its error's key. */
+
     var status by mutableStateOf<JSONObject?>(null); private set
     val busy get() = operation != null
 
@@ -77,7 +72,7 @@ class GmailCaptureModel(private val menu: MenuModel) {
 
     private class Failed(val key: String) : Exception()
 
-    /** One request on the calling (worker) thread: its value, or [Failed] with the section's key for the failure. */
+
     private fun call(runtime: CoreHost, name: String, input: JSONObject = JSONObject()): Any? {
         val reply = try { runtime.gmailRequest(name, input.toString()) } catch (_: Exception) { throw Failed("settings.gmailCaptureFailed") }
         reply.optString("errorKey").ifEmpty { null }?.let { throw Failed(it) }
@@ -86,11 +81,11 @@ class GmailCaptureModel(private val menu: MenuModel) {
 
     private fun labelsOf(value: Any?): List<JSONObject> = (value as? JSONArray)?.let { all -> List(all.length()) { all.getJSONObject(it) } }.orEmpty()
 
-    /** RN's choice: the saved label, else one named "Mindwtr", else none. */
+
     private fun chosen(next: JSONObject, nextLabels: List<JSONObject>) = next.optString("labelId").takeUnless { next.isNull("labelId") }
         ?: nextLabels.firstOrNull { it.optString("name") == "Mindwtr" }?.optString("id") ?: ""
 
-    /** RN's mount: the status, then the config, the reset notice and, once connected, the labels. Once per visit. */
+
     fun mount() {
         if (mounted) return
         mounted = true
@@ -101,7 +96,7 @@ class GmailCaptureModel(private val menu: MenuModel) {
             try {
                 val next = call(runtime, "config") as JSONObject
                 if (current != generation) return@Thread
-                // The status read opens the receipts file, so a reset it just made shows too.
+
                 val reset = call(runtime, "receiptsReset") == true
                 shell.ui { if (current == generation) { config = next; receiptsReset = reset } }
                 if (next.getBoolean("connected")) {
@@ -114,7 +109,7 @@ class GmailCaptureModel(private val menu: MenuModel) {
         }, "mindwtr-gmail-open").start()
     }
 
-    /** Back (RN unmounts the section): its state goes, and an answer still on its way counts for nothing. */
+
     fun leave() {
         generation += 1
         mounted = false
@@ -122,7 +117,7 @@ class GmailCaptureModel(private val menu: MenuModel) {
         operation = null; error = null; notice = null; receiptsReset = false
     }
 
-    /** RN's subscribeGmailCaptureStatus: the controller's status after each cycle (host-gmail.ts `gmailStatus` events). */
+
     fun statusChanged(next: JSONObject) { status = next }
 
     fun toggle() { open = !open }
@@ -130,7 +125,7 @@ class GmailCaptureModel(private val menu: MenuModel) {
     fun closePicker() { pickerOpen = false }
     fun choose(id: String) { labelId = id; pickerOpen = false }
 
-    /** RN's runOperation: a new generation, the operation shown, the old error and notice gone; [before] runs here at once. */
+
     private fun run(next: String, before: () -> Unit = {}, work: (CoreHost, Int) -> Unit) {
         val runtime = shell.coreHost() ?: return
         val current = ++generation
@@ -193,23 +188,19 @@ class GmailCaptureModel(private val menu: MenuModel) {
 
     fun check() = run("check") { runtime, _ -> call(runtime, "checkNow") }
 
-    /** RN's displayedError: the operation's, else the reset notice, else the last cycle's. */
+
     val shownError: String? get() = error ?: (if (receiptsReset) "settings.gmailCaptureReceiptsReset" else null)
         ?: status?.takeUnless { it.isNull("lastErrorKey") }?.optString("lastErrorKey")
 }
 
-/**
- * The time of a capture cycle whose mail the lists must read again (InboxViewModel's `gmailStatus` event), or null: a cycle with
- * a new `lastPollAt` that saved mail, or that failed partway (a failed round may follow rounds that saved). A status republished
- * with its old time (dispose, a config change) or a cycle that found nothing reads nothing.
- */
+
 internal fun gmailCycleToShow(seen: String?, status: JSONObject): String? {
     if (status.isNull("lastPollAt")) return null
     val at = status.optString("lastPollAt")
     return at.takeIf { it != seen && (status.optInt("lastImportCount") > 0 || !status.isNull("lastError")) }
 }
 
-/** RN's GmailCaptureSection: a disclosure card under the Capture cards, its body while open, in RN's order. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun GmailCaptureSection(model: InboxViewModel) {
@@ -241,7 +232,7 @@ internal fun GmailCaptureSection(model: InboxViewModel) {
                         }
                         val labelName = gmail.labels.firstOrNull { it.optString("id") == gmail.labelId }?.optString("name") ?: t("settings.gmailCaptureChooseLabel")
                         val labelTitle = t("settings.gmailCaptureLabel")
-                        // RN's SettingRow inside the body keeps its own 16 dp padding.
+
                         SettingRow(labelTitle, labelName, modifier = Modifier.testTag("gmail-label-picker").clearAndSetSemantics {
                             contentDescription = "$labelTitle, $labelName"; role = Role.Button
                             if (!busy) onClick { gmail.openPicker(); true } else disabled()
@@ -280,7 +271,7 @@ internal fun GmailCaptureSection(model: InboxViewModel) {
     }
 }
 
-/** RN's section button: a 1 dp tint outline, radius 8, its label in the tint at 600; half faded while disabled. */
+
 @Composable
 private fun GmailButton(id: String, label: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -292,7 +283,7 @@ private fun GmailButton(id: String, label: String, enabled: Boolean, onClick: ()
     }
 }
 
-/** RN's label picker (its Modal on settings' pickerOverlay and pickerCard): the labels as radio rows; a choice closes it. */
+
 @Composable
 internal fun GmailLabelPicker(model: InboxViewModel) {
     val gmail = model.menu.settings.gmail

@@ -19,7 +19,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [30, 35], qualifiers = "xxxhdpi")
 class ModalKeyboardInsetTest {
-  // Inject the platform inset at the dialog root: Robolectric does not run an IME.
+
   private class InsetsRoot(context: Context, var insets: WindowInsets?) : View(context) {
     override fun getRootWindowInsets(): WindowInsets? = insets
   }

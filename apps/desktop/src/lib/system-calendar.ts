@@ -93,8 +93,7 @@ const calendarReadDiagnosticCounts = (
         else if (localDay < utcDay) localDayBehindCount += 1;
     }
 
-    // A system calendar carries the OS colour in `color` (Linux and macOS readers); an ICS
-    // feed carries its hint in `feedColor`. Either one means the native colour arrived.
+
     const nativeColorCount = calendars.filter((calendar) => (
         [calendar.color, calendar.feedColor].some((value) => typeof value === 'string' && value.trim().length > 0)
     )).length;

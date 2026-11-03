@@ -72,7 +72,7 @@ final class LegacyRNStorageTests: XCTestCase {
 
     func testMD5BackedValuesUseLowercaseUTF8DigestAndAllowLargeBackups() throws {
         let directory = try store(["mindwtr-data": NSNull(), "clé 😀": NSNull()])
-        // Fixed digests from the RN MD5 format; the test does not call reader hashing.
+
         let backup = String(repeating: "x", count: 3 * 1024 * 1024) + "😀"
         try Data(backup.utf8).write(to: directory.appendingPathComponent("d59baf067e1f6acb9879d4a44c5bc756"))
         try Data("été 🧠".utf8).write(to: directory.appendingPathComponent("20fa0a4a007952ce0a20fac39e754bcc"))
@@ -286,7 +286,7 @@ final class LegacyRNStorageTests: XCTestCase {
         XCTAssertEqual(try reopened.value(forKey: "é"), "composed")
         XCTAssertEqual(try reopened.value(forKey: "e\u{301}"), "decomposed")
         XCTAssertEqual(try reopened.bootState().backupJSON, "raw backup")
-        // The immutable old snapshot remains available for exact retry.
+
         XCTAssertEqual(try loaded.value(forKey: "mindwtr-data:json-ahead-of-sqlite"), "1")
     }
 

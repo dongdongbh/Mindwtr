@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
 
-/** The project next-action prompt's model (NextActionPrompt.kt): what a reply, a refusal and a failure do to the open prompt. */
+
 class NextActionPromptModelTest {
     private val sent = mutableListOf<JSONObject>()
     private val toasts = mutableListOf<String>()
@@ -48,7 +48,7 @@ class NextActionPromptModelTest {
         assertEquals(listOf("Error"), toasts)
     }
 
-    /** Review N1: a stale prompt takes core's prompt read again for the same task, keeps the typed text, and closes when none is owed. */
+
     @Test fun aStaleRefusalTakesTheFreshPromptOrCloses() {
         model.show(prompt())
         model.type("Draft")
@@ -63,19 +63,19 @@ class NextActionPromptModelTest {
         assertNull(model.prompt)
     }
 
-    /** Review N2: a failure that leaves a retry owed (SAVE_FAILED) closes the prompt, so the failure banner's Try again is reachable. */
+
     @Test fun anOwedFailureClosesThePrompt() {
         model.show(prompt())
         model.type("Draft")
         model.add(openAfterSave = true)
         model.owed()
         assertNull(model.prompt)
-        // The owed retry's later reply opens nothing: the prompt it came from is gone.
+
         model.done(JSONObject().put("action", "add").put("id", "new").put("openAfterSave", true))
         assertEquals(emptyList<String>(), opened)
     }
 
-    /** Review N4: Save & edit opens the editor only while its prompt is still open. */
+
     @Test fun saveAndEditOpensTheEditorOnlyForTheOpenPrompt() {
         model.show(prompt())
         model.type("Plan")

@@ -61,7 +61,7 @@ const preparedOf = (input: unknown): PreparedCalendarSubscriptionSetting | null 
     } catch { return null; }
 };
 
-/** Canonical-only metadata writes; the native owner fences the legacy fixed cell through COMMIT. */
+
 export function createCalendarSubscriptionSettingsMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
     storage: () => CalendarSubscriptionSourceStorage | null;
@@ -96,7 +96,7 @@ export function createCalendarSubscriptionSettingsMethods(deps: {
             const owned = authorizations.get(id);
             if (!owned || !await ownsSource(owned)) return recovery();
             if (useTaskStore.getState().persistenceFailure) {
-                // A rolled-back save may outlive a later durable import; never flush its old snapshot over that data.
+
                 try {
                     const durable = await owned.adapter.getData({ rawTasks: true });
                     if (!await ownsSource(owned) || !taskEditValuesEqual(durable, owned.authority.snapshot)) return recovery();
@@ -166,7 +166,7 @@ export function createCalendarSubscriptionSettingsMethods(deps: {
         return source ? { ok: true as const, value: { adapter, authority, source, storage, legacyRaw } }
             : fail('INVALID_INPUT', 'Saved calendar subscriptions are malformed or exceed the source bound');
     };
-    // The bridge calls these outside the contract: each async method is a store command (store-write-gate.ts).
+
     return gateStoreCommands({
         async getCalendarSubscriptionOptions(input: unknown): Promise<NativeHostResult<CalendarSubscriptionSettingsOptions>> {
             if (!record(input) || !exact(input, [])) return fail('INVALID_INPUT', 'Calendar subscription options take an empty object');

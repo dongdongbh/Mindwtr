@@ -14,8 +14,8 @@ for attempt in 1 2 3; do
         --fetch-retry-mintimeout=2000 \
         --fetch-retry-maxtimeout=30000 \
         --prefix "${package_dir}"; then
-        # npm does not know about bun's patchedDependencies; apply them or the
-        # build ships unpatched modules (#1016 shipped v1.2.0 that way).
+
+
         bash "${repo_root}/scripts/ci/apply_bun_patches.sh" "${package_dir}/node_modules"
         exit 0
     fi

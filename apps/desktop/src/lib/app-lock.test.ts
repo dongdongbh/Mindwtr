@@ -168,7 +168,7 @@ describe('keyboard guard', () => {
         expect(press({ key: 'p', metaKey: true })).toBe(true);
         expect(press({ key: 'F5' })).toBe(true);
         expect(rightClick()).toBe(true);
-        // The lock screen's own keys keep working.
+
         for (const key of ['Tab', 'Enter', ' ', 'Escape']) expect(press({ key })).toBe(false);
 
         resetAppLockStoreForTests({ enabled: true, locked: false });

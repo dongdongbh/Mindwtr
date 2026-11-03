@@ -280,7 +280,7 @@ describe('useTaskQuickActionMenuProps contexts panel', () => {
         render(<TaskQuickActionMenuHost task={opened} x={0} y={0} onClose={vi.fn()} />);
         fireEvent.click(screen.getByRole('menuitem', { name: 'Contexts…' }));
         fireEvent.change(screen.getByRole('textbox', { name: 'task.aria.contexts' }), { target: { value: '@a, @mine' } });
-        // A sync save holds the gate while the user saves, then publishes another device's added context.
+
         const finish = holdSyncSave(() => useTaskStore.setState({ _allTasks: [{ ...opened, rev: 3, contexts: ['@a', '@remote'] }] }));
         fireEvent.click(screen.getByRole('button', { name: 'Save' }));
         await act(finish);

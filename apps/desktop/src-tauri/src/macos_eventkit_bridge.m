@@ -13,8 +13,8 @@ static NSString *mindwtr_permission_status_string(EKAuthorizationStatus status) 
         return @"denied";
     }
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140000
-    // Newer SDKs alias FullAccess to the legacy Authorized value, so avoid a
-    // switch here because duplicate case labels fail to compile.
+
+
     if (@available(macOS 14.0, *)) {
         if (status == EKAuthorizationStatusWriteOnly) {
             return @"denied";
@@ -285,14 +285,14 @@ char *mindwtr_macos_calendar_events_json(const char *range_start, const char *ra
                 @"url": [@"system://" stringByAppendingString:encoded],
                 @"enabled": @YES
             }];
-            // The calendar's own colour, as the Linux reader already sends it. Without it every
-            // Mac calendar fell back to the eight-colour id hash and several shared a blue.
+
+
             NSString *color = mindwtr_calendar_color_hex(calendar);
             if (color) calendarItem[@"color"] = color;
             [calendarPayload addObject:calendarItem];
         }
-        // EventKit returns calendars in no promised order, and the order did change between
-        // reads: the calendar chips swapped places each time the view opened.
+
+
         [calendarPayload sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
             NSString *aName = a[@"name"] ?: @"";
             NSString *bName = b[@"name"] ?: @"";

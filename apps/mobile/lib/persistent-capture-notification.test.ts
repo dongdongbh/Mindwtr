@@ -98,14 +98,14 @@ describe('persistent-capture-notification', () => {
     });
 
     it('removes a notification left pinned by an off the app stopped in the middle of', async () => {
-        // The key is off but the notifier's mirror still says on (a process death or a failure between the switch's two steps):
-        // the next start re-pins it from the mirror (NotificationOpenIntentsPackage), so the startup restore removes it again.
+
+
         mockGetItem.mockResolvedValue(null);
         await restorePersistentCaptureNotificationOnStartup(strings);
         expect(mockHide).toHaveBeenCalledTimes(1);
         expect(mockShow).not.toHaveBeenCalled();
 
-        // Storage that cannot be read says nothing: the notification stays as it is.
+
         mockHide.mockClear();
         mockGetItem.mockRejectedValue(new Error('storage unavailable'));
         await restorePersistentCaptureNotificationOnStartup(strings);
@@ -114,8 +114,8 @@ describe('persistent-capture-notification', () => {
     });
 
     it('never acts on a read the switch overtook while it was pending', async () => {
-        // A foreground restore reads off; before the read resolves the user turns the switch on (it shows the notification
-        // first, then stores the key): the stale off must not remove the notification the user just turned on.
+
+
         let resolveRead: (value: string | null) => void = () => undefined;
         mockGetItem.mockReturnValueOnce(new Promise((resolve) => { resolveRead = resolve; }));
         const pending = restorePersistentCaptureNotificationOnStartup(strings);
@@ -140,7 +140,7 @@ describe('persistent-capture-notification', () => {
         await flushAsync();
         expect(mockShow).toHaveBeenCalledTimes(2);
 
-        // Turning the preference off makes foreground re-arms no-ops.
+
         mockGetItem.mockResolvedValue(null);
         appStateListeners.forEach((listener) => listener('active'));
         await flushAsync();

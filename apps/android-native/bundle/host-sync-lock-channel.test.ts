@@ -2,10 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-// File Sync's lock channel over the real host-polyfills.js (S5 review P2-1). A host cancel (another operation passed its
-// deadline: CoreHost.callAsync, host-entry cancel, __cancelHostCalls) must never strand a lease: a release always reaches
-// the lock, and an acquire that the cancel abandoned but the lock still granted is released when its late answer lands.
-// RN's Expo lock calls are never cancelled from JS (rn-fix-inventory.md line 144).
+
 const load = () => {
     const sent: Record<string, unknown>[] = [];
     const answers: string[] = [];
@@ -57,10 +54,10 @@ describe('File Sync lock channel and host cancels', () => {
         expect(host.sent).toEqual([{ op: 'acquire', uri: 'content://p/tree/t' }, { op: 'release', token: 'late-token' }]);
         expect(host.lateReleases()).toBe(0);
         host.answer('lock-2', null);
-        // host-sync.ts logs the release (v1.3.8/native-file-sync-late-release) once it answered.
+
         expect(host.lateReleases()).toBe(1);
         host.resume();
-        // The lease is free again: the next acquire is sent and answered as usual.
+
         const again = host.lock({ op: 'acquire', uri: 'content://p/tree/t' });
         host.answer('lock-3', 'next-token');
         await expect(again).resolves.toBe('next-token');

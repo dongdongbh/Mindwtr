@@ -1,5 +1,7 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const nlOverrides: Record<string, string> = {
+    "review.projectDeferred": "Gepland",
+    "taskEdit.startAdvanceReminderLabel": "Voor de start",
     'savedFilters.saveTitle': "Filter opslaan",
     'savedFilters.namePlaceholder': "Filternaam",
     'taskEdit.dragChecklistItem': "Sleep om te ordenen",

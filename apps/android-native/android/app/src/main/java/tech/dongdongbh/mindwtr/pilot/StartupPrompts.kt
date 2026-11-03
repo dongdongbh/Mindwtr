@@ -56,46 +56,37 @@ import tech.dongdongbh.mindwtr.pilot.core.debugProperty
 import java.util.UUID
 import java.util.concurrent.Executors
 
-/** The journaled command this file sends (host-entry.ts MENU_COMMANDS; check-boot-gates.mjs keeps them in step). */
+
 internal val STARTUP_PROMPT_COMMANDS = setOf("supportPromptShown")
 
-/**
- * RN's startup prompts (app/_layout.tsx's queue; core's native-host-contract-startup-prompts.ts): after the validated boot core
- * picks at most one prompt (the welcome sheet, the maintainer announcement, the update reminder, the donation ask) on RN's
- * device keys, and asks again after each one closes, as RN's queue goes on. Kotlin draws the prompt and opens its links.
- */
+
 class StartupPromptsModel(private val shell: InboxViewModel) {
-    /** The open prompt: core's `{ id, words, language }` (the welcome sheet) or `{ id, announcement, notNow, closeLabel }`. */
+
     var prompt by mutableStateOf<JSONObject?>(null); private set
-    /** Start using Mindwtr is seeding Getting Started (RN's busy sheet). */
+
     var seeding by mutableStateOf(false); private set
-    /** The welcome sheet's error box after a seed that did not create Getting Started. */
+
     var seedError by mutableStateOf<String?>(null); private set
 
-    // One ask or action at a time, in order (review O2e P3-B: two asks never overlap).
+
     private val asks = Executors.newSingleThreadExecutor { Thread(it, "mindwtr-startup-prompts") }
     private var runtime: CoreHost? = null
-    /**
-     * A debug build's preview (RN's prompt test controls): `debug.mindwtr.native.startup_prompt` names the prompt to open. As RN's
-     * tests, the welcome sheet runs its real handlers; a window's preview stores nothing.
-     */
+
+
     private val preview = if (BuildConfig.DEBUG) debugProperty("startup_prompt") else ""
     private var previewing = false
-    /** Core's line when a preview has no window (RN's toast for an update preview on a FOSS build). */
+
     @Volatile private var previewNotice: String? = null
-    /** The donation window whose showing was recorded (RN's onShown runs once per showing; a rotation redraws it). */
+
     private var recordedShowing: JSONObject? = null
 
-    /**
-     * [work] on the prompts' thread, in order. A screen model cleared before its boot ended (Back on the start screen) or before a
-     * seed answered has shut it: nothing more runs, as the last screen's writer (InboxViewModel.keepLastRoute).
-     */
+
     private fun later(work: () -> Unit) {
         if (asks.isShutdown) return
         runCatching { asks.execute(work) }
     }
 
-    /** After the validated boot, once per screen model: core records today's prompt activity, then answers the prompt to open. */
+
     fun start(host: CoreHost) {
         if (runtime != null) return
         runtime = host
@@ -117,10 +108,7 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /**
-     * The open prompt closes: "dismiss" (Not now, the X, Back, the backdrop, Skip, or a finished Start) or "act" (its button, or
-     * the welcome sheet's Set up sync and Import tasks). Core stores what RN stores; then the next prompt is asked.
-     */
+
     fun close(action: String) {
         val open = prompt ?: return
         prompt = null
@@ -134,7 +122,7 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         ask()
     }
 
-    /** The donation window is on screen (RN's onShown): its record on the device, then the synced one with the same time. */
+
     fun shown(open: JSONObject) {
         if (open.optString("id") != "donation" || previewing || recordedShowing === open) return
         recordedShowing = open
@@ -147,7 +135,7 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         }
     }
 
-    /** The window's button: RN's handler closes it, then opens its link or, for feedback, Settings › About. */
+
     fun act(open: JSONObject, openLink: (String) -> Unit) {
         val action = open.getJSONObject("announcement").optJSONObject("action") ?: return
         close("act")
@@ -155,17 +143,14 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         else action.optString("url").trim().takeIf { it.isNotEmpty() }?.let(openLink)
     }
 
-    /** The welcome sheet's Set up sync (`sync`) or Import tasks (`data`): RN closes it for this run, then opens that screen's handoff. */
+
     fun handoff(screen: String) {
         if (seeding) return
         close("act")
         shell.menu.openSettingsScreen(screen, onboardingHandoff = true)
     }
 
-    /**
-     * Start using Mindwtr: core's journaled Getting Started seed in the language core gave the sheet. On success the sheet is
-     * dismissed for good and Getting Started opens with RN's toast; otherwise RN's error box and toast, and the sheet stays.
-     */
+
     fun startFresh() {
         val open = prompt?.takeIf { it.optString("id") == "onboarding" } ?: return
         if (seeding) return
@@ -193,11 +178,11 @@ class StartupPromptsModel(private val shell: InboxViewModel) {
         }, "mindwtr-welcome-seed").start()
     }
 
-    /** The screen model is cleared: no ask starts after it. */
+
     fun shutdown() = asks.shutdown()
 }
 
-// RN draws these at stroke 2.2 (MobileOnboardingFlow.tsx, app-announcement-modal.tsx).
+
 private val Database22 = lucide("Database", "M3 5a9 3 0 1 0 18 0a9 3 0 1 0-18 0", "M3 5V19A9 3 0 0 0 21 19V5", "M3 12A9 3 0 0 0 21 12", stroke = 2.2f)
 private val RefreshCw22 = lucide("RefreshCw", "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", "M21 3v5h-5",
     "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", "M8 16H3v5", stroke = 2.2f)
@@ -205,7 +190,7 @@ private val X22 = lucide("X", "M18 6 6 18", "m6 6 12 12", stroke = 2.2f)
 private val MessageSquare22 = lucide("MessageSquare",
     "M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z", stroke = 2.2f)
 
-/** The open startup prompt over the whole screen, as RN's root layout draws its modals. */
+
 @Composable
 fun StartupPromptOverlays(model: InboxViewModel) {
     val prompts = model.prompts
@@ -214,22 +199,19 @@ fun StartupPromptOverlays(model: InboxViewModel) {
     else PromptWindow(prompts, open)
 }
 
-/** A window over the whole screen with its own backdrop, as RN's transparent Modal (the platform dim off). */
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun FullScreenDialog(onBack: () -> Unit, content: @Composable () -> Unit) {
     Dialog(onDismissRequest = onBack, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         SideEffect { window?.setDimAmount(0f) }
-        // Its own window: the device checks find its tags only when this composition names them too, as MainActivity's does.
+
         Box(Modifier.semantics { testTagsAsResourceId = true }) { content() }
     }
 }
 
-/**
- * RN's AppAnnouncementModal (components/app-announcement-modal.tsx): the maintainer announcement, the update reminder or the
- * donation ask; a backdrop tap, the X or Back dismisses it.
- */
+
 @Composable
 private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
     val theme = LocalTheme.current
@@ -241,7 +223,7 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
     val dismiss = { prompts.close("dismiss") }
     FullScreenDialog(dismiss) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            // The backdrop is the card's sibling, so its tap target never merges the card's text (TalkBack names it by the title).
+
             Box(Modifier.matchParentSize().background(theme.announcementScrim).clickable(role = Role.Button, onClick = dismiss)
                 .semantics { contentDescription = announcement.getString("title") })
             Box(Modifier.systemBarsPadding().padding(18.dp), contentAlignment = Alignment.Center) {
@@ -285,11 +267,7 @@ private fun PromptWindow(prompts: StartupPromptsModel, open: JSONObject) {
     }
 }
 
-/**
- * RN's first-run welcome sheet (components/MobileOnboardingFlow.tsx): Start using Mindwtr first, then Set up sync and Import
- * tasks, the error box, the footer (stacked at font scale 1.5 and above, #632) and the pinned close. While seeding, Back and every
- * control do nothing.
- */
+
 @Composable
 private fun WelcomeSheet(prompts: StartupPromptsModel, open: JSONObject) {
     val theme = LocalTheme.current
@@ -359,7 +337,7 @@ private fun WelcomeSheet(prompts: StartupPromptsModel, open: JSONObject) {
     }
 }
 
-/** One of the welcome sheet's options (RN's OnboardingOption, and Start's filled row). */
+
 @Composable
 private fun WelcomeOption(
     title: String, description: String, background: Color, border: Color, titleColor: Color, descriptionColor: Color, iconBackground: Color,

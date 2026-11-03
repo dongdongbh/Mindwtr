@@ -9,7 +9,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Voice pass V3: the bundle's microphone calls answer like a fetch, with fixed codes host-voice.ts reads (its m4a fallback included). */
+
 class HostVoiceTest {
     private val direct = Executor { it.run() }
 

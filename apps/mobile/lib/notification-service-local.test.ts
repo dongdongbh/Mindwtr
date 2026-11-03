@@ -138,11 +138,7 @@ vi.mock('react-native-alarm-notification', () => ({
   },
 }));
 
-// Only the genuinely platform-specific bits are replaced: language/translation loading (which
-// otherwise pulls in the real i18n loader) and the store. `buildReminderSchedule`,
-// `getTaskReminderPlan`, `hasTimeComponent`, `safeParseDate`, etc. are the REAL core
-// implementations, so a change to core's reminder-kind selection or gating shows up here instead
-// of being invisible behind a hand-rolled stub.
+
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
   return {
@@ -374,14 +370,13 @@ describe('notification-service-local', () => {
   });
 
   it('re-asserts the persistent capture notification after wiping fired notifications', async () => {
-    // Only a denied notification permission wipes the tray; turning reminders off
-    // (stop) keeps a delivered Pomodoro alert.
+
+
     mockPermissionsAndroidCheck.mockResolvedValue(false);
     mockPermissionsAndroidRequest.mockResolvedValue('never_ask_again');
     await startLocalMobileNotifications();
 
-    // removeAllFiredNotifications() is NotificationManager.cancelAll(), which
-    // also removes the pinned quick-capture notification (#819).
+
     expect(mockAlarmRemoveAllFiredNotifications).toHaveBeenCalledTimes(1);
     expect(mockRestorePersistentCaptureNotification).toHaveBeenCalledTimes(1);
     const wipeOrder = mockAlarmRemoveAllFiredNotifications.mock.invocationCallOrder[0];
@@ -429,9 +424,8 @@ describe('notification-service-local', () => {
         has_button: true,
         has_complete_action: true,
         loop_sound: false,
-        // No description on the task: the body is the reminder-kind label alone (English
-        // fallback, since this test's translation dict has no 'settings.dueDateNotifications'
-        // key), never raw markdown or a bare repeat of the title (#reminder-schedule).
+
+
         message: 'Due date reminder',
         play_sound: true,
         snooze_interval: 10,
@@ -460,7 +454,7 @@ describe('notification-service-local', () => {
 
     const alarmKeys = (mockAlarmScheduleAlarm.mock.calls as unknown as Array<[{ data?: { alarmKey?: string } }]>)
       .map((call) => call[0]?.data?.alarmKey);
-    // 30min interval, 120min window -> 4 occurrences (r1..r4), not a 5th.
+
     expect(alarmKeys).toEqual(expect.arrayContaining([
       'task:task-1:r1',
       'task:task-1:r2',
@@ -475,7 +469,7 @@ describe('notification-service-local', () => {
       'task:task-1:r1': { id: 42 },
       'task:task-1:r2': { id: 43 },
     }));
-    // Done tasks get neither a base reminder nor repeat occurrences (core's isInactiveTask gate).
+
     mockStoreState.tasks = [{
       id: 'task-1',
       title: 'Pay rent',
@@ -619,9 +613,8 @@ describe('notification-service-local', () => {
         tasks: mockStoreState.tasks,
         projects: mockStoreState.projects,
       };
-      // buildReminderSchedule never reads `language` directly, but the
-      // reschedule cycle localizes every alarm title/body from it, so a
-      // language-only change must still re-arm.
+
+
       const prevSettings = { ...mockStoreState.settings, language: 'en' };
       const nextSettings = { ...prevSettings, language: 'de' };
       listener({ ...shared, settings: nextSettings }, { ...shared, settings: prevSettings });
@@ -636,10 +629,8 @@ describe('notification-service-local', () => {
   });
 
   describe('rescheduleLocalAlarmsAsExact', () => {
-    // AlarmManager fixes exact-vs-inexact when the alarm is created, so an
-    // alarm scheduled while "Alarms & reminders" was denied stays inexact
-    // (#528). The rebuild has to cancel first: scheduleAlarmForKey skips any
-    // key whose config signature is unchanged, which every one of them is.
+
+
     const scheduleOneReminder = async () => {
       mockStoreState.tasks = [
         { id: 'task-1', title: 'Task one', dueDate: new Date(Date.now() + 5 * 60 * 1000).toISOString() },
@@ -703,9 +694,8 @@ describe('notification-service-local', () => {
   });
 
   it('reports the pending native alarm count alongside the tracked count', async () => {
-    // #1020: a cancel that silently removes nothing leaves the OS holding more
-    // pending requests than the alarm map tracks. That gap is invisible in the
-    // app, so the cycle log has to carry it.
+
+
     mockStoreState.tasks = [
       { id: 'task-1', title: 'Task one', dueDate: new Date(Date.now() + 5 * 60 * 1000).toISOString() },
     ];
@@ -725,9 +715,8 @@ describe('notification-service-local', () => {
   });
 
   it('does not enumerate pending native alarms on a store change when diagnostics logging is off', async () => {
-    // The enumeration is a native round-trip that only feeds the cycle log, and
-    // a reschedule runs on every store change (#766). Only a start request reads
-    // the Android rows, to delete stale ones.
+
+
     vi.useFakeTimers();
     mockIsLoggingEnabled.mockReturnValue(false);
     mockStoreState.tasks = [
@@ -775,9 +764,9 @@ describe('notification-service-local', () => {
       ));
       mockAlarmGetScheduledAlarms.mockResolvedValue([
         nativeRow(42, future, taskData('live')),
-        // The reporter's shape: a start reminder whose id the map lost, days after its task was done.
+
         nativeRow(7, past, taskData('finished')),
-        // A pending snooze of a live task, a fired one, a Pomodoro alert and a lost digest copy.
+
         nativeRow(8, new Date(Date.now() + 5 * 60 * 1000), taskData('live')),
         nativeRow(9, past, taskData('live')),
         nativeRow(10, past, 'kind==>pomodoro;;'),
@@ -794,7 +783,7 @@ describe('notification-service-local', () => {
       expect(deleted).not.toContain(8);
       expect(deleted).not.toContain(12);
       expect(deleted).not.toContain(10);
-      // The finished task's delivered notification goes too; a fired snooze's stays.
+
       expect(mockAlarmRemoveFiredNotification).toHaveBeenCalledWith(7);
       expect(mockAlarmRemoveFiredNotification).not.toHaveBeenCalledWith(9);
       expect(mockLogInfo).toHaveBeenCalledWith('[Local Notifications] Stale native alarms deleted', expect.objectContaining({
@@ -821,7 +810,7 @@ describe('notification-service-local', () => {
       const start = startLocalMobileNotifications();
       await vi.waitFor(() => expect(mockAlarmGetScheduledAlarms).toHaveBeenCalledTimes(1));
 
-      // A restore may arrive while the native bridge reads alarm rows.
+
       mockStoreState.tasks = [
         { id: 'live', title: 'Live', startTime: new Date(Date.now() + 60 * 60 * 1000).toISOString() },
         { id: 'finished', title: 'Restored', status: 'next', startTime: new Date(Date.now() - 60 * 1000).toISOString() },
@@ -856,7 +845,7 @@ describe('notification-service-local', () => {
       const row = (id: number, data: string, scheduleType = 'once') => ({ id, data, scheduleType, year: 2099, month: 1, day: 1, hour: 9, minute: 0, second: 0 });
       mockAlarmGetScheduledAlarms.mockResolvedValue([
         row(99, 'kind==>task-due;;alarmKey==>task:live;;'),
-        row(100, 'kind==>task-due;;alarmKey==>task:live;;'),
+        row(100, 'kind==>task-start-advance;;alarmKey==>task:live:sa15:4070955600000;;'),
         row(101, 'kind==>task-due;;alarmKey==>task:gone;;'),
         row(102, 'kind==>pomodoro;;'),
         row(103, 'unknown==>value;;'),
@@ -882,6 +871,17 @@ describe('notification-service-local', () => {
       expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(100);
       expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(101);
       expect(mockNativeModule.rearmAlarms).toHaveBeenCalledExactlyOnceWith([101]);
+    });
+
+    it('rearms a future start prealert with explicit Send under the device default Skip', async () => {
+      mockStoreState.tasks = [{ id: 'live', title: 'Live', reminderPolicy: 'send' }];
+      mockStoreState.settings = { taskReminderDefault: 'skip' };
+      const row = { id: 100, data: 'kind==>task-start-advance;;alarmKey==>task:live:sa15:4070955600000;;',
+        scheduleType: 'once', year: 2099, month: 1, day: 1, hour: 9, minute: 0, second: 0 };
+      mockAlarmGetScheduledAlarms.mockResolvedValue([row]);
+      await startLocalMobileNotifications();
+      expect(mockNativeModule.rearmAlarms).toHaveBeenCalledExactlyOnceWith([100]);
+      expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(100);
     });
 
     it('recovers a persisted unchanged signature on cold startup without allocating a new row', async () => {
@@ -962,8 +962,8 @@ describe('notification-service-local', () => {
   });
 
   it('does not rewrite the alarm map when a reschedule cycle derives the same alarms', async () => {
-    // Most saves touch no reminder-relevant field, so the cycle re-derives an
-    // identical map; persisting it again is an AsyncStorage write per save (#766).
+
+
     mockStoreState.tasks = [
       { id: 'task-1', title: 'Task one', dueDate: new Date(Date.now() + 5 * 60 * 1000).toISOString() },
     ];
@@ -982,8 +982,8 @@ describe('notification-service-local', () => {
         projects: mockStoreState.projects,
         settings: mockStoreState.settings,
       };
-      // A task-array identity change with the same reminder fields: the cycle
-      // runs, derives the same alarm, and must not touch storage again.
+
+
       listener({ ...shared, tasks: [...mockStoreState.tasks] }, shared);
       await vi.advanceTimersByTimeAsync(3000);
     } finally {
@@ -1011,7 +1011,7 @@ describe('notification-service-local', () => {
     expect(callReminders.length).toBeGreaterThan(1);
     expect(new Set(callReminders.map((details) => details.tag))).toEqual(new Set(['mindwtr-reminder:task:call']));
     expect(scheduled.find((details) => details.data?.taskId === 'other')?.tag).toBe('mindwtr-reminder:task:other');
-    // Android replaces natively; the collapse is iOS's.
+
     expect(mockAlarmCollapseDeliveredReminderNotifications).not.toHaveBeenCalled();
   });
 
@@ -1028,7 +1028,7 @@ describe('notification-service-local', () => {
       extra: expect.objectContaining({ releaseCheck: 'v1.3.5/ios-reminder-threads', count: 2 }),
     }));
 
-    // The app returning to the foreground starts the service again: one more cycle, one more collapse.
+
     await startLocalMobileNotifications();
     expect(mockAlarmCollapseDeliveredReminderNotifications).toHaveBeenCalledTimes(2);
   });
@@ -1112,8 +1112,8 @@ describe('notification-service-local', () => {
         id: 'task-1',
         title: 'Pay rent',
         description: '',
-        // Start reminders are off, so the earlier start time must be ignored and the due
-        // reminder (later, still in the future) must be the one that gets scheduled.
+
+
         startTime: new Date(Date.now() + 1 * 60 * 1000).toISOString(),
         dueDate: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       },
@@ -1255,7 +1255,7 @@ describe('notification-service-local', () => {
       for (let turn = 0; turn < 200 && mockAlarmScheduleAlarm.mock.calls.length === 0; turn += 1) await Promise.resolve();
       expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
 
-      // A capture-queue import lands while the cycle waits on the native module: the store tells whoever is subscribed now.
+
       const prevState = { ...mockStoreState };
       mockStoreState.tasks = [
         ...mockStoreState.tasks,
@@ -1281,10 +1281,7 @@ describe('notification-service-local', () => {
     const listener = (mockStoreSubscribe.mock.calls as unknown[][])[0]?.[0] as (state: unknown, prevState: unknown) => void;
     expect(listener).toBeTypeOf('function');
 
-    // Android coming back to the foreground: an overdue store/top-up reschedule
-    // and the AppState start request both run while a new due reminder is
-    // pending. Each cycle used to see the key as unscheduled and arm its own
-    // native alarm, so the reminder fired twice.
+
     let resolveFirstSchedule: (value: { id: number }) => void = () => undefined;
     mockAlarmScheduleAlarm
       .mockImplementationOnce(() => new Promise((resolve) => { resolveFirstSchedule = resolve; }))
@@ -1401,7 +1398,7 @@ describe('notification-service-local', () => {
         data: {
           kind: 'pomodoro',
           phase: 'focus-complete',
-          // The library stamps the alert with the phase's end (setWhen), so a late one never reads as new.
+
           endsAtMs: String(fireAt.getTime()),
         },
       })
@@ -1413,8 +1410,8 @@ describe('notification-service-local', () => {
   });
 
   it('arms the pomodoro alarm again when its record matches but the alarm library no longer holds it', async () => {
-    // An RN recovery build over the native app: the native app cancelled RN's alarms and dropped the library's alarm table,
-    // but kept RN's Pomodoro record, which still names that alarm.
+
+
     const fireAt = new Date('2099-05-22T12:30:00.000Z');
     const storage = installPomodoroStorage(JSON.stringify({ id: 41, fireAtMs: fireAt.getTime(), phase: 'focus-complete' }));
     mockAlarmGetScheduledAlarms.mockResolvedValue([{ id: 7, data: 'kind==>task;;taskId==>task-1;;' }]);
@@ -1423,13 +1420,13 @@ describe('notification-service-local', () => {
 
     expect(mockAlarmScheduleAlarm).toHaveBeenCalledTimes(1);
     expect(storage.getPomodoro()).toBe(JSON.stringify({ id: 99, fireAtMs: fireAt.getTime(), phase: 'focus-complete' }));
-    // The old id names no Pomodoro alarm any more: the library may have given it to a task reminder since.
+
     expect(mockAlarmDeleteAlarm).not.toHaveBeenCalledWith(41);
     expect(mockAlarmRemoveFiredNotification).not.toHaveBeenCalledWith(41);
   });
 
   it('keeps a matching pomodoro record inside the immediate window even when the library no longer lists it', async () => {
-    // iOS can deliver up to a second early and then drops the request: that must not read as missing and show it twice.
+
     const fireAt = new Date(Date.now() + 500);
     installPomodoroStorage(JSON.stringify({ id: 41, fireAtMs: fireAt.getTime(), phase: 'focus-complete' }));
 
@@ -1538,7 +1535,7 @@ describe('notification-service-local', () => {
     expect(mockAsyncStorageRemoveItem).not.toHaveBeenCalledWith('mindwtr:local:pomodoro-alarm:v1');
     expect(nativePending.has(41)).toBe(true);
 
-    // Model AlarmManager dispatching only after the JS completion transition.
+
     const dispatchedAfterJsCompletion = nativePending.delete(41);
     expect(dispatchedAfterJsCompletion).toBe(true);
     expect(mockLogInfo).toHaveBeenCalledWith(
@@ -1675,7 +1672,7 @@ describe('notification-service-local', () => {
   it('does not reschedule the same future phase and deadline', async () => {
     installPomodoroStorage();
     const fireAt = new Date('2099-05-22T12:30:00.000Z');
-    // The library lists the alarm it scheduled (id 99).
+
     mockAlarmGetScheduledAlarms.mockResolvedValue([{ id: 99, data: { kind: 'pomodoro', phase: 'focus-complete' } }]);
 
     await scheduleLocalPomodoroCompletionNotification(
@@ -1905,10 +1902,8 @@ describe('notification-service-local', () => {
     expect(mockAlarmDeleteAlarm).toHaveBeenCalledWith(42);
     expect(storage.getPomodoro()).toBeNull();
   });
-  // A rejected scheduleAlarm (revoked exact-alarm permission, the per-app pending
-  // alarm cap) aborted the cycle before its single save, so alarms created earlier
-  // stayed live in AlarmManager while the persisted map never learned their ids —
-  // after a restart nothing could cancel them and the reminders kept firing.
+
+
   describe('a refused alarm', () => {
     const readSavedAlarmMap = () => {
       const call = [...mockAsyncStorageSetItem.mock.calls]
@@ -1984,7 +1979,7 @@ describe('notification-service-local', () => {
           ? JSON.stringify({ 'task:gone-1': { id: 71, signature: 'deleted task' }, 'task:gone-2': { id: 72, signature: 'deleted task' } })
           : null
       ));
-      // The native table holds two alarms and refuses a third.
+
       const live = new Set([71, 72]);
       let nextId = 300;
       mockAlarmDeleteAlarm.mockImplementation((id: number) => { live.delete(id); });

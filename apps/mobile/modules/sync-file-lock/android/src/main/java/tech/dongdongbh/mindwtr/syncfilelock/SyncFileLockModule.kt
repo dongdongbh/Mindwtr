@@ -6,11 +6,11 @@ import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-// Expo names a rejection by its class; this keeps the code the module rejected with before SyncFileLockCore.
+
 private class SyncFileLockModuleException(message: String, cause: Throwable? = null) :
   CodedException("ERR_SYNC_FILE_LOCK_UNAVAILABLE", message, cause)
 
-/** React Native's SyncFileLock module: SyncFileLockCore behind Expo, its refusals as coded errors with the same text. */
+
 class SyncFileLockModule : Module() {
   private val core = SyncFileLockCore { appContext.reactContext ?: throw Exceptions.ReactContextLost() }
 
@@ -23,8 +23,7 @@ class SyncFileLockModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("SyncFileLock")
 
-    // Proof for the startup log that SyncHttpClientPackage installed the bounded
-    // connect timeout before any request was made (#1150).
+
     Constant("httpConnectTimeoutMs") { SyncHttpClientConfig.installedConnectTimeoutMs.toDouble() }
 
     OnDestroy {

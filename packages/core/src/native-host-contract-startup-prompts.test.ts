@@ -5,11 +5,9 @@ import { flushPendingSave, resetForTests, setStorageAdapter, useTaskStore } from
 import { SYNC_BACKEND_KEY } from './sync-storage-keys';
 import { LOCAL_USER_PROMPT_STATE_KEY, recordPromptActivity } from './user-prompts';
 
-/**
- * The native hosts' startup prompts: core's RN descriptors and queue on the host's device keys, after the validated boot.
- */
+
 const DAY_MS = 24 * 60 * 60 * 1000;
-// Sandbox mode is fixed per runtime (initializeSandboxRuntime); one test switches what the contract reads.
+
 const sandbox = vi.hoisted(() => ({ on: false }));
 vi.mock('./sandbox', async (importOriginal) => ({ ...await importOriginal<typeof import('./sandbox')>(), isSandboxMode: () => sandbox.on }));
 const value = <T,>(result: NativeHostResult<T>): T => {
@@ -71,9 +69,9 @@ const begin = async (contract: Contract, input: Record<string, unknown>) => {
     await vi.runAllTimersAsync();
     return value(await run).prompt;
 };
-// A user first seen a month ago, active on two days since: past the update reminder's and donation ask's waits.
+
 const settledUser = () => JSON.stringify(recordPromptActivity(recordPromptActivity({}, Date.now() - 30 * DAY_MS), Date.now() - 10 * DAY_MS));
-// First seen 40 days ago and active on 25 of them: past the donation ask's 30 days and 21 active days.
+
 const longTimeUser = () => JSON.stringify(Array.from({ length: 25 }, (_, day) => Date.now() - (40 - day) * DAY_MS)
     .reduce((state, at) => recordPromptActivity(state, at), {}));
 
@@ -84,7 +82,7 @@ describe('native host contract: the donation ask\'s synced record', () => {
         const requestId = '0b6f8d0e-7c55-4a8e-9b1a-3d2f8f0c1a77';
         expect(value(await contract.supportPromptShown({ requestId, shownAt }))).toEqual({ changed: true });
         expect(useTaskStore.getState().settings.supportPrompt?.lastShownAt).toBe(shownAt);
-        // A replay of the same request answers from its receipt and writes nothing new.
+
         useTaskStore.setState({ settings: { ...useTaskStore.getState().settings, supportPrompt: { lastShownAt: '2026-10-23T00:00:00.000Z' } } } as never);
         expect(value(await contract.supportPromptShown({ requestId, shownAt }))).toEqual({ changed: true });
         expect(useTaskStore.getState().settings.supportPrompt?.lastShownAt).toBe('2026-10-23T00:00:00.000Z');
@@ -108,7 +106,7 @@ describe('native host contract: startup prompts', () => {
         expect(sheet).toMatchObject({ id: 'onboarding', language: 'en', words: { title: 'Welcome to Mindwtr', startFreshTitle: 'Start using Mindwtr', skipForNow: 'Skip for now', toastReady: 'Getting Started is ready in Projects.' } });
         expect(Object.values((sheet as { words: Record<string, string> }).words).every((word) => !word.startsWith('onboarding.'))).toBe(true);
         expect(JSON.parse(bound.storage.get(LOCAL_USER_PROMPT_STATE_KEY)!).activeDayKeys).toHaveLength(1);
-        // The prompts' active day has one writer, logged once per process after the write.
+
         expect(lines).toEqual([['Native prompt activity recorded', { releaseCheck: 'v1.3.5/native-prompt-activity', outcome: 'stored' }]]);
         expect(value(await contract.startupPromptAction({ id: 'onboarding', action: 'dismiss' }))).toEqual({ shownAt: null });
         expect(bound.storage.get(MOBILE_ONBOARDING_STORAGE_KEY)).toBe('dismissed');
@@ -143,8 +141,8 @@ describe('native host contract: startup prompts', () => {
         });
         value(await contract.startupPromptAction({ id: 'update-reminder', action: 'dismiss' }));
         expect(JSON.parse(bound.storage.get(LOCAL_USER_PROMPT_STATE_KEY)!).update.dismissedVersion).toBe('1.4.0');
-        // RN's queue goes on after a dismissal; this user is too new for the donation ask, so nothing else opens, and the
-        // update reminder is not checked again this session.
+
+
         expect(await begin(contract, { installerSource: 'sideload', donationEnabled: true })).toBeNull();
         expect(bound.fetched).toHaveLength(1);
     });
@@ -196,7 +194,7 @@ describe('native host contract: startup prompts', () => {
     it('refuses before the boot is ready, and answers unavailable without a device', async () => {
         const early = createNativeHostContract({ about: device().host });
         expect((await early.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false })).ok).toBe(false);
-        // A loaded store, then a contract with no device.
+
         await openContract(device());
         const hostless = createNativeHostContract({});
         value(await hostless.setLanguage({ storedLanguage: 'en', systemLocale: 'en-US' }));
@@ -213,7 +211,7 @@ describe('native host contract: startup prompts', () => {
             const prompt = value(await contract.beginStartupPrompts({ installerSource: 'sideload', donationEnabled: false, preview: id })).prompt;
             expect(prompt?.id).toBe(id);
         }
-        // RN's update test target: the Play listing for a Play install, View release for an unknown installer.
+
         const update = value(await contract.beginStartupPrompts({ installerSource: 'play-store', donationEnabled: false, preview: 'update-reminder' })).prompt;
         expect(update).toMatchObject({ announcement: { id: 'update-reminder-99.99.99',
             action: { label: 'Update now', url: 'https://play.google.com/store/apps/details?id=tech.dongdongbh.mindwtr' } } });
@@ -241,7 +239,7 @@ describe('native host contract: startup prompts', () => {
         expect((await contract.beginStartupPrompts({ installerSource: 'sideload' })).ok).toBe(false);
         expect((await contract.startupPromptAction({ id: 'donation', action: 'open' })).ok).toBe(false);
     });
-    // Last: the store keeps this run's task ids, so a later empty library would be refused as a partial save.
+
     it('never offers the welcome sheet over data', async () => {
         const contract = await openContract(device());
         await useTaskStore.getState().addTask('Task');

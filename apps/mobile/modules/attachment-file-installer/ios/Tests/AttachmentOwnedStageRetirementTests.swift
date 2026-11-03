@@ -3,7 +3,7 @@ import Darwin
 import XCTest
 @testable import AttachmentFileInstallerEngine
 
-/// Public-facade behavior plus internal default-noop fault seams. No RN binding.
+
 final class AttachmentOwnedStageRetirementTests: XCTestCase {
   private enum Stop: Error { case fault }
 
@@ -417,7 +417,7 @@ final class AttachmentOwnedStageRetirementTests: XCTestCase {
       let outcome = try action()
       guard case .conflict = outcome else { return XCTFail("Must refuse without terminal missing/removal", file: file, line: line) }
     } catch {
-      // All production messages are fixed; no supplied path or proof is echoed.
+
       XCTAssertFalse(error.localizedDescription.contains("file:///"), file: file, line: line)
     }
   }

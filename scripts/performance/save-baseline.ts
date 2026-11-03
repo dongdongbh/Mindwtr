@@ -1,4 +1,4 @@
-// Run with Bun. Synthetic snapshots only; never reads or writes application data.
+
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import type { AppData } from '../../packages/core/src/types';

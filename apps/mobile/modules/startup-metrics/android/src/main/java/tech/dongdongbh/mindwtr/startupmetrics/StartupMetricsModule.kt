@@ -9,7 +9,7 @@ import expo.modules.kotlin.functions.Queues
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-/** No exported component, permissions, task data, or persisted configuration. */
+
 class StartupMetricsModule : Module() {
   private var reportedActivity = WeakReference<Activity>(null)
   private val profileLock = Any()
@@ -46,8 +46,8 @@ class StartupMetricsModule : Module() {
 
   override fun definition() = ModuleDefinition {
     Name("MindwtrStartupMetrics")
-    // No exported component or caller-controlled path. Both the build flag and
-    // exact synthetic-only package must match; normal releases cannot activate it.
+
+
     Function("beginCaptureProfile") {
       synchronized(profileLock) {
         if (!captureProfilingAllowed() || activeProfile != 0 || profileSequence >= 8) {

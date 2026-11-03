@@ -3,7 +3,7 @@ export type AppleRemindersImportSettings = {
   selectedListTitle?: string;
   importedReminderIds: string[];
   deleteImportedReminders: boolean;
-  /** Run the import each time Mindwtr comes to the foreground (#1238). */
+
   autoImportOnOpen: boolean;
 };
 
@@ -23,7 +23,7 @@ export type AppleRemindersImportResult = {
   failedCount: number;
 };
 
-/** Only the provider fields that participate in the existing import policy. */
+
 export type AppleReminderImportSource = {
   id?: unknown;
   title?: unknown;
@@ -99,7 +99,7 @@ export function normalizeAppleRemindersImportSettings(value: unknown): AppleRemi
   };
 }
 
-/** Classification supplies an Inbox seed, never proof of a saved task or authority to delete the source. */
+
 export function classifyAppleReminderForImport(
   source: AppleReminderImportSource,
   listId: string,

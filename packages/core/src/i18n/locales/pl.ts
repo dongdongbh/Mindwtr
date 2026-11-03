@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const plOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "Przed rozpoczęciem",
     "attachments.webUploadRequiresCloud": "Przesyłanie w przeglądarce wymaga synchronizacji z własnym serwerem w chmurze.",
     "attachments.webUploadEncrypted": "Przesyłanie w przeglądarce wymaga wyłączenia szyfrowania synchronizacji.",
     "attachments.webUploadOffline": "Nie można przesyłać plików offline.",
@@ -781,6 +782,7 @@ export const plOverrides: Record<string, string> = {
         'review.projectsStepDesc': 'Upewnij się, że każdy aktywny projekt ma następne działanie.',
         'review.projectsHint': 'Przejrzyj każdy projekt. Czy ma co najmniej jedno konkretne następne działanie? Jeśli nie, dodaj je teraz. Ukończone projekty oznacz jako zakończone.',
         'review.hasNextAction': 'Ma następną akcję',
+    'review.projectDeferred': 'Zaplanowane',
         'review.needsAction': 'Potrzebuje działania',
         'review.noActiveTasks': 'Brak aktywnych zadań',
         'review.somedayStep': 'Kiedyś/Może',
@@ -1553,7 +1555,7 @@ export const plOverrides: Record<string, string> = {
         'captureNotification.text': 'Dotknij, aby zapisać do Skrzynki',
         'captureNotification.channelName': 'Szybkie przechwytywanie',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': 'Oczyść umysł',
         'mindSweep.title': 'Oczyść umysł',
         'mindSweep.intro': 'Przejdź przez kilka list podpowiedzi i zapisz wszystko, co przyjdzie ci do głowy. Nie filtruj i nie porządkuj — każda pozycja trafi do skrzynki odbiorczej, ogarniesz ją później.',

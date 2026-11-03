@@ -1,12 +1,6 @@
-/**
- * React Native's Contexts screen, replayed against the frozen parity fixture that
- * core's contexts-view-model and the native host contract are tested against.
- *
- * MINDWTR_CAPTURE_LIST_VIEWS=1 rewrites the fixture's `contexts` part; its
- * `provenance` names the commit the observations were captured at. Each scenario renders the real screen
- * with the real core store, presses its chips, rows and bulk buttons, and records
- * what a user sees and what the store is asked to write.
- */
+
+
+
 import React from 'react';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
@@ -65,7 +59,7 @@ vi.mock('@/hooks/use-theme-colors', () => {
 });
 vi.mock('@/lib/task-meta-navigation', () => ({ openContextsScreen: vi.fn(), openProjectScreen: vi.fn() }));
 vi.mock('@/lib/app-log', () => ({ logError: vi.fn(), logInfo: vi.fn(), logWarn: vi.fn() }));
-// Keep the historical fixture intact while honoring native visibility for the new filter sheet.
+
 vi.mock('../task-filter-sheet', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../task-filter-sheet')>();
   return {
@@ -348,7 +342,7 @@ async function seedStore(settings: AppSettings, tasks: Task[]) {
   } as never);
   await useTaskStore.getState().fetchData({ throwOnError: true });
   await flushPendingSave();
-  // Only the screen's own calls: batchMoveTasks calls batchUpdateTasks inside the store.
+
   let moving = 0;
   useTaskStore.setState(Object.fromEntries(RECORDED.map((name) => [name, async (...args: unknown[]) => {
     if (!(name === 'batchUpdateTasks' && moving > 0)) writeLog.push([name, ...encodeArgs(args)]);
@@ -370,7 +364,7 @@ const textOf = (node: ReactTestInstance): string[] => {
 const textsIn = (node: ReactTestInstance): string[] => node.findAll((child) => String(child.type) === 'Text')
   .map((child) => textOf(child).join(''));
 const hostsOf = (root: ReactTestInstance, type: string) => root.findAll((node) => String(node.type) === type);
-// A bulk button's name: its text, or the accessibility label of an icon-only button (the X exit).
+
 const buttonName = (node: ReactTestInstance): string | undefined => textsIn(node)[0] ?? node.props.accessibilityLabel;
 
 function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number; writes: number }) {
@@ -387,7 +381,7 @@ function observe(root: ReactTestInstance, seen: { alerts: number; toasts: number
   const flatList = hostsOf(root, 'FlatList')[0];
   const emptyIcon = flatList.findAll((node) => String(node.type).startsWith('Icon:'))[0];
   const empty = rows.length === 0 && emptyIcon ? [String(emptyIcon.type), ...textsIn(flatList)] : null;
-  // Search-row Sort and Filters controls are not part of the bulk bar.
+
   const bulkButtons = hostsOf(root, 'TouchableOpacity')
     .filter((node) => !node.findAll((child) => ['Icon:ArrowUpDown', 'Icon:SlidersHorizontal'].includes(String(child.type))).length);
   const bulk = bulkButtons.length > 0
@@ -437,7 +431,7 @@ async function perform(root: ReactTestInstance, action: Action) {
       node.props.accessibilityLabel === action[1] || String(node.props.accessibilityLabel).startsWith(`${action[1]} (`)
     ))[0];
     if (!chip) throw new Error(`No chip ${action[1]}`);
-    // 'chip' is the additive press, RN's long-press (the host's `additive`); 'chipTap' the tap (`next`) (#1427).
+
     await act(async () => { ((kind === 'chip' && chip.props.onLongPress) || chip.props.onPress)(); });
     return;
   }
@@ -508,7 +502,7 @@ async function runScenario(scenario: Scenario) {
   const observations = [observe(renderer.root, seen)];
   for (const action of scenario.actions) {
     await perform(renderer.root, action);
-    // Store writes settle through promises the press does not await.
+
     await act(async () => { await flushPendingSave(); });
     observations.push(observe(renderer.root, seen));
   }

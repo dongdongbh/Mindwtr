@@ -4,8 +4,7 @@ import {
   writeMobileOnboardingDismissed as writeCoreMobileOnboardingDismissed,
 } from '@mindwtr/core';
 
-// When the welcome sheet opens and its dismissal live in core (first-run-onboarding.ts), so the native app follows the
-// same rule under the same key; this app binds them to AsyncStorage and keeps the manual-trigger events.
+
 export { MOBILE_ONBOARDING_STORAGE_KEY, shouldOpenMobileFirstRunOnboarding } from '@mindwtr/core';
 
 const listeners = new Set<() => void>();

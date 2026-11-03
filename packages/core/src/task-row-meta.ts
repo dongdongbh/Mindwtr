@@ -15,14 +15,14 @@ import { resolveTaskTextDirection } from './text-direction';
 import { formatTimeSpentLabel } from './time-spent';
 import type { AppSettings, Area, Project, Section, Task, TaskPriority, TaskStatus } from './types';
 
-/** The optional features a task row reads, resolved from settings. */
+
 export type TaskRowFeatures = {
     priorities: boolean;
     timeEstimates: boolean;
-    /** Time spent shows only while Pomodoro is on and linked to tasks. */
+
     timeSpent: boolean;
     taskAge: boolean;
-    /** False while the editor layout hides Status: the row flags its status control hidden (#1405, as RN's and desktop's rows). */
+
     status?: boolean;
 };
 
@@ -39,7 +39,7 @@ export function resolveTaskRowFeatures(
     };
 }
 
-/** Clients map these to theme colors: overdue = danger, dueSoon = warning, normal = secondary text. */
+
 export type TaskRowDueTone = 'overdue' | 'dueSoon' | 'normal';
 
 type TaskRowMetaPartBody =
@@ -54,39 +54,32 @@ type TaskRowMetaPartBody =
     | { kind: 'timeSpent' | 'attachments'; accessibilityLabel: string }
     | { kind: 'checklist'; completed: number; total: number };
 
-/**
- * One item of the row's metadata line, in display order. `text` is the whole visible
- * label, except that context and tag show "+overflowCount" after it when above zero.
- * `detail` parts hide when the view hides details (mobile lists always do; Focus has a toggle).
- * A project or area with no color gets the grey default dot, as group headers and desktop rows do (#1422).
- */
+
 export type TaskRowMetaPart = TaskRowMetaPartBody & { text: string; detail: boolean };
 export type TaskRowMetaPartKind = TaskRowMetaPart['kind'];
 
 export type TaskRowMeta = {
     parts: TaskRowMetaPart[];
-    /** Detail: hidden with the detail parts. Null when the setting is off, or for Done and Reference. */
+
     ageLabel: string | null;
-    /** Detail: the first markdown line of the description. */
+
     descriptionPreview: string | null;
-    /** The priority strip; null when priorities are off or for Reference. */
+
     priority: TaskPriority | null;
-    /** The status control's label; null for Reference, which has no status control. */
+
     statusLabel: string | null;
-    /**
-     * True while the editor layout hides Status: RN's and desktop's rows show no status control then (#1405). A separate flag, so
-     * a host whose row actions live in its status menu (iOS native's row Done) keeps the label.
-     */
+
+
     statusHidden: boolean;
-    /** Whether the Focus star can show (the view decides whether it offers one). */
+
     canFocus: boolean;
-    /** The native apps' single swipe action. RN's row renders buildTaskRowSwipeActions (#1464); the native apps move to it next. */
+
     swipe: { target: TaskStatus; label: string; icon: 'restore' | 'done' | 'next' };
     textDirection: 'ltr' | 'rtl';
     accessibilityLabel: string;
 };
 
-/** The containers a row names. Resolve once per task and container change: it scans the lists. */
+
 export type TaskRowLookup = {
     project?: Project;
     projectArea?: Area;
@@ -113,9 +106,9 @@ export type TaskRowMetaInput = {
     task: Task;
     lookup: TaskRowLookup;
     features: TaskRowFeatures;
-    /** The app language; the age label reads it. */
+
     language: Language;
-    /** Every date label is formatted with this, never with the globally configured formatting. */
+
     dateFormatting: DateFormattingConfig;
     t: TranslateFn;
     now?: Date;
@@ -156,23 +149,18 @@ const swipeFor = (status: TaskStatus, t: TranslateFn): TaskRowMeta['swipe'] => {
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-/**
- * The first instant (epoch ms) after `now` at which buildTaskRowMeta for this task reads differently, the store unchanged: the
- * due tone's (dueToneFor: dueSoon from 72 h before the due instant, overdue just after it) and the age label's next change
- * (getTaskAgeLabel over whole days). Null when the clock never changes the row. A host reads a list again at its rows'
- * earliest (#1360: RN redraws its rows each minute).
- */
+
 export function getTaskRowMetaValidUntil(task: Task, now: Date, features: Pick<TaskRowFeatures, 'taskAge'>): number | null {
     const nowMs = now.getTime();
     if (!Number.isFinite(nowMs) || task.status === 'reference') return null;
     let next = Infinity;
     const consider = (at: number) => { if (at > nowMs && at < next) next = at; };
     const due = isTaskActionable(task) ? safeParseDueDate(task.dueDate)?.getTime() : undefined;
-    // getTaskUrgency compares the hours left strictly: each tone changes 1 ms after its threshold instant.
+
     if (due !== undefined) for (const before of [72 * HOUR_MS, 0]) consider(due - before + 1);
     const created = Date.parse(task.createdAt);
     if (features.taskAge && task.status !== 'done' && Number.isFinite(created)) {
-        // The label's steps are at most 30 days apart (months), and every language steps on the same days.
+
         const days = Math.floor((nowMs - created) / DAY_MS);
         const label = getTaskAgeLabel(task.createdAt, 'en', now);
         for (let day = Math.max(days + 1, 1); day <= days + 31; day += 1) {
@@ -182,7 +170,7 @@ export function getTaskRowMetaValidUntil(task: Task, now: Date, features: Pick<T
     return Number.isFinite(next) ? next : null;
 }
 
-/** The React Native task row's meta line and labels, as data. The output depends only on the input. */
+
 export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
     const { task, features, t } = input;
     const { project, projectArea, taskArea, section } = input.lookup;
@@ -213,8 +201,8 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
             dotColor: getProjectAccentColor(project, new Map(projectArea ? [[projectArea.id, projectArea]] : [])) ?? DEFAULT_AREA_COLOR,
         });
     }
-    // A task filed straight under an area names the area; a project already
-    // carries its area through the dot (#1246).
+
+
     if ((isReference || !project) && area) {
         add({ kind: 'area', text: area.name, dotColor: area.color || DEFAULT_AREA_COLOR });
     }
@@ -302,8 +290,8 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
                 `${tFallback(t, 'taskEdit.statusLabel', 'Status')}: ${t(`status.${task.status}`)}`,
                 startText,
                 dueLabel ? `${tFallback(t, 'taskEdit.dueDateLabel', 'Due')}: ${dueLabel}` : null,
-                // The strip is the only priority signal on a row, so the level
-                // has to reach screen readers as text, not color alone.
+
+
                 features.priorities && task.priority
                     ? `${tFallback(t, 'taskEdit.priorityLabel', 'Priority')}: ${t(`priority.${task.priority}`)}`
                     : null,
@@ -316,7 +304,7 @@ export function buildTaskRowMeta(input: TaskRowMetaInput): TaskRowMeta {
 
 function referenceAccessibilityLabel({ task, lookup, t }: TaskRowMetaInput, visibleAttachmentCount: number): string {
     const { project } = lookup;
-    // A task's own area id wins even when that area is missing; only then the project's.
+
     const area = task.areaId ? lookup.taskArea : lookup.projectArea;
     return [
         task.title,

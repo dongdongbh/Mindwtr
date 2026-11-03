@@ -4,7 +4,7 @@ import type { AppData, Project, Task } from './types';
 import { WIDGET_FIXED_LIST_IDS, WIDGET_FOCUS_AVAILABLE_LIST_ID } from './widget-lists';
 import { buildAndroidWidgetPublication, buildWidgetPayload, iosWidgetProjectionOptions, createWidgetPayloadProjection } from './widget-payload';
 
-// #1468: an opt-in Focus widget variant that adds Next Actions whose start date has arrived.
+
 const originalTz = process.env.TZ;
 const task = (id: string, fields: Partial<Task> = {}): Task => ({
     id, title: id, status: 'next', tags: [], contexts: [],
@@ -49,7 +49,7 @@ describe('Focus widget: available actions (#1468)', () => {
     it('adds started Next Actions after Today, and only those', () => {
         const payload = buildWidgetPayload(store, 'en', { listIds: [WIDGET_FOCUS_AVAILABLE_LIST_ID], maxItems: 50 });
         const list = payload.lists[WIDGET_FOCUS_AVAILABLE_LIST_ID];
-        // Any start today is in Today (day granularity) with the default focusIncludeStartDates; never repeated.
+
         expect(sectionIds(list)).toEqual({
             focus: ['starred'],
             schedule: ['started-this-morning', 'starts-this-evening', 'due-today'],

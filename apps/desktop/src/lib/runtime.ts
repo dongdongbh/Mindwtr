@@ -6,21 +6,17 @@ export function isFlatpakRuntime(): boolean {
     return typeof window !== 'undefined' && Boolean((window as any).__MINDWTR_FLATPAK__);
 }
 
-/**
- * Whether the desktop shell is running on Windows. Read from the user agent because the
- * renderer has no synchronous platform call, and every Windows WebView2 user agent carries
- * "Windows" in its platform token.
- */
+
 export function isWindowsRuntime(): boolean {
     return typeof navigator !== 'undefined' && (navigator.userAgent ?? '').includes('Windows');
 }
 
-/** Whether the desktop shell is running on macOS (WKWebView's user agent says "Macintosh"). */
+
 export function isMacRuntime(): boolean {
     return typeof navigator !== 'undefined' && (navigator.userAgent ?? '').includes('Macintosh');
 }
 
-/** Whether the desktop shell is running on Linux, including Flatpak and AppImage builds. */
+
 export function isLinuxRuntime(): boolean {
     return typeof navigator !== 'undefined' && (navigator.userAgent ?? '').includes('Linux');
 }
@@ -65,17 +61,17 @@ async function resolveWithTimeout<T>(promise: Promise<T>, fallback: T, timeoutMs
 
 export async function getInstallSourceOrFallback(fallback = 'unknown'): Promise<string> {
     if (!isTauriRuntime()) return fallback;
-    // Imported lazily: tauri-invoke guards on isTauriRuntime from this module.
+
     const { invokeNative } = await import('./tauri-invoke');
     return resolveWithTimeout(invokeNative<string>('get_install_source'), fallback, INSTALL_SOURCE_TIMEOUT_MS);
 }
 
-/** Mirrors the Rust `LinuxDistroInfo` returned by `get_linux_distro`. */
+
 export type LinuxDistroInfo = { id?: string; id_like?: string[] };
 
-/** The host Linux distribution, or null off Linux and outside the desktop app. */
+
 export async function getLinuxDistro(): Promise<LinuxDistroInfo | null> {
-    // Imported lazily: tauri-invoke guards on isTauriRuntime from this module.
+
     const { invokeNativeOr } = await import('./tauri-invoke');
     return invokeNativeOr<LinuxDistroInfo | null>(null, 'get_linux_distro');
 }

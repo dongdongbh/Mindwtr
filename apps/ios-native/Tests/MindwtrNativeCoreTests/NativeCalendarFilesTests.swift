@@ -13,7 +13,7 @@ final class NativeCalendarFilesTests: XCTestCase {
     private let bytes = Data("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:世界 + résumé\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n".utf8)
 
     override func setUpWithError() throws {
-        // Keep fixtures on the test account/container's disk, not a global temp directory.
+
         let candidate = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Library/MindwtrCalendarFileTests/" + UUID().uuidString.lowercased(), isDirectory: true)
         try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
@@ -307,7 +307,7 @@ final class NativeCalendarFilesTests: XCTestCase {
         }
         files.beforeCalendarPublish = nil; files.afterSourceOpened = nil
         XCTAssertTrue(mutated)
-        // The mutation is no longer the exact unreturned generation; retain it.
+
         XCTAssertEqual(try Data(contentsOf: XCTUnwrap(target)), Data("changed final generation".utf8))
         XCTAssertEqual(try names(cache), [])
     }

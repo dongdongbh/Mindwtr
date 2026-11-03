@@ -15,11 +15,7 @@ import {
 } from '../../lib/workspaces';
 import { useUiStore } from '../../store/ui-store';
 
-/**
- * The workspace list plus the one switch flow both the sidebar switcher and
- * Settings use: confirm, save pending changes, then restart into the new
- * workspace (#1473).
- */
+
 export function useWorkspaces() {
     const { t } = useLanguage();
     const showToast = useUiStore((state) => state.showToast);
@@ -31,14 +27,14 @@ export function useWorkspaces() {
         try {
             setList(await listWorkspaces());
         } catch {
-            // Sandbox mode and web builds have no workspaces.
+
             setList(null);
         }
     }, []);
 
     useEffect(() => {
         void refresh();
-        // Settings and the sidebar each hold a list; a change in one refreshes both.
+
         window.addEventListener(WORKSPACES_CHANGED_EVENT, refresh);
         return () => window.removeEventListener(WORKSPACES_CHANGED_EVENT, refresh);
     }, [refresh]);
@@ -51,8 +47,8 @@ export function useWorkspaces() {
     const switchTo = useCallback(async (workspace: WorkspaceInfo) => {
         setSwitching(true);
         try {
-            // After its retries the store drops a failed save, so the flush
-            // itself succeeds; a failure still recorded means unsaved changes.
+
+
             await switchWorkspace(workspace.id, async () => {
                 await flushPendingSave();
                 if (useTaskStore.getState().persistenceFailure !== null) {

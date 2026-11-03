@@ -16,12 +16,7 @@ import * as FileSystem from './file-system';
 import { logInfo } from './app-log';
 import { mobileStorage } from './storage-adapter';
 
-/**
- * The recovery-snapshot cluster, split out of data-transfer.ts so the capture path can reach
- * it without that module's four import parsers (~150KB of source). Metro does not tree-shake,
- * so one import of data-transfer.ts evaluated every importer when the capture sheet mounted
- * (A-05).
- */
+
 const SNAPSHOT_DIR_NAME = 'snapshots';
 export const SNAPSHOT_FILE_PATTERN = RECOVERY_SNAPSHOT_FILE_PATTERN;
 const SNAPSHOT_PENDING_FILE_NAME = 'data.pending.snapshot.tmp';
@@ -61,7 +56,7 @@ export const pruneSnapshots = (directory: Directory, protect: readonly string[] 
                 file.delete();
             }
         } catch {
-            // Ignore best-effort cleanup failures.
+
         }
     });
 };
@@ -112,7 +107,7 @@ export const saveCurrentDataSnapshot = async (data: AppData): Promise<string> =>
                 pending.delete();
             }
         } catch {
-            // Ignore best-effort cleanup failures.
+
         }
         throw error;
     }

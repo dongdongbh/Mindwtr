@@ -2,23 +2,14 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// vitest runs with apps/desktop as the root; tolerate a repo-root invocation too.
+
 const LOCAL_SRC = join(process.cwd(), 'src');
 const SRC_ROOT = existsSync(LOCAL_SRC) ? LOCAL_SRC : join(process.cwd(), 'apps', 'desktop', 'src');
 
-/**
- * A toast is UI copy. A string literal handed straight to showToast() is English
- * for every one of the 20 locales, and nothing else catches it: the missing-key
- * ratchet only sees keys that reach en.ts, so text that never became a key is
- * invisible to it forever.
- *
- * Each exclusion needs a reason. "It was already there" is not one.
- */
+
 const ALLOWED_LITERAL_TOASTS = new Map<string, string>();
 
-// t(...), translate(...), tFallback(...) or its full name translateWithFallback(...),
-// resolve*(...), format*(...) — every wrapper the desktop uses to turn a key into
-// localized copy.
+
 const TRANSLATOR_CALL = /\b(t|translate|tFallback|translateWithFallback|resolve[A-Z]\w*|format[A-Z]\w*)\s*\(/;
 
 function collectSourceFiles(dir: string): string[] {
@@ -31,7 +22,7 @@ function collectSourceFiles(dir: string): string[] {
     });
 }
 
-/** Text of the first argument of every showToast(...) call in `source`. */
+
 function firstArguments(source: string): string[] {
     const args: string[] = [];
     const call = /showToast\(/g;
@@ -59,7 +50,7 @@ function firstArguments(source: string): string[] {
     return args;
 }
 
-/** A quoted run whose text outside `${...}` still carries words. */
+
 function hasProseLiteral(argument: string): boolean {
     const code = argument.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
     const literals = code.match(/'[^']*'|"[^"]*"|`[^`]*`/g) ?? [];
@@ -80,14 +71,12 @@ describe('desktop toasts', () => {
         expect(offenders.filter((file) => !ALLOWED_LITERAL_TOASTS.has(file))).toEqual([]);
     });
 
-    // Without this half the pin rots: an exclusion left behind after its file is
-    // migrated quietly re-opens the door for that file.
+
     it('keeps no stale exclusions', () => {
         expect([...ALLOWED_LITERAL_TOASTS.keys()].filter((file) => !offenders.includes(file))).toEqual([]);
     });
 
-    // ponytail: a literal that already interpolates a translator call passes
-    // (`${t('k')}: ${msg}`). Tighten only if that shape starts hiding prose.
+
     it('still finds showToast calls to check', () => {
         const scanned = collectSourceFiles(SRC_ROOT)
             .reduce((total, file) => total + firstArguments(readFileSync(file, 'utf8')).length, 0);

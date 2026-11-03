@@ -8,13 +8,13 @@ import { useStatusColors } from '../../hooks/use-status-colors';
 import { styles } from './swipeable-task-item.styles';
 
 interface SwipeableTaskItemStatusMenuProps {
-    /** Long-press on the Done option completes the task with a picked timestamp. */
+
     onBackdatedComplete?: () => void;
     onClose: () => void;
     onStatusChange: (status: TaskStatus) => void;
     onMoveToSection?: () => void;
     onMoveToDestination?: () => void;
-    /** Add to checklist (#1467): only for a title-only Inbox task. */
+
     onAddToChecklist?: () => void;
     taskId: string;
     taskStatus: TaskStatus;
@@ -90,7 +90,7 @@ export function SwipeableTaskItemStatusMenu({
                     </View>
                     {onMoveToDestination || onMoveToSection || onAddToChecklist ? (
                         <View style={styles.menuMoveActions}>
-                            {/* Organize (#1464) sets Status above and Destination here: two headed groups. */}
+                            {                                                                                 }
                             <Text style={[styles.menuSectionTitle, { color: tc.secondaryText }]} accessibilityRole="header">
                                 {tFallback(t, 'task.destination', 'Destination')}
                             </Text>

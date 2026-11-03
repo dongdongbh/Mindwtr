@@ -1,9 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { initializeSandboxRuntime } from '@mindwtr/core';
 
-// The sandbox workspace must never read the device calendar, fetch a
-// subscription feed, or persist calendar settings. Every mock below stands for
-// one of those side effects; a recorded call is a leak out of the sandbox.
+
 const {
   mockGetItem,
   mockSetItem,
@@ -88,7 +86,7 @@ describe('external-calendar in sandbox mode', () => {
     await saveExternalCalendars([
       { id: 'sub-1', name: 'Team', url: 'https://example.com/team.ics', enabled: true },
     ] as any);
-    // The disabled default: system calendars off, nothing hand-picked.
+
     await expect(getSystemCalendarSettings()).resolves.toEqual({
       enabled: false,
       selectAll: true,

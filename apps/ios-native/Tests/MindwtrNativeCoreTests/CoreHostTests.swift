@@ -41,8 +41,8 @@ final class CoreHostTests: XCTestCase {
     private func assertJournalContentUnchanged(_ saved: Data) throws {
         let before = try object(String(decoding: saved, as: UTF8.self))
         let after = try object(String(contentsOf: journal))
-        // Recovery can re-encode the outer envelope; JSON object order is not
-        // part of the contract. The embedded request must remain byte-exact.
+
+
         XCTAssertEqual(try json(after), try json(before))
         XCTAssertEqual(Data(try XCTUnwrap(after["argumentsJSON"] as? String).utf8),
                        Data(try XCTUnwrap(before["argumentsJSON"] as? String).utf8))
@@ -100,7 +100,7 @@ final class CoreHostTests: XCTestCase {
     private func destinationPreservedFields(_ row: [String: Any]) throws -> String {
         let changed: Set<String> = ["projectId", "sectionId", "areaId", "rev", "revBy", "updatedAt"]
         var fields = row.filter { !changed.contains($0.key) }
-        // Compare every nested JSON value while retaining exact scalar/date values.
+
         for name in ["checklist", "attachments"] {
             if let encoded = fields[name] as? String {
                 fields[name] = try JSONSerialization.jsonObject(with: Data(encoded.utf8))
@@ -111,9 +111,8 @@ final class CoreHostTests: XCTestCase {
 
     private func semanticStoredTaskRow(_ row: [String: Any]) throws -> String {
         var fields = row
-        // The JS store re-encodes these nested values when saving the whole
-        // store. Preserve the complete row comparison, including all CAS and
-        // ownership columns, while comparing JSON values rather than key order.
+
+
         for name in ["checklist", "attachments"] {
             if let encoded = fields[name] as? String {
                 fields[name] = try JSONSerialization.jsonObject(with: Data(encoded.utf8))
@@ -180,8 +179,7 @@ final class CoreHostTests: XCTestCase {
         return try object(XCTUnwrap(args.first))
     }
 
-    // Old installed builds wrote v1 date journals. Keep their recovery fixtures
-    // explicit while all current editor saves produce exact v2 receipts.
+
     private func convertPendingDraftToLegacyFixture() throws {
         var saved = try object(String(contentsOf: journal))
         var commit = try pendingDraftCommit()
@@ -409,7 +407,7 @@ final class CoreHostTests: XCTestCase {
         let replayFaults = HostIOFaults()
         var mutations: [String] = []
         replayFaults.beforeSQL = { sql in
-            // Opening SQLite repeats this idempotent schema-version registration.
+
             if !sql.hasPrefix("INSERT OR IGNORE INTO schema_migrations"),
                sql.range(of: #"(?i)^\s*(?:INSERT|UPDATE|DELETE)\b"#, options: .regularExpression) != nil { mutations.append(sql) }
         }
@@ -580,7 +578,7 @@ final class CoreHostTests: XCTestCase {
             let expected = (initial["total"] as? Int ?? 0) + 1
             let payload = try await capture(core, title: afterCommit ? "Committed before lost reply" : "Pending before restart")
             if afterCommit {
-                // SQLite committed; the journal clear failed before UI acknowledgment.
+
                 faults.journalRemove = { throw HostFailure("Injected journal clear failure") }
             } else {
                 faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected COMMIT failure") } }
@@ -631,7 +629,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: journal), "malformed")
     }
 
-    /// Core's project next-action Add carries `timeEstimate` (validated by `isTimeEstimate`).
+
     func testProjectNextActionAddWitnessAdmitsCoreTimeEstimates() {
         func witness(_ estimate: Any?) -> Bool {
             var props: [String: Any] = ["status": "next", "projectId": "project"]
@@ -961,8 +959,8 @@ final class CoreHostTests: XCTestCase {
         let recovered = try object(await valid.start())
         XCTAssertEqual(recovered["total"] as? Int, 1)
         await valid.close()
-        // A retained valid WAL can repair an overwritten main file. This case
-        // intentionally has no usable recovery log; WAL preservation is tested separately.
+
+
         for suffix in ["-wal", "-shm"] {
             let sidecar = URL(fileURLWithPath: database.path + suffix)
             if FileManager.default.fileExists(atPath: sidecar.path) { try FileManager.default.removeItem(at: sidecar) }
@@ -1003,8 +1001,8 @@ final class CoreHostTests: XCTestCase {
         for suffix in ["-wal", "-shm"] {
             XCTAssertFalse(FileManager.default.fileExists(atPath: checkpointURL.path + suffix))
         }
-        // Reopen through the host before any writable checkpoint inspection:
-        // opening a WAL-header snapshot read/write would hide missing sidecars.
+
+
         let core = host()
         _ = try await core.start()
         await core.close()
@@ -1032,7 +1030,7 @@ final class CoreHostTests: XCTestCase {
         _ = try source.execute("PRAGMA wal_autocheckpoint = 0")
         _ = try source.execute("CREATE TABLE recovery_probe (value TEXT)")
         _ = try source.execute("INSERT INTO recovery_probe VALUES ('uncheckpointed committed row')")
-        source.close() // No other connection shields the source from teardown.
+        source.close()
         let wal = URL(fileURLWithPath: database.path + "-wal")
         let shm = database.path + "-shm"
         let mainBefore = try Data(contentsOf: database)
@@ -1171,9 +1169,8 @@ final class CoreHostTests: XCTestCase {
         let mutable = editable.union(["rev", "revBy", "updatedAt"])
         func preservedFields(_ row: [String: Any]) throws -> String {
             var fields = row.filter { !mutable.contains($0.key) }
-            // These columns hold JSON: compare every nested value and array
-            // position while allowing property order and escape spelling to
-            // differ. Dates and all other scalar columns remain exact strings.
+
+
             for name in ["checklist", "attachments"] {
                 if let encoded = fields[name] as? String {
                     fields[name] = try JSONSerialization.jsonObject(with: Data(encoded.utf8))
@@ -1183,8 +1180,8 @@ final class CoreHostTests: XCTestCase {
         }
         XCTAssertEqual(try preservedFields(before), try preservedFields(after))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-        // RN keeps the existing title when its draft is blank; native delegates
-        // that policy and permits clearing the description with an empty string.
+
+
         _ = try await core.call("saveDraft", argumentsJSON: json([json([
             "id": id, "base": ["title": title], "patch": ["title": " \n "],
         ])]))
@@ -1224,8 +1221,8 @@ final class CoreHostTests: XCTestCase {
         }
         faults.journalWrite = { journalWrites += 1 }
         faults.commandDiagnostic = { if $0 == "saveTaskDraft" { diagnostics += 1 } }
-        // These full destination patches are what buildTaskMovePatch returns.
-        // Section selection itself is deliberately a one-field draft patch.
+
+
         let transitions: [[String: String]] = [
             ["projectId": "destination-project-a", "areaId": "", "sectionId": "destination-section-a"],
             ["sectionId": ""],
@@ -1273,8 +1270,8 @@ final class CoreHostTests: XCTestCase {
                 else { XCTAssertEqual(persisted as? String, value) }
             }
             let stored = try storedTask(id)
-            // Core's container move clears the old project's ordering when
-            // moving to an area or None; all other unrelated fields stay exact.
+
+
             if next["projectId"] as? String == "" { expectedPreserved["orderNum"] = NSNull() }
             XCTAssertEqual(try destinationPreservedFields(stored), try destinationPreservedFields(expectedPreserved))
             XCTAssertEqual(stored["rev"] as? Int, (before["rev"] as? Int ?? 0) + saves)
@@ -1402,8 +1399,8 @@ final class CoreHostTests: XCTestCase {
             else { XCTAssertEqual(attempted["sectionId"] as? String, "destination-section-a") }
             await expectFailure("exact retry") { _ = try await core.call("destinationPicker", argumentsJSON: json(["{}"])) }
             await core.close()
-            // A separate writer changes an unrelated field while the intent is
-            // pending. Recovery must merge the destination without losing it.
+
+
             let sqlite = try SQLiteBridge(url: database)
             _ = try sqlite.execute("UPDATE tasks SET priority = ?, rev = rev + 1 WHERE id = ?", parametersJSON: json(["urgent", id]))
             sqlite.close()
@@ -1608,8 +1605,8 @@ final class CoreHostTests: XCTestCase {
         let baseline = try XCTUnwrap(opening["recurrenceBase"] as? [String: Any])
         XCTAssertEqual(Set(baseline.keys), Set(["recurrence", "showFutureRecurrence"]))
         let openingRecurrence = try XCTUnwrap(baseline["recurrence"] as? [String: Any])
-        // SQLite load canonicalizes the rule before the editor opens. Pin every
-        // supplied metadata value and use that actual opening baseline below.
+
+
         for field in rawRecurrence.keys {
             XCTAssertEqual(try json([openingRecurrence[field] ?? NSNull()]), try json([rawRecurrence[field] ?? NSNull()]))
         }
@@ -1639,8 +1636,8 @@ final class CoreHostTests: XCTestCase {
         let result = try object(await core.call("saveDraft", argumentsJSON: json([json(request)])))
         XCTAssertEqual(recurrenceDiagnostics, ["taskEditorDurableApplied", "taskEditorDurableApplied"])
         let acknowledgedDraft = try XCTUnwrap(result["draft"] as? [String: Any])
-        // The stored RRULE gains its canonical inherited series stamp. Compare
-        // visible core controls, then pin that acknowledged draft across restart.
+
+
         let acknowledgedModel = try object(await core.call("editorModel", argumentsJSON: json([id])))
         XCTAssertEqual(try json((acknowledgedModel["fields"] as? [String: Any])?["recurrence"] ?? [:]),
                        try json((edited["fields"] as? [String: Any])?["recurrence"] ?? [:]))
@@ -1679,8 +1676,8 @@ final class CoreHostTests: XCTestCase {
         let before = try storedTask(id)
         let opening = try object(await core.call("editorModel", argumentsJSON: json([id])))
         let baseline = try XCTUnwrap(opening["recurrenceBase"] as? [String: Any])
-        // The SQLite loader presents the legacy string as a rule object and
-        // false as absent. Protect that opening baseline, not a pre-load shape.
+
+
         XCTAssertEqual((baseline["recurrence"] as? [String: Any])?["rule"] as? String, "daily")
         XCTAssertTrue(baseline["showFutureRecurrence"] is NSNull)
         XCTAssertEqual((opening["draft"] as? [String: Any])?["showFutureRecurrence"] as? Bool, false)
@@ -1794,8 +1791,8 @@ final class CoreHostTests: XCTestCase {
         await core.close()
         let frozenEnvelope = try object(String(contentsOf: journal, encoding: .utf8))
         let frozenArguments = Data(try XCTUnwrap(frozenEnvelope["argumentsJSON"] as? String).utf8)
-        // A valid journal from another encoder may use different whitespace/order.
-        // Recovery must preserve its exact prepared arguments, not that formatting.
+
+
         try JSONSerialization.data(withJSONObject: frozenEnvelope, options: [.prettyPrinted, .sortedKeys])
             .write(to: journal, options: .atomic)
         let writer = try SQLiteBridge(url: database)
@@ -1813,8 +1810,8 @@ final class CoreHostTests: XCTestCase {
         await expectFailure("STALE_REVISION") { _ = try await reopened.start() }
         XCTAssertEqual(taskWrites, 0)
         XCTAssertEqual(try json(storedTask(id)), try json(newer))
-        // Replay re-persists the envelope; JSONEncoder does not guarantee member order.
-        // Its exact arguments string contains the frozen request and all prepared values.
+
+
         let retained = try object(String(contentsOf: journal, encoding: .utf8))
         XCTAssertEqual(try json(retained), try json(frozenEnvelope))
         XCTAssertEqual(Data(try XCTUnwrap(retained["argumentsJSON"] as? String).utf8), frozenArguments)
@@ -2032,8 +2029,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertTrue(raw["reviewAt"] is NSNull)
         XCTAssertTrue(raw["relativeStartOffset"] is NSNull)
         let originalDraft = try XCTUnwrap(editor["draft"] as? [String: Any])
-        // This floating value equals the ISO baseline's NY display. Explicit
-        // date intent must still replace the different raw representation.
+
+
         let floating = try XCTUnwrap(originalDraft["startTime"] as? String)
         XCTAssertEqual(floating, "2036-10-01T10:30")
         let patch: [String: Any] = ["startTime": floating, "dueDate": "2036-10-03", "reviewAt": "2036-10-06"]
@@ -2154,8 +2151,8 @@ final class CoreHostTests: XCTestCase {
                 XCTAssertEqual(response["id"] as? String, id)
                 XCTAssertEqual((response["draft"] as? [String: Any])?["description"] as? String, "Newer independent note")
                 let beforeMaintenance = try storedTask(id)
-                // Normal activation resumes after cleanup and may persist other fixture rows.
-                // Count every recovery write, then independently prove this complete row stays exact.
+
+
                 reopenFaults.journalRemove = { journalResolved = true }
                 _ = try await reopened.start()
                 let absent = try await reopened.retryPending()
@@ -2203,7 +2200,7 @@ final class CoreHostTests: XCTestCase {
         let exactArguments = try XCTUnwrap(pending["argumentsJSON"] as? String)
         await core.close()
         let sqlite = try SQLiteBridge(url: database)
-        // A mixture of the frozen before/after schedule is neither snapshot.
+
         _ = try sqlite.execute("UPDATE tasks SET startTime = ?, priority = ?, rev = rev + 1 WHERE id = ?",
                                parametersJSON: json(["2036-10-02", "urgent", id]))
         sqlite.close()
@@ -2395,8 +2392,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertNil(absent)
         XCTAssertTrue(cleanupReached)
         XCTAssertEqual(taskWrites, 0)
-        // Ordinary activation may canonicalize nested fixture JSON. Every
-        // scalar, raw date, revision and nested value must still be unchanged.
+
+
         XCTAssertEqual(try datePreservedFields(storedTask(id), excluding: []), try datePreservedFields(before, excluding: []))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
     }
@@ -2759,8 +2756,8 @@ final class CoreHostTests: XCTestCase {
                 "base": ["title": "Before edit", "description": "", "priority": "", "energyLevel": "", "timeEstimate": ""],
                 "patch": ["title": rawTitle, "description": rawNote, "priority": "urgent", "energyLevel": "high", "timeEstimate": "30min"]])])
             if afterCommit {
-                // Leave an unknown journal even though SQLite committed, forcing
-                // core replay after restart instead of terminal-result cleanup.
+
+
                 var journalWrites = 0
                 faults.journalWrite = {
                     journalWrites += 1
@@ -2787,8 +2784,8 @@ final class CoreHostTests: XCTestCase {
             reopenFaults.beforeSQL = { sql in
                 if sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+tasks\b"#, options: .regularExpression) != nil { taskWrites += 1 }
             }
-            // Hold the terminal response so startup replay's acknowledgment is
-            // checked before cleanup and normal activation can finish.
+
+
             reopenFaults.journalRemove = { throw HostFailure("Injected editor cleanup failure") }
             let reopened = host(reopenFaults)
             await expectFailure("cleanup") { _ = try await reopened.start() }
@@ -2905,8 +2902,8 @@ final class CoreHostTests: XCTestCase {
             _ = try await core.call("editorModel", argumentsJSON: json([id]))
         }
         for malformed in ["[]", "null"] {
-            // Foundation may reject a JSON fragment before the object-shape
-            // guard. Both paths must reject without depending on parser wording.
+
+
             await expectFailure { _ = try await core.call("editDraft", argumentsJSON: json([malformed])) }
         }
         XCTAssertEqual(statements, 0)
@@ -3298,7 +3295,7 @@ final class CoreHostTests: XCTestCase {
             _ = try sqlite.execute("INSERT INTO tasks (id, title, status, assignedTo, dueDate, tags, contexts, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                    parametersJSON: json([id, id, status, person, due.isEmpty ? NSNull() : due as Any, "[]", "[]", created, created, 1]))
         }
-        // Both auxiliary collections cross the first-window bound (100).
+
         for index in 0..<101 {
             let suffix = String(format: "%03d", index)
             _ = try sqlite.execute("INSERT INTO projects (id, title, status, color, orderNum, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -3398,7 +3395,7 @@ final class CoreHostTests: XCTestCase {
         for index in 0..<101 {
             let suffix = String(format: "%03d", index)
             sections.append(["id": "someday-section-\(suffix)", "title": "Section \(suffix)", "order": index])
-            // Deferred projects have their own collection; their tasks are not in the visible task list.
+
             for (prefix, status) in [("someday-project", "active"), ("someday-deferred", "someday")] {
                 _ = try sqlite.execute("INSERT INTO projects (id, title, status, color, orderNum, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                                        parametersJSON: json(["\(prefix)-\(suffix)", "Project \(suffix)", status, "#123456", index, at, at, 1]))
@@ -3448,7 +3445,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual((items.first?["addTask"] as? [String: Any])?["sectionId"] as? String, "someday-section-000")
         XCTAssertNotNil((items[1]["row"] as? [String: Any])?["meta"])
 
-        // Unknown token selections stay active until explicitly cleared; unavailable Projects are pruned.
+
         let stale = try await read("someday", ["sortBy": "title", "groupBy": "none", "showDetails": true,
                                                "filters": ["tokens": ["#gone"], "projects": ["gone"]], "offset": 0, "limit": 2])
         let staleFilters = try XCTUnwrap(stale["filters"] as? [String: Any])
@@ -3569,7 +3566,7 @@ final class CoreHostTests: XCTestCase {
                                        parametersJSON: json(["fold-\(status)-\(index)", "Legacy \(index)", status, areaID, "[]", "[]", status == "reference" ? NSNull() : at as Any, at, at, 1]))
             }
         }
-        // Keep this read-contract fixture independent of time-based auto-archiving.
+
         let settingsRows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(sqlite.execute("SELECT data FROM settings WHERE id = 1").utf8)) as? [[String: Any]])
         var settings = try object(XCTUnwrap(settingsRows.first?["data"] as? String))
         settings["gtd"] = ["autoArchiveDays": 0]
@@ -3791,7 +3788,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(try json(storedTask("reference-archived")), try json(before))
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         _ = try await core.call("menuRead", argumentsJSON: json(["reference", json(["offset": 0, "limit": 50])]))
-        // Rejected commands may create and clean their journals; they must never reach SQLite.
+
         XCTAssertEqual(statements, 0)
         XCTAssertEqual(refusals, 1)
     }
@@ -3825,12 +3822,12 @@ final class CoreHostTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.hasPrefix("INVALID_INPUT:"))
             XCTAssertTrue(error.localizedDescription.contains("read-only"))
         }
-        // Ordinary activation repairs this dangling association. Pending recovery must
-        // preserve it until the unknown completion resolves, so that guard cannot be bypassed.
+
+
         XCTAssertEqual(try json(storedTask("reference-deleted")), try json(before))
         XCTAssertEqual(try storedTask("reference-deleted")["projectId"] as? String, "deleted-parent")
-        // Replay re-persists its decoded envelope with JSONEncoder, whose property
-        // order can differ from the fixture's sorted JSONSerialization output.
+
+
         let retained = try object(String(contentsOf: journal, encoding: .utf8))
         XCTAssertEqual(try json(retained), try json(intent))
         XCTAssertEqual(Data(try XCTUnwrap(retained["argumentsJSON"] as? String).utf8), Data(argumentsJSON.utf8))
@@ -3839,7 +3836,7 @@ final class CoreHostTests: XCTestCase {
     }
 
     func testHistoryAndDoneGroupedPagesAreaAndTokenReadsWithoutWrites() async throws {
-        // Keep this paging fixture before its seven-day auto-archive cutoff.
+
         let fixtureBundle = try dateBundle(at: "2026-09-27T12:00:00.000Z")
         let initializer = host(bundleURL: fixtureBundle)
         _ = try await initializer.start()
@@ -4019,8 +4016,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertTrue(abandoned["completedAtValue"] is NSNull)
         XCTAssertTrue(abandoned["completedAtPicker"] is NSNull)
         XCTAssertTrue(try XCTUnwrap(abandoned["dateLabel"] as? String).hasPrefix(XCTUnwrap(labels["taskCancelled"] as? String) + ": "))
-        // The native editor passes the whole returned draft into its View tab,
-        // including archived status for both completed and cancelled records.
+
+
         for (id, title, readOnly) in [("archive-task-000", "Archive 000", false),
                                        ("archive-cancelled", "Archive cancelled", false),
                                        ("archive-task-001", "Archive 001", true)] {
@@ -4117,7 +4114,7 @@ final class CoreHostTests: XCTestCase {
         _ = try await initializer.start()
         await initializer.close()
         let sqlite = try SQLiteBridge(url: database)
-        // Keep every deletion within retention regardless of when this test runs.
+
         let now = Date()
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -4131,7 +4128,7 @@ final class CoreHostTests: XCTestCase {
             let area = index == 51 ? "hidden-area" : "trash-area"
             let taskDeleted = formatter.string(from: now.addingTimeInterval(-Double(index * 120)))
             let projectDeleted = formatter.string(from: now.addingTimeInterval(-Double(index * 120 + 60)))
-            // IDs deliberately overlap across kinds; neither entity may displace the other.
+
             _ = try sqlite.execute("INSERT INTO tasks (id, title, status, areaId, tags, contexts, description, isFocusedToday, showFutureRecurrence, suppressMindwtrReminders, pushCount, createdAt, updatedAt, deletedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                    parametersJSON: json(["trash-\(suffix)", "Deleted task \(index)", "next", area, "[]", "[]", "**Kept** note", 0, 0, 0, 0, at, at, taskDeleted, 1]))
             _ = try sqlite.execute("INSERT INTO projects (id, title, status, color, areaId, orderNum, isSequential, isFocused, createdAt, updatedAt, deletedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -4237,7 +4234,7 @@ final class CoreHostTests: XCTestCase {
         for status in ["done", "archived"] { try insert("hidden-\(status)", status: status, contexts: ["@hidden"]) }
         try insert("hidden-deleted", contexts: ["@hidden"], deleted: true)
         for status in ["someday", "waiting", "archived"] {
-            // Reference remains Reference under an archived parent during normal load.
+
             try insert("hidden-project-\(status)", status: status == "archived" ? "reference" : "next", contexts: ["@hidden"], project: "contexts-project-\(status)")
         }
         let settingsRows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(sqlite.execute("SELECT data FROM settings WHERE id = 1").utf8)) as? [[String: Any]])
@@ -4310,7 +4307,7 @@ final class CoreHostTests: XCTestCase {
         let office = try await read(nextInput(chip(none, "@office")))
         XCTAssertEqual(try ids(office), ["contexts-combo", "contexts-office"])
         XCTAssertEqual((office["selection"] as? [String: Any])?["tokens"] as? [String], ["@office"])
-        // A tap switches to the chip alone; its additive press (long-press) combines (#1427).
+
         XCTAssertEqual((try chip(office, "#blue")["next"] as? [String: Any])?["tokens"] as? [String], ["#blue"])
         let andInput = try nextInput(XCTUnwrap(chip(office, "#blue")["additive"] as? [String: Any]))
         let both = try await read(andInput)
@@ -4330,14 +4327,14 @@ final class CoreHostTests: XCTestCase {
         anyInput["matchMode"] = "any"
         let either = try await read(anyInput)
         XCTAssertEqual(try ids(either), ["contexts-combo", "contexts-office", "contexts-tag"])
-        // RN's search field filters chips only, including case-insensitive token matching.
+
         let searched = try await read(["searchQuery": "  BLUE  ", "offset": 0, "limit": 50])
         XCTAssertEqual((searched["chips"] as? [[String: Any]])?.compactMap { $0["id"] as? String }, ["all", "none", "#blue"])
         XCTAssertEqual(searched["total"] as? Int, 105)
         XCTAssertEqual(try json(XCTUnwrap(searched["rows"])), try json(XCTUnwrap(all["rows"])))
         anyInput["searchQuery"] = "no matching chip or task title"
         let searchedSelection = try await read(anyInput)
-        // RN keeps selected chips available even when the query matches neither.
+
         XCTAssertEqual((searchedSelection["chips"] as? [[String: Any]])?.compactMap { $0["id"] as? String },
                        ["all", "none", "@office", "#blue"])
         XCTAssertEqual(try chip(searchedSelection, "@office")["selected"] as? Bool, true)
@@ -4424,7 +4421,7 @@ final class CoreHostTests: XCTestCase {
             XCTAssertEqual(journalWrites, 0)
             _ = try await core.call("setAreaFilter", argumentsJSON: json([json(XCTUnwrap(option["next"]))]))
             XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-            // The existing area command intentionally persists settings. Count only subsequent reads.
+
             statements = 0; journalWrites = 0
         }
         let all = try await read()
@@ -4991,7 +4988,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(statements, 0); XCTAssertEqual(journalWrites, 0)
         XCTAssertEqual(try reviewReadSnapshot(), before)
 
-        // Existing area selection intentionally writes settings; all following Review reads remain pure.
+
         let filter = try object(await core.call("areaFilter"))
         let option = try XCTUnwrap((filter["options"] as? [[String: Any]])?.first { $0["id"] as? String == "review-area-b" })
         _ = try await core.call("setAreaFilter", argumentsJSON: json([json(XCTUnwrap(option["next"]))]))
@@ -5062,7 +5059,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(nested["total"] as? Int, 103)
         XCTAssertEqual((nested["items"] as? [Any])?.count, 100)
         let stale = try await weeklyStep("stale")
-        // Each stale project is its project card among the step's items (#1459); `projects` keeps none.
+
         let projects = try XCTUnwrap((stale["content"] as? [String: Any])?["projects"] as? [String: Any])
         XCTAssertEqual(projects["total"] as? Int, 0)
         let staleTotal = try XCTUnwrap(stale["total"] as? Int)
@@ -5186,7 +5183,7 @@ final class CoreHostTests: XCTestCase {
     }
 
     private func calendarPreferencePayload(_ field: String, before: Any, value: Any, id: String = UUID().uuidString) throws -> String {
-        // Deliberate whitespace inside the serialized request pins exact transport replay.
+
         try json([" \n" + json(["requestId": id, "field": field, "before": before, "value": value]) + "\n "])
     }
 
@@ -5649,7 +5646,7 @@ final class CoreHostTests: XCTestCase {
         for (list, prefix) in [("contexts", "@"), ("tags", "#")] {
             let values = try XCTUnwrap(inventories[list]).compactMap { $0["value"] as? String }
             let numberedPrefix = prefix + (list == "contexts" ? "Context " : "Tag ")
-            // The deleted task's tokens are excluded; raw Unicode spellings stay distinct.
+
             XCTAssertEqual(values.filter { $0.hasPrefix(numberedPrefix) }, labels.filter { $0 != "003" }.map { numberedPrefix + $0 })
             for spelling in [prefix + "café", prefix + "cafe\u{0301}"] {
                 XCTAssertEqual(values.filter { Array($0.utf8) == Array(spelling.utf8) }.count, 1)
@@ -6803,8 +6800,7 @@ final class CoreHostTests: XCTestCase {
         await expectFailure("INVALID_INPUT") { _ = try await writer.call("somedaySectionRenameRetryOutcome", argumentsJSON: reused) }
         await writer.close()
 
-        // iOS retains unresolved identity in its file journal, not a history of
-        // completed UUIDs. After recreation, replay the exact original request.
+
         let saved = try calendarPreferenceSettings()
         let faults = HostIOFaults()
         let reader = host(faults)
@@ -6891,7 +6887,7 @@ final class CoreHostTests: XCTestCase {
             let blockedFaults = HostIOFaults()
             var writes: [String] = []
             blockedFaults.beforeSQL = {
-                // Boot repeats this idempotent schema marker before reading the target.
+
                 if $0 == "INSERT OR IGNORE INTO schema_migrations (version) VALUES (1)" { return }
                 if $0.hasPrefix("UPDATE ") || $0.hasPrefix("INSERT ") || $0.hasPrefix("DELETE ") { writes.append($0) }
             }
@@ -7548,9 +7544,8 @@ final class CoreHostTests: XCTestCase {
             faults.beforeSQL = { if $0.hasPrefix("UPDATE settings") || $0.hasPrefix("INSERT INTO settings") { writes += 1 } }
             await expectFailure("STALE_REVISION") { _ = try await core.call("somedaySectionDeleteWrite", argumentsJSON: payload) }
             XCTAssertEqual(writes, 0)
-            // Pure request validation cannot compare current sections or stamp.
-            // A stale outcome may be journaled as pending, then as a definite
-            // rejected terminal, before the host removes both from disk.
+
+
             XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
             XCTAssertEqual(try json(calendarPreferenceSettings()), try json(changed))
             await core.close()
@@ -7951,8 +7946,8 @@ final class CoreHostTests: XCTestCase {
             XCTAssertEqual(writes, 0)
             XCTAssertEqual(try json(calendarPreferenceSettings()), try json(settings))
             await replay.close()
-            // A definite no-write rejection can leave a terminal journal until
-            // cleanup; the next case gets a clean database and no pending action.
+
+
         }
     }
 
@@ -8192,7 +8187,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(statements, 0); XCTAssertEqual(journalWrites, 0)
         XCTAssertEqual(try reviewReadSnapshot(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
-        // Correct types but invalid options belong to core, after journaling.
+
         for (field, beforeValue, value) in [("viewMode", "month" as Any, "bad" as Any), ("weekVisibleDays", 5 as Any, 8 as Any)] {
             do {
                 _ = try await core.call("calendarPreference", argumentsJSON: calendarPreferencePayload(field, before: beforeValue, value: value))
@@ -8452,7 +8447,7 @@ final class CoreHostTests: XCTestCase {
         _ = try await reopened.call("language", argumentsJSON: json(["en", "en-US"]))
         var restored = try object(await reopened.call("menuRead", argumentsJSON: json(["board", json(["limit": 2])])))
         var expected = view
-        // Revisions include a host process ID; only the Board content survives restart.
+
         restored.removeValue(forKey: "revision"); expected.removeValue(forKey: "revision")
         XCTAssertEqual(try json(restored), try json(expected))
         XCTAssertEqual(try reviewReadSnapshot(), before)
@@ -8645,7 +8640,7 @@ final class CoreHostTests: XCTestCase {
             json([["id": "old-link", "kind": "link", "title": "Retained link", "uri": "https://example.invalid/retained", "createdAt": at, "updatedAt": at],
                   ["id": "old-file", "kind": "file", "title": "Retained file", "uri": "file:///retained", "createdAt": at, "updatedAt": at]]), id]))
         sqlite.close()
-        // Establish core's existing row serialization before targeted-write assertions.
+
         let canonicalizer = host()
         _ = try await canonicalizer.start()
         _ = try await canonicalizer.call("captureSubmit", argumentsJSON: capture(canonicalizer, title: "Unrelated Board row", id: UUID().uuidString.lowercased()))
@@ -8726,7 +8721,7 @@ final class CoreHostTests: XCTestCase {
             let expected = try XCTUnwrap(prepared["result"] as? [String: Any])
             await core.close()
             if version == 1 {
-                // Simulate an interrupted previous build, whose frozen duplicate reset checklist progress.
+
                 prepared["version"] = 1
                 var after = try XCTUnwrap(prepared["after"] as? [String: Any])
                 var checklist = try XCTUnwrap(after["checklist"] as? [[String: Any]])
@@ -8740,7 +8735,7 @@ final class CoreHostTests: XCTestCase {
                     sqlite.close()
                 }
             }
-            // A lost reply acknowledges the unchanged copy before mutable source checks.
+
             if afterCommit {
                 let sqlite = try SQLiteBridge(url: database)
                 _ = try sqlite.execute("UPDATE tasks SET title = ?, deletedAt = ?, rev = rev + 1 WHERE id = ?",
@@ -9009,8 +9004,8 @@ final class CoreHostTests: XCTestCase {
                                                          try recurrence.map { try json($0) } as Any? ?? NSNull(), "30min", json(["@calendar"]), json(["#retained"]),
                                                          0, recurrence == nil ? 0 : 1, 0, 0, at, at, done ? "2026-11-01T16:00:00.000Z" as Any : NSNull(), 1]))
         }
-        // RN's Week all-day lane intentionally previews only three items. Use
-        // timed scheduled rows for the >100-entry paging fixture in every mode.
+
+
         for index in 0..<count {
             try insert(String(format: "calendar-bulk-%03d", index),
                        start: timedBulk ? "2026-11-01T15:00:00.000Z" : nil, due: "2026-11-01")
@@ -9160,11 +9155,11 @@ final class CoreHostTests: XCTestCase {
             try await read(name, valid)
             for field in ["events", "feed", "event", "canOpen", "action", "requestId", "unknown"] {
                 var input = valid; input[field] = NSNull()
-                // An event member selects the closed event grammar for calendarItem.
+
                 await expectFailure("Unsupported native Calendar") { try await read(name, input) }
             }
-            // The optional, explicitly supplied feed is admitted by the native
-            // grammar, then rejected as malformed by the shared reader.
+
+
             var nullCalendar = valid; nullCalendar["calendar"] = NSNull()
             await expectFailure("INVALID_INPUT") { try await read(name, nullCalendar) }
             for malformedState in [NSNull(), [], ["viewMode": "unknown"], ["viewMode": "day", "selectedDate": "2026-02-30", "visibleMonth": "2026-11-01"], ["viewMode": "day", "selectedDate": "2026-11-01", "visibleMonth": "2026-11-01T00:00:00Z"]] as [Any] {
@@ -9239,13 +9234,12 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual((screen["items"] as? [Any])?.count, 2)
         XCTAssertNotNil(screen["toolbar"])
 
-        // Evaluate the exact bundled preflight/polyfills on a separate off-main
-        // JSC queue. No fake Intl can satisfy numeric plus accent equivalence.
+
         let source = try String(contentsOf: bundle)
         let collated: [String] = try await withCheckedThrowingContinuation { continuation in
             DispatchQueue(label: "test.intl").async {
                 let context = JSContext()!
-                // I/O services for module initialization only; Intl is JSC's own.
+
                 context.evaluateScript("globalThis.__mindwtrNative = {nowMs: () => Date.now(), randomBytes: n => JSON.stringify(Array(n).fill(0)), log: () => {}}")
                 context.evaluateScript(source)
                 if let exception = context.exception { continuation.resume(throwing: HostFailure(exception.toString() ?? "JSC exception")); return }
@@ -9671,8 +9665,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(try storedTask(id)["title"] as? String, "One atomic item")
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
 
-        // A second failed publication leaves a terminal envelope that must be
-        // rejected by the pure decoder before opening SQLite or removing intent.
+
         let second = UUID().uuidString.lowercased()
         let secondFaults = HostIOFaults()
         let writer = host(secondFaults)
@@ -9764,8 +9757,7 @@ final class CoreHostTests: XCTestCase {
         let originalJournal = try Data(contentsOf: journal)
         XCTAssertEqual(try taskCount(), originalCount)
 
-        // The simulator trigger-drop diagnosis made an external schema commit
-        // after the failure. The live adapter must refuse its stale snapshot.
+
         let external = try SQLiteBridge(url: database)
         _ = try external.execute("CREATE TABLE native_mind_sweep_external_probe (id INTEGER PRIMARY KEY)")
         external.close()
@@ -9776,9 +9768,8 @@ final class CoreHostTests: XCTestCase {
         await expectFailure("SAVE_FAILED") { _ = try await core.retryPending() }
         XCTAssertEqual(taskWrites, 0)
         XCTAssertEqual(try taskCount(), originalCount)
-        // JSONEncoder does not promise object-key order across re-encoding.
-        // Compare the complete envelope, including the exact frozen arguments
-        // string, so a formatting change cannot mask or imitate intent changes.
+
+
         XCTAssertEqual(try json(object(String(contentsOf: journal))),
                        try json(object(String(decoding: originalJournal, as: UTF8.self))))
     }
@@ -9960,8 +9951,7 @@ final class CoreHostTests: XCTestCase {
         ])]))
         await core.close()
 
-        // Terminal success cannot bypass immutable validation or substitute an
-        // acknowledgment. Every corruption must stop before opening SQLite.
+
         let beforeDB = try Data(contentsOf: database)
         for corruption in ["envelope", "acknowledgment", "unrequestedDue", "pushCount"] {
             var forgedEnvelope = envelope
@@ -9972,8 +9962,8 @@ final class CoreHostTests: XCTestCase {
             } else if corruption == "acknowledgment" {
                 terminalResult["unexpected"] = true
             } else {
-                // Keep the affected row coherent with the forged decision. The
-                // validator must bind intent, not just compare two forged copies.
+
+
                 var witness = try XCTUnwrap(forgedPrepared["witness"] as? [String: Any])
                 var decision = try XCTUnwrap(witness["preparedDecision"] as? [String: Any])
                 var updates = try XCTUnwrap(decision["taskUpdates"] as? [String: Any])
@@ -10125,7 +10115,7 @@ final class CoreHostTests: XCTestCase {
         let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(committed.utf8)) as? [[String: Any]])
         let followUp = try XCTUnwrap(rows.first { $0["id"] as? String != id })
         XCTAssertEqual(followUp["dueDate"] as? String, "2036-10-03")
-        XCTAssertEqual(followUp["status"] as? String, "inbox") // RN preserves the source actionable status.
+        XCTAssertEqual(followUp["status"] as? String, "inbox")
         let checks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(XCTUnwrap(followUp["checklist"] as? String).utf8)) as? [[String: Any]])
         let attachments = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(XCTUnwrap(followUp["attachments"] as? String).utf8)) as? [[String: Any]])
         XCTAssertNotEqual(checks.first?["id"] as? String, "original-check")
@@ -10561,7 +10551,7 @@ final class CoreHostTests: XCTestCase {
         func snapshot() throws -> [String] {
             var tables = try nineTableSnapshot(sqlite)
             let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(tables[0].utf8)) as? [[String: Any]])
-            // Activation may reorder JSON object keys; preserve every value and array position.
+
             tables[0] = try json(rows.map { try object(comparable($0)) })
             return tables
         }
@@ -10722,8 +10712,8 @@ final class CoreHostTests: XCTestCase {
             let faults = HostIOFaults()
             let core = host(faults, bundleURL: try dateBundle(at: "2026-09-30T12:00:00.000Z"))
             _ = try await core.start()
-            // Seed through the ordinary writer so load-time legacy fixture defaults
-            // are already persisted before the preservation baseline is taken.
+
+
             _ = try await core.call("captureSubmit", argumentsJSON: capture(core, title: "Status sibling", id: UUID().uuidString.lowercased()))
             let opening = try object(await core.call("editorModel", argumentsJSON: json([id])))
             var edited = opening
@@ -10842,8 +10832,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(try json(XCTUnwrap(envelope["request"])), try json(request))
         func snapshot() throws -> [String] {
             let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(calendarPreferenceTasks().utf8)) as? [[String: Any]])
-            // SQLite JSON columns may reorder object keys during activation;
-            // every value, array position, scalar date, ID and stamp stays exact.
+
+
             return try rows.map { try datePreservedFields(object(recurrenceComparableRow($0)), excluding: []) }
         }
         let savedTasks = try snapshot()
@@ -11079,10 +11069,8 @@ final class CoreHostTests: XCTestCase {
                                    parametersJSON: json([id, "Task \(id)", "next", "high", "low", at, "2036-10-02", "[\"#keep\"]", "[\"@desk\"]", checklist, "Keep task details", attachments, projectID, sectionID, areaID, 8, 7, 6, 1, "15min", 5, 0, 0, 2, at, at, deleted ? at as Any : NSNull(), rev]))
         }
         sqlite.close()
-        // Persist through the real reader/writer once so recoveryLoad sees the same
-        // canonical SQL rows that the ordinary host used to freeze its prepared scope.
-        // Recoloring the unrelated Area gives this fixture a real write without using
-        // Area rename itself, and leaves its Area/Project relationship canonical.
+
+
         let canonicalizer = host()
         _ = try await canonicalizer.start()
         let colorOptions = try object(await canonicalizer.call("areaColorOptions"))
@@ -11177,7 +11165,7 @@ final class CoreHostTests: XCTestCase {
                                    parametersJSON: json([id, id, "next", area, project, section, "Keep **details**", "2036-10-02", checklist, attachments, "[\"#keep\"]", "[\"@desk\"]", "high", 3, 0, 0, 0, 0, at, at, deleted ? at as Any : NSNull(), rev]))
         }
         sqlite.close()
-        // Establish the adapter's canonical SQL TEXT before testing a later Area-only mutation.
+
         let normalizer = host()
         _ = try await normalizer.start()
         let order = try await areaOrderRequest(normalizer, intent: ["kind": "sortName"])
@@ -11233,7 +11221,7 @@ final class CoreHostTests: XCTestCase {
                                                          deleted ? at as Any : NSNull(), target ? 3 : 1]))
         }
         sqlite.close()
-        // Canonicalize the seeded SQL rows before a later prepared write or cold replay.
+
         let normalizer = host()
         _ = try await normalizer.start()
         _ = try await normalizer.call("projectCreate", argumentsJSON: json([json(projectCreateRequest(title: "Canonical sibling"))]))
@@ -11264,7 +11252,7 @@ final class CoreHostTests: XCTestCase {
                                                          "[\"#keep\"]", "[\"@desk\"]", "high", 3, 0, 0, 0, 0, at, at, 3]))
         }
         sqlite.close()
-        // Persist the adapter's canonical rich SQL TEXT before testing a title-only write.
+
         let normalizer = host()
         _ = try await normalizer.start()
         _ = try await normalizer.call("projectCreate", argumentsJSON: json([json(projectCreateRequest(title: "Rename sibling"))]))
@@ -11400,7 +11388,7 @@ final class CoreHostTests: XCTestCase {
         try await seedProjectSectionDeleteRows()
         let at = recentAreaTestTime()
         let sqlite = try SQLiteBridge(url: database)
-        // Match a persisted core Section: a NULL isCollapsed would be canonicalized to 0 by the next full save.
+
         _ = try sqlite.execute("UPDATE sections SET orderNum = 100, isCollapsed = 0 WHERE id = 'delete-sibling-section'", parametersJSON: "[]")
         _ = try sqlite.execute("INSERT INTO sections (id, projectId, title, orderNum, isCollapsed, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                                parametersJSON: json(["order-third", "focus-target", "Keep sibling", 200, 0, at, at, 2]))
@@ -12471,7 +12459,7 @@ final class CoreHostTests: XCTestCase {
                 let at = recentAreaTestTime(daysAgo: 0)
                 _ = try edit.execute("UPDATE projects SET title = 'Later parent rename', rev = rev + 1, updatedAt = ? WHERE id = 'focus-target'",
                                      parametersJSON: json([at]))
-                // A later deleted Task remains in the frozen scope but is not repaired by normal startup maintenance.
+
                 _ = try edit.execute("INSERT INTO tasks (id, title, status, projectId, sectionId, createdAt, updatedAt, deletedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                      parametersJSON: json(["delete-late-task", "Later deleted linked task", "next", "focus-target", "rename-section", at, at, at, 1]))
                 edit.close()
@@ -12858,7 +12846,7 @@ final class CoreHostTests: XCTestCase {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try await seedProjectSectionOrderRows()
             if kind == "partial-receipt" {
-                // No integer fits between 0 and 1, so the shared sparse planner rebalances two rows.
+
                 let dense = try SQLiteBridge(url: database)
                 _ = try dense.execute("UPDATE sections SET orderNum = 1 WHERE id = 'delete-sibling-section'", parametersJSON: "[]")
                 _ = try dense.execute("UPDATE sections SET orderNum = 2 WHERE id = 'order-third'", parametersJSON: "[]")
@@ -13141,8 +13129,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(try projectRows(id).count, 1)
         let saved = try json(XCTUnwrap(projectRows(id).first))
         await core.close()
-        // The first-apply order guard is stale, but the created row remains an
-        // exact receipt. Recovery must acknowledge it before inspecting order.
+
+
         let siblingID = UUID().uuidString.lowercased()
         let siblingSQLite = try SQLiteBridge(url: database)
         let at = "2026-09-27T12:00:00.000Z"
@@ -13666,8 +13654,8 @@ final class CoreHostTests: XCTestCase {
         let sqlite = try SQLiteBridge(url: database)
         defer { sqlite.close() }
         let at = recentAreaTestTime()
-        // Seed codec-canonical JSON bytes so untouched rows remain raw-exact
-        // even when a later full snapshot serializes all loaded Task objects.
+
+
         let checklistJSON = #"[{"id":"edit-step","title":"Retained step","isCompleted":true}]"#
         let attachmentJSON = "[{\"id\":\"edit-file\",\"kind\":\"file\",\"title\":\"Retained file\",\"uri\":\"file:///retained.txt\",\"createdAt\":\"\(at)\",\"updatedAt\":\"\(at)\"}]"
         let recurrenceJSON = #"{"rule":"weekly","strategy":"strict","byDay":["TH"],"rrule":"FREQ=WEEKLY;BYDAY=TH"}"#
@@ -13679,8 +13667,8 @@ final class CoreHostTests: XCTestCase {
         for (id, status, purged, contextOnly) in [("person-edit-reference", "reference", false, false), ("person-edit-archive", "archived", false, false), ("person-edit-purged", "next", true, false), ("person-edit-context", "next", false, true)] {
             _ = try sqlite.execute("INSERT INTO tasks (id, title, status, assignedTo, tags, contexts, checklist, attachments, description, viewSectionIds, recurrence, priority, orderNum, boardOrder, focusOrder, isFocusedToday, showFutureRecurrence, suppressMindwtrReminders, pushCount, createdAt, updatedAt, completedAt, purgedAt, rev) SELECT ?, title, ?, ?, tags, ?, checklist, attachments, description, viewSectionIds, recurrence, priority, orderNum, boardOrder, focusOrder, isFocusedToday, showFutureRecurrence, suppressMindwtrReminders, pushCount, createdAt, updatedAt, ?, ?, rev FROM tasks WHERE id = 'person-delete-live-task'", parametersJSON: json([id, status, contextOnly ? "Sibling" : "Old Person", json(["@Old Person", "@keep"]), status == "archived" ? at as Any : NSNull(), purged ? at as Any : NSNull()]))
         }
-        // Finished Tasks do not have a focus order in the RN lifecycle model.
-        // Active/reference/purged-only Tasks retain the nondefault value above.
+
+
         _ = try sqlite.execute("UPDATE tasks SET focusOrder = NULL WHERE status IN ('done', 'archived')")
     }
 
@@ -13693,8 +13681,8 @@ final class CoreHostTests: XCTestCase {
     }
 
     private func personEditSemanticTables(_ tables: [String], changedTaskIDs: Set<String>) throws -> [String] {
-        // Retain every table/row/column. Only JSON key order in changed Task rows
-        // is insignificant; unaffected rows and all other tables stay raw-exact.
+
+
         let jsonColumns: Set<String> = ["relativeStartOffset", "recurrence", "tags", "contexts", "checklist", "attachments", "viewSectionIds", "tagIds", "data"]
         guard !changedTaskIDs.isEmpty else { return tables }
         var result = tables
@@ -13834,8 +13822,8 @@ final class CoreHostTests: XCTestCase {
 
     func testManagePersonEditMetadataOnlyPreservesRawWhitespaceName() async throws {
         try await seedPersonEditRows()
-        // Startup normalizes loaded names; inject a later raw store row inside the test bundle.
-        // This tests the RN action policy when metadata arrives after initialization.
+
+
         let source = try dateBundle(at: "2026-10-01T12:00:00.000Z")
         var script = try String(contentsOf: source)
         let pattern = #"([A-Za-z_$][A-Za-z0-9_$]*)\.getState\(\)\._allPeople"#
@@ -13856,9 +13844,8 @@ final class CoreHostTests: XCTestCase {
         try script.write(to: source, atomically: true, encoding: .utf8)
         let core = host(bundleURL: source); _ = try await core.start()
         let sqlite = try SQLiteBridge(url: database); defer { sqlite.close() }
-        // Match the post-load raw row in durable storage before Options opens.
-        // The bounded durable read must acknowledge it with full expected CAS,
-        // rather than bypassing the adapter's external-commit fence.
+
+
         _ = try sqlite.execute("UPDATE people SET name = 'Raw   Person' WHERE id = 'legacy-person'")
         let before = try nineTableSnapshot(sqlite)
         let request = try await personEditRequest(core, name: nil, note: "Only metadata", referenceLink: nil)
@@ -13947,8 +13934,8 @@ final class CoreHostTests: XCTestCase {
         let prepared = try XCTUnwrap(object(XCTUnwrap(args.first))["prepared"] as? [String: Any])
         let updateAt = try XCTUnwrap(prepared["updateAt"] as? String), renameAt = try XCTUnwrap(prepared["renameAt"] as? String)
         await first.close()
-        // The host deliberately retains committed WAL pages on close. Capture
-        // a standalone backup, rather than mixing main-file bytes with a prior case's WAL.
+
+
         let baselineURL = directory.appendingPathComponent("person-edit-cold-baseline.sqlite")
         let snapshot = try SQLiteBridge(url: database)
         let baselineTables = try nineTableSnapshot(snapshot)
@@ -14079,7 +14066,7 @@ final class CoreHostTests: XCTestCase {
         _ = try await bootstrap.start(); await bootstrap.close()
         var settings = try calendarPreferenceSettings()
         settings["appearance"] = ["showTaskAge": false, "unassignedAreaColor": "#abcdef", "legacy97": "keep"]
-        // Preserve the numeric legacy witness exactly until an explicit regional choice replaces it.
+
         settings["weekStart"] = 1; settings["dateFormat"] = "system"; settings["timeFormat"] = "system"
         settings["syncPreferencesUpdatedAt"] = ["appearance": originalStamp, "language": originalStamp, "gtd": at]
         if workflow {
@@ -14130,7 +14117,7 @@ final class CoreHostTests: XCTestCase {
         settings["unrelated97"] = ["credential": "general97-private-fixture", "url": "https://example.invalid/private-fixture"]
         try writeCalendarPreferenceSettings(settings)
         if section != nil || presetting || resetting || fielding || fieldSectioning || ordering {
-            // Complete the existing task-editor settings migration before the raw-row write oracle.
+
             let migrated = host(bundleURL: clock); _ = try await migrated.start(); await migrated.close()
         }
         let setup = try SQLiteBridge(url: database)
@@ -14365,7 +14352,7 @@ final class CoreHostTests: XCTestCase {
             try replayJournal.write(to: journal)
             var changed = try calendarPreferenceSettings()
             if scenario == "stale" {
-                // Same desired value written independently is not the frozen operation's receipt.
+
                 if workflow {
                     try applyGtd(&changed)
                 } else if nestedAppearance {
@@ -15498,7 +15485,7 @@ final class CoreHostTests: XCTestCase {
         let picker = try XCTUnwrap(model["language"] as? [String: Any])
         let choices = try XCTUnwrap(picker["options"] as? [[String: Any]]).compactMap { $0["value"] as? String }
         XCTAssertEqual(choices.count, 23); XCTAssertEqual(Set(choices).count, choices.count)
-        // Explicitly storing the displayed fallback is a change when the synced field is absent.
+
         for value in ["es"] + choices {
             let beforeDB = try SQLiteBridge(url: database)
             let before = try nineTableSnapshot(beforeDB); beforeDB.close()
@@ -15543,7 +15530,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(refreshed["language"] as? String, choices.last)
         XCTAssertEqual(journals, 0)
         await core.close()
-        // A recreated host must reconcile from the saved language, not an old device mirror.
+
         let cold = host(); _ = try await cold.start()
         let winner = try object(await cold.call("languageSaved", argumentsJSON: json(["en", "en-US"])))
         XCTAssertEqual(winner["language"] as? String, choices.last)
@@ -15730,7 +15717,7 @@ final class CoreHostTests: XCTestCase {
             let entries = try XCTUnwrap(created[field] as? [[String: Any]])
             XCTAssertTrue(entries.contains { $0["token"] as? String == name && $0["deletedAt"] == nil })
             await core.close()
-            // Cold replay of the frozen request observes the exact catalogue after-state and writes nothing.
+
             try frozen.write(to: journal)
             let replay = host()
             _ = try await replay.start()
@@ -15757,8 +15744,8 @@ final class CoreHostTests: XCTestCase {
     }
 
     private func seedAreaDurableRows(_ mode: AreaDurableCase, clock: URL, at: String) async throws {
-        // Complete ordinary load maintenance at the operation clock BEFORE
-        // introducing the legacy SQL-only terminal focus fields.
+
+
         let bootstrap = host(bundleURL: clock)
         _ = try await bootstrap.start(); await bootstrap.close()
         let sqlite = try SQLiteBridge(url: database)
@@ -15867,8 +15854,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
         await writer.close()
         for changed in mode == .fresh ? [false] : [true, false] {
-            // The last-close WAL is intentionally retained; backup bytes are a
-            // standalone database and must never be combined with old sidecars.
+
+
             for suffix in ["-wal", "-shm"] {
                 let sidecar = URL(fileURLWithPath: database.path + suffix)
                 if FileManager.default.fileExists(atPath: sidecar.path) { try FileManager.default.removeItem(at: sidecar) }
@@ -15917,13 +15904,12 @@ final class CoreHostTests: XCTestCase {
 
     func testManagePersonEditLegacyTerminalFocusOrderColdPreservesRawRowsAndConflictsRefuse() async throws {
         try await seedPersonEditRows()
-        // Prime one-time/day-gated load maintenance on the same clock as the
-        // writer before injecting legacy raw fields. That maintenance may save
-        // a normal projection independently of the Person edit under test.
+
+
         let at = "2026-10-01T12:00:00.000Z", clock = try dateBundle(at: "2026-10-01T12:00:00.000Z")
         let initializer = host(bundleURL: clock); _ = try await initializer.start(); await initializer.close()
-        // Real legacy SQL can retain a focus order that normal load clears only
-        // in memory. Freeze the durable baseline and preserve these raw fields.
+
+
         let legacy = try SQLiteBridge(url: database)
         _ = try legacy.execute("UPDATE tasks SET focusOrder = 9 WHERE id IN ('person-delete-done-task', 'person-edit-archive')")
         legacy.close()
@@ -15949,8 +15935,8 @@ final class CoreHostTests: XCTestCase {
         await expectFailure("SAVE_FAILED") { _ = try await writer.retryPending() }
         try assertJournalContentUnchanged(frozen)
         for id in ["person-delete-done-task", "person-edit-archive"] { XCTAssertEqual(try storedTask(id)["focusOrder"] as? Int, 9) }
-        // Pin original durable before rows/journal before the successful retry,
-        // then restore that authority for the separate recreated-host branches.
+
+
         let snapshot = try SQLiteBridge(url: database)
         let baselineURL = directory.appendingPathComponent("person-edit-legacy-baseline.sqlite")
         let baselineTables = try nineTableSnapshot(snapshot)
@@ -16135,8 +16121,8 @@ final class CoreHostTests: XCTestCase {
         let edit = try SQLiteBridge(url: database)
         _ = try edit.execute("UPDATE people SET name = 'Later restored Person', deletedAt = NULL, rev = rev + 1 WHERE id = 'legacy-person'")
         _ = try edit.execute("UPDATE tasks SET description = 'Later Task edit', rev = rev + 1 WHERE id = 'person-delete-live-task'")
-        // Keep the intervening inventory self-consistent: surviving assignments
-        // have an independent live Person, so ordinary load need not derive one.
+
+
         let interveningAt = recentAreaTestTime()
         _ = try edit.execute("INSERT INTO people (id, name, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?)",
                              parametersJSON: json(["independent-edited-person", "Edited Person", interveningAt, interveningAt, 1]))
@@ -16665,7 +16651,7 @@ final class CoreHostTests: XCTestCase {
             try frozen.write(to: journal)
             let replayFaults = HostIOFaults()
             var libraryWrites = 0
-            // Startup schema/FTS maintenance is separate from library mutations.
+
             replayFaults.beforeSQL = { sql in
                 if sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM|REPLACE INTO)\s+(?:tasks|projects|areas|people|sections|settings|saved_filters|calendar_sync)\b"#, options: .regularExpression) != nil { libraryWrites += 1 }
             }
@@ -16771,7 +16757,7 @@ final class CoreHostTests: XCTestCase {
         sqlite.close()
         let replayFaults = HostIOFaults()
         var libraryWrites = 0
-        // Startup schema/FTS maintenance is separate from library mutations.
+
         replayFaults.beforeSQL = { sql in
             if sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM|REPLACE INTO)\s+(?:tasks|projects|areas|people|sections|settings|saved_filters|calendar_sync)\b"#, options: .regularExpression) != nil { libraryWrites += 1 }
         }
@@ -16806,7 +16792,7 @@ final class CoreHostTests: XCTestCase {
         edit.close()
         let replayFaults = HostIOFaults()
         var libraryWrites = 0, diagnostics = 0
-        // Startup schema/FTS maintenance is separate from library mutations.
+
         replayFaults.beforeSQL = { sql in
             if sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM|REPLACE INTO)\s+(?:tasks|projects|areas|people|sections|settings|saved_filters|calendar_sync)\b"#, options: .regularExpression) != nil { libraryWrites += 1 }
         }
@@ -18575,8 +18561,8 @@ final class CoreHostTests: XCTestCase {
                 settings["deviceId"] = UUID().uuidString.lowercased()
                 try writeCalendarPreferenceSettings(settings)
                 let edit = try SQLiteBridge(url: database)
-                // Edit unrelated rows under a live Area. Linking a row to the
-                // tombstoned Area would trigger legitimate load repair writes.
+
+
                 let at = recentAreaTestTime(daysAgo: 0)
                 _ = try edit.execute("UPDATE tasks SET title = ?, updatedAt = ?, rev = rev + 1 WHERE id = 'delete-unrelated'",
                                      parametersJSON: json(["Later unrelated task", at]))
@@ -18842,7 +18828,7 @@ final class CoreHostTests: XCTestCase {
             } else {
                 let options = try object(await core.call("projectFocusOptions", argumentsJSON: json([json(["projectId": "focus-target"])])))
                 if kind == "inactive" {
-                    // A legacy archived star is cleared by the normal load before Focus policy runs.
+
                     XCTAssertEqual((options["project"] as? [String: Any])?["isFocused"] as? Bool, false)
                     XCTAssertEqual(try projectRows("focus-target").first?["isFocused"] as? Int, 0)
                 }
@@ -18989,7 +18975,7 @@ final class CoreHostTests: XCTestCase {
             var writeStatements: [String] = []
             replayFaults.beforeSQL = { sql in
                 let isDML = sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+"#, options: .regularExpression) != nil
-                // Cold boot may rebuild FTS bookkeeping before a pending command is replayed.
+
                 let isFTSBootstrap = sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+(?:schema_migrations|fts_lock|tasks_fts)\b"#, options: .regularExpression) != nil
                 if isDML && !isFTSBootstrap {
                     writes += 1
@@ -21018,7 +21004,7 @@ final class CoreHostTests: XCTestCase {
         }
         _ = try sqlite.execute("UPDATE settings SET data = ? WHERE id = 1", parametersJSON: json([json(settings)]))
         sqlite.close()
-        // Settle ordinary startup once, then prove read-only behavior on fresh hosts.
+
         let settle = host(bundleURL: source); _ = try await settle.start(); await settle.close()
         let initial = try SQLiteBridge(url: database); let before = try nineTableSnapshot(initial); initial.close()
         for _ in 0..<2 {
@@ -22497,7 +22483,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(writes, 0)
         XCTAssertEqual(try nineTableSnapshot(check), before)
 
-        // The Area choice is an intentional settings write; subsequent tag reads remain pure.
+
         let area = try object(await core.call("areaFilter"))
         let option = try XCTUnwrap((area["options"] as? [[String: Any]])?.first { $0["id"] as? String == "destination-area-a" })
         _ = try await core.call("setAreaFilter", argumentsJSON: json([json(XCTUnwrap(option["next"]))]))
@@ -23033,7 +23019,7 @@ final class CoreHostTests: XCTestCase {
             XCTAssertEqual(try json(XCTUnwrap(recovery["result"] as? [String: Any])), try json(frozen))
             let afterMoved = try storedTask("order-a")
             if kind == "receipt-delete" {
-                // Repair batches the changed tasks and sections; the tombstoned parent stays unchanged.
+
                 XCTAssertEqual(writes, 2, "Repair SQL statements (no parameters): \(writeSQL)")
                 for table in ["tasks", "sections"] {
                     XCTAssertEqual(writeSQL.filter { $0.hasPrefix("INSERT INTO " + table + " ") }.count, 1)
@@ -24266,7 +24252,7 @@ final class CoreHostTests: XCTestCase {
         let receipts = try success.execute("SELECT request_id, method, reply FROM native_request_receipts")
         XCTAssertTrue(receipts.contains(try XCTUnwrap(request["requestId"] as? String)))
         success.close(); await core.close()
-        // Intervening enabled -> disabled -> enabled -> disabled, same original UUID must never enable again.
+
         for value in [false, true, false] {
             let writer = host(); _ = try await writer.start()
             let later = try await appLockRequest(writer, value: value)
@@ -24571,7 +24557,7 @@ final class CoreHostTests: XCTestCase {
         let ids = try XCTUnwrap((recovery["result"] as? [String: Any])?["attachmentIds"] as? [String])
         XCTAssertEqual(ids.count, 2)
         XCTAssertEqual(Set(ids).count, 2)
-        // Cold replay uses the loaded fingerprints and writes only the changed project.
+
         XCTAssertEqual(writes, 1, "Replay SQL statements (no parameters): \(writeSQL)")
         XCTAssertEqual(writeSQL.filter { $0.range(of: #"(?i)^\s*INSERT INTO projects\b"#, options: .regularExpression) != nil }.count, 1)
         XCTAssertEqual(writeSQL.filter { $0.range(of: #"(?i)^\s*INSERT INTO settings\b"#, options: .regularExpression) != nil }.count, 0)
@@ -25141,9 +25127,8 @@ final class CoreHostTests: XCTestCase {
         let cascade = formatter.string(from: Date().addingTimeInterval(-60))
         let older = formatter.string(from: Date().addingTimeInterval(-3600))
         let sqlite = try SQLiteBridge(url: database)
-        // seedDestinationTask inserts raw Projects without these two columns.
-        // The loader uses rowid for a missing order and [] for missing tags;
-        // a full-store save writes those canonical values on unrelated rows.
+
+
         _ = try sqlite.execute("UPDATE projects SET orderNum = COALESCE(orderNum, rowid), tagIds = COALESCE(tagIds, '[]') WHERE id LIKE 'destination-project-%'")
         _ = try sqlite.execute("UPDATE projects SET deletedAt = ?, areaTitle = '' WHERE id = 'destination-project-a'",
                                parametersJSON: json([cascade]))
@@ -25522,8 +25507,8 @@ final class CoreHostTests: XCTestCase {
     private func seedProjectDeleteProject() async throws -> String {
         let taskID = try await seedDestinationTask()
         let sqlite = try SQLiteBridge(url: database)
-        // The destination fixture predates the saved Project defaults. Make its
-        // raw baseline match the loader's canonical order/tag representation.
+
+
         _ = try sqlite.execute("UPDATE projects SET orderNum = COALESCE(orderNum, rowid), tagIds = COALESCE(tagIds, '[]') WHERE id LIKE 'destination-project-%'")
         sqlite.close()
         return taskID
@@ -25830,8 +25815,8 @@ final class CoreHostTests: XCTestCase {
     private func seedProjectDuplicateSource(bundleURL: URL? = nil) async throws -> String {
         let taskID = try await seedDestinationTask(bundleURL: bundleURL)
         let sqlite = try SQLiteBridge(url: database)
-        // The older destination fixture predates these Project defaults; a
-        // full-store save writes their canonical values on unrelated rows.
+
+
         _ = try sqlite.execute("UPDATE projects SET orderNum = COALESCE(orderNum, rowid), tagIds = COALESCE(tagIds, '[]') WHERE id LIKE 'destination-project-%'")
         sqlite.close()
         return taskID
@@ -26249,8 +26234,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(completed["status"] as? String, "archived")
         await writer.close()
 
-        // The app opens this archived Project after a cold launch, then keeps
-        // the same host and filter state while Reactivate writes and rereads it.
+
         let reopened = host()
         _ = try await reopened.start()
         func window(offset: Int, limit: Int, filters: [String: Any], revision: String? = nil) async throws -> [String: Any] {
@@ -26291,7 +26275,7 @@ final class CoreHostTests: XCTestCase {
             XCTAssertFalse(parts.contains { $0["kind"] as? String == "completed" }, id)
         }
 
-        // Later windows must retain the same fresh snapshot as the first page.
+
         let revision = try XCTUnwrap(fresh["revision"] as? String)
         let total = try XCTUnwrap(fresh["total"] as? Int)
         var paged: [[String: Any]] = []
@@ -26446,9 +26430,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertNil(try object(String(contentsOf: journal))["terminal"])
         await writer.close()
 
-        // Pre-Task173 iOS had this landed v1 journal but did not save a
-        // preparedProjectLifecycle receipt. Equal current rows are not proof
-        // that this UUID committed.
+
         let edit = try SQLiteBridge(url: database)
         _ = try edit.execute("DELETE FROM native_request_receipts WHERE request_id = ?",
                              parametersJSON: json([try XCTUnwrap(restore["requestId"] as? String)]))
@@ -26542,8 +26524,8 @@ final class CoreHostTests: XCTestCase {
         _ = try seed.execute("INSERT INTO tasks (id, title, status, projectId, sectionId, orderNum, tags, contexts, isFocusedToday, showFutureRecurrence, suppressMindwtrReminders, pushCount, completedAt, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                              parametersJSON: json(["lifecycle-cancel-done", "Completed history", "done", "destination-project-a", "destination-section-a", 41,
                                                    "[]", "[]", 0, 0, 0, 0, completedAt, completedAt, completedAt, 1]))
-        // This fixture tests Cancel's treatment of completed history, so
-        // disable the independent startup auto-archive pass before boot.
+
+
         let settingsRows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(seed.execute("SELECT data FROM settings WHERE id = 1").utf8)) as? [[String: Any]])
         var settings = try object(XCTUnwrap(settingsRows.first?["data"] as? String))
         var gtd = settings["gtd"] as? [String: Any] ?? [:]
@@ -27183,8 +27165,8 @@ final class CoreHostTests: XCTestCase {
 
     private func seedArchivedTask172(parent: Bool = false) async throws -> String {
         let at = "2026-10-03T12:00:00.000Z"
-        // Capture and the direct fixture update must share a clock, otherwise
-        // normal load repairs updatedAt < createdAt and invalidates raw CAS.
+
+
         let id = try await seedProjectDuplicateSource(bundleURL: try dateBundle(at: at))
         let sqlite = try SQLiteBridge(url: database)
         defer { sqlite.close() }
@@ -27198,8 +27180,8 @@ final class CoreHostTests: XCTestCase {
         }
         _ = try sqlite.execute("UPDATE tasks SET status = 'archived', archivedAt = ?, completedAt = ?, updatedAt = ?, projectArchivedAt = ?, statusBeforeProjectArchive = ? WHERE id = ?",
                                parametersJSON: json([at, at, at, parent ? at as Any : NSNull(), parent ? "next" as Any : NSNull(), id]))
-        // The writer is Oct4 noon and receipt replay is one hour later; keep
-        // unrelated daily tombstone cleanup outside this strict no-write oracle.
+
+
         let settingsRows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(sqlite.execute("SELECT data FROM settings WHERE id = 1").utf8)) as? [[String: Any]])
         var settings = try object(XCTUnwrap(settingsRows.first?["data"] as? String))
         var migrations = settings["migrations"] as? [String: Any] ?? [:]
@@ -27930,8 +27912,8 @@ final class CoreHostTests: XCTestCase {
         defer { sqlite.close() }
         _ = try sqlite.execute("UPDATE tasks SET status = 'done', createdAt = '2026-09-01T12:00:00.000Z', updatedAt = '2026-10-01T12:00:00.000Z', completedAt = ?, recurrence = ?, showFutureRecurrence = 1 WHERE id = ?",
                                parametersJSON: json(["2026-10-01T12:00:00.000Z", json(["rule": "daily", "strategy": "strict", "seriesId": id, "rrule": "FREQ=DAILY;X-MINDWTR-SERIES-ID=\(id)"]), id]))
-        // Keep cold recovery within one maintenance interval; this suite proves
-        // command replay, while daily tombstone cleanup has its own coverage.
+
+
         let settingsRows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(sqlite.execute("SELECT data FROM settings WHERE id = 1").utf8)) as? [[String: Any]])
         var settings = try object(XCTUnwrap(settingsRows.first?["data"] as? String))
         var migrations = try XCTUnwrap(settings["migrations"] as? [String: Any])
@@ -28147,7 +28129,7 @@ final class CoreHostTests: XCTestCase {
                 var envelope = try doneTask176Journal(method)
                 await writer.close()
                 if equalAfter {
-                    // Keep the actual saved AFTER row, but give the journal an unused UUID.
+
                     let unused = UUID().uuidString.lowercased()
                     var altered = request; altered["requestId"] = unused
                     envelope["request"] = altered
@@ -28193,7 +28175,7 @@ final class CoreHostTests: XCTestCase {
     }
 
     func testDoneTask176ForgedDeleteAndUndoJournalsRefuseBeforeSQLite() async throws {
-        // Keep the seeded completion inside Done’s relative date window.
+
         let frozen = try dateBundle(at: "2026-10-02T13:00:00.000Z")
         for undo in [false, true] {
             let id = try await seedDoneTask176()
@@ -28264,8 +28246,8 @@ final class CoreHostTests: XCTestCase {
         let faults = HostIOFaults(), core = host(faults, bundleURL: try dateBundle(at: "2026-10-02T13:00:00.000Z"))
         _ = try await core.start()
         let request = try await doneTask177Request(core, id: id, status: "done")
-        // Done hides archived-project children; the editor still exposes their
-        // exact row token and read-only state without granting write authority.
+
+
         let protectedEditor = try object(await core.call("editorModel", argumentsJSON: json([id + "-protected"])))
         XCTAssertEqual(protectedEditor["readOnly"] as? Bool, true)
         XCTAssertEqual((protectedEditor["draft"] as? [String: Any])?["status"] as? String, "done")
@@ -28510,8 +28492,8 @@ final class CoreHostTests: XCTestCase {
             let baseline = try nineTableSnapshot(reader), receipts = try doneTask176Receipts(reader)
             var expected: [String]?
             if !edited {
-                // A normal uninterrupted write from an exact database copy is
-                // the oracle; Swift never reimplements core's SQL row codec.
+
+
                 let normalDatabase = directory.appendingPathComponent("done177-normal-\(UUID().uuidString).sqlite")
                 try reader.prepareRecovery(at: normalDatabase)
                 let normal = CoreHost(databaseURL: normalDatabase, bundleURL: try dateBundle(at: "2026-10-02T13:00:00.000Z"))
@@ -28533,8 +28515,8 @@ final class CoreHostTests: XCTestCase {
             XCTAssertEqual(rawBefore["focusOrder"] as? Int, 2)
             XCTAssertNil(rawBefore["pushCount"])
             let rawAttachments = try XCTUnwrap(rawBefore["attachments"] as? [[String: Any]])
-            // Shared entity-sync-schema.toAttachments defaults missing updatedAt
-            // to an empty string even through SqliteAdapter's rawTasks path.
+
+
             XCTAssertEqual(rawAttachments.first?["updatedAt"] as? String, "")
             let failed = try SQLiteBridge(url: database)
             XCTAssertEqual(try nineTableSnapshot(failed), baseline)
@@ -28543,8 +28525,8 @@ final class CoreHostTests: XCTestCase {
             await writer.close()
             let edit = try SQLiteBridge(url: database)
             if edited {
-                // No revision bump: the complete raw BEFORE must guard even a
-                // raw-only change the displayed revision cannot distinguish.
+
+
                 _ = try edit.execute("UPDATE tasks SET focusOrder = 3 WHERE id = ?", parametersJSON: json([id]))
             }
             let current = try nineTableSnapshot(edit), currentReceipts = try doneTask176Receipts(edit)
@@ -28785,7 +28767,7 @@ final class CoreHostTests: XCTestCase {
             XCTAssertEqual(rawBefore["focusOrder"] as? Int, 2)
             XCTAssertNil(rawBefore["pushCount"])
             let rawAttachments = try XCTUnwrap(rawBefore["attachments"] as? [[String: Any]])
-            // Existing shared rawTasks attachment codec supplies an empty value.
+
             XCTAssertEqual(rawAttachments.first?["updatedAt"] as? String, "")
             let failed = try SQLiteBridge(url: database)
             XCTAssertEqual(try nineTableSnapshot(failed), baseline)
@@ -29232,7 +29214,7 @@ final class CoreHostTests: XCTestCase {
             XCTAssertEqual(rawBefore["focusOrder"] as? Int, 2)
             XCTAssertNil(rawBefore["pushCount"])
             let rawAttachments = try XCTUnwrap(rawBefore["attachments"] as? [[String: Any]])
-            // Existing shared rawTasks attachment codec supplies an empty value.
+
             XCTAssertEqual(rawAttachments.first?["updatedAt"] as? String, "")
             let failed = try SQLiteBridge(url: database)
             XCTAssertEqual(try nineTableSnapshot(failed), baseline)
@@ -29561,7 +29543,7 @@ final class CoreHostTests: XCTestCase {
             reader.close()
             let before = try storedTask(id), count = try taskCount()
             var writes = 0, journalWrites = 0
-            // Valid requests read durable raw authority before shared container validation.
+
             faults.beforeSQL = { sql in
                 if sql.range(of: #"(?i)^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM)\s+(?:tasks|projects|areas|people|sections|settings|saved_filters|schema_migrations|calendar_sync|native_request_receipts)\b"#, options: .regularExpression) != nil { writes += 1 }
             }
@@ -29585,7 +29567,7 @@ final class CoreHostTests: XCTestCase {
                 XCTAssertEqual(saved["status"] as? String, "archived")
                 XCTAssertEqual(saved["completedAt"] as? String, request["completedAt"] as? String)
                 XCTAssertEqual(saved["rev"] as? Int, (before["rev"] as? Int ?? 0) + 1)
-                // RN retires these reversible project-archive markers after a direct edit.
+
                 for field in ["projectArchivedAt", "statusBeforeProjectArchive", "completedAtBeforeProjectArchive", "isFocusedTodayBeforeProjectArchive"] {
                     XCTAssertTrue(saved[field] is NSNull, field)
                 }
@@ -29630,7 +29612,7 @@ final class CoreHostTests: XCTestCase {
         }
         _ = try sqlite.execute("UPDATE tasks SET cancelledAt = ?, completedAt = NULL WHERE id = ?",
                                parametersJSON: json([at, id + "-cancelled"]))
-        // The membership authority includes legacy section-only and tombstoned siblings.
+
         _ = try sqlite.execute("INSERT INTO tasks (id, title, status, sectionId, deletedAt, tags, contexts, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                parametersJSON: json([id + "-legacy", "Task180 legacy sibling", "reference", "destination-section-b", NSNull(), "[]", "[]", at, at, 1]))
         _ = try sqlite.execute("INSERT INTO tasks (id, title, status, projectId, deletedAt, tags, contexts, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -29640,8 +29622,8 @@ final class CoreHostTests: XCTestCase {
         var gtd = settings["gtd"] as? [String: Any] ?? [:]
         gtd["autoArchiveDays"] = 0
         settings["gtd"] = gtd
-        // Receipt/replay tests advance only one hour beyond archive180Clock;
-        // unrelated daily tombstone cleanup must not alter their boot oracle.
+
+
         var migrations = settings["migrations"] as? [String: Any] ?? [:]
         migrations["lastTombstoneCleanupAt"] = archive180Clock
         settings["migrations"] = migrations
@@ -29653,8 +29635,8 @@ final class CoreHostTests: XCTestCase {
     }
 
     private func archive180ApplyRawFixture(_ ids: [String], databaseURL: URL? = nil) throws {
-        // Inject after normal load: repairing section-only ownership can save the
-        // loaded projection and canonicalize otherwise untouched legacy fields.
+
+
         let sqlite = try SQLiteBridge(url: databaseURL ?? database)
         defer { sqlite.close() }
         let id = try XCTUnwrap(ids.first), at = "2026-10-03T12:00:00.000Z"
@@ -29694,9 +29676,8 @@ final class CoreHostTests: XCTestCase {
         addTeardownBlock { await normal.close() }
         _ = try await normal.start()
         if rawIDs != nil {
-            // Normal boot repairs legacy containers and stamps their revision.
-            // Reinstall the exact pre-boot raw fixture, including that revision,
-            // so the successful-write oracle and cold replay have identical input.
+
+
             let raw = try SQLiteBridge(url: normalDatabase)
             for row in rawRows {
                 let columns = row.keys.filter { $0 != "id" }.sorted()
@@ -29719,9 +29700,8 @@ final class CoreHostTests: XCTestCase {
     }
 
     private func archive180AssertOnlyBootstrapWrite(_ statements: [String], file: StaticString = #filePath, line: UInt = #line) {
-        // Capture every domain/receipt DML statement, including schema_migrations.
-        // This exact registration is idempotent on the already initialized fixture;
-        // full nine-table/receipt equality below proves it changed no saved data.
+
+
         XCTAssertEqual(statements, ["INSERT OR IGNORE INTO schema_migrations (version) VALUES (1)"],
                        statements.joined(separator: "\n"), file: file, line: line)
     }
@@ -29894,7 +29874,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(source["focusOrder"] as? Int, 2)
         XCTAssertNil(source["pushCount"], "SQLite NULL is omitted by the shared raw Task codec")
         let attachments = try XCTUnwrap(source["attachments"] as? [[String: Any]])
-        // Existing SqliteAdapter taskFromSqliteRow/toAttachments supplies this optional field.
+
         XCTAssertEqual(attachments.first?["updatedAt"] as? String, "")
         XCTAssertTrue(sources.contains { $0["id"] as? String == ids[0] + "-legacy" })
         XCTAssertNil(sources.first { $0["id"] as? String == ids[0] + "-legacy" }?["projectId"], "Scope must bind the raw section-only sibling")
@@ -29928,7 +29908,7 @@ final class CoreHostTests: XCTestCase {
 
     func testArchivedTasksRestore180ColdRawFocusAndNewParentMemberRefuseWithoutWrites() async throws {
         for editKind in ["rawFocus", "newMember"] {
-            // Each process-death scenario starts from its own SQLite fixture.
+
             for suffix in ["", "-wal", "-shm", ".pending.json"] {
                 let path = URL(fileURLWithPath: database.path + suffix)
                 if FileManager.default.fileExists(atPath: path.path) { try FileManager.default.removeItem(at: path) }
@@ -29944,7 +29924,7 @@ final class CoreHostTests: XCTestCase {
             await writer.close()
             let edit = try SQLiteBridge(url: database)
             if editKind == "rawFocus" {
-                // No revision change: only the raw-before authority can detect this edit.
+
                 _ = try edit.execute("UPDATE tasks SET focusOrder = 3 WHERE id = ?", parametersJSON: json([ids[0]]))
             } else {
                 _ = try edit.execute("INSERT INTO tasks (id, title, status, projectId, tags, contexts, createdAt, updatedAt, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -30165,8 +30145,8 @@ final class CoreHostTests: XCTestCase {
         var result = snapshot
         var tasks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(snapshot[0].utf8)) as? [[String: Any]])
         let selected = Set(ids)
-        // JSON object property order is serialization, while arrays and all
-        // non-JSON/null cells stay exact. Untouched rows remain raw-cell exact.
+
+
         let columns = ["attachments", "checklist", "contexts", "recurrence", "relativeStartOffset", "tags", "viewSectionIds"]
         for index in tasks.indices where selected.contains(tasks[index]["id"] as? String ?? "") {
             for column in columns {
@@ -30202,8 +30182,8 @@ final class CoreHostTests: XCTestCase {
         var clock = ""
         if let at = commitAndRestartAt {
             let prefix = undo == nil ? "archivedTasksDelete" : "archivedTasksDeleteUndo"
-            // Prepare freezes12, then the uninterrupted commit uses the same13
-            // clock as cold replay. This also compares saved_at exactly.
+
+
             clock = """
             (() => {
                 const FixedDate = Date, commit = MindwtrHost.\(prefix)Commit;
@@ -30222,9 +30202,8 @@ final class CoreHostTests: XCTestCase {
         addTeardownBlock { await normal.close() }
         _ = try await normal.start()
         if rawIDs != nil {
-            // Normal boot may repair one legacy member and serialize every row.
-            // Restore ALL captured raw tasks so this command oracle starts from
-            // the identical complete authority, with no representation waiver.
+
+
             let raw = try SQLiteBridge(url: normalDatabase)
             for row in rawRows {
                 let columns = row.keys.filter { $0 != "id" }.sorted()
@@ -30411,7 +30390,7 @@ final class CoreHostTests: XCTestCase {
                 XCTAssertEqual(source["focusOrder"] as? Int, 2)
                 XCTAssertNil(source["pushCount"], "Raw Task codec omits SQLite NULL")
                 let attachments = try XCTUnwrap(source["attachments"] as? [[String: Any]])
-                // Existing SqliteAdapter taskFromSqliteRow/toAttachments supplies ''.
+
                 XCTAssertEqual(attachments.first?["updatedAt"] as? String, "")
             } else {
                 let deletion = try XCTUnwrap(prepared["delete"] as? [String: Any])
@@ -30480,7 +30459,7 @@ final class CoreHostTests: XCTestCase {
             await writer.close()
             let edit = try SQLiteBridge(url: database)
             if editKind == "deleteRaw" {
-                // Displayed revision remains unchanged; raw authority catches this edit.
+
                 _ = try edit.execute("UPDATE tasks SET focusOrder = 3 WHERE id = ?", parametersJSON: json([ids[0]]))
             } else if editKind == "undoRow" {
                 _ = try edit.execute("UPDATE tasks SET title = ?, rev = rev + 1 WHERE id = ?", parametersJSON: json(["Independent Trash edit", ids[1]]))
@@ -30513,8 +30492,8 @@ final class CoreHostTests: XCTestCase {
         let deletion = try await archive180Request(core, ids: ids)
         _ = try await core.call("archivedTasksDeleteWrite", argumentsJSON: json([json(deletion)]))
         let edit = try SQLiteBridge(url: database)
-        // A parent deleted after Delete but before Undo preparation is repaired
-        // by the existing RN restore sanitizer. Its sibling parent stays archived.
+
+
         _ = try edit.execute("UPDATE projects SET deletedAt = ?, rev = rev + 1 WHERE id = 'destination-project-b'", parametersJSON: json([archive180Clock]))
         let containers = Array(try nineTableSnapshot(edit).dropFirst()), receipts = try archive181ReceiptRows(edit)
         edit.close()
@@ -30567,13 +30546,12 @@ final class CoreHostTests: XCTestCase {
                                      parametersJSON: json(["Independent later Task181 edit", "2026-10-04T12:30:00.000Z", ids[1]]))
                 _ = try edit.execute("UPDATE projects SET title = ?, rev = rev + 1 WHERE id = 'destination-project-b'", parametersJSON: json(["Independent later parent edit"]))
                 if undo {
-                    // A proven terminal Undo remains proven even after its Delete
-                    // prerequisite receipt has been removed independently.
+
+
                     _ = try edit.execute("DELETE FROM native_request_receipts WHERE request_id = ?", parametersJSON: json([XCTUnwrap(deletion["requestId"])]))
                 }
-                // These are independent direct edits after the confirmed write.
-                // Retire project-archive provenance so normal startup has no
-                // separate deleted-task migration or archived-parent completion.
+
+
                 for id in ids {
                     _ = try edit.execute("UPDATE tasks SET projectArchivedAt = NULL, statusBeforeProjectArchive = NULL, completedAtBeforeProjectArchive = NULL, isFocusedTodayBeforeProjectArchive = NULL WHERE id = ?",
                                          parametersJSON: json([id]))
@@ -30712,8 +30690,8 @@ final class CoreHostTests: XCTestCase {
         let faults = HostIOFaults(), core = host(faults, bundleURL: try dateBundle(at: archive180Clock))
         _ = try await core.start()
         let sqlite = try SQLiteBridge(url: database)
-        // Delete has two selected row copies; a real prospective Undo includes
-        // the entire Delete plus two more copies. Only the latter exceeds 2 MB.
+
+
         _ = try sqlite.execute("UPDATE tasks SET description = ? WHERE id = ?", parametersJSON: json([String(repeating: "x", count: 550_000), ids[0]]))
         sqlite.close()
         let request = try await archive180Request(core, ids: [ids[0]])
@@ -30867,7 +30845,7 @@ final class CoreHostTests: XCTestCase {
                 let before = try XCTUnwrap(prepared["before"] as? [[String: Any]])
                 let source = try XCTUnwrap(before.first { $0["id"] as? String == ids[0] })
                 XCTAssertEqual(source["focusOrder"] as? Int, 2); XCTAssertNil(source["pushCount"])
-                // Existing raw Task codec supplies the absent optional attachment field.
+
                 XCTAssertEqual((source["attachments"] as? [[String: Any]])?.first?["updatedAt"] as? String, "")
             }
             await writer.close()
@@ -30912,8 +30890,8 @@ final class CoreHostTests: XCTestCase {
         XCTAssertFalse(rows.compactMap { $0["row"] as? [String: Any] }.contains { $0["id"] as? String == ids[0] + "-protected" })
         let revisions = try XCTUnwrap(request["taskRevisions"] as? [String: String])
         let parent = try SQLiteBridge(url: database)
-        // The displayed request was valid. A parent becoming read-only must
-        // refuse the entire batch even though no selected row token changed.
+
+
         _ = try parent.execute("UPDATE projects SET status = 'archived', rev = rev + 1 WHERE id = 'destination-project-b'")
         parent.close()
         let reader = try SQLiteBridge(url: database), baseline = try nineTableSnapshot(reader), receipts = try doneTask176Receipts(reader)
@@ -31160,8 +31138,8 @@ final class CoreHostTests: XCTestCase {
         reader.close()
         var clock = ""
         if let at = commitAndRestartAt {
-            // Freeze planning at12, commit at13 like actual cold replay; the
-            // receipt saved_at and the complete checkpoint must also match.
+
+
             clock = """
             (() => {
                 const FixedDate = Date, commit = MindwtrHost.archivedTasksRestoreCommit;
@@ -31181,8 +31159,8 @@ final class CoreHostTests: XCTestCase {
         _ = try await normal.start()
         if raw {
             let sql = try SQLiteBridge(url: copy)
-            // Existing boot normalization may touch a legacy member. Restore
-            // every raw row so this oracle starts with identical authority.
+
+
             for row in rawRows {
                 let columns = row.keys.filter { $0 != "id" }.sorted()
                 _ = try sql.execute("UPDATE tasks SET " + columns.map { "\($0) = ?" }.joined(separator: ", ") + " WHERE id = ?",
@@ -31306,7 +31284,7 @@ final class CoreHostTests: XCTestCase {
             let scope = try XCTUnwrap(prepared["scope"] as? [String: Any]), tasks = try XCTUnwrap(scope["tasks"] as? [[String: Any]])
             let rawBefore = try XCTUnwrap(tasks.first { $0["id"] as? String == ids[0] })
             XCTAssertEqual(rawBefore["focusOrder"] as? Int, 2); XCTAssertNil(rawBefore["pushCount"])
-            // Existing shared raw Task codec supplies missing attachment updatedAt.
+
             XCTAssertEqual((rawBefore["attachments"] as? [[String: Any]])?.first?["updatedAt"] as? String, "")
             XCTAssertTrue(tasks.contains { $0["id"] as? String == ids[0] + "-legacy" && $0["projectId"] == nil })
             await writer.close()
@@ -31729,7 +31707,7 @@ final class CoreHostTests: XCTestCase {
         let scope = try XCTUnwrap(prepared["scope"] as? [String: Any]), tasks = try XCTUnwrap(scope["tasks"] as? [[String: Any]])
         let rawBefore = try XCTUnwrap(tasks.first { $0["id"] as? String == ids[0] })
         XCTAssertEqual(rawBefore["focusOrder"] as? Int, 2); XCTAssertNil(rawBefore["pushCount"])
-        // Existing shared raw Task codec supplies absent attachment updatedAt.
+
         XCTAssertEqual((rawBefore["attachments"] as? [[String: Any]])?.first?["updatedAt"] as? String, "")
         let effect = try XCTUnwrap(prepared["effect"] as? [String: Any]), pairs = try XCTUnwrap(effect["tasks"] as? [[String: Any]])
         XCTAssertFalse(pairs.contains { ($0["before"] as? [String: Any])?["id"] as? String == ids[1] })
@@ -31799,8 +31777,8 @@ final class CoreHostTests: XCTestCase {
         for (label, value) in invalid {
             await assertRefused(label + " Write", code: "INVALID_INPUT", method: "archivedTasksRestoreWrite", value: value)
             if label == "whitespace tag" {
-                // Strict bounded transport is valid, but there is no saved receipt.
-                // This readonly probe returns no proof without preparing the tag.
+
+
                 let outcome = try object(await core.call("archivedTasksRestoreRetryOutcome", argumentsJSON: json([json(value)])))
                 XCTAssertEqual(try json(outcome), try json(["kind": "unproven"]), label + " RetryOutcome")
             } else {
@@ -31819,7 +31797,7 @@ final class CoreHostTests: XCTestCase {
         XCTAssertEqual(changedCarrier["rev"] as? Int, (carrier["rev"] as? Int ?? 0) + 1, "Stale fixture must change the durable revision, including NULL")
         XCTAssertNotEqual(try json(changedCarrier), try json(carrier))
         let stale = try nineTableSnapshot(sql)
-        // An already-tagged carrier is still part of the accepted full selection.
+
         let noop = request.merging(["tag": "#retain184"]) { _, new in new }
         await assertRefused("stale carrier noop Write", code: "STALE_REVISION", method: "archivedTasksRestoreWrite", value: noop)
         XCTAssertEqual(try nineTableSnapshot(sql), stale)
@@ -32014,8 +31992,8 @@ final class CoreHostTests: XCTestCase {
         try doneTag184AssertResult(result, count: 3)
         let saved = try storedTask(ids[0])
         let tags = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(XCTUnwrap(saved["tags"] as? String).utf8)) as? [String])
-        // Shared base collator orders accents/case in JSC; distinct case tokens
-        // retain their stable input order and the comma stays inside one token.
+
+
         XCTAssertEqual(tags, ["#ä", "#Blue", "#blue", "#Café,Review", "#Éclair", "#retain184", "#Zebra"])
         let check = try SQLiteBridge(url: database)
         XCTAssertEqual(try nineTableSnapshot(check), expected.raw)
@@ -32230,7 +32208,7 @@ final class CoreHostTests: XCTestCase {
         let scope = try XCTUnwrap(prepared["scope"] as? [String: Any]), tasks = try XCTUnwrap(scope["tasks"] as? [[String: Any]])
         let rawBefore = try XCTUnwrap(tasks.first { $0["id"] as? String == ids[0] })
         XCTAssertEqual(rawBefore["focusOrder"] as? Int, 2); XCTAssertNil(rawBefore["pushCount"])
-        // Existing shared raw Task codec supplies absent attachment updatedAt.
+
         XCTAssertEqual((rawBefore["attachments"] as? [[String: Any]])?.first?["updatedAt"] as? String, "")
         let effect = try XCTUnwrap(prepared["effect"] as? [String: Any]), pairs = try XCTUnwrap(effect["tasks"] as? [[String: Any]])
         XCTAssertFalse(pairs.contains { ($0["before"] as? [String: Any])?["id"] as? String == ids[2] })
@@ -32698,7 +32676,7 @@ final class CoreHostTests: XCTestCase {
                 var envelope = try referenceTask186Journal(method)
                 await writer.close()
                 if equalAfter {
-                    // Keep the actual saved AFTER row, but give the journal an unused UUID.
+
                     let unused = UUID().uuidString.lowercased()
                     var altered = request; altered["requestId"] = unused
                     envelope["request"] = altered
@@ -32950,9 +32928,8 @@ final class CoreHostTests: XCTestCase {
         for mode in ["delete-archived-parent", "undo-deleted-parent", "undo-purged-parent"] {
             let undo = mode.hasPrefix("undo")
             if mode != "delete-archived-parent" {
-                // The shared fixture uses INSERT OR IGNORE for fixed parent
-                // IDs. Remove the previous case's deliberate parent mutation
-                // before the next fixture is loaded and its row is displayed.
+
+
                 let reset = try SQLiteBridge(url: database)
                 _ = try reset.execute("UPDATE projects SET status = 'active', archivedAt = NULL, deletedAt = NULL, purgedAt = NULL WHERE id = 'destination-project-a'")
                 reset.close()
@@ -33028,8 +33005,8 @@ final class CoreHostTests: XCTestCase {
         await expectFailure("SAVE_FAILED") { _ = try await writer.call("taskDelete", argumentsJSON: args) }
         var saved = try object(String(contentsOf: journal))
         await writer.close()
-        // Use an actually persisted, valid, matching frozen draft. Rejecting
-        // this journal must come from the row-source rule, not a missing file.
+
+
         let store = EditorDraftStore(databaseURL: database)
         try store.checkpoint(draft)
         let attempt = try store.freeze(sessionID: session, generation: 1, method: "taskDelete", argumentsJSON: args)
@@ -33147,9 +33124,8 @@ final class CoreHostTests: XCTestCase {
         _ = try await warm.start()
         let displayed = try await referenceNext187Request(warm, id: id), displayedRaw = try storedTask(id)
         XCTAssertNotEqual(displayedRaw["focusOrder"] as? Int, 2)
-        // Reference retains these fields in its normal-load projection. Changing
-        // raw values after display without a revision bump must not silently
-        // substitute a new normalized source for the captured row witness.
+
+
         let raw = try SQLiteBridge(url: database)
         _ = try raw.execute("UPDATE tasks SET focusOrder = 2, pushCount = NULL WHERE id = ?", parametersJSON: json([id]))
         let rawBaseline = try nineTableSnapshot(raw), rawReceipts = try doneTask176Receipts(raw)
@@ -33171,9 +33147,8 @@ final class CoreHostTests: XCTestCase {
         let unchanged = try SQLiteBridge(url: database)
         XCTAssertEqual(try nineTableSnapshot(unchanged), rawBaseline); XCTAssertEqual(try doneTask176Receipts(unchanged), rawReceipts)
         unchanged.close(); await warm.close()
-        // A fresh normal load now displays this actual raw fixture. It retains
-        // focusOrder2/NULL pushCount in durable BEFORE while planning from the
-        // corresponding shared normalized source; neither guard is weakened.
+
+
         let faults = HostIOFaults(), writer = host(faults, bundleURL: try dateBundle(at: "2026-10-02T13:00:00.000Z"))
         _ = try await writer.start()
         let loadedRaw = try storedTask(id)
@@ -33538,9 +33513,8 @@ final class CoreHostTests: XCTestCase {
         let seed = try SQLiteBridge(url: database)
         _ = try seed.execute("UPDATE tasks SET id = ? WHERE id = ?", parametersJSON: json([nfd, originalID]))
         let parentID = try XCTUnwrap(storedTask(originalID + "-protected")["projectId"] as? String)
-        // Use the existing full-save codec's canonical boolean defaults for
-        // this identity regression. The complete sibling row is compared;
-        // no scalar or ownership column is omitted.
+
+
         _ = try seed.execute("INSERT INTO tasks (id,title,status,projectId,tags,contexts,createdAt,updatedAt,rev,isFocusedToday,showFutureRecurrence,suppressMindwtrReminders) VALUES (?,?,?,?,?,?,?,?,?,0,0,0)",
                              parametersJSON: json([nfc, "Read-only NFC Reference", "reference", parentID, "[]", "[]", "2026-10-01T12:00:00.000Z", "2026-10-01T12:00:00.000Z", 7]))
         seed.close()
@@ -33595,8 +33569,8 @@ final class CoreHostTests: XCTestCase {
                                            undo: [String: Any]? = nil, editSource: Bool = false,
                                            commitAt: String? = nil) async throws -> ([String], String) {
         let method = undo != nil ? "taskCompletionUndoCommit" : completion ? "taskCompletionCommit" : "doneTaskStatusCommit"
-        // Preparation freezes task effects at 13:00. Receipt saved_at is the
-        // successful commit clock, including when a different host saves later.
+
+
         let clock = commitAt.map { instant in
             """
             (() => {
@@ -33858,9 +33832,8 @@ final class CoreHostTests: XCTestCase {
             let outcome = try object(await cold.call(outcomeMethod, argumentsJSON: json([json(submitted)])))
             XCTAssertEqual(try json(outcome), try json(["kind": "confirmed", "result": result]))
             try assertReferenceStatus188Receipt(envelope, prefix: operation == "status" ? "referenceTaskStatus" : operation == "undo" ? "referenceTaskCompletionUndo" : "referenceTaskCompletion", result: result)
-            // Exact landed receipt recovery precedes ordinary activation. The
-            // archived-parent migration after that point is normal startup, and
-            // must match an independent normal load of the same raw database.
+
+
             XCTAssertEqual(removals, 1, operation); XCTAssertEqual(try XCTUnwrap(checkpointWrites), [], operation)
             XCTAssertEqual(try XCTUnwrap(checkpoint), baseline, operation); XCTAssertEqual(try XCTUnwrap(checkpointReceipts), receipts, operation)
             XCTAssertEqual(domainWrites, expectedReady.2, operation)
@@ -34093,8 +34066,8 @@ extension CoreHostTests {
     }
 
     private func referenceBackdate189RecurringIdentityFixture(_ identities: [String]) throws -> String {
-        // Independent normal preparation and failed-save/replay must receive the
-        // same generated IDs. All planned fields and receipt columns stay exact.
+
+
         """
         (() => {
             const prepare = MindwtrHost.referenceTaskBackdatePrepare;
@@ -34365,8 +34338,8 @@ extension CoreHostTests {
             let cold = host(replay, bundleURL: try dateBundle(at: "2026-10-02T15:00:00.000Z"))
             await expectFailure { _ = try await cold.start() }
             XCTAssertEqual(writes, 0, part)
-            // A structurally valid terminal without a receipt may inspect SQLite,
-            // but it cannot write or discard the retained command.
+
+
             if part != "terminal" { XCTAssertEqual(statements, 0, part) }
             XCTAssertEqual(try Data(contentsOf: journal), bytes)
             let check = try SQLiteBridge(url: database); XCTAssertEqual(try nineTableSnapshot(check), baseline, part); XCTAssertEqual(try doneTask176Receipts(check), receipts, part); check.close(); await cold.close()
@@ -34669,8 +34642,8 @@ extension CoreHostTests {
     private func seedProjectNext191(candidates: Int = 1) async throws -> String {
         let id = try await seedReferenceStatus188()
         let sql = try SQLiteBridge(url: database); defer { sql.close() }
-        // Remove unrelated future schedule from the source; candidates are actual
-        // Waiting tasks in the same active parent, not synthetic UI options.
+
+
         _ = try sql.execute("UPDATE tasks SET startTime=NULL,dueDate=NULL,recurrence=NULL WHERE id=?", parametersJSON: json([id]))
         for index in 0..<candidates {
             _ = try sql.execute("INSERT INTO tasks (id,title,status,projectId,sectionId,tags,contexts,isFocusedToday,showFutureRecurrence,suppressMindwtrReminders,pushCount,createdAt,updatedAt,rev,orderNum) VALUES (?,?, 'waiting','destination-project-a','destination-section-a','[]','[]',0,0,0,0,?,?,1,?)",
@@ -34712,8 +34685,8 @@ extension CoreHostTests {
         let operation = try XCTUnwrap(prepared["operation"] as? [String: Any])
         guard operation["kind"] as? String == "add" else { return "" }
         let task = try XCTUnwrap(operation["task"] as? [String: Any])
-        // This fixture's text has no links and its device is already saved. The
-        // only allocation is the actual Task UUID, shared by both preparations.
+
+
         let id = try XCTUnwrap(task["id"] as? String)
         return """
         (() => {
@@ -34983,8 +34956,8 @@ extension CoreHostTests {
         XCTAssertEqual(try storedTask(id)["status"] as? String, "done")
         let warmOptions = try await projectNext191Options(core, origin: origin)
         XCTAssertEqual(warmOptions["scope"] as? String, "project"); await core.close()
-        // RN writes Done first. Normal activation's established auto-archive
-        // transition supplies the actual Archive origin, not the setting alone.
+
+
         try bytes.write(to: journal)
         let cold = host(bundleURL: try dateBundle(at: "2026-10-02T15:00:00.000Z"))
         let window = try object(await cold.start()); XCTAssertEqual(try storedTask(id)["status"] as? String, "archived")
@@ -35016,8 +34989,8 @@ extension CoreHostTests {
             let value = try await core.call("referenceProjectNextActionOptions", argumentsJSON: json([json(["origin": origin, "params": ["offset": 0, "revision": NSNull()]])]))
             if mode == "future" { XCTAssertEqual(value, "null", mode) }
             else if mode == "recurring" {
-                // Reference recurrence creates a Reference child, so it does not
-                // supply an existing Next action that would suppress this prompt.
+
+
                 let saved = try object(String(decoding: originJournal, as: UTF8.self))
                 let arguments = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(XCTUnwrap(saved["argumentsJSON"] as? String).utf8)) as? [String])
                 let envelope = try object(XCTUnwrap(arguments.first)), prepared = try XCTUnwrap(envelope["prepared"] as? [String: Any])
@@ -35048,8 +35021,6 @@ extension CoreHostTests {
 }
 
 
-// Task192: Reference selection uses the shared readonly list model; writes keep
-// the existing bulk journal family and exact durable receipt identity.
 extension CoreHostTests {
     private func seedReferenceBulk192() async throws -> [String] {
         let ids = try await seedDoneBulk182()
@@ -35058,8 +35029,8 @@ extension CoreHostTests {
             _ = try sql.execute("UPDATE tasks SET status='reference',completedAt=NULL,cancelledAt=NULL,archivedAt=NULL,projectArchivedAt=NULL,statusBeforeProjectArchive=NULL,tags=? WHERE id=?",
                                 parametersJSON: json([json(["#Task192 A", "#Task192 B"]), id]))
         }
-        // Bind legacy Section-only ownership before startup; this fixture tests
-        // the new command, without an unrelated load migration changing controls.
+
+
         _ = try sql.execute("UPDATE tasks SET projectId='destination-project-b' WHERE id=?", parametersJSON: json([ids[0] + "-legacy"]))
         return ids
     }
@@ -35122,8 +35093,8 @@ extension CoreHostTests {
         let protected = ids[0] + "-protected"
         let readonly = try object(await core.call("menuRead", argumentsJSON: json(["bulk", json(["list": "reference", "params": ["groupBy": "none", "includeArchivedProjects": true], "taskIds": ids + [protected]])])))
         XCTAssertEqual(readonly["selectedIds"] as? [String], ids)
-        // A visible readonly row is a safe selection no-op, as on RN. A row
-        // hidden by the accepted filter is a distinct invalid selection edit.
+
+
         let readonlyClick = try object(await core.call("menuRead", argumentsJSON: json(["bulk", json(["list": "reference", "params": ["includeArchivedProjects": true], "taskIds": [], "selectionEdit": ["taskId": protected]])])))
         XCTAssertEqual(readonlyClick["selectedIds"] as? [String], []); XCTAssertEqual(readonlyClick["selectedCount"] as? Int, 0)
         XCTAssertTrue(readonlyClick["anchorId"] is NSNull); XCTAssertEqual((readonlyClick["taskRevisions"] as? [String: String])?.count, 0)
@@ -35226,7 +35197,7 @@ extension CoreHostTests {
                 let before = try XCTUnwrap(prepared["before"] as? [[String: Any]])
                 let source = try XCTUnwrap(before.first { $0["id"] as? String == ids[0] })
                 XCTAssertEqual(source["focusOrder"] as? Int, 2); XCTAssertNil(source["pushCount"])
-                // Reference raw authority retains actual optional member absence.
+
                 XCTAssertNil((source["attachments"] as? [[String: Any]])?.first?["updatedAt"])
                 XCTAssertNil(source["tags"]); XCTAssertNil(source["contexts"])
             }
@@ -35527,8 +35498,8 @@ extension CoreHostTests {
         let edit = try SQLiteBridge(url: database)
         _ = try edit.execute("UPDATE tasks SET description=? WHERE id=?", parametersJSON: json([String(repeating: "x", count: 550_000), ids[0]]))
         edit.close(); await core.close()
-        // The oversized row must be the displayed/accepted baseline. Editing it
-        // after preparing selection correctly exercises stale CAS instead.
+
+
         let largeCore = host(faults, bundleURL: try dateBundle(at: archive180Clock)); _ = try await largeCore.start()
         let fresh = try await referenceBulk192Request(largeCore, ids: [ids[0]])
         let largeBaseline = try SQLiteBridge(url: database)
@@ -35542,8 +35513,6 @@ extension CoreHostTests {
 }
 
 
-// Task193 invokes the real shared JavaScript bundle, SQLite adapter and durable
-// Swift journal. RN parity is also checked independently in the shared-core suite.
 extension CoreHostTests {
     private func seedReferenceMove193() async throws -> [String] {
         let ids = try await seedReferenceBulk192()
@@ -35640,8 +35609,8 @@ extension CoreHostTests {
             XCTAssertEqual(receipts.filter { ($0["method"] as? String)?.hasPrefix("referenceTasksMove:") == true }.count, 1)
             sql.close()
             XCTAssertEqual(try doneTask178RowWithDecodedAttachments(storedTask(ids[0] + "-protected")), try doneTask178RowWithDecodedAttachments(protected))
-            // RN keeps an explicitly requested Next status for future work;
-            // date/Focus handling is part of the complete row comparison above.
+
+
             if status == "next" { XCTAssertEqual(try storedTask(ids[1])["status"] as? String, "next") }
             let inventory = try SQLiteBridge(url: database)
             let tasks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(inventory.execute("SELECT id FROM tasks").utf8)) as? [[String: Any]])
@@ -35671,8 +35640,8 @@ extension CoreHostTests {
         let areaView = try object(await writer.call("areaFilter"))
         let areaOptions = try XCTUnwrap(areaView["options"] as? [[String: Any]])
         let unrelatedSelection = try XCTUnwrap(areaOptions.last?["next"] as? [String: Any])
-        // Preparation stays at the original clock; the first durable receipt is
-        // stamped when cold replay first commits, one hour later.
+
+
         let expected = try await referenceMove193Control(request, commitAt: "2026-10-04T13:00:00.000Z")
         let sql = try SQLiteBridge(url: database), baseline = try nineTableSnapshot(sql), receipts = try doneTask176Receipts(sql); sql.close()
         faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected Task193 COMMIT failure") } }
@@ -35825,8 +35794,8 @@ extension CoreHostTests {
                 };
             })();
             """))
-        // A malformed-result injection is a boundary test only; actual native
-        // acceptance above uses the unmodified generated core bundle.
+
+
         _ = try await writer.start()
         let request = try await referenceMove193Request(writer, ids: ids, status: "waiting")
         await expectFailure("acknowledgment") { _ = try await writer.call("referenceTasksMoveWrite", argumentsJSON: json([json(request)])) }
@@ -35842,8 +35811,6 @@ extension CoreHostTests {
 }
 
 
-// Task195 exercises the real JSC/SQLite journal carrier. Independent actual RN
-// builder+batchUpdate parity is owned by the shared-core Task195 suite.
 extension CoreHostTests {
     private var referenceTag195Input: String { "  ###café 🧭  " }
 
@@ -36110,8 +36077,7 @@ extension CoreHostTests {
     }
 }
 
-// Task196 exercises the real JSC/SQLite journal carrier. Independent actual RN
-// builder+batchUpdate parity is owned by the shared-core Task196 suite.
+
 extension CoreHostTests {
     private var referenceRemove196Picks: [String] {
         ["  ###café 🧭  ", "cafe\u{301} 🧭", "Task196 CASE", "Task196 imported " + String(repeating: "x", count: 5_001)]
@@ -36177,8 +36143,8 @@ extension CoreHostTests {
         XCTAssertTrue(coreAcknowledgedCounts.isEmpty, "Malformed or unrelated console payloads cannot claim a bulk acknowledgment")
         let beforeRead = try SQLiteBridge(url: database), beforeReadRaw = try nineTableSnapshot(beforeRead), beforeReadReceipts = try doneTask176Receipts(beforeRead)
         beforeRead.close()
-        // Adding Reference's picker to the transport allowlist must not enable other
-        // picker kinds or unbounded/unbound windows. Every refusal is a pure read.
+
+
         let invalidPickers: [[String: Any]] = [
             ["kind": "project"], ["kind": "area"],
             ["kind": "removeTag", "query": String(repeating: "x", count: 501)],
@@ -36430,11 +36396,11 @@ extension CoreHostTests {
     }
 }
 
-// Task193 review regressions use only real JSC methods and canonical SQLite.
+
 extension CoreHostTests {
     private func referenceMove193SQLRows(_ raw: String) throws -> NSArray {
-        // Ignore only bridge JSON object ordering; SQLite cell strings, NULLs,
-        // scalar types, array order and rowids remain exact.
+
+
         try XCTUnwrap(JSONSerialization.jsonObject(with: Data(raw.utf8)) as? NSArray)
     }
     func testReferenceBulkMove193LegacyBlankAreaThroughParentColdJournalKeepsRawRowAndOwnReceipt() async throws {
@@ -36516,8 +36482,8 @@ extension CoreHostTests {
         _ = try await core.start()
         let request = try await referenceMove193Request(core, ids: ids, status: "waiting")
         let unrelatedID = "task193-unrelated-invalid-project", setup = try SQLiteBridge(url: database)
-        // Disable FK enforcement only on this fixture connection for the one
-        // deliberately invalid legacy row, then restore it before invoking core.
+
+
         _ = try setup.execute("PRAGMA foreign_keys = OFF")
         do {
             _ = try setup.execute("INSERT INTO tasks (id,title,status,projectId,tags,contexts,createdAt,updatedAt,rev) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -36665,7 +36631,7 @@ extension CoreHostTests {
         let control = directory.appendingPathComponent("task200-control.zip")
         try XCTUnwrap(Data(base64Encoded: XCTUnwrap(expected["content"] as? String))).write(to: control)
         defer { try? FileManager.default.removeItem(at: control) }
-        // ZIP timestamps can differ across these reads; compare exact decompressed entries.
+
         func contents(_ url: URL) throws -> Data {
             let process = Process(), output = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
@@ -36693,7 +36659,7 @@ extension CoreHostTests {
         await expectFailure { _ = try await competing.start() }
         XCTAssertTrue(FileManager.default.fileExists(atPath: prepared.url.path))
         await competing.close()
-        // Close without the UI dismissal callback, keeping the old object alive.
+
         await core.close()
         let restarted = host(); _ = try await restarted.start()
         XCTAssertFalse(FileManager.default.fileExists(atPath: prepared.url.path))
@@ -36945,7 +36911,6 @@ extension CoreHostTests {
 }
 
 
-// Task739: Inbox reuses the prepared bulk writer and requires fresh durable Undo proof.
 extension CoreHostTests {
     private func seedInboxBulk739() async throws -> [String] {
         let ids = try await seedReferenceBulk192()
@@ -37110,7 +37075,7 @@ extension CoreHostTests {
                 let before = try XCTUnwrap(prepared["before"] as? [[String: Any]])
                 let source = try XCTUnwrap(before.first { $0["id"] as? String == ids[0] })
                 XCTAssertEqual(source["focusOrder"] as? Int, 2); XCTAssertNil(source["pushCount"])
-                // Inbox raw authority retains actual optional member absence.
+
                 XCTAssertNil((source["attachments"] as? [[String: Any]])?.first?["updatedAt"])
                 XCTAssertNil(source["tags"]); XCTAssertNil(source["contexts"])
             }
@@ -37147,8 +37112,7 @@ extension CoreHostTests {
     }
 }
 
-// Task740 invokes the real shared JavaScript bundle, SQLite adapter and durable
-// Swift journal. RN parity is also checked independently in the shared-core suite.
+
 extension CoreHostTests {
     private func seedInboxMove740() async throws -> [String] {
         let ids = try await seedReferenceBulk192()
@@ -37248,8 +37212,8 @@ extension CoreHostTests {
             XCTAssertEqual(receipts.filter { ($0["method"] as? String)?.hasPrefix("inboxTasksMove:") == true }.count, 1)
             sql.close()
             XCTAssertEqual(try doneTask178RowWithDecodedAttachments(storedTask(ids[0] + "-protected")), try doneTask178RowWithDecodedAttachments(protected))
-            // RN keeps an explicitly requested Next status for future work;
-            // date/Focus handling is part of the complete row comparison above.
+
+
             if status == "next" { XCTAssertEqual(try storedTask(ids[1])["status"] as? String, "next") }
             let inventory = try SQLiteBridge(url: database)
             let tasks = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(inventory.execute("SELECT id FROM tasks").utf8)) as? [[String: Any]])
@@ -37290,8 +37254,8 @@ extension CoreHostTests {
         let areaView = try object(await writer.call("areaFilter"))
         let areaOptions = try XCTUnwrap(areaView["options"] as? [[String: Any]])
         let unrelatedSelection = try XCTUnwrap(areaOptions.last?["next"] as? [String: Any])
-        // Preparation stays at the original clock; the first durable receipt is
-        // stamped when cold replay first commits, one hour later.
+
+
         let expected = try await inboxMove740Control(request, commitAt: "2026-10-04T13:00:00.000Z")
         let sql = try SQLiteBridge(url: database), baseline = try nineTableSnapshot(sql), receipts = try doneTask176Receipts(sql); sql.close()
         faults.beforeSQL = { if $0 == "COMMIT" { throw HostFailure("Injected Task740 COMMIT failure") } }
@@ -37450,8 +37414,8 @@ extension CoreHostTests {
                 };
             })();
             """))
-        // A malformed-result injection is a boundary test only; actual native
-        // acceptance above uses the unmodified generated core bundle.
+
+
         _ = try await writer.start()
         let request = try await inboxMove740Request(writer, ids: ids, status: "waiting")
         await expectFailure("acknowledgment") { _ = try await writer.call("inboxTasksMoveWrite", argumentsJSON: json([json(request)])) }
@@ -37465,8 +37429,6 @@ extension CoreHostTests {
         let check = try SQLiteBridge(url: database); XCTAssertEqual(try nineTableSnapshot(check), baseline); XCTAssertEqual(try doneTask176Receipts(check), receipts); check.close(); await cold.close()
     }
 }
-
-
 
 
 extension CoreHostTests {
@@ -37523,8 +37485,8 @@ extension CoreHostTests {
             }
             if self.archive180IsDomainWrite(statement) { writes += 1 }
         }
-        // The shared core's BEGIN epoch fence refuses any commit that landed after its last read as SAVE_FAILED, with no receipt
-        // (native-host-contract-inbox-bulk-status.test.ts, "uses the actual production BEGIN epoch fence").
+
+
         await expectFailure("SAVE_FAILED: SQLITE_BUSY") { _ = try await core.call("inboxTasksMoveWrite", argumentsJSON: json([json(request)])) }
         XCTAssertTrue(changed); XCTAssertEqual(writes, 0)
         let saved = try SQLiteBridge(url: database)
@@ -37558,8 +37520,7 @@ extension CoreHostTests {
     }
 }
 
-// Task741 exercises the real JSC/SQLite journal carrier. Independent actual RN
-// builder+batchUpdate parity is owned by the shared-core Task741 suite.
+
 extension CoreHostTests {
     private var inboxTag741Input: String { "  ###café 🧭  " }
 
@@ -37826,7 +37787,7 @@ extension CoreHostTests {
     }
 }
 
-// Task742: public strict Remove-tag carrier, read union and original-journal recovery.
+
 extension CoreHostTests {
     private func seedInboxRemove742() async throws -> [String] {
         let ids = try await seedInboxMove740(), sql = try SQLiteBridge(url: database)
@@ -37933,7 +37894,6 @@ extension CoreHostTests {
 }
 
 
-// Task743: independently durable Organize Apply and destination creation.
 extension CoreHostTests {
     private var organize743EmptyDraft: [String: String] {
         ["status": "__KEEP__", "projectChoice": "__KEEP__", "areaChoice": "__KEEP__", "contexts": "", "tags": "",

@@ -58,8 +58,8 @@ describe('native Pomodoro alarm intent follows RN root policy', () => {
 });
 
 describe('the RN Pomodoro alert owed at the native Android upgrade', () => {
-    // RN's alarm due between the native app's install and its first start was dropped (RN's receiver is gone): it is shown
-    // once at that start, at most 24 h late, as RN's own boot receiver would. One due before the install was RN's to show.
+
+
     const installedAtMs = now - 10 * 60_000;
     const legacy = (record: unknown, input: { settings?: AppSettings; nowMs?: number; installed?: number } = {}) =>
         buildNativePomodoroLegacyAlert({ raw: record === null ? null : JSON.stringify(record), settings: input.settings ?? {},

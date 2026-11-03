@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 
-/**
- * Tracks whether a pointer (mouse/touch/pen) is currently pressed, using
- * document-level capture listeners, and lets callers defer teardown work until
- * that press releases.
- *
- * This exists to avoid moving UI out from under an active pointer between
- * pointerdown and pointerup: collapsing a control on blur mid-press shifts the
- * button the user is aiming at and swallows the click (issue #901).
- */
+
 export function usePointerPress() {
     const pressActiveRef = useRef(false);
 
@@ -30,11 +22,7 @@ export function usePointerPress() {
         };
     }, []);
 
-    /**
-     * Runs `callback` after any in-flight pointer press releases. If no press is
-     * active (e.g. a keyboard-driven blur), runs it on the next tick, matching
-     * the immediate-defer behavior callers already relied on.
-     */
+
     const runAfterPointerRelease = useCallback((callback: () => void) => {
         if (typeof document === 'undefined' || !pressActiveRef.current) {
             window.setTimeout(callback, 0);
@@ -43,8 +31,8 @@ export function usePointerPress() {
         const handleRelease = () => {
             document.removeEventListener('pointerup', handleRelease, true);
             document.removeEventListener('pointercancel', handleRelease, true);
-            // Defer past the click the browser dispatches after pointerup so the
-            // click lands on the button at its un-moved position first.
+
+
             window.setTimeout(callback, 0);
         };
         document.addEventListener('pointerup', handleRelease, true);

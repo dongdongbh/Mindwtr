@@ -74,7 +74,7 @@ import { QuickAddSyntaxHint } from './ui/QuickAddSyntaxHint';
 import { QuickAddPreview } from './QuickAddPreview';
 import { FocusStarIcon } from './FocusStarIcon';
 
-// Relative to the managed data dir (portable-aware, #855).
+
 const QUICK_ADD_IMAGE_CAPTURE_DIR = 'quick-add-images';
 
 type PastedImageAttachment = {
@@ -133,11 +133,7 @@ async function readTextFile(file: File): Promise<string> {
     });
 }
 
-// Closed modal renders nothing (see the isOpen guard below); reading
-// getDerivedState() unconditionally forced the full derived-state rebuild
-// (12ms at 5k tasks) on every task write for this invisible overlay
-// (PERF-01). Only allContexts/allTags/focusedCount are used while closed is
-// skipped.
+
 const EMPTY_QUICK_ADD_DERIVED: Pick<DerivedState, 'allContexts' | 'allTags' | 'focusedCount'> = Object.freeze({
     allContexts: [],
     allTags: [],
@@ -187,7 +183,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const [recordingBusy, setRecordingBusy] = useState(false);
     const [recordingError, setRecordingError] = useState<string | null>(null);
     const [pastedImageAttachments, setPastedImageAttachments] = useState<PastedImageAttachment[]>([]);
-    // The web build can attach a pasted image only with plaintext self-hosted Cloud, so it checks when help opens (#1433).
+
     const [canPasteImages, setCanPasteImages] = useState(isTauriRuntime);
     const handleSyntaxHelpToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
         if (isTauriRuntime() || !event.currentTarget.open) return;
@@ -240,7 +236,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
     const defaultAreaId = defaultAreaMode === 'active'
         ? activeAreaId ?? ''
         : resolveDefaultNewTaskAreaId(settings, sortedAreas) ?? '';
-    // Read lazily on each open: the modal does not subscribe to tasks/people.
+
     const quickAddParseOptions = useMemo(
         () => buildQuickAddParseOptions(settings, isOpen ? useTaskStore.getState() : {}),
         [isOpen, retainedTasks, settings],
@@ -249,7 +245,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         () => parseQuickAdd(value, projects, new Date(), areas, quickAddParseOptions),
         [value, projects, areas, quickAddParseOptions],
     );
-    // Same parse object the submit path uses, shaped for display only.
+
     const previewEntries = useMemo(
         () => buildQuickAddPreviewEntries(parsedInput, { t, projects, areas, rawInput: value }),
         [areas, parsedInput, projects, t, value],
@@ -432,9 +428,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         setRecordingError(null);
     }, [forcedCaptureMode, isOpen, settings?.gtd?.defaultCaptureMethod]);
 
-    // Returns whether the spoken words actually reached the task. The caller
-    // deletes the recording only on a true, so a run that resolves without
-    // writing anything never throws the words away (#1245).
+
     const applySpeechResult = useCallback(async (taskId: string, result: SpeechToTextResult): Promise<boolean> => {
         const {
             tasks: currentTasks,
@@ -571,8 +565,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         });
     }, [cleanupPastedImageAttachments, createPastedImageAttachment, t]);
 
-    // WebKitGTK (Linux) delivers an empty DOM paste event for a clipboard image; anywhere
-    // the paste event already carried the image or any text, this never runs.
+
     const attachImagesFromAsyncClipboard = useCallback(async () => {
         if (isSandboxMode()) return;
         const session = activeSubmissionSessionRef.current;
@@ -645,8 +638,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         }
     }, [applyImportedText, reportTextFileImportError]);
 
-    // The desktop app picks the file through native-dialog, so the privacy
-    // lock knows the picker's focus loss is Mindwtr's own (#1472).
+
     const importTextFileNative = useCallback(async () => {
         if (isSandboxMode()) return;
         try {
@@ -680,9 +672,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         );
         const runStart = async () => {
             try {
-                // Voice capture is speech-to-text: if no model/key is configured, transcription
-                // can never run. Resolve it under the capture-session lease so a late result from
-                // a dismissed surface cannot toast or mutate the next one.
+
+
                 const { ready: speechConfigured } = await resolveSpeechCapture(settings.ai);
                 if (!isStartCurrent()) return;
                 if (!speechConfigured) {
@@ -803,8 +794,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             if (addTaskResult.success && addTaskResult.id) stoppedCaptureAdopted = true;
             if (!isSubmissionCurrent()) return;
             if (!addTaskResult.success) {
-                // Closing here would drop the recording with nothing said; keep
-                // the dialog so the capture can be retried.
+
+
                 showToast(tFallback(t, 'task.addFailed', 'Failed to add task'), 'error');
                 return;
             }
@@ -829,12 +820,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 });
             };
 
-            // The transcript was the only thing that would have carried the
-            // words, and it never arrived. Keep the recording and attach it
-            // instead of deleting it, or the note is lost for good (#1245).
+
             const keepCaptureAsAttachment = async () => {
                 if (saveAudioAttachments) return;
-                // Appended to the task as stored when the write is admitted, after any sync save ahead of it.
+
                 await updateTaskFromLatest(taskId, (existing) => (existing.attachments?.some((item) => item.id === audioAttachment.id)
                     ? null
                     : { attachments: [...(existing.attachments ?? []), audioAttachment] }));
@@ -872,9 +861,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                             discardCapture();
                             return;
                         }
-                        // It resolved, but nothing reached the task: an empty
-                        // transcript, a refused write, or a project that could
-                        // not be created. The recording is all that is left.
+
+
                         keepCaptureAfterFailure('Speech-to-text saved nothing to the task');
                     })
                     .catch((error) => keepCaptureAfterFailure('Speech-to-text failed', error));
@@ -957,8 +945,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 setProjectView({ selectedProjectId: props.projectId });
             }
             dispatchNavigateEvent(view);
-            // The editor may file the task elsewhere (a status, a project); follow it
-            // there instead of leaving the user on a list it just left (#1243).
+
+
             followCreatedTaskAfterEdit(taskId, view);
         });
     }, [setEditingTaskId, setHighlightTask, setProjectView]);
@@ -1057,11 +1045,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             let currentProjects = projects;
             let currentAreas = areas;
             if (standaloneWindow) {
-                // The standalone window re-parses against projects/areas fetched
-                // here, which can be fresher than the ones the preview strip
-                // rendered from — the preview may lag by whatever this fetch pulls
-                // in. Accepted: the submit deciding on fresher data is the right
-                // direction, and the window closes on save.
+
+
                 await refreshStandaloneData().catch((error) => reportError('Failed to refresh quick add data', error));
                 if (!submissionCoordinatorRef.current.isCurrent(session)) return;
                 const currentState = useTaskStore.getState();
@@ -1115,7 +1100,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                         return Object.keys(updates).length > 0 ? useTaskStore.getState().updateTask(taskId, updates) : { success: true, id: taskId };
                     },
                 });
-                // Peer-only additions stay outside the user's draft baseline on later retries too.
+
                 submittedBaseline = { ...priorAdmission.baseline, ...props, title: prepared.title };
                 admittedAttachments = [...preparedAttachments, ...removed];
                 result = { success: updated.success, createdTaskId: priorAdmission.id, props };
@@ -1144,8 +1129,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             if (latestValueRef.current !== savedInput || pastedImageAttachmentsRef.current.some((item) =>
                 !preparedAttachments.some((saved) => saved.id === item.attachment.id))) return;
             if (addAnother) {
-                // Shift+Enter batch capture: clear per-task state but keep the
-                // dialog (and the picked area) for the next entry.
+
+
                 setValue('');
                 setFocusNewTask(false);
                 setPastedImageError(null);
@@ -1156,10 +1141,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
             if (openAfterSave && result.createdTaskId && result.props && !standaloneWindow) {
                 openCreatedTaskForEditing(result.createdTaskId, result.props);
             } else if (initialProps?.projectId && result.createdTaskId) {
-                // Opened from a project/section preset (ProjectWorkspace's add button):
-                // flash + scroll the new row in the project view. Global captures with
-                // no project preset intentionally skip this so they never leave a
-                // stray highlight on an unrelated view (#916).
+
+
                 setHighlightTask(result.createdTaskId);
             }
         } catch (error) {
@@ -1206,10 +1189,7 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                 return;
             }
 
-            // One store write for the whole import, not one per line (#942): a
-            // per-line loop left a half-imported inbox behind whenever any line
-            // failed, and queued one full-data save snapshot per task. Mobile's
-            // bulk capture already prepares then batches the same way.
+
             const bulkFailed = (detail?: string) => {
                 const message = tFallback(t, 'quickAdd.bulkCreateError', 'Could not create all tasks.');
                 setBulkQuickAddError(detail ? `${message} (${detail})` : message);
@@ -1290,13 +1270,13 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
         <Dialog
             onClose={handleClose}
             labelledBy={titleId}
-            // Escape stays with the window keydown listener, which also has to
-            // close the standalone capture window (#869).
+
+
             closeOnEscape={false}
             placement="top"
             overlayClassName={cn(standaloneWindow ? 'bg-popover' : 'pt-[20vh]')}
-            // Uncapped on purpose: the title field's suggestion menus are
-            // absolutely positioned and have to escape the panel.
+
+
             panelClassName={cn(
                 'overflow-visible max-h-[none]',
                 standaloneWindow ? 'max-w-none rounded-none border-0 shadow-none' : 'max-w-lg',
@@ -1387,11 +1367,10 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                     "w-full rounded-lg border border-border bg-card py-3 pl-4 pr-12 shadow-sm transition-colors focus:border-transparent focus:ring-2 focus:ring-primary",
                                 )}
                             />
-                            {/* "Add to today's focus" star sits inside the field's right edge —
-                                the browser-bookmark idiom, so it reads as "star this capture".
-                                Label lives in the tooltip/aria-label; on = filled amber star,
-                                matching focused tasks in lists. Tapping past the focus cap
-                                explains the block via toast instead of a dead control. */}
+                            {
+
+
+                                                                                          }
                             <button
                                 type="button"
                                 onClick={() => {
@@ -1565,8 +1544,8 @@ export function QuickAddModal({ standaloneWindow = false }: QuickAddModalProps) 
                                 )}
                                 aria-label={audioButtonLabel}
                                 autoFocus
-                                // Keep focus while startup is busy so Enter can stop the recording.
-                                // onClick ignores activation until the operation finishes.
+
+
                                 aria-disabled={recordingBusy}
                             >
                                 {audioButtonLabel}

@@ -117,8 +117,8 @@ describe('Inbox Remove tag exact authority and durable replay', () => {
             const before = await raw(sqlite); const memory = useTaskStore.getState();
             const replacement = new NativeReceiptSqliteAdapter(sqlite.client(), { rejectConcurrentWrites: true });
             const committing = memory.commitPreparedInboxTasksRemoveTag(command.prepared, read.authority);
-            // The first await yields before any application; even another guarded
-            // adapter over this same SQLite connection is a different authority.
+
+
             setStorageAdapter(replacement);
             expect(useTaskStore.getState()).toBe(memory);
             expect(await committing).toMatchObject({ success: false, reason: 'conflict' });
@@ -245,11 +245,11 @@ describe('Inbox Remove tag exact authority and durable replay', () => {
             race.mutate = async () => { await other.client.run(query, [...args]); externalRaw = await raw(sqlite); }; race.ready = true;
             expect(await host(sqlite).commitPreparedInboxTasksRemoveTag(command)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
             const after = await raw(sqlite); expect(await receipts(sqlite)).toEqual([]);
-            expect(after).toEqual(externalRaw); // The external write survives; the rejected transaction changed no domain cell.
+            expect(after).toEqual(externalRaw);
             await sqlite.restart(undefined, { recoveryLoad: true });
             if (label === 'settings') {
                 value(await host(sqlite).commitPreparedInboxTasksRemoveTag(command)); const final = await raw(sqlite);
-                // The successful RN-equivalent write also retains this exact prepared token effect.
+
                 const expectedSettings = clone(after.settings);
                 expectedSettings.rows[0].data = JSON.stringify(retainTaxonomyEffects(JSON.parse(expectedSettings.rows[0].data),
                     command.prepared.effect.tasks, command.prepared.effect.projects));
@@ -527,7 +527,7 @@ describe('Inbox Remove tag layered source and raw publication guards', () => {
             const before = await raw(sqlite); const memory = useTaskStore.getState();
             command.prepared.effect.tasks[0].before.description = 'Forged raw before';
             command.prepared.effect.tasks[0].after.description = 'Must never publish';
-            // Isolate the lower store CAS from the separately-tested family self-validation/authority fences.
+
             referenceBatchModules.inboxRemoveTag = () => ({ validateEnvelope: () => true, authorityMatches: () => true });
             expect(await useTaskStore.getState().commitPreparedInboxTasksRemoveTag(command.prepared, authority)).toMatchObject({ success: false });
             expect(useTaskStore.getState()).toBe(memory); expect(authority.saveBoundary).toBeUndefined();

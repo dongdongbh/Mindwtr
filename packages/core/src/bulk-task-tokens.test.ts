@@ -47,8 +47,7 @@ describe('bulk-task-tokens', () => {
         ]);
     });
 
-    // A selected id the lookup cannot resolve must be skipped, never written
-    // back as `tags: [newToken]` — that would drop every other tag on it.
+
     it('skips selected ids the lookup does not know rather than replacing their tokens', () => {
         const tasksById = new Map<string, Task>([
             ['a', createTask('a', { tags: ['#urgent', '#ops'] })],

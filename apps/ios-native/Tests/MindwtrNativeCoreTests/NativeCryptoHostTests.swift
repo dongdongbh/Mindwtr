@@ -67,8 +67,8 @@ final class NativeCryptoHostTests: XCTestCase {
         value.configureCryptoJobs={state.capture($0)};value.cryptoBeforeOperation={state.record($0)}
         value.commandDiagnostic={if $0 == "cryptoDelivered"{state.receipt()}}
         let config=URLSessionConfiguration.ephemeral;config.protocolClasses=[CryptoHTTPFixtureProtocol.self];value.httpConfiguration=config
-        // Only the mixed-pump test asks for a synthetic secret read. These
-        // injected not-found statuses never call Security on any platform.
+
+
         value.secretService="mindwtr.native-keychain.fixture."+UUID().uuidString.lowercased()
         value.secretStatus={_,_ in errSecItemNotFound}
         return value
@@ -112,8 +112,7 @@ final class NativeCryptoHostTests: XCTestCase {
         XCTFail("Crypto slots did not drain");XCTAssertEqual(state.slots,0)
     }
 
-    // Synthetic remote generations isolate shared admission from HTTP and the
-    // production Unlock-only parser; all Argon2/AES work still uses native jobs.
+
     private let capacityHelpers = """
     if(typeof g.runEnableSyncEncryptionOverRemote!=='function'||typeof g.SyncEncryptionArtifactCapacityError!=='function'
       ||typeof g.encryptedSyncArtifactByteLength!=='function')throw new Error('Crypto fixture gate is unavailable');
@@ -327,10 +326,8 @@ final class NativeCryptoHostTests: XCTestCase {
 
 
     func testDirectNativeSealSliceOutputBodyCleanupPreservesBytesAndReleasesSlots() async throws {
-        // This direct owner regression does not start the giant Engine, so the
-        // cleanup path can run under ASan independently of CoreHost stack size.
-        // CryptoKit's observed ciphertext slice uses nonzero indices on Darwin;
-        // correctness must also hold if its storage representation later changes.
+
+
         let registry=NativeAttachmentLocalRequests(),jobs=NativeCryptoJobs(registry:registry);defer{jobs.shutdown()}
         let keyBytes=Data(count:32),nonceBytes=Data(count:12),aad=Data([9,0,8])
         let key=SymmetricKey(data:keyBytes),nonce=try AES.GCM.Nonce(data:nonceBytes)
@@ -338,7 +335,7 @@ final class NativeCryptoHostTests: XCTestCase {
             let plain=Data((0..<length).map{UInt8($0 % 251)})
             let box=try AES.GCM.seal(plain,using:key,nonce:nonce,authenticating:aad)
             var expected=box.ciphertext;expected.append(box.tag)
-            // Use Data's actual index range, never assume a zero-based slice.
+
             XCTAssertEqual(expected.endIndex-expected.startIndex,length+16)
             let request=try json(["op":"aesGcmSeal","key":keyBytes.base64EncodedString(),"nonce":nonceBytes.base64EncodedString(),
                                   "data":plain.base64EncodedString(),"aad":aad.base64EncodedString()])
@@ -469,8 +466,8 @@ final class NativeCryptoHostTests: XCTestCase {
         """,faults:faults)
         try await start(host);let request=Task{try await self.probe(host)}
         XCTAssertEqual(entered.wait(timeout:.now()+5),.success)
-        // counters.jobs includes pre-decode reservations. Unfinished counts only
-        // actual admitted jobs, proving the second submit finished admission.
+
+
         let admissionDeadline=Date().addingTimeInterval(5)
         while state.unfinished != 2 && Date() < admissionDeadline { try await Task.sleep(nanoseconds:1_000_000) }
         guard state.unfinished == 2 else {
@@ -547,9 +544,8 @@ final class NativeCryptoHostTests: XCTestCase {
         var result: [String: String] = [:]
         for row in names { let name = try XCTUnwrap(row["name"] as? String), quoted = name.replacingOccurrences(of: "\"", with: "\"\"")
             let columns = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("PRAGMA table_info(\"\(quoted)\")").utf8)) as? [[String: Any]])
-            // SQLiteBridge intentionally refuses BLOB JSON cells. Capture every
-            // table (including FTS shadow BLOBs), with type and exact byte hex
-            // for both text/BLOB; scalar quote preserves NULL/integer/real.
+
+
             let projection = try columns.enumerated().map { index, column -> String in
                 let columnName = try XCTUnwrap(column["name"] as? String).replacingOccurrences(of: "\"", with: "\"\"")
                 let cell = "\"\(columnName)\""

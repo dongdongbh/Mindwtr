@@ -50,7 +50,7 @@ function renderApp() {
     );
 }
 
-/** Visible task text: anything not inside an inert subtree. */
+
 const visibleTaskText = () => screen.queryAllByText('Call the bank about the mortgage')
     .filter((element) => !element.closest('[inert]'));
 
@@ -63,10 +63,10 @@ describe('AppLockGate', () => {
         expect(screen.getByTestId('app-lock-screen')).toBeTruthy();
         expect(visibleTaskText()).toHaveLength(0);
         expect(screen.getByTestId('app-root').closest('[aria-hidden="true"]')).not.toBeNull();
-        // The print rule hides everything but the lock screen while this is set.
+
         expect(document.documentElement.getAttribute('data-app-locked')).toBe('true');
 
-        // The startup prompt runs once by itself; cancelling keeps it locked.
+
         await waitFor(() => expect(authCalls).toBe(1));
         await screen.findByText('Mindwtr is still locked.');
         expect(useAppLockStore.getState().locked).toBe(true);
@@ -78,7 +78,7 @@ describe('AppLockGate', () => {
         expect(visibleTaskText()).toHaveLength(1);
         expect(screen.getByTestId('app-root').closest('[inert]')).toBeNull();
         expect(document.documentElement.hasAttribute('data-app-locked')).toBe(false);
-        // No way-out button was offered: the check was never unavailable.
+
         expect(screen.queryByRole('button', { name: 'Turn off app lock' })).toBeNull();
     });
 
@@ -94,7 +94,7 @@ describe('AppLockGate', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
         await screen.findByText('Windows Hello or Touch ID is not available on this device right now.');
 
-        // Rust re-checked and the check is available: stay locked, button gone.
+
         turnOffAnswer = 'failed';
         fireEvent.click(screen.getByRole('button', { name: 'Turn off app lock' }));
         await screen.findByText('Mindwtr is still locked.');
@@ -116,7 +116,7 @@ describe('AppLockGate', () => {
 
         act(() => lockApp('manual'));
         expect(screen.getByTestId('app-lock-screen')).toBeTruthy();
-        // A manual lock does not prompt straight away: the user meant to step away.
+
         expect(authCalls).toBe(0);
 
         answers = ['success'];

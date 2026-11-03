@@ -12,7 +12,7 @@ import {
     type AreaVisibilityContext,
 } from './area-filter';
 import { isTaskInActiveProject } from './project-utils';
-import { getSequentialFirstTaskIds, getTaskSequencing, isSequentialChainStatus, isTaskSequenceBlocked, shouldShowTaskForStart, sortTasksBy } from './task-utils';
+import { compareTasksByProjectOrder, getSequentialFirstTaskIds, getTaskSequencing, isSequentialChainStatus, isTaskSequenceBlocked, shouldShowTaskForStart, sortTasksBy } from './task-utils';
 import { isTaskActionable, isTaskCompleted } from './task-status';
 import { normalizeTimeSpentMinutes } from './time-spent';
 
@@ -22,7 +22,7 @@ export const DEFAULT_REVIEW_ADVANCE_DAYS = 7;
 
 export type ReviewOverviewScope = 'due' | 'all';
 
-/** Only an explicit, reached review date creates an outstanding reminder. */
+
 export function isTaskDueForReview(task: Pick<Task, 'status' | 'reviewAt' | 'deletedAt' | 'purgedAt'>, now: Date = new Date()): boolean {
     return !task.deletedAt && !task.purgedAt && isTaskActionable(task) && isDueForReview(task.reviewAt, now);
 }
@@ -31,10 +31,7 @@ export function getReviewOverviewTasks(tasks: readonly Task[], scope: ReviewOver
     return tasks.filter((task) => scope === 'due' ? isTaskDueForReview(task, now) : !task.deletedAt && !task.purgedAt && isTaskActionable(task));
 }
 
-/**
- * Next review date after marking an item reviewed: `days` from now, preserving
- * the original value's date-only vs datetime shape (time-of-day carries over).
- */
+
 export function getAdvancedReviewDate(
     reviewAt: string | undefined | null,
     now: Date = new Date(),
@@ -64,11 +61,7 @@ export type ReviewSchedulePartition<T> = {
     unscheduled: T[];
 };
 
-/**
- * Splits reviewable items by review date: `due` (review date reached),
- * `scheduled` (explicitly deferred to a future review date), `unscheduled`
- * (no review date set).
- */
+
 export function partitionByReviewDate<T extends { reviewAt?: string | null }>(
     items: T[],
     now: Date = new Date(),
@@ -95,25 +88,61 @@ export type WeeklyReviewSummary = {
     staleWaitingCount: number;
 };
 
-/** The review badge's answer to "can this project move?": a live `next` task
- * means yes; otherwise a live `waiting` task means it is delegated — blocked on
- * someone, not stuck (#1086, mirroring the sequential-chain rule where waiting
- * holds a slot); only a project with neither truly needs a next action. */
-export type ProjectNextActionState = 'next' | 'waiting' | 'none';
+
+export type ProjectNextActionState = 'next' | 'waiting' | 'deferred' | 'none';
 
 export function getProjectNextActionState(
-    tasks: ReadonlyArray<Pick<Task, 'status'>>,
+    tasks: ReadonlyArray<Pick<Task, 'status' | 'startTime'>>,
+    now: Date = new Date(),
 ): ProjectNextActionState {
-    if (tasks.some((task) => task.status === 'next')) return 'next';
+    if (tasks.some((task) => task.status === 'next' && !isFutureDate(task.startTime, now))) return 'next';
     if (tasks.some((task) => task.status === 'waiting')) return 'waiting';
+    if (tasks.some((task) => task.status === 'next')) return 'deferred';
     return 'none';
 }
 
 export type WeeklyReviewProjectEntry = {
     project: Project;
     tasks: Task[];
+    currentTasks: Task[];
+    laterTasks: Task[];
     nextActionState: ProjectNextActionState;
 };
+
+
+function reviewSequence(tasks: readonly Task[], projects: readonly Project[], sections: readonly Section[]) {
+    const sequencing = getTaskSequencing(projects, sections);
+    const firstTaskIds = getSequentialFirstTaskIds(
+        tasks.filter((task) => !task.deletedAt && !task.purgedAt && isSequentialChainStatus(task.status)),
+        sequencing.sequentialProjectIds,
+        { ...sequencing, sections },
+    );
+    const blocked = (task: Task) => isTaskSequenceBlocked(task, sequencing, firstTaskIds);
+    const sectionById = new Map(sections.filter((section) => !section.deletedAt).map((section) => [section.id, section]));
+    const sectionRank = new Map([...sectionById.values()]
+        .sort((a, b) => (a.order - b.order) || a.title.localeCompare(b.title) || a.id.localeCompare(b.id))
+        .map((section, index) => [section.id, index]));
+    const rank = (task: Task) => task.sectionId && sectionById.get(task.sectionId)?.projectId === task.projectId
+        ? sectionRank.get(task.sectionId) ?? Infinity : Infinity;
+    const partition = (items: Task[], keepDueCurrent: boolean, now: Date) => {
+        const currentTasks: Task[] = [];
+        const laterTasks: Task[] = [];
+        items.forEach((task) => {
+            (task.status === 'next' && blocked(task) && !(keepDueCurrent && isTaskDueForReview(task, now))
+                ? laterTasks : currentTasks).push(task);
+        });
+        laterTasks.sort((a, b) => rank(a) !== rank(b) ? rank(a) - rank(b) : compareTasksByProjectOrder(a, b));
+        return { currentTasks, laterTasks };
+    };
+    const headsByProject = new Map<string, Task[]>();
+    tasks.forEach((task) => {
+        if (!task.projectId || task.deletedAt || task.purgedAt || !isSequentialChainStatus(task.status) || blocked(task)) return;
+        const heads = headsByProject.get(task.projectId) ?? [];
+        heads.push(task);
+        headsByProject.set(task.projectId, heads);
+    });
+    return { blocked, partition, headsByProject };
+}
 
 export type WeeklyReviewLookBack = {
     completedCount: number;
@@ -137,7 +166,9 @@ function deriveWeeklyReview(
     staleThresholdDays: number,
     now: Date,
     weekStart?: AppSettings['weekStart'],
+    sections: readonly Section[] = [],
 ): WeeklyReviewDerivation {
+    const sequence = reviewSequence(tasks, projects, sections);
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     const activeProjects = projects.filter((project) => project.status === 'active' && !project.deletedAt);
     const projectTasksById = new Map(activeProjects.map((project) => [project.id, [] as Task[]]));
@@ -191,7 +222,8 @@ function deriveWeeklyReview(
             || !belongsToActiveProject
             || (task.status !== 'next' && task.status !== 'waiting')
             || isFutureDate(task.reviewAt, now)
-            || isFutureDate(task.startTime, now)
+            || (!isTaskDueForReview(task, now) && (isFutureDate(task.startTime, now)
+                || (task.status === 'next' && sequence.blocked(task))))
         ) return;
         const updated = new Date(task.updatedAt || task.createdAt);
         if (Number.isNaN(updated.getTime())) return;
@@ -232,14 +264,15 @@ function deriveWeeklyReview(
         return {
             project,
             tasks: projectTasks,
-            nextActionState: getProjectNextActionState(projectTasks),
+            ...sequence.partition(projectTasks, false, now),
+            nextActionState: getProjectNextActionState(projectTasks.filter((task) => !sequence.blocked(task)), now),
         };
     });
     const summary: WeeklyReviewSummary = {
         inboxCount: inbox.length,
         activeProjectCount: projectEntries.length,
-        // A waiting-only project is delegated, not stuck — it does not count as
-        // "without next action" (#1086).
+
+
         projectsWithoutNextAction: projectEntries.filter((entry) => entry.nextActionState === 'none').length,
         staleWaitingCount: staleItems.filter((item) => item.status === 'waiting').length,
     };
@@ -248,21 +281,14 @@ function deriveWeeklyReview(
     return { inbox, projectEntries, staleItems, summary, lookBack };
 }
 
-/**
- * Factual snapshot for the weekly review's completed step. Every count mirrors
- * the filter a review step itself uses, so the summary can never disagree with
- * what the user just saw:
- * - `inboxCount` matches the inbox step's `inboxTasks` filter.
- * - `projectsWithoutNextAction` matches the projects step's next-action predicate.
- * - `staleWaitingCount` shares the stale-items derivation, including its
- *   future-reviewAt/startTime exemption.
- */
+
 export function getWeeklyReviewSummary(
     tasks: Task[],
     projects: Project[],
     now: Date = new Date(),
+    sections: readonly Section[] = [],
 ): WeeklyReviewSummary {
-    return deriveWeeklyReview(tasks, projects, 14, now).summary;
+    return deriveWeeklyReview(tasks, projects, 14, now, undefined, sections).summary;
 }
 
 export function getStaleItems(
@@ -270,20 +296,11 @@ export function getStaleItems(
     projects: Project[],
     staleThresholdDays = 14,
     now: Date = new Date(),
+    sections: readonly Section[] = [],
 ): ReviewSnapshotItem[] {
-    return deriveWeeklyReview(tasks, projects, staleThresholdDays, now).staleItems;
+    return deriveWeeklyReview(tasks, projects, staleThresholdDays, now, undefined, sections).staleItems;
 }
 
-// ---------------------------------------------------------------------------
-// Daily Review / Weekly Review candidate + step derivation.
-//
-// Both platforms independently filtered the same task/project lists for the
-// same review steps. Desktop's Daily Review additionally kept a pre-#867 raw
-// `startTime > now` check instead of `shouldShowTaskForStart`, hiding a task
-// starting later today all morning and ignoring recurrence deferral (#843).
-// This is the single home for both rules (ADR 0021: "candidate logic stays a
-// core predicate... no per-platform copies").
-// ---------------------------------------------------------------------------
 
 export type ReviewBucketOptions = {
     now?: Date;
@@ -291,13 +308,8 @@ export type ReviewBucketOptions = {
     showFutureStarts?: boolean;
     sortBy?: TaskSortBy;
     sections?: readonly Section[];
-    /**
-     * Opt-in area narrowing, read by `getDailyReviewBuckets` only —
-     * `getWeeklyReviewBuckets` ignores it. Currently unused: no caller passes
-     * it, so every review spans every area; see `getDailyReviewBuckets` for
-     * why. Kept as the seam so scoping a review is a one-argument change at the
-     * call site rather than a rewrite of the predicate.
-     */
+
+
     areaVisibility?: Pick<AreaVisibilityContext, 'areaById' | 'resolvedAreaFilter'>;
 };
 
@@ -314,20 +326,7 @@ export type DailyReviewBuckets = {
     focusCandidates: Task[];
 };
 
-/**
- * Daily Review's per-step task lists. Finished and reference tasks are excluded
- * once, at the base —
- * every bucket below is a further filter of that same active set.
- *
- * A review deliberately ignores the app-wide area filter and sweeps the whole
- * system. The point of the review is to find what you have not looked at, and
- * an area filter is a browsing device — a way to narrow what you are reading
- * right now — not a statement about which commitments still count. Honouring it
- * here would let an inbox item quietly sit unreviewed for as long as its area
- * stayed filtered out, which is the exact failure the review exists to prevent.
- * `opts.areaVisibility` is the seam if this is ever revisited; nothing passes it
- * today.
- */
+
 export function getDailyReviewBuckets(
     tasks: Task[],
     projects: Project[],
@@ -339,7 +338,7 @@ export function getDailyReviewBuckets(
     const visibility: AreaVisibilityContext = {
         areaById: opts.areaVisibility?.areaById,
         projectById: projectMap,
-        // No selection means no area filtering — see `areaVisibility` above.
+
         resolvedAreaFilter: opts.areaVisibility?.resolvedAreaFilter ?? { included: [], excluded: [] },
     };
 
@@ -351,9 +350,8 @@ export function getDailyReviewBuckets(
     ));
 
     const sequencing = getTaskSequencing(projects, opts.sections);
-    // Waiting tasks hold their chain slot: a waiting first step keeps a
-    // sequential project's later next tasks out of the review candidates too
-    // ("later steps aren't actionable yet" applies while waiting on someone).
+
+
     const sequentialFirstTaskIds = getSequentialFirstTaskIds(
         activeTasks.filter((task) => isSequentialChainStatus(task.status)),
         sequencing.sequentialProjectIds,
@@ -388,11 +386,11 @@ export function getDailyReviewBuckets(
             return;
         }
         if (task.status === 'next') {
-            // Same deferral rule as Focus: a recurring chore carrying only a
-            // due date is not reviewable until it starts (#843, #867).
+
+
             if (!shouldShowTaskForStart(task, opts)) return;
-            // Sequential projects surface only their first remaining task;
-            // later steps aren't actionable yet.
+
+
             if (isTaskSequenceBlocked(task, sequencing, sequentialFirstTaskIds)) return;
             addCandidate(task);
             return;
@@ -435,25 +433,20 @@ export type WeeklyReviewBuckets = {
     calendarItems: CalendarReviewEntry[];
 };
 
-/**
- * Weekly Review's complete per-step task/project model (ADR 0021's stale-item
- * and candidate surfaces), including the completion summary. Standalone stale
- * and summary helpers delegate to the same derivation for compatibility.
- */
+
 export function getWeeklyReviewBuckets(
     tasks: Task[],
     projects: Project[],
     opts: ReviewBucketOptions = {},
 ): WeeklyReviewBuckets {
     const now = opts.now ?? new Date();
-    const weekly = deriveWeeklyReview(tasks, projects, 14, now, opts.weekStart);
+    const weekly = deriveWeeklyReview(tasks, projects, 14, now, opts.weekStart, opts.sections);
     const projectMap = new Map(projects.map((project) => [project.id, project]));
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const upcomingEnd = new Date(startOfToday);
     upcomingEnd.setDate(upcomingEnd.getDate() + 7);
 
-    // Contexts and the upcoming-calendar list both want "still live, not yet
-    // resolved" tasks: not deleted/done/archived/reference, in an active project.
+
     const isReviewable = (task: Task) => (
         !task.deletedAt
         && isTaskActionable(task)
@@ -512,6 +505,8 @@ export function getWeeklyReviewBuckets(
 export type ReviewOverviewProjectGroup = {
     project?: Project;
     tasks: Task[];
+    currentTasks: Task[];
+    laterTasks: Task[];
     nextActionState: ProjectNextActionState;
 };
 
@@ -525,6 +520,7 @@ export type ReviewOverviewAreaGroup = {
 
 export type GetReviewOverviewGroupsParams = {
     tasks: Task[];
+    sections?: readonly Section[];
     projects: Project[];
     orderedAreas: Area[];
     areaFilter: AreaFilterSelection;
@@ -533,11 +529,7 @@ export type GetReviewOverviewGroupsParams = {
     now?: Date;
 };
 
-/**
- * The Review overview's complete task hierarchy. Core owns visibility,
- * sorting, container resolution, ordering, and health counts; callers add
- * platform labels, colors, and rendering ids only.
- */
+
 export function getReviewOverviewGroups({
     tasks,
     projects,
@@ -546,7 +538,9 @@ export function getReviewOverviewGroups({
     sortBy,
     scope = 'all',
     now = new Date(),
+    sections = [],
 }: GetReviewOverviewGroupsParams): ReviewOverviewAreaGroup[] {
+    const sequence = reviewSequence(tasks, projects, sections);
     const projectById = new Map(projects.map((project) => [project.id, project]));
     const areaById = new Map(orderedAreas.map((area) => [area.id, area]));
     const areaOrderById = new Map(orderedAreas.map((area, index) => [area.id, index]));
@@ -584,10 +578,11 @@ export function getReviewOverviewGroups({
         const projectGroup = areaGroup.projectGroups.get(projectKey) ?? {
             project,
             tasks: [],
+            currentTasks: [],
+            laterTasks: [],
             nextActionState: 'none' as ProjectNextActionState,
         };
         projectGroup.tasks.push(task);
-        projectGroup.nextActionState = getProjectNextActionState(projectGroup.tasks);
         areaGroup.projectGroups.set(projectKey, projectGroup);
         areaGroup.taskCount += 1;
         areaGroups.set(areaKey, areaGroup);
@@ -609,6 +604,10 @@ export function getReviewOverviewGroups({
                     return (left.project.order - right.project.order)
                         || left.project.title.localeCompare(right.project.title);
                 });
+            projectGroups.forEach((group) => {
+                Object.assign(group, sequence.partition(group.tasks, scope === 'due', now));
+                group.nextActionState = getProjectNextActionState(group.project ? sequence.headsByProject.get(group.project.id) ?? [] : group.currentTasks, now);
+            });
             const projectCount = projectGroups.filter((group) => Boolean(group.project)).length;
             const needsActionCount = projectGroups.filter(
                 (group) => Boolean(group.project) && group.nextActionState === 'none',
@@ -623,11 +622,7 @@ export function getReviewOverviewGroups({
         });
 }
 
-/**
- * The Weekly Review calendar step's external-calendar day summaries: a
- * 7-day window over the already-fetched events, non-empty days only.
- * Fetching stays a platform concern; this grouping does not.
- */
+
 export function getExternalCalendarDaySummaries(
     events: ExternalCalendarEvent[],
     days: number = 7,
@@ -646,7 +641,7 @@ export function getExternalCalendarDaySummaries(
     return summaries;
 }
 
-/** The events that overlap `date`'s local day, earliest start first. */
+
 export function getExternalCalendarEventsForDay(
     events: readonly ExternalCalendarEvent[],
     date: Date,
@@ -707,11 +702,7 @@ function getLocalReviewWindowStart(
     return start.getTime();
 }
 
-/**
- * Parses a device-local Review checkpoint and rejects malformed, future, or
- * expired values. Daily checkpoints share a local date; weekly checkpoints
- * share the local calendar week selected by the user's week-start setting.
- */
+
 export function parseStoredReviewStepSession<Step extends ReviewStepId>(
     serialized: string | null | undefined,
     validSteps: ReadonlySet<Step>,
@@ -743,7 +734,7 @@ export function parseStoredReviewStepSession<Step extends ReviewStepId>(
     return { step: candidate.step as Step, startedAt: candidate.startedAt };
 }
 
-/** Resolves skipped steps, progress, and navigation for either review flow. */
+
 export function resolveReviewStepSession<Step extends ReviewStepFlags>(
     steps: readonly Step[],
     requestedStep: Step['id'],
@@ -785,11 +776,7 @@ export type WeeklyReviewStepsOptions = {
     externalCalendarLoading?: boolean;
 };
 
-/**
- * Canonical step order + "does this step have anything to show" for Daily or
- * Weekly Review. Titles, descriptions, icons and `t()` stay in the modals —
- * those are platform/i18n concerns, not part of the review rule.
- */
+
 export function buildReviewSteps(
     buckets: DailyReviewBuckets,
     opts: DailyReviewStepsOptions,
@@ -813,8 +800,8 @@ export function buildReviewSteps(
         const steps: ReviewStepFlags[] = [
             { id: 'today', hasWork: todayHasWork },
             { id: 'inbox', hasWork: b.inbox.length > 0 },
-            // Waiting For comes before focus selection: items unblocked today
-            // can be switched to Next here and picked up in the focus step.
+
+
             { id: 'waiting', hasWork: b.waiting.length > 0 },
         ];
         if (opts.includeFocusStep !== false) {
@@ -829,7 +816,7 @@ export function buildReviewSteps(
         || (opts.externalCalendarDayCount ?? 0) > 0
         || Boolean(opts.externalCalendarHasError)
         || Boolean(opts.externalCalendarLoading);
-    // "Not due yet" (scheduled) items don't count as work: nothing to act on today.
+
     const waitingHasWork = b.waitingGroups.due.length + b.waitingGroups.unscheduled.length > 0;
     const somedayHasWork = b.somedayGroups.due.length + b.somedayGroups.unscheduled.length > 0;
     const steps: ReviewStepFlags[] = [

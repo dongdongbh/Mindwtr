@@ -7,7 +7,7 @@ import { markArchiveRetentionSyncCompleted } from './store-archive-retention';
 import type { AppSettings, Task } from './types';
 import { generateUUID } from './uuid';
 
-/** Native Android's Archive retention (#1320): RN's Data card and its root-layout runner through the native host contract. */
+
 const value = <T,>(result: NativeHostResult<T>): T => {
     if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
     return result.value;
@@ -148,8 +148,7 @@ describe('native host contract: Settings › Data Archive retention card', () =>
     });
 });
 
-// iOS reads getDataSettings by named fields only (apps/ios-native/App/CoreModel.swift readDataSettings, no key-count check), so the
-// archiveRetention key is safe there (review BLOCK 2, waived). These are the fields its guard requires: a rename fails here first.
+
 describe('native host contract: the getDataSettings fields iOS reads', () => {
     it('keeps the version, revision, title, every backup label and the diagnostics card iOS checks', async () => {
         const view = value((await openHost({})).getDataSettings()) as unknown as Record<string, any>;

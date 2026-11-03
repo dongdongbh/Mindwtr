@@ -233,7 +233,7 @@ export function createProjectDeleteMethods(deps: {
             return envelope ? { ok: true, value: envelope.prepared.result }
                 : fail('INVALID_INPUT', 'Prepared Project Delete is malformed');
         },
-        /** Exact durable UUID/effect receipt only; an equal target row is not proof. */
+
         projectDeleteOutcome(input: NativeProjectDeleteEnvelope): NativeHostResult<NativeProjectDeleteResult | null> {
             const envelope = readDelete(input);
             if (!envelope) return fail('INVALID_INPUT', 'Prepared Project Delete is malformed');
@@ -258,12 +258,12 @@ export function createProjectDeleteMethods(deps: {
             if (confirmed.ok && !alreadySaved?.ok) {
                 try { logInfo('Native Project delete taxonomy retained', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.7/native-project-delete-taxonomy', operation: 'delete', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             if (confirmed.ok && envelope.request.source === 'archive' && !alreadySaved?.ok) {
                 try { logInfo('Native archived Project delete confirmed', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.4/ios-archive-project-trash', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },
@@ -291,8 +291,8 @@ export function createProjectDeleteMethods(deps: {
                     || row.sectionId !== undefined && sectionIds.has(row.sectionId)),
                 sections,
                 area: state._allAreas.find((row) => row.id === target.areaId) ?? null,
-                // RN batchUpdateTasks reserves Project order in current Task-array
-                // order, even when the original Delete link list had another order.
+
+
                 linkedTasks: [...currentLinks.map((row) => ({ id: row.id, row })),
                     ...links.filter(({ id }) => !presentLinkIds.has(id)).map(({ id }) => ({ id, row: null }))] };
             const device = ensureDeviceId(state.settings);
@@ -326,7 +326,7 @@ export function createProjectDeleteMethods(deps: {
             if (confirmed.ok && !alreadySaved?.ok) {
                 try { logInfo('Native Project delete taxonomy retained', { scope: 'native-host', category: 'storage',
                     context: { releaseCheck: 'v1.3.7/native-project-delete-taxonomy', operation: 'undo', outcome: 'confirmed' } }); }
-                catch { /* Diagnostics cannot invalidate a durable acknowledgment. */ }
+                catch {                                                               }
             }
             return confirmed;
         },

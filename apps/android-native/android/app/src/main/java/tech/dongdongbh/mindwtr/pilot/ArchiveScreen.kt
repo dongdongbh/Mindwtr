@@ -65,13 +65,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
-/**
- * RN's Archived (app/(drawer)/archived.tsx), History's second tab, on core's getArchiveView and runArchiveAction: the
- * Tasks and Projects chips, the search box (core's setSearch) with core's "Filters · N" and RN's list menu (Filters, then Sort
- * and Group, kept on the device under RN's key), core's count with Select, the bulk bar (core's stateless Select all, Restore
- * to Inbox, Delete), core's headings and rows, and core's empty state. A row swipes right to Restore and left to Delete (which
- * asks core's question first); TalkBack has both as actions. A completed row's date opens RN's completion time picker.
- */
+
 @Composable
 fun ArchiveList(model: InboxViewModel) = with(model.menu) {
     val shown = page ?: return
@@ -80,7 +74,7 @@ fun ArchiveList(model: InboxViewModel) = with(model.menu) {
     val own = own("archive")
     val tasks = view.getString("segment") == "tasks"
     val selecting = tasks && own.optBoolean("selecting")
-    // Back leaves selection mode before the screen (RN's archived.tsx on useTaskListSelection); an open dialog takes Back first.
+
     BackHandler(enabled = selecting && dialog == null && model.failedAction == null) { selecting(false) }
     val labels = view.getJSONObject("labels")
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
@@ -137,7 +131,7 @@ fun ArchiveList(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's archived task row: the struck title (a cancelled one is not struck), core's note preview, core's date line, and the gray bar. */
+
 @Composable
 private fun ArchivedTask(model: InboxViewModel, item: MenuItem, labels: JSONObject, selecting: Boolean, isSelected: Boolean) = with(model.menu) {
     val theme = LocalTheme.current
@@ -155,7 +149,7 @@ private fun ArchivedTask(model: InboxViewModel, item: MenuItem, labels: JSONObje
             .clickable(enabled = model.writable && !model.busy && model.failedAction == null) {
                 if (selecting) toggleSelected(row.id) else model.openEditor(row.id)
             }
-            // The tag sits in the row's own semantics: a separate testTag node carried no label on the phone (run 27).
+
             .semantics {
                 contentDescription = if (selecting) "${labels.getString("select")} ${row.title}" else row.title
                 testTag = "task-row"
@@ -171,7 +165,7 @@ private fun ArchivedTask(model: InboxViewModel, item: MenuItem, labels: JSONObje
                 json.menuText("descriptionMarkdown")?.let {
                     Text(it, style = rnText(14, 400), color = c.secondaryText, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(bottom = 4.dp))
                 }
-                // A completed row's date opens RN's completion time picker (core's start); a cancelled one's is plain text.
+
                 val picker = json.optJSONObject("completedAtPicker")?.takeIf { !selecting }
                 val edit = labels.getString("editCompletedAt")
                 val on = picker != null && model.writable && !model.busy && model.failedAction == null
@@ -186,7 +180,7 @@ private fun ArchivedTask(model: InboxViewModel, item: MenuItem, labels: JSONObje
     }
 }
 
-/** RN's archived project row: the struck title, core's date line and area, and the project's accent bar; a tap opens it. */
+
 @Composable
 private fun ArchivedProject(model: InboxViewModel, json: JSONObject) = with(model.menu) {
     val c = LocalTheme.current.colors
@@ -215,17 +209,13 @@ private fun ArchivedProject(model: InboxViewModel, json: JSONObject) = with(mode
     }
 }
 
-/**
- * RN's Swipeable on Archive rows: a drag right reveals Restore (blue, 100 wide), a drag left Delete (red, with Trash2);
- * a tap on the revealed button runs it and closes the row. [content] gets both as TalkBack actions. Trash's rows draw
- * RN's 120-wide buttons, Restore in green ([width], [restoreColor]).
- */
+
 @Composable
 fun ArchiveSwipe(model: InboxViewModel, enabled: Boolean, restore: String, delete: String, onRestore: () -> Unit, onDelete: () -> Unit,
                  width: Dp = 100.dp, restoreColor: Color = LocalTheme.current.restoreAction, content: @Composable (List<CustomAccessibilityAction>) -> Unit) {
     val theme = LocalTheme.current
     val density = LocalDensity.current
-    val open = with(density) { (width + 8.dp).toPx() } // the button and RN's 8 gap
+    val open = with(density) { (width + 8.dp).toPx() }
     val offset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val settle = { to: Float -> scope.launch { offset.animateTo(to) }; Unit }
@@ -252,10 +242,7 @@ fun ArchiveSwipe(model: InboxViewModel, enabled: Boolean, restore: String, delet
     }
 }
 
-/**
- * RN's bulk bar: core's count, then core's Select all (stateless: core resolves it again for the action and refuses it once the
- * rows changed), Restore to Inbox, and Delete (which asks core's question first).
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun BulkBar(model: InboxViewModel, view: JSONObject) = with(model.menu) {
@@ -277,10 +264,7 @@ private fun BulkBar(model: InboxViewModel, view: JSONObject) = with(model.menu) 
     }
 }
 
-/**
- * RN's CompletedAtPicker on Android: the system date dialog, then the time dialog, each starting where core says (the row's
- * completedAtPicker day and time); dismissing either ends it. The picked day and time go to core's setCompletedAt.
- */
+
 @Composable
 fun CompletedAtPicker(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     if (open.optString("step") != "time") {
@@ -298,7 +282,7 @@ fun BulkButton(label: String, color: Color, enabled: Boolean, onClick: () -> Uni
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 10.dp, vertical = 7.dp))
 }
 
-/** RN's small bordered button (Select, Done, Clear Trash). */
+
 @Composable
 fun SmallButton(label: String, color: Color, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -307,7 +291,7 @@ fun SmallButton(label: String, color: Color, enabled: Boolean, onClick: () -> Un
         .clickable(enabled = enabled, role = Role.Button, onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
-/** RN's Archive search box: bordered, the input background, core's placeholder; the text is kept as typed. */
+
 @Composable
 private fun SearchBox(value: String, placeholder: String, modifier: Modifier, onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors

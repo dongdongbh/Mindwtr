@@ -88,8 +88,7 @@ describe('File Sync attachment failure diagnostics', () => {
         expect(logSyncWarning).not.toHaveBeenCalled();
     });
 
-    // A tester's log said `generation-reserve`, no OS code, and nothing more. The reserve step
-    // refuses for reasons of its own; naming the rule is what the next log has to do.
+
     it('names the native refusal only when it is one of our own fixed sentences', () => {
         expect(buildFileSyncAttachmentFailureExtra('generation-reserve', 'Attachment publication journal is full'))
             .toMatchObject({ errorType: 'string', nativeCode: 'unknown', reason: 'Attachment publication journal is full' });
@@ -100,12 +99,12 @@ describe('File Sync attachment failure diagnostics', () => {
             'File Sync private publication path must be a real directory, not a link or reparse point',
         )).toMatchObject({ reason: 'File Sync private publication path must be a real directory, not a link or reparse point' });
 
-        // Built with format!, so it can carry a path: never logged, not even partly.
+
         const leaky = 'Failed to inspect attachment publication namespace C:\\Users\\roman\\Sync\\attachments: denied';
         const extra = buildFileSyncAttachmentFailureExtra('generation-reserve', leaky);
         expect(extra.reason).toBe('unlisted');
         expect(JSON.stringify(extra)).not.toContain('roman');
-        // A path dressed up as a label does not get through the templated patterns either.
+
         expect(buildFileSyncAttachmentFailureExtra('generation-reserve', 'File Sync C:/Users/roman path must be a directory').reason)
             .toBe('unlisted');
     });

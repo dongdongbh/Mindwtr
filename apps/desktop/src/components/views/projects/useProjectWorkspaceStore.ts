@@ -3,9 +3,7 @@ import { AREA_FILTER_NONE, shallow, useTaskStore, type Area, type Task } from '@
 
 const EMPTY_PROJECT_TASKS: readonly Task[] = [];
 
-// Narrow store reads for the project workspace. Mirrors useProjectsViewStore:
-// the workspace subscribes per-slice/per-action (shallow) instead of receiving
-// ~30 store values re-threaded through ProjectsView (arch review 2026-07-20 #8).
+
 export const useProjectWorkspaceStore = (selectedProjectId: string | null) => {
     const store = useTaskStore(
         (state) => ({
@@ -42,7 +40,7 @@ export const useProjectWorkspaceStore = (selectedProjectId: string | null) => {
         [allContexts, allTags],
     );
     const selectedProjectTasks = useMemo<readonly Task[]>(
-        // The derived map uses the visible projection, which drops archived tasks.
+
         () => (selectedProjectId
             ? store.allTasks.filter((task) => task.projectId === selectedProjectId && !task.deletedAt)
             : EMPTY_PROJECT_TASKS),

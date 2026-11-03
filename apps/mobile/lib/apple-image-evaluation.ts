@@ -95,7 +95,7 @@ export type AppleImageSaveDependencies = {
     options: { captureId: string },
   ) => Promise<{ success: boolean; id?: string; error?: string }>;
   flushPendingSave: () => Promise<void>;
-  /** Core retryPersistence action: re-enqueues a full snapshot before flushing. */
+
   retryPendingPersistence: () => Promise<void>;
 };
 
@@ -115,10 +115,7 @@ function trimToLimit(value: string, limit: number): string {
   return value.replace(/\r\n/g, '\n').trim().slice(0, limit).trim();
 }
 
-/**
- * Parses only the two fields this evaluation may save. Any model-suggested
- * dates, reminders, completion state, tags, projects, or commands are ignored.
- */
+
 export function parseAppleImageModelProposal(raw: string): AppleImageProposal | null {
   let candidate = raw.trim();
   const fenced = candidate.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -373,9 +370,8 @@ export class AppleImageEvaluationController {
         }
 
         if (this.state.saveNeedsFlush) {
-          // A terminal flush failure exhausts and removes its queue entry. Core's
-          // recovery action persists a fresh full snapshot before flushing; a
-          // second bare flush could see an empty queue and falsely report success.
+
+
           await deps.retryPendingPersistence();
         } else {
           await deps.flushPendingSave();

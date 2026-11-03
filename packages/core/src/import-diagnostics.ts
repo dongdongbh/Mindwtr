@@ -35,7 +35,7 @@ const countFromMessage = (message: string): number => {
     return match ? Number(match[1]) : 1;
 };
 
-// Bounded numeric CSV entry/record/column positions, with no source text accepted.
+
 export const importDiagnosticLocationParams = (message: string): Record<string, number | string> => {
     const match = / \[csv-locations=((?:\d{1,9}:\d{1,9}:\d{1,9})(?:,\d{1,9}:\d{1,9}:\d{1,9}){0,4}); omitted=(\d{1,9})\]$/u.exec(message);
     if (!match || match[1].split(',').some((location) => {

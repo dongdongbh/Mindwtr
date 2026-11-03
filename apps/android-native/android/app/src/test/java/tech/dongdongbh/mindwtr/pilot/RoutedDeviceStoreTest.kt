@@ -8,10 +8,7 @@ import org.junit.Test
 import tech.dongdongbh.mindwtr.pilot.core.RkStore
 import tech.dongdongbh.mindwtr.pilot.core.routedDeviceStore
 
-/**
- * System search's two keys live in RN's RKStorage, every other device key in the preferences (pass O2d), and both keep
- * DeviceWrites' journal order: a replayed older General edit never overwrites the newer switch (review O2d P2-3).
- */
+
 class RoutedDeviceStoreTest {
     private val prefs = linkedMapOf<String, String>()
     private val rkStorage = Transactions()
@@ -33,7 +30,7 @@ class RoutedDeviceStoreTest {
 
     @Test fun aReplayedOlderSwitchEditNeverWinsOverANewerOne() {
         store.store(writes("mindwtr:appSearchWipeOwed" to "true", "mindwtr:appSearchIndexingEnabled" to null), 9, replay = false)
-        // The older "on" entry (sequence 4), kept because its delete failed, replays at the next boot.
+
         store.store(writes("mindwtr:appSearchIndexingEnabled" to "true"), 4, replay = true)
         assertNull(rk["mindwtr:appSearchIndexingEnabled"])
         assertEquals("true", rk["mindwtr:appSearchWipeOwed"])
@@ -46,11 +43,7 @@ class RoutedDeviceStoreTest {
         assertEquals(3L, store.highestSequence())
     }
 
-    /**
-     * RKStorage, one entry in [committed] per transaction. A switch-off must be one transaction holding the removal and its journal
-     * sequence (review O2d R-P2-2). With two (values and sequences first, removals after) a death between them left the switch's
-     * sequence stored without its removal, and the replay then skipped the removal: system search stayed on.
-     */
+
     private class Transactions : RkStore {
         val committed = mutableListOf<Map<String, String?>>()
         val values = linkedMapOf<String, String>()

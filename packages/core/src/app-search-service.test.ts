@@ -1,5 +1,5 @@
-// Moved with the service from React Native's lib/app-search-service.test.ts (pass O2c): the same cases through ports, so
-// the native Android app's binding inherits them. React Native keeps its own copy, now running against this core service.
+
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAppSearchIndexing, type AppSearchIndexingPorts } from './app-search-service';
 import type { Area, Project, Task } from './types';
@@ -118,13 +118,13 @@ describe('AppSearch indexing (core, shared by React Native and native Android)',
         expect(env.ports.logInfo).toHaveBeenLastCalledWith('AppSearch owed wipe finished at start', { releaseCheck: 'v1.3.7/app-search-owed-wipe', outcome: 'wiped' });
     });
 
-    // A reindex never clears an owed wipe: a toggle-off can land while it runs, and its upsert lands after that wipe.
+
     const midReindexOff = async (start: () => Promise<void>) => {
         let resolveUpsert!: () => void;
         env.ports.upsert.mockImplementationOnce(() => new Promise<undefined>((resolve) => { resolveUpsert = () => resolve(undefined); }));
         const starting = start();
         await flush();
-        // The user turns the switch off: the owed wipe is stored, the switch goes, and its wipe lands.
+
         env.ports.readEnabled.mockResolvedValue(false);
         await env.indexing.wipe();
         resolveUpsert();
@@ -135,10 +135,10 @@ describe('AppSearch indexing (core, shared by React Native and native Android)',
         env.ports.wipe.mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('died'));
         await midReindexOff(() => env.indexing.syncWithPreference());
         expect(env.indexing.isArmed()).toBe(false);
-        // The reindex's late upsert is wiped again, owed first; that wipe failing leaves it owed for the next start.
+
         expect(env.ports.markWipeOwed).toHaveBeenCalledTimes(1);
         expect(env.ports.markWipeOwed.mock.invocationCallOrder[0]).toBeLessThan(env.ports.wipe.mock.invocationCallOrder[2]);
-        // The toggle-off's wipe landed during the rebuild, so it cleared nothing; the last wipe failed: still owed.
+
         expect(env.ports.clearWipeOwed).not.toHaveBeenCalled();
     });
 
@@ -150,8 +150,7 @@ describe('AppSearch indexing (core, shared by React Native and native Android)',
         expect(env.ports.clearWipeOwed.mock.invocationCallOrder.every((order) => order < env.ports.markWipeOwed.mock.invocationCallOrder[0])).toBe(true);
     });
 
-    // O2c review notes: a port that rejects anyway (the contract says they never do) cannot stop the wipe, and a toggle-off's
-    // wipe that lands while a rebuild runs leaves the owed wipe owed (the rebuild's upsert lands after it).
+
     it('still wipes when marking the owed wipe fails', async () => {
         env.ports.readEnabled.mockResolvedValue(false);
         env.ports.markWipeOwed.mockRejectedValueOnce(new Error('disk'));
@@ -184,7 +183,7 @@ describe('AppSearch indexing (core, shared by React Native and native Android)',
         expect(env.indexing.isArmed()).toBe(false);
         env.indexing.arm();
         env.ports.upsert.mockClear();
-        // An edit already debounced, then disarm: the pending update is dropped and the store listener is gone.
+
         env.listeners[0]({ ...env.state, tasks: [task({ title: 'later' })] }, { ...env.state });
         env.indexing.disarm();
         await vi.advanceTimersByTimeAsync(2_000);

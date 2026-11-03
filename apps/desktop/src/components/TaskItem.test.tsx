@@ -29,9 +29,7 @@ const createDeferred = <T,>() => {
     return { promise, resolve };
 };
 
-// The completion dialog now uses the shared date control (#944): a locale-formatted
-// date field plus a separate time input, rather than one datetime-local box. jsdom
-// reports en-US, so the display order is month/day/year.
+
 const setCompletionDateTime = (dialog: HTMLElement, localIso: string) => {
     const [date, time] = localIso.split('T');
     const [year, month, day] = date.split('-');
@@ -449,15 +447,14 @@ describe('TaskItem', () => {
             fireEvent.click(deleteButton);
         });
 
-        // Deleting is immediate (soft delete to Trash with an undo toast);
-        // no confirmation dialog appears.
+
         expect(queryByRole('dialog', { name: /^delete$/i })).not.toBeInTheDocument();
         await waitFor(() => {
             const stored = useTaskStore.getState()._allTasks.find((candidate) => candidate.id === mockTask.id);
             expect(stored?.deletedAt).toBeTruthy();
         });
-        // The edit session must close with the task, or the stale
-        // editingTaskId keeps global keyboard shortcuts suppressed (#870).
+
+
         expect(useUiStore.getState().editingTaskId).toBeNull();
     });
 
@@ -845,8 +842,7 @@ describe('TaskItem', () => {
             fireEvent.click(getByRole('button', { name: "Add to today's focus" }));
         });
 
-        // The star is a draft field: nothing is committed until Save, so the
-        // row cannot vanish from the list mid-edit.
+
         expect(useTaskStore.getState()._tasksById.get('editor-star-task')?.isFocusedToday).not.toBe(true);
 
         await act(async () => {
@@ -926,8 +922,7 @@ describe('TaskItem', () => {
         });
     });
 
-    // #1255: %Person was the one title token nothing claimed, so an accepted suggestion was typed
-    // into the title as "%Stefan" and Assigned To stayed empty.
+
     it('applies an accepted %person suggestion to Assigned To without keeping the token in the title', async () => {
         const editableTask: Task = {
             ...mockTask,
@@ -1381,9 +1376,7 @@ describe('TaskItem', () => {
             fireEvent.doubleClick(toggles[0]);
         });
 
-        // Only the double-clicked row may run the editor; a second instance
-        // would treat clicks inside the first editor as outside clicks and
-        // close the whole session.
+
         expect(getAllByDisplayValue('Test Task')).toHaveLength(1);
 
         const titleInput = getAllByDisplayValue('Test Task')[0];
@@ -1459,10 +1452,8 @@ describe('TaskItem', () => {
         expect(getByText('Delete')).toBeInTheDocument();
 
         act(() => {
-            // A real press always ends: the menu now swallows the click that
-            // dismisses it (so the control underneath is not activated), and it
-            // releases that swallower when the gesture completes. A lone
-            // mouseDown is not a gesture a browser can produce.
+
+
             fireEvent.mouseDown(document.body);
             fireEvent.mouseUp(document.body);
         });
@@ -1581,8 +1572,8 @@ describe('TaskItem', () => {
                     _tasksById: new Map([[task.id, task]]),
                 });
             });
-            // Scoped to this render's own container: every render in this test shares
-            // document.body, so a screen-level query would find the previous row.
+
+
             const { container } = render(
                 <LanguageProvider>
                     <TaskItem task={task} />
@@ -1591,8 +1582,7 @@ describe('TaskItem', () => {
             return container.textContent ?? '';
         };
 
-        // Age is expanded-only metadata; the collapsed summary stays limited
-        // to actionable routing and date information.
+
         expect(renderWithStatus('next', 'age-next-task')).not.toContain('5 days old');
         expect(renderWithStatus('done', 'age-done-task')).not.toContain('5 days old');
         expect(renderWithStatus('archived', 'age-archived-task')).not.toContain('5 days old');
@@ -1619,9 +1609,7 @@ describe('TaskItem', () => {
             </LanguageProvider>
         );
 
-        // A completed row carries Duplicate, Restore and Delete as buttons, so it drops
-        // the "More options" trigger that would only repeat them; right-click still
-        // reaches the menu (#968).
+
         expect(queryByRole('button', { name: /more options/i })).toBeNull();
         fireEvent.contextMenu(container.querySelector('[data-task-id="done-menu-duplicate-task"]')!);
         const duplicateItem = await findByRole('menuitem', { name: /duplicate/i });
@@ -1658,8 +1646,8 @@ describe('TaskItem', () => {
 
         const row = container.querySelector('[data-task-id="context-menu-ring-task"]');
         expect(row).toBeTruthy();
-        // Token check on purpose: the base class list carries focus-within:ring-*
-        // variants whose substrings would satisfy a plain toContain.
+
+
         const rowClassTokens = () => (row as HTMLElement).className.split(/\s+/);
         expect(rowClassTokens()).not.toContain('ring-primary/40');
 
@@ -2793,7 +2781,7 @@ describe('TaskItem', () => {
         );
 
         const promoteButton = getByRole('button', { name: 'Next' });
-        // #1053: the arrow needs a hover tooltip naming the action.
+
         expect(promoteButton).toHaveAttribute('title', 'Move to Next');
 
         fireEvent.click(promoteButton);

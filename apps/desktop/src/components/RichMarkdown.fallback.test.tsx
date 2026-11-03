@@ -15,9 +15,8 @@ describe('RichMarkdown fallback', () => {
     });
 
     it('falls back to plain text when markdown rendering throws', () => {
-        // Old WebKit threw from inside the markdown pipeline while rendering
-        // task notes; the whole view went to the app error screen. The local
-        // boundary must degrade to the raw text instead.
+
+
         vi.spyOn(console, 'error').mockImplementation(() => {});
 
         render(<RichMarkdown markdown={'- [ ] buy milk'} />);

@@ -135,8 +135,8 @@ afterEach(() => {
 
 vi.mock('@mindwtr/core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@mindwtr/core')>();
-  // The real store is selector-based; the shared visible-task context
-  // subscribes field by field, so the mock has to honour selectors.
+
+
   const useTaskStore = Object.assign(
     (selector?: (state: typeof storeState) => unknown) => (selector ? selector(storeState) : storeState),
     { getState: () => storeState },
@@ -194,9 +194,8 @@ vi.mock('../contexts/theme-context', () => ({
 }));
 
 vi.mock('../contexts/language-context', () => {
-  // One stable `t`, as the real provider gives: its context value only changes
-  // when the language does, so a store write must not churn translator
-  // identity — several Focus callbacks memoise on it.
+
+
   const t = (key: string) =>
     ({
         'common.all': 'All',
@@ -550,7 +549,7 @@ describe('FocusScreen', () => {
     vi.useRealTimers();
   });
 
-  // #1252: the star makes a task today's focus; this files it under Today without that.
+
   it('offers Today in the row menu, sets the start date, and keeps the star', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 4, 2, 10, 0, 0, 0));
@@ -586,8 +585,7 @@ describe('FocusScreen', () => {
     vi.useRealTimers();
   });
 
-  // Pomodoro's Mark done dropped the store result, so a refused write left the
-  // task untouched with nothing on screen.
+
   it('reports a failed Pomodoro Mark done', async () => {
     storeState.settings = { appearance: {}, features: { pomodoro: true } };
     storeState.updateTask.mockResolvedValue({ success: false, error: 'Disk full' });
@@ -1126,8 +1124,7 @@ describe('FocusScreen', () => {
     expect(flippedButton).toBeTruthy();
   });
 
-  // The tint is the only sign that a view option is on, and Show details now
-  // lives in the same sheet as sort and group.
+
   it('tints the View options button while details are shown', () => {
     let tree!: ReturnType<typeof create>;
     act(() => {
@@ -1191,7 +1188,7 @@ describe('FocusScreen', () => {
     expect(shownIds).toContain('deferred-soon');
     expect(shownIds).toContain('recurring-soon');
     expect(shownIds).not.toContain('deferred-far');
-    // Reveal-date order inside the section: start Apr 8 before due Apr 10.
+
     expect(shownIds.indexOf('deferred-soon')).toBeLessThan(shownIds.indexOf('recurring-soon'));
     vi.useRealTimers();
   });
@@ -1219,7 +1216,7 @@ describe('FocusScreen', () => {
     expect(recurringRow?.props.focusToggleDisabledLabel)
       .toBe('This task is deferred; change its start date before focusing it.');
     expect(nextRow?.props.focusToggleDisabledLabel).toBeUndefined();
-    // The reveal date is the section's purpose, so it rides the row.
+
     expect(upcomingRow?.props.footerContent).toBeTruthy();
     expect(nextRow?.props.footerContent).toBeUndefined();
     vi.useRealTimers();
@@ -1281,7 +1278,7 @@ describe('FocusScreen', () => {
     storeState.projects = [
       makeProject('due-project', {
         title: 'Due project',
-        // Same instant as the fake clock, so "due today" holds in every timezone.
+
         dueDate: '2026-04-10T12:00:00.000Z',
       }),
     ];
@@ -1767,8 +1764,8 @@ describe('FocusScreen', () => {
 
     const findRow = () => tree.root.findAllByType(SwipeableTaskItem)
       .find((node) => node.props.task.id === 'later-today-next');
-    // Planning the 17:00 task for today is legitimate, so the star must not
-    // pick up Upcoming's disabled-for-deferred gating.
+
+
     expect(findRow()?.props.focusToggleDisabledLabel).toBeUndefined();
     expect(findRow()?.props.footerContent).toBeTruthy();
     expect(tree.root.findByProps({ accessibilityLabel: 'Later today 1' })).toBeTruthy();
@@ -1793,10 +1790,8 @@ describe('FocusScreen', () => {
         dueDate: '2026-04-05',
         startTime: '2026-04-06',
       }),
-      // Without a second task landing in another section, hasTasks (based on
-      // schedule/nextActions/reviewDue only, not upcoming) hides the whole
-      // list — a pre-existing gap out of this fix's scope. Keep this row so
-      // the assertion below tests the schedule-pool fix, not that gap.
+
+
       makeTask('plain-next', { title: 'Plain next' }),
     ];
 
@@ -2440,7 +2435,7 @@ describe('FocusScreen', () => {
     expect(storeState.updateSettings.mock.calls[0]?.[0]?.savedFilters[1]).not.toHaveProperty('deletedAt');
   });
 
-  // The screen still shows a filter another device deleted; the delete edits the latest stored list by id.
+
   it('keeps a saved filter another device deleted when deleting another one', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     storeState.updateSettings.mockResolvedValue(undefined);
@@ -2544,8 +2539,7 @@ describe('FocusScreen', () => {
       tree = create(<FocusScreen />);
     });
 
-    // Visible without selecting the chip, long-pressing it, or going through an
-    // accessibility action.
+
     const deleteControl = findButtonByLabel(tree, 'Delete saved filter Desk');
     act(() => {
       deleteControl.props.onPress();
@@ -2553,7 +2547,7 @@ describe('FocusScreen', () => {
 
     expect(alertSpy).toHaveBeenCalledTimes(1);
     expect(storeState.updateSettings).not.toHaveBeenCalled();
-    // Revealing the delete control must not apply the filter.
+
     expect(findButtonByText(tree, 'All').props.accessibilityState.selected).toBe(true);
 
     const confirmButton = alertSpy.mock.calls[0]?.[2]?.find((button) => button.style === 'destructive');
@@ -2940,8 +2934,7 @@ describe('FocusScreen', () => {
       buttonInVisibleModal('Save').props.onPress();
     });
 
-    // iOS can only present one native Modal at a time. The save-name prompt
-    // must replace the filter sheet instead of being presented on top of it.
+
     const nameDialog = visibleModal();
     const nameInput = nameDialog.findByType(TextInput);
     act(() => {
@@ -3212,9 +3205,8 @@ describe('FocusScreen', () => {
   });
 
   it('hides the reorder toggle when a filter narrows the Focus list', () => {
-    // Default sort, but a token filter narrows focusedTasks to a subset;
-    // reordering that subset would write focusOrder 0..n over only the visible
-    // rows, so the toggle must disappear until the filter clears.
+
+
     storeState.tasks = [
       makeTask('focus-a', { title: 'Work focus alpha', isFocusedToday: true, focusOrder: 0, contexts: ['@work'] }),
       makeTask('focus-b', { title: 'Home focus beta', isFocusedToday: true, focusOrder: 1 }),
@@ -3238,8 +3230,7 @@ describe('FocusScreen', () => {
       findButtonByText(tree, '@work').props.onPress();
     });
 
-    // The @work task still renders as a non-empty Focus subset, but the toggle
-    // is gone because reordering a subset would corrupt the full focusOrder.
+
     expect(
       tree.root.findAllByType(SwipeableTaskItem).map((node) => node.props.task.id),
     ).toEqual(['focus-a']);
@@ -3247,11 +3238,6 @@ describe('FocusScreen', () => {
   });
 
 
-  // The Focus tab is the app's default route, so its rows carry the #766 memo
-  // boundary. That boundary only holds if the props Focus hands each row keep
-  // their identity across a store write — the row itself is mocked here, so
-  // this pins the caller side; the boundary itself is pinned in
-  // components/swipeable-task-item.test.tsx.
   it('keeps row props stable for untouched tasks across a store write', () => {
     storeState.tasks = [
       makeTask('row-a', { title: 'Row A' }),

@@ -204,7 +204,7 @@ final class AttachmentMixedDraftStoreTests: XCTestCase {
         try cold().writeMixed(record([.remove(complete)]))
         let reply = try XCTUnwrap(complete.replyJSON)
         XCTAssertEqual(try XCTUnwrap(JSONSerialization.jsonObject(with: Data(reply.utf8)) as? [String: Any])["status"] as? String, "draftRemoved")
-        // The store intentionally does not grant canonical-time or soft-delete authority.
+
     }
 
     func testAllMixedAndRemoveObjectLevelsRequireExactKeysAndNulls() throws {

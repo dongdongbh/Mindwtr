@@ -21,7 +21,7 @@ const rawSort = (): NativeHostResult<string | null> => {
         : fail('INVALID_INPUT', 'Stored task list sort has an unsupported value');
 };
 
-/** Pure validation for a cold native journal, before storage opens. */
+
 export function validateTaskListSortWrite(input: unknown): NativeHostResult<NativeTaskListSortResult> {
     if (!isNativeJsonWithinBytes(input, 4096) || !record(input)
         || !exact(input, ['requestId', 'sortBy', 'expected'])

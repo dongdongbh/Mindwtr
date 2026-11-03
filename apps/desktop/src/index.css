@@ -2,24 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Hallmark · genre: modern-minimal desktop productivity · tone: calm, quiet, capable · anchor hue: accessible blue */
-/* Hallmark · macrostructure: GTD command rail + adaptive work canvas · fingerprint: task-first rail, focused list, optional detail panels */
-/* Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 */
-/* Hallmark · contrast: pass (40–41) · nav: N2 command rail · footer: none (desktop app) · slop: pass (42–45) */
-/* Hallmark · honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) */
-/* Hallmark · mobile: pass (34, 49, 50–57) */
-
-/*
- * Z-INDEX SCALE
- *   z-10    — inline overlays anchored to a relative parent (action buttons, floating labels)
- *   z-20    — inline popovers and dropdowns (SectionSelector, SidebarAreaFilter)
- *   z-50    — modals, global search, toast host, skip-link
- *   z-[70]  — modal-over-modal and portaled selectors that must escape clipped surfaces
- * New overlays should pick from this scale, not invent new values.
- *
- * MODAL BACKDROP
- *   Use bg-black/50 for modal backdrops. Do not pick new opacities.
- */
 
 @layer base {
   :root {
@@ -89,23 +71,23 @@
 
   .dark {
     color-scheme: dark;
-    /* VS Code Dark Modern style - softer dark instead of near-black */
-    --background: 220 13% 13%;        /* #1e1e2e - main background */
-    --foreground: 220 13% 91%;        /* #e4e4e7 - text color */
 
-    --card: 220 13% 16%;              /* #252530 - card background */
+    --background: 220 13% 13%;
+    --foreground: 220 13% 91%;
+
+    --card: 220 13% 16%;
     --card-foreground: 220 13% 91%;
 
-    --popover: 220 13% 14%;           /* #222230 - popover background */
+    --popover: 220 13% 14%;
     --popover-foreground: 220 13% 91%;
 
-    --primary: 217 91% 65%;           /* Accessible blue accent on cards */
+    --primary: 217 91% 65%;
     --primary-foreground: 220 13% 13%;
 
-    --secondary: 220 13% 20%;         /* #2d2d3a - secondary background */
+    --secondary: 220 13% 20%;
     --secondary-foreground: 220 13% 88%;
 
-    --muted: 220 13% 22%;             /* #33333f - muted background */
+    --muted: 220 13% 22%;
     --muted-foreground: 220 13% 70%;
 
     --accent: 220 13% 22%;
@@ -124,7 +106,7 @@
 
     --border: 220 13% 30%;
     --input: 220 13% 30%;
-    --ring: 217 91% 60%;              /* matches primary */
+    --ring: 217 91% 60%;
 
     --status-inbox: 217 91% 65%;
     --status-next: 142 60% 50%;
@@ -206,9 +188,20 @@
     box-shadow: none !important;
   }
 
-  /* E-ink maps every surface to pure white, so background-based selection
-     highlights vanish; mark the active listbox option with an outline. */
+
   :root.theme-eink [role='option'][aria-selected='true'] {
+    outline: 2px solid hsl(var(--foreground));
+    outline-offset: -2px;
+  }
+
+
+  :root.theme-eink [aria-pressed='true'] {
+    outline: 2px solid hsl(var(--foreground));
+    outline-offset: -2px;
+  }
+
+
+  :root.theme-eink [aria-current='page'] {
     outline: 2px solid hsl(var(--foreground));
     outline-offset: -2px;
   }
@@ -265,10 +258,7 @@
     --badge-info-fg: 217.5 26.7% 94.1%;
   }
 
-  /* Catppuccin Macchiato. Surfaces climb base -> surface0 -> surface1 ->
-     surface2; mauve is the accent (the flavor's own default), blue carries the
-     informational role. Badge backgrounds take an accent's hue at surface
-     lightness, as the Nord block above does. */
+
   :root.theme-catppuccin-macchiato {
     color-scheme: dark;
     --background: 231.8 23.4% 18.4%;
@@ -321,11 +311,7 @@
     --badge-info-fg: 227.4 68.3% 87.6%;
   }
 
-  /* Dracula. Surfaces are the reference theme's own background/bgLight/
-     bgLighter/selection ladder; purple is the accent. `comment` is Dracula's
-     de-emphasis color but only reaches 3:1 on the background, so it stays on
-     structural roles (done badges) and secondary text uses a lighter blend of
-     it — see DRACULA_STATUS_COLORS in core's theme-scheme.ts. */
+
   :root.theme-dracula {
     color-scheme: dark;
     --background: 231.4 14.9% 18.4%;
@@ -378,13 +364,7 @@
     --badge-info-fg: 60 30% 96.1%;
   }
 
-  /* Gruvbox light, soft contrast (morhetz/gruvbox). Surfaces: bg0_s ground,
-     bg0 cards, bg1 secondary/muted, bg2 borders; the faded blue is the accent.
-     Gruvbox's darkest green and aqua stop near 3.9:1 on bg0_s, so success,
-     estimate and reference keep their hue and saturation with the lightness
-     lowered to 4.5:1, and done is the fg3 gray. --status-next and --warning
-     are darkened the same way so they clear 4.5:1 on their chip tint and on
-     the info badge. Status hues match core's GRUVBOX_LIGHT_STATUS_COLORS. */
+
   :root.theme-gruvbox-light {
     color-scheme: light;
     --background: 45.6 67.5% 84.3%;
@@ -437,11 +417,7 @@
     --badge-info-fg: 21.8 7.4% 29.2%;
   }
 
-  /* Gruvbox dark, medium contrast. Surfaces: bg0 ground, bg0_s cards, bg1
-     secondary/muted, bg2 borders; the bright blue is the accent, lightened
-     (--primary, --status-next) to clear 4.5:1 on its own tints. Muted text is
-     fg3 because fg4 drops to 4.2:1 on bg1. Status hues match core's
-     GRUVBOX_DARK_STATUS_COLORS. */
+
   :root.theme-gruvbox-dark {
     color-scheme: dark;
     --background: 0 0% 15.7%;
@@ -494,11 +470,7 @@
     --badge-info-fg: 40.4 38.2% 73.3%;
   }
 
-  /* OLED / Midnight. The dark theme's hues on pure-black surfaces — matches the
-     mobile `oled` preset (#000000 ground and cards, #1F2937 borders carrying the
-     separation, #4F9DFF accent). Status colors stay the dark set, mirroring
-     core's theme-scheme where oled derives from dark rather than a bespoke
-     palette. */
+
   :root.theme-oled {
     color-scheme: dark;
     --background: 0 0% 0%;
@@ -609,12 +581,7 @@
     @apply border-border;
   }
 
-  /*
-   * Default keyboard-only focus ring. Mouse clicks don't trigger :focus-visible,
-   * so this is invisible to pointer users but ensures every interactive element
-   * is discoverable via Tab. Components can override by styling :focus-visible
-   * locally — the !important is avoided so overrides stay easy.
-   */
+
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
@@ -641,10 +608,8 @@
   html {
     font-size: calc(16px * var(--mindwtr-text-scale));
     overflow-x: clip;
-    /* Ensure consistent sizing on WebKitGTK */
-    /* Lock the viewport here, not on body: body's overflow only propagates to
-     * the viewport while html is fully `visible`, and the clip above breaks
-     * that. WKWebView then let the whole shell scroll past its end. */
+
+
     overflow-y: hidden;
     overscroll-behavior: none;
   }
@@ -702,11 +667,7 @@
     overflow-y: hidden;
   }
 
-  /*
-   * Placeholders must read as hints, not entered values. Color alone is not
-   * enough: some themes (e.g. Nord) keep --muted-foreground close to
-   * --foreground, so the reduced opacity carries the distinction everywhere.
-   */
+
   input::placeholder,
   textarea::placeholder {
     color: hsl(var(--muted-foreground));
@@ -734,13 +695,7 @@
     color-scheme: dark;
   }
 
-  /*
-   * Theme-aware scrollbars. Every Tauri webview (WebView2, WKWebView,
-   * WebKitGTK) supports the -webkit-scrollbar pseudo-elements, so the thumb
-   * can follow the active theme's palette instead of the engine's default
-   * chrome. The transparent border + content-box clip inset the pill so it
-   * floats over the surface.
-   */
+
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -773,8 +728,8 @@
 }
 
 @layer components {
-  /* A settings row picked from the search results, same ring a highlighted
-     task row gets. Cleared by SettingsView once the user has seen it. */
+
+
   [data-settings-highlight] {
     outline: 2px solid hsl(var(--primary) / 0.7);
     outline-offset: 2px;
@@ -1022,24 +977,12 @@
   }
 }
 
-/* Font choice (#1244): Settings → Look & feel → Font sets --mindwtr-font-family on
-   the root; without it this is Tailwind's default sans stack, unchanged. */
+
 html {
     font-family: var(--mindwtr-font-family, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji");
 }
 
-/* Spinners are redrawn on every frame instead of turned by the compositor (#913, #1251).
-   A `transform` animation runs on the compositor: the icon is drawn once into a texture and
-   the GPU rotates that picture. On some Windows machines the rotated picture wobbles around
-   a point about a pixel off-centre and looks soft, worse at other zoom levels, and the layer
-   it needs also pulled task rows into layers of their own (#1251). A custom property cannot
-   be animated on the compositor, so animating the angle through one keeps the rotation on
-   the main thread: no texture, no layer, a crisp icon each frame.
-   Ceiling: a main-thread animation hitches while the main thread is busy (a heavy sync). A
-   spinner that stutters for a moment beats one that wobbles all the time.
-   Fallback without JS: on an engine with no `@property`, `--mindwtr-spin-animation` is not
-   registered, so the `var()` below falls back to Tailwind's own compositor `spin`. Without
-   that, 0deg and 360deg would swap discretely and the icon would stand still. */
+
 @property --mindwtr-spin-angle {
     syntax: '<angle>';
     inherits: false;
@@ -1055,12 +998,11 @@ html {
 }
 .animate-spin {
     animation: var(--mindwtr-spin-animation, spin 1s linear infinite);
-    /* `rotate`, not `transform`, so it composes with any transform utility on the element. */
+
     rotate: var(--mindwtr-spin-angle, 0deg);
 }
 
-/* While the privacy lock is on (#1472), only the lock screen prints. The
-   inert app beneath is still laid out, and print drops the cover's background. */
+
 @media print {
     html[data-app-locked] body > :not([data-app-lock-screen]) {
         display: none !important;

@@ -42,18 +42,15 @@ const loadDatabaseCtor = (): DatabaseCtor | null => {
 const RuntimeDatabase = loadDatabaseCtor();
 const describeSqlite = RuntimeDatabase ? describe : describe.skip;
 
-// `describe.skip` above passes silently if no sqlite runtime is found - this bare
-// top-level check fails loudly instead, so the schema suite can't vanish
-// unnoticed on a runtime that lacks both bun:sqlite and node:sqlite.
+
 it('has a sqlite runtime available to run the schema suite', () => {
     expect(RuntimeDatabase).not.toBeNull();
 });
 
-// Prepares exactly one statement, like op-sqlite's execute(): an incomplete
-// fragment (e.g. a CREATE TRIGGER body cut at an inner ';') fails to prepare.
+
 const prepareSingle = (db: Database, sql: string): Statement => {
     if (typeof db.prepare === 'function') {
-        // node:sqlite statements take positional params spread, not as an array.
+
         const statement = db.prepare(sql) as unknown as {
             run: (...params: unknown[]) => unknown;
             all: (...params: unknown[]) => unknown[];
@@ -77,7 +74,7 @@ describe('splitSqlStatements', () => {
         for (const trigger of triggers) {
             expect(trigger.toUpperCase()).toMatch(/END$/);
         }
-        // No orphaned trigger-body fragments escape as standalone statements.
+
         expect(statements.some((statement) => statement.toUpperCase().startsWith('SELECT RAISE'))).toBe(false);
         expect(statements.some((statement) => statement.toUpperCase() === 'END')).toBe(false);
     });
@@ -174,7 +171,7 @@ describeSqlite('schema replay through single-statement execute (op-sqlite emulat
             'tasks_validate_insert',
             'tasks_validate_update',
         ]);
-        // The validation trigger is live, not just present.
+
         expect(() =>
             prepareSingle(
                 db,

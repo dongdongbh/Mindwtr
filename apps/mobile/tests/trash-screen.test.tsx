@@ -61,9 +61,8 @@ vi.mock('@mindwtr/core', async () => {
   return {
     ...actual,
     shallow: Object.is,
-    // Run the real selector: the screen reads through
-    // `useTaskStore((state) => ({…}), shallow)`, so a mock that ignores the
-    // selector never executes the projection it is meant to cover.
+
+
     useTaskStore: (selector?: (state: unknown) => unknown) => (
       selector ? selector(mocks.storeState) : mocks.storeState
     ),
@@ -191,7 +190,7 @@ describe('TrashScreen', () => {
       tree = renderer.create(<TrashScreen />);
     });
 
-    // The project has no area, so including "Work" leaves only the task.
+
     expect(timelineIds(tree)).toEqual(['recent-task']);
   });
 
@@ -213,8 +212,7 @@ describe('TrashScreen', () => {
     node.props?.accessibilityLabel === label && typeof node.props?.onPress === 'function'
   ))[0];
 
-  // The Clear Trash button carries no accessibility label, so it is found by the
-  // text it renders. The last match is the innermost pressable holding that text.
+
   const instanceText = (node: renderer.ReactTestInstance) => [node, ...node.findAll(() => true)]
     .flatMap((child) => child.children)
     .filter((child): child is string => typeof child === 'string')
@@ -224,7 +222,7 @@ describe('TrashScreen', () => {
     typeof node.props?.onPress === 'function' && instanceText(node).includes(text)
   )).slice(-1)[0];
 
-  // Purge cannot be undone, so Clear Trash may only delete what the screen lists.
+
   it('clears only the trashed items the area filter shows', async () => {
     mocks.areaFilter.areaById = new Map([['a1', { id: 'a1', name: 'Work', order: 0 }]]);
     mocks.storeState._allTasks.push({
@@ -242,8 +240,7 @@ describe('TrashScreen', () => {
     });
     renderer.act(() => { findPressableByText(tree, 'Clear Trash').props.onPress(); });
 
-    // The counts sentence names the shown set, not "all trashed", and the counts
-    // and the translated sentence are two lines — no hard-coded ". " join.
+
     expect(alertSpy.mock.calls[0]?.[1]).toBe('1 task · 1 project\nThis action cannot be undone.');
     const confirmButton = (alertSpy.mock.calls[0]?.[2] ?? []).find((button) => button.style === 'destructive');
     await renderer.act(async () => {
@@ -256,8 +253,7 @@ describe('TrashScreen', () => {
     expect(mocks.storeState.purgeDeletedProjects).not.toHaveBeenCalled();
   });
 
-  // The confirmed set is the set the alert was opened for, whatever its wording.
-  // An item that arrives while the alert is open was never shown, so it survives.
+
   it('clears exactly the items the alert was opened for', async () => {
     const alertSpy = vi.spyOn(Alert, 'alert');
     let tree!: renderer.ReactTestRenderer;
@@ -266,10 +262,10 @@ describe('TrashScreen', () => {
     });
     renderer.act(() => { findPressableByText(tree, 'Clear Trash').props.onPress(); });
 
-    // Nothing is hidden, so the alert still claims the whole trash.
+
     expect(alertSpy.mock.calls[0]?.[1]).toBe('This will permanently delete all trashed tasks and projects.');
 
-    // A sync merge lands another trashed task before the user confirms.
+
     mocks.storeState._allTasks.push({
       ...mocks.storeState._allTasks[0], id: 'arriving-task', title: 'Arriving deleted task',
     });

@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""Retire only completed CI build outputs, after their evidence was uploaded.
-
-Keep dependency downloads/checkouts, logs, source, unknown directories and other
-compiler generations. No broad checkout clean or simulator commands belong here.
-"""
 import hashlib
 import json
 import os
@@ -33,7 +28,6 @@ def path_from_environment(name):
 
 
 def open_directory(path):
-    """Walk descriptors, refusing every symlink, including trailing-slash aliases."""
     if not path.is_absolute() or ".." in path.parts:
         raise Refused("Invalid output path")
     descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -80,7 +74,7 @@ def remove_tree_at(parent, name, expected):
             if stat.S_ISDIR(info.st_mode):
                 remove_tree_at(child, entry, identity(info))
             else:
-                # Unlink symlink entries themselves; never walk their targets.
+
                 os.unlink(entry, dir_fd=child)
         if identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != expected:
             raise Refused("Generated output changed during cleanup")
@@ -126,8 +120,7 @@ def cleanup(kind):
             candidates.append(workspace / "apps/mobile/ios/build")
             candidates.append(temporary / "ios27-artifacts/Mindwtr-unsigned.xcarchive")
 
-    # Inspect every candidate before removing any: a symlink late in the list
-    # cannot cause partial cleanup followed by a validation refusal.
+
     plan = [(path, candidate_identity(path)) for path in candidates]
     before = os.statvfs(home).f_bavail * os.statvfs(home).f_frsize
     removed = 0

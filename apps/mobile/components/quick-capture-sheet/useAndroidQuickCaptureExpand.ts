@@ -68,7 +68,7 @@ export function useAndroidQuickCaptureExpand({
 
     setPhase('hiding');
     keyboardHideSubRef.current = Keyboard.addListener('keyboardDidHide', expandAfterKeyboardHidden);
-    // Safety net only: if keyboardDidHide never fires, More should not get stuck collapsed.
+
     fallbackTimerRef.current = setTimeout(expandAfterKeyboardHidden, fallbackMs);
   }, [clearAndroidOptionsExpand, clearInitialFocusTimer, expandAfterKeyboardHidden, fallbackMs, inputRef]);
 

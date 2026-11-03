@@ -1,4 +1,4 @@
-// node --test apps/android-native/scripts/run-device-batch.test.mjs (no phone needed)
+
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
@@ -47,9 +47,9 @@ test('an unset adb port defaults to 5038 in the child env and the detached unit;
     const set = withAdbPort({ PATH: '/bin', ANDROID_ADB_SERVER_PORT: '5099' });
     assert.equal(set.ANDROID_ADB_SERVER_PORT, '5099');
     assert.deepEqual(setenvArgs(set), ['--setenv=PATH=/bin', '--setenv=ANDROID_ADB_SERVER_PORT=5099']);
-    // A parity pass's PARITY_ONLY reaches capture-parity-screens in the detached unit.
+
     assert.deepEqual(setenvArgs({ PATH: '/bin', PARITY_ONLY: 'small2' }), ['--setenv=PATH=/bin', '--setenv=PARITY_ONLY=small2']);
-    // device.mjs's own default is the /opt adb, never the /home/dd/Android/Sdk one (each kills the other's server).
+
     assert.equal(DEFAULT_ADB, '/opt/android-sdk/platform-tools/adb');
 });
 
@@ -63,9 +63,7 @@ test('a phone that is not "device" stops the batch with one line naming the port
         'VERDICT FAIL 0/2: not run, RFCW10JBP0Y not reachable on adb port 5038 (spawnSync adb ENOENT)');
 });
 
-// The real scripts: a check needs the upgrade harness only when it reads its built APKs (apks/manifest.json), itself or through
-// the check it runs (check-data-deadlines-device runs check-data-device). Shots, locks and the startup fixture in the harness
-// folder do not count.
+
 const readCheck = (check) => readFileSync(new URL(`./${check}.mjs`, import.meta.url), 'utf8');
 const stepNames = (checks) => buildSteps('/w/t', harnessChecks(checks, readCheck)).map(([name]) => name);
 

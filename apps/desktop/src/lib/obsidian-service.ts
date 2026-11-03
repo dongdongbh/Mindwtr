@@ -22,7 +22,7 @@ export type ObsidianFilesChangedPayload = {
     deleted: string[];
 };
 
-/** Mirrors the Rust `DetectedObsidianVault` returned by `list_obsidian_vaults`. */
+
 export type DetectedObsidianVault = {
     name: string;
     path: string;
@@ -88,10 +88,7 @@ export const buildObsidianUri = (source: ObsidianSourceRef): string => {
     return `obsidian://open?vault=${vault}&file=${file}`;
 };
 
-/**
- * Vaults Obsidian has registered on this machine. Empty off-Tauri or when the
- * registry cannot be read — the caller offers filesystem browsing either way.
- */
+
 export const listDetectedObsidianVaults = async (): Promise<DetectedObsidianVault[]> => {
     try {
         const vaults = await invokeNativeOr<DetectedObsidianVault[]>([], 'list_obsidian_vaults');

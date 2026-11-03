@@ -4,9 +4,7 @@ import { TIME_ESTIMATE_OPTIONS } from '@mindwtr/core';
 
 import { TimeEstimateField } from './TaskMetadataFields';
 
-// The editor once hard-coded its nine <option> tags with English labels. It now
-// renders core's list, so a value added there shows up here without an edit, and
-// the labels follow the locale's unit text.
+
 const t = (key: string) => ({
     'taskEdit.timeEstimateLabel': 'Time estimate',
     'task.aria.timeEstimate': 'Time estimate',

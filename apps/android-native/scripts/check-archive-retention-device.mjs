@@ -1,19 +1,6 @@
-// Archive retention check for the isolated native Android development app (#1320; RN's use-root-layout-archive-retention.ts).
-//
-//   node apps/android-native/scripts/check-archive-retention-device.mjs <adb-serial> [apk]
-//
-// Starts a WebDAV folder (sync-harness.mjs serveWebdav) on 127.0.0.1 and maps the phone's port to it (`adb reverse`). Then:
-//   (1) WebDAV set up through Settings › Sync; two archived tasks are put into the folder's document (one archived 20 years
-//       ago, one 5 days ago) and Sync now brings both to the phone;
-//   (2) Settings › Data › Archive retention: 7000 days typed, Save shows RN's review with only seeded old tasks eligible (this
-//       run's, and an earlier stopped run's); it refuses to apply otherwise, so nothing else in the library is removed;
-//   (3) the server down, the app killed and started again: the start's run waits for this session's first sync
-//       (`skipped=waiting-for-sync`) and removes nothing;
-//   (4) the server back, a task editor open, a leave and a return: the run logs `skipped=editor-open` and removes nothing;
-//   (5) the editor closed, leave and return until the run purged: the old task is purged on the phone, this week's stays.
-// On exit it sets Archive retention back to Never and Sync to Off, removes the port mapping, stops the server, puts rotation
-// back and leaves the phone on its home screen. It installs with `install -r` and touches only the development package.
-// Exit 0 = pass, 1 = fail, 2 = refused, 3 = stopped.
+
+
+
 import { execFileSync } from 'node:child_process';
 import { createHash, randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -61,7 +48,7 @@ const { sh, home, front, requireAppFront, pid, screen, waitFor, tap, tapExpectin
 const runAs = (command) => sh(`run-as ${PKG} sh -c '${command}'`);
 const allLogs = () => execFileSync(adbBin, ['-s', serial, 'logcat', '-d', '-s', `${TAG}:*`], { encoding: 'utf8', maxBuffer: 64 << 20 }).replace(/\\/g, '');
 const RAN = 'Native archive retention ran';
-/** The retention lines logged after [since] (a logStamp) that hold every one of [needles]. */
+
 const ran = (since, ...needles) => linesAfter(allLogs(), since).filter((line) => line.includes(RAN) && needles.every((needle) => line.includes(needle)));
 
 const pullDb = () => {
@@ -72,7 +59,7 @@ const pullDb = () => {
     for (const suffix of ['', '-wal', '-journal']) if (present.includes(`${DB}${suffix}`)) device.pull(`files/${DB}${suffix}`, resolve(dir, `${DB}${suffix}`));
     return resolve(dir, DB);
 };
-/** Each seeded task's row on the phone: `{ id, status, deletedAt, purgedAt }`, or absent. */
+
 const seeded = () => {
     const out = execFileSync('sqlite3', ['-json', pullDb(), `SELECT id, status, deletedAt, purgedAt FROM tasks WHERE id IN ('${OLD.id}', '${RECENT.id}')`],
         { encoding: 'utf8', maxBuffer: 1 << 28 }).trim();
@@ -88,16 +75,16 @@ const until = async (description, holds, timeoutMs = 120_000, everyMs = 2_000) =
         await sleep(everyMs);
     }
 };
-/** The app's process gone, as after the system reclaimed it (a signal, never a force-stop). */
+
 const killApp = async () => {
     if (front().includes(`${PKG}/`)) sh('input keyevent KEYCODE_HOME');
     for (let attempt = 0; attempt < 20 && pid(); attempt += 1) {
-        try { runAs(`kill -9 ${pid()}`); } catch { /* gone meanwhile */ }
+        try { runAs(`kill -9 ${pid()}`); } catch {                      }
         await sleep(500);
     }
     if (pid()) fail('the app process did not end');
 };
-/** A leave and a return (RN's AppState background, then active). */
+
 const leaveAndReturn = async () => {
     sh('input keyevent KEYCODE_HOME');
     await waitFor('home screen', () => front().includes(`${home}/`), 10_000);
@@ -106,7 +93,7 @@ const leaveAndReturn = async () => {
     await waitFor('the app in front again', () => front().includes(`${PKG}/`), 30_000);
 };
 
-// ---- Settings (core's English), as check-bgsync-device.mjs drives it ----
+
 const sheetOpen = (nodes) => Boolean(tagged(nodes, 'more-sheet'));
 const onInbox = (nodes) => !tagged(nodes, 'quick-capture') && !tagged(nodes, 'menu-screen') && !tagged(nodes, 'global-search') && !inEditor(nodes)
     && tabSelected(nodes, en['tab.inbox']) && Number.isFinite(inboxCount(nodes));
@@ -174,7 +161,7 @@ const setNever = async () => {
 let dav = null;
 let applied = false;
 let syncSet = false;
-/** Archive retention back to Never and Sync to Off, so no later check meets either; a failure here is only printed. */
+
 const restore = async () => {
     if (dav) dav.state.down = false;
     if ((applied || syncSet) && !front().includes(`${PKG}/`)) device.launch(ACTIVITY);
@@ -205,7 +192,7 @@ try {
     device.launch(ACTIVITY);
     await waitFor('the Inbox', onInbox, 90_000);
 
-    // (1) WebDAV through Settings › Sync, then the two archived tasks through the folder.
+
     let nodes = await openSync();
     if (!nodes.some((node) => node.text === en['settings.syncOff'])) {
         await tapTag('sync-backend-off', (next) => next.some((node) => node.text === en['settings.syncOff']), 'Sync off');
@@ -220,7 +207,7 @@ try {
     await fill('sync-username', USER);
     await fill('sync-password', PASSWORD);
     let since = logStamp(allLogs());
-    // A Save runs a verification sync and then a normal sync (~95 s on the test phone's library, 10-13).
+
     await tapTag('sync-save', () => commands('saveSyncBackend', since) > 0, 'Save', 240_000);
     const document = await until('the phone\'s data in the WebDAV folder', () => webdavDocument(dav, FOLDER), 60_000);
     const path = `${FOLDER}/data.json`;
@@ -234,12 +221,12 @@ try {
     let rows = await until('both seeded tasks on the phone', () => { const found = seeded(); return live(found[OLD.id]) && live(found[RECENT.id]) && found; }, 60_000);
     check(rows[OLD.id].status === 'archived' && rows[RECENT.id].status === 'archived', '(1) Sync now brought both archived tasks to the phone');
 
-    // (2) Settings › Data › Archive retention: RN's review, then Apply.
+
     await openData();
     await fill('archive-retention-days', String(DAYS));
     await hideKeyboard();
     nodes = await tapTag('archive-retention-save', (next) => Boolean(tagged(next, 'archive-retention-review')), 'Save and its review', 60_000);
-    // Only seeded tasks may be eligible: this run's, and an earlier run's that stopped before its purge (same title shape).
+
     const seededLine = new RegExp(`^${en['calendar.tasks']}: Retention old \\d+$`);
     const ownLines = nodes.filter((node) => seededLine.test(node.text ?? '')).length;
     const counts = en['settings.archiveRetentionCounts'].replace('{tasks}', String(ownLines)).replace('{projects}', '0').replace('{sections}', '0');
@@ -248,12 +235,12 @@ try {
         throw new Refused(`the review lists more than this check's seeded tasks (expected "${counts}"); nothing applied, so no other item is removed`);
     }
     check(true, `(2) Save shows RN's review: "${counts}" and the seeded task`);
-    // No hideKeyboard here: its Back would close the review (Save already took the field's focus).
+
     await tapExpecting(tagged(nodes, 'archive-retention-apply') ?? fail('no Apply retention'), (next) => next.some((node) => node.text === current(DAYS)), 'Apply retention', 30_000);
     applied = true;
     check(live(seeded()[OLD.id]), `(2) Apply stores ${DAYS} days and removes nothing by itself`);
 
-    // (3) A new session with the server down: the start's run waits for the first sync.
+
     dav.state.down = true;
     await killApp();
     since = logStamp(allLogs());
@@ -262,7 +249,7 @@ try {
     await until('the start\'s run', () => ran(since, '"skipped":"waiting-for-sync"').length > 0, 60_000);
     check(live(seeded()[OLD.id]), '(3) with no sync this session, the start\'s run logged skipped=waiting-for-sync and removed nothing');
 
-    // (4) The server back, an editor open: a return runs nothing.
+
     dav.state.down = false;
     nodes = await toTabs();
     const row = taskRows(nodes)[0] ?? fail('no task row in the Inbox to open an editor on');
@@ -272,7 +259,7 @@ try {
     await until('the return\'s run with the editor open', () => ran(since, '"skipped":"editor-open"').length > 0, 60_000);
     check(inEditor(await screen()) && live(seeded()[OLD.id]), '(4) with an editor open, the return\'s run logged skipped=editor-open and removed nothing');
 
-    // (5) The editor closed: the next return purges (the return's own sync may finish after its run, so a second one may be needed).
+
     await toTabs();
     since = logStamp(allLogs());
     for (let attempt = 0; attempt < 4 && ran(since, '"outcome":"purged"').length === 0; attempt += 1) {
@@ -289,7 +276,7 @@ try {
     try {
         console.log(`evidence - app log (retention):\n${allLogs().split('\n').filter((line) => /archive retention|Core action|sync started/i.test(line))
             .slice(-40).map((line) => line.slice(0, 300)).join('\n')}`);
-    } catch { /* the phone is gone */ }
+    } catch {                         }
     if (!(error instanceof Refused)) evidenced(error);
     console.error(error instanceof Refused ? `REFUSED: ${error.message}` : error instanceof Stopped ? `STOPPED: ${error.message}` : `FAIL: ${error.message}`);
     process.exitCode = error instanceof Refused ? 2 : error instanceof Stopped ? 3 : 1;

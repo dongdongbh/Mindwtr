@@ -8,12 +8,11 @@ export const DEFAULT_EMAIL_CAPTURE_FOLDER = 'Mindwtr';
 
 const DEFAULT_POLL_INTERVAL_MS = 5 * 60 * 1000;
 const DEFAULT_INITIAL_POLL_DELAY_MS = 20_000;
-// A backlog (first setup with a full folder) is drained in bounded rounds per
-// cycle; anything left waits for the next interval.
+
+
 const DEFAULT_MAX_ROUNDS_PER_CYCLE = 10;
 
-// Rust falls back to `uid:<uidValidity>:<uid>` when an email has no Message-ID header.
-// That value changes when the server renumbers the folder, so it cannot name the task.
+
 const UID_FALLBACK_MESSAGE_ID = /^uid:\d+:\d+$/;
 
 export const emailCaptureIdFor = (messageId: string): string | undefined => {
@@ -58,8 +57,8 @@ export type EmailCaptureStatus = {
     lastPollAt: string | null;
     lastImportCount: number;
     lastError: EmailCaptureErrorInfo | null;
-    // Terminal errors (bad credentials, broken config) stop polling until the
-    // settings are saved again; retrying them on a timer cannot succeed.
+
+
     terminal: boolean;
 };
 
@@ -136,7 +135,7 @@ export const subscribeEmailCaptureStatus = (listener: EmailCaptureStatusListener
 
 let activeController: EmailCaptureController | null = null;
 
-/** Clears a terminal error and schedules a prompt re-poll after settings change. */
+
 export const notifyEmailCaptureConfigChanged = () => {
     publishStatus({ ...currentStatus, lastError: null, terminal: false });
     activeController?.handleConfigChanged();
@@ -239,9 +238,8 @@ export const createEmailCaptureController = (
                     if (!added.success) {
                         throw new Error(added.error || 'Failed to add captured email tasks');
                     }
-                    // The IMAP watermark only advances after the tasks are
-                    // durably persisted; a crash in between re-imports mail
-                    // instead of silently dropping it.
+
+
                     await options.flushPendingSave();
                     imported += result.messages.length;
                 }

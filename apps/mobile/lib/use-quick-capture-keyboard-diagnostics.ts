@@ -24,7 +24,7 @@ const loggingEnabled = () => {
   try { return isLoggingEnabled(); } catch { return false; }
 };
 
-/** Observe the existing focus/inset path without changing keyboard behavior. */
+
 export function useQuickCaptureKeyboardDiagnostics(options: Options) {
   const latest = useRef(options);
   latest.current = options;
@@ -53,7 +53,7 @@ export function useQuickCaptureKeyboardDiagnostics(options: Options) {
         ...extra,
       } }).catch(() => undefined);
     } catch {
-      // Optional diagnostics must never interrupt the focus request.
+
     }
   }, []);
   const settle = useCallback((attempt: Attempt) => {
@@ -63,7 +63,7 @@ export function useQuickCaptureKeyboardDiagnostics(options: Options) {
     attempt.timer = setTimeout(() => {
       attempt.timer = undefined;
       if (attemptRef.current !== attempt || !loggingEnabled()) return;
-      // Baseline survives a missing native measurement callback.
+
       emit(attempt, 'settled', { outcome: 'baseline' });
       try {
         latest.current.inputRef.current?.measureInWindow?.((x, y, width, height) => {
@@ -74,7 +74,7 @@ export function useQuickCaptureKeyboardDiagnostics(options: Options) {
           });
         });
       } catch {
-        // The baseline still records settlement if native measurement is unavailable.
+
       }
     }, SETTLE_MS);
   }, [emit]);
@@ -100,7 +100,7 @@ export function useQuickCaptureKeyboardDiagnostics(options: Options) {
           settle(attempt);
         }));
       } catch {
-        // A missing native event capability must not prevent opening the sheet.
+
       }
     }
     return () => {
@@ -108,7 +108,7 @@ export function useQuickCaptureKeyboardDiagnostics(options: Options) {
       attemptRef.current = null;
       if (attempt.timer !== undefined) clearTimeout(attempt.timer);
       subscriptions.forEach((subscription) => {
-        try { subscription.remove(); } catch { /* Continue releasing the remaining listeners. */ }
+        try { subscription.remove(); } catch {                                                   }
       });
     };
   }, [options.visible, options.openRequestId, emit, settle]);

@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { applyMarkdownToolbarAction, MARKDOWN_TOOLBAR_ACTIONS } from './markdown';
 import { createNativeHostContract } from './native-host-contract';
 
-// The Android expanded editor's Markdown toolbar (RN's MarkdownFormatToolbar): core's actions with RN's labels, and each
-// action on the editor's text and selection. Both are reads; nothing is written.
+
 describe('the native Markdown toolbar', () => {
     it('lists core\'s actions in RN\'s order with RN\'s labels, falling back as translateWithFallback does', async () => {
         const host = createNativeHostContract();
@@ -13,7 +12,7 @@ describe('the native Markdown toolbar', () => {
         if (!reply.ok) return;
         expect(reply.value.actions.map((action) => action.id)).toEqual(MARKDOWN_TOOLBAR_ACTIONS.map((action) => action.id));
         expect(reply.value.actions.slice(0, 2)).toEqual([{ id: 'heading', label: 'Insert heading', shortLabel: 'H1' }, { id: 'bold', label: 'Bold', shortLabel: 'B' }]);
-        // en.ts now has its own text, the same as core's fallback label.
+
         expect(reply.value.actions.find((action) => action.id === 'quote')?.label).toBe('Quote');
         expect(reply.value.undoLabel).toBe('Undo');
     });

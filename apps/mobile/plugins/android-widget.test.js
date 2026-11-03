@@ -92,8 +92,8 @@ describe('android-widget', () => {
     expect(xml).toContain('android:targetCellWidth="3"');
     expect(xml).toContain('android:targetCellHeight="2"');
     expect(xml).toContain('android:resizeMode="horizontal|vertical"');
-    // keyguard lets the OS list the widget in its lock-screen picker where it
-    // offers one (Android 15+ tablets first); home_screen keeps the launcher.
+
+
     expect(xml).toContain('android:widgetCategory="home_screen|keyguard"');
     expect(xml).toContain('android:initialLayout="@layout/mindwtr_widget"');
     expect(xml).toContain('android:previewImage="@drawable/mindwtr_widget_preview"');
@@ -101,9 +101,8 @@ describe('android-widget', () => {
     expect(buildWidgetInfoXml(compact)).toContain('android:updatePeriodMillis="0"');
     expect(buildWidgetInfoXml(quickCapture)).toContain('android:updatePeriodMillis="0"');
     expect(xml).toContain(`android:configure="${CONFIGURE_ACTIVITY_NAME}"`);
-    // reconfigurable = the launcher's edit action on a placed widget;
-    // configuration_optional = placement skips the picker and lands on the
-    // default list, because the widget's own header opens the chooser (#1173).
+
+
     expect(xml).toContain('android:widgetFeatures="reconfigurable|configuration_optional"');
     expect(buildWidgetStringsXml([tasks, quickCapture])).toContain('Inbox, focus, and quick capture');
 
@@ -122,7 +121,7 @@ describe('android-widget', () => {
     expect(compactXml).toContain('android:targetCellHeight="2"');
     expect(compactXml).toContain('android:initialLayout="@layout/mindwtr_compact_widget"');
     expect(compactXml).toContain('android:previewImage="@drawable/mindwtr_compact_widget_preview"');
-    // Compact's settings hold only the background choice; placement still skips them.
+
     expect(compactXml).toContain(`android:configure="${CONFIGURE_ACTIVITY_NAME}"`);
     expect(compactXml).toContain('android:widgetFeatures="reconfigurable|configuration_optional"');
   });
@@ -131,7 +130,7 @@ describe('android-widget', () => {
     const xml = buildWidgetStylesXml();
     expect(xml).toContain('parent="Theme.AppCompat.DayNight.Dialog"');
     expect(xml).toContain('<item name="windowNoTitle">true</item>');
-    // The dialog draws its own rounded surface in the app palette; the window itself stays clear.
+
     expect(xml).toContain('<item name="android:windowBackground">@android:color/transparent</item>');
     expect(xml).toContain('<item name="android:backgroundDimEnabled">true</item>');
   });
@@ -169,7 +168,7 @@ describe('android-widget', () => {
       $: { 'android:name': SERVICE_NAME, 'android:permission': 'android.permission.BIND_REMOTEVIEWS', 'android:exported': 'false' },
     }]);
     expect(application.activity).toHaveLength(4);
-    // The task sheet a widget row opens: floating, own task, never exported.
+
     expect(application.activity[3].$).toMatchObject({
       'android:name': 'tech.dongdongbh.mindwtr.androidwidget.TaskPeekActivity',
       'android:exported': 'false',
@@ -178,8 +177,8 @@ describe('android-widget', () => {
       'android:taskAffinity': '',
     });
     expect(application.activity[2].$).toMatchObject({ 'android:name': TAP_ACTIVITY_NAME, 'android:exported': 'false', 'android:theme': '@android:style/Theme.NoDisplay' });
-    // No affinity: the widget header's chooser runs in its own task, so closing
-    // it goes back to the launcher rather than to the app's last screen (#1173).
+
+
     expect(application.activity[1].$).toMatchObject({ 'android:name': CONFIGURE_ACTIVITY_NAME, 'android:exported': 'true', 'android:taskAffinity': '' });
     expect(application.activity[1]['intent-filter'][0].action[0].$['android:name']).toBe('android.appwidget.action.APPWIDGET_CONFIGURE');
     expect(application.activity[0].$).toMatchObject({

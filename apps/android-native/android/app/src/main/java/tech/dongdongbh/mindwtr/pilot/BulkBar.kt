@@ -61,28 +61,17 @@ import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
 
-/*
- * RN's selection mode on the Inbox, Waiting, Someday, Reference and Done (task-list/TaskListBulkBar.tsx, TaskListTagModal.tsx,
- * TaskListBulkOrganizeModal.tsx and TaskListBulkDateField.tsx) on core's bulk contract (native-host-contract-bulk-actions.ts):
- * the bar over the list, the Add tag dialog, and Bulk Organize. Every count, label, enabled state and edit is core's
- * getBulkActions reply (MenuPage.bulk); every write is core's runBulkAction through MenuModel.bulkAction.
- */
 
-/**
- * RN's bulk bar: core's count (with the running action's label and a spinner), the exit button, core's statuses to move to,
- * then Move to section (Someday), Bulk organize (the Inbox), Range, Add tag, Remove tag and Delete, each enabled as core says.
- * Core's stateless Select all leads the actions (RN's TaskList has none; the contract offers it, as Archive's bar does).
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun BulkBar(model: InboxViewModel) = with(model.menu) {
-    // Review draws its own bar (ReviewScreen.kt); its page carries core's bar only for the Organize dialog.
+
     val bulk = page?.bulk?.takeIf { list in BULK_LISTS } ?: return
     val theme = LocalTheme.current
     val c = theme.colors
     val bar = bulk.getJSONObject("bar")
     val labels = bulk.getJSONObject("labels")
-    // While a command runs or a retry is owed the bar's controls wait; core's own enabled rules apply on top.
+
     val enabled = { control: JSONObject -> idle && control.getBoolean("enabled") }
     Column(Modifier.fillMaxWidth().background(c.cardBg).rnBorderBottom(c.border).padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -126,7 +115,7 @@ fun BulkBar(model: InboxViewModel) = with(model.menu) {
     }
 }
 
-/** RN's bulk bar exit (bulkExitButton): a 32 circle with Lucide X at 16, named [label] (core's bulk.exitSelect); dimmed while off. */
+
 @Composable
 internal fun BulkExitButton(label: String, enabled: Boolean, onExit: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -137,7 +126,7 @@ internal fun BulkExitButton(label: String, enabled: Boolean, onExit: () -> Unit)
     }
 }
 
-/** One of the bar's buttons (RN's bulkMoveButton and bulkActionButton): one node with its label, role and state; dimmed while off. */
+
 @Composable
 internal fun BarButton(label: String, enabled: Boolean, background: Color, color: Color, description: String = label, selected: Boolean? = null,
                       weight: Int = 600, icon: ImageVector? = null, action: () -> Unit) {
@@ -154,10 +143,7 @@ internal fun BarButton(label: String, enabled: Boolean, background: Color, color
     }
 }
 
-/**
- * RN's Add tag dialog (TaskListTagModal): core's title, the field with core's placeholder, Cancel and Save (off until something
- * is typed). Save sends core's editTaskTokens with the typed tag; core adds its # and writes only the rows it changes.
- */
+
 @Composable
 fun AddTagDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val text = page?.bulk?.getJSONObject("addTag") ?: return
@@ -176,7 +162,7 @@ fun AddTagDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     }
 }
 
-/** RN's modal card (task-list.styles modalOverlay and modalCard): a dimmed screen and a centered card; the backdrop closes it. */
+
 @Composable
 private fun ModalCard(model: InboxViewModel, content: @Composable () -> Unit) {
     val theme = LocalTheme.current
@@ -195,9 +181,9 @@ private fun TextAction(label: String, color: Color, enabled: Boolean, action: ()
         .clickable(enabled = enabled, onClick = action).fade(if (enabled) 1f else 0.5f).padding(horizontal = 12.dp, vertical = 12.dp))
 }
 
-/** RN's modal input: bordered, radius 8, the input background; [value] as typed; [onDone] is the keyboard's Done (RN's onSubmitEditing). */
+
 @Composable
-private fun ModalInput(value: String, placeholder: String, description: String, modifier: Modifier = Modifier, enabled: Boolean = true, onDone: (() -> Unit)? = null,
+internal fun ModalInput(value: String, placeholder: String, description: String, modifier: Modifier = Modifier, enabled: Boolean = true, onDone: (() -> Unit)? = null,
                        onChange: (String) -> Unit) {
     val c = LocalTheme.current.colors
     val shape = RoundedCornerShape(8.dp)
@@ -213,12 +199,7 @@ private fun ModalInput(value: String, placeholder: String, description: String, 
         })
 }
 
-/**
- * RN's Bulk organize (TaskListBulkOrganizeModal): core's title and subtitle, then Status (core's chips), Project and Area (core's
- * pickers, Keep and None first), the person for Waiting, Start, Due and Review (typed as a local day, the calendar from core's
- * start, core's Today and Tomorrow), Contexts and Tags, core's validation line, Cancel and Apply. Every control sends core's
- * edit (typed text core's setText) and shows the draft core answered. The project and area pickers can create one (core's "+ Create").
- */
+
 @Composable
 fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
     val organize = page?.bulk?.optJSONObject("organize") ?: return
@@ -281,7 +262,7 @@ fun OrganizeDialog(model: InboxViewModel, open: JSONObject) = with(model.menu) {
                     .clearAndSetSemantics { contentDescription = cancel; role = Role.Button; if (!model.busy) onClick { keepDialog(null); true } else disabled() }
                     .clickable(enabled = !model.busy) { keepDialog(null) }.padding(horizontal = 12.dp, vertical = 10.dp))
                 val apply = organize.getString("applyLabel")
-                // The lists' bar counts the selection (Select all included); Review's lists its selected ids.
+
                 val canApply = !locked && (page?.bulk?.let { it.optInt("selectedCount", it.optJSONArray("selectedIds")?.length() ?: 0) } ?: 0) > 0
                 Row(Modifier.fade(if (canApply) 1f else 0.6f).heightIn(min = 40.dp).clip(RoundedCornerShape(8.dp)).background(theme.filledBg)
                     .clearAndSetSemantics { contentDescription = apply; role = Role.Button; if (canApply) onClick { organizeApply(); true } else disabled() }
@@ -309,7 +290,7 @@ private fun Section(label: String, content: @Composable () -> Unit) = Column(ver
     content()
 }
 
-/** RN's bulkOrganizeChip: a 34-high pill, the tint when chosen. */
+
 @Composable
 private fun OrganizeChip(label: String, selected: Boolean, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -320,7 +301,7 @@ private fun OrganizeChip(label: String, selected: Boolean, enabled: Boolean, act
     }
 }
 
-/** RN's picker row: core's value and a chevron, core's "label: value" for TalkBack; dimmed while off (Area under a chosen project). */
+
 @Composable
 private fun PickerRow(description: String, value: String, enabled: Boolean, action: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -334,10 +315,7 @@ private fun PickerRow(description: String, value: String, enabled: Boolean, acti
     }
 }
 
-/**
- * RN's bulk date field (TaskListBulkDateField): core's label, the field (core's date in the user's format until it is typed in;
- * a typed day goes to core as typed), the calendar (core's start), and core's Today and Tomorrow (the chosen one clears it).
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DateField(model: InboxViewModel, open: JSONObject, date: JSONObject, locked: Boolean) = with(model.menu) {
@@ -374,13 +352,7 @@ private fun DateField(model: InboxViewModel, open: JSONObject, date: JSONObject,
     }
 }
 
-/**
- * Bulk Organize's project or area picker ([kind]): the search box, then core's choices (Keep and None first, whatever the
- * search), the chosen one checked. A choice sends its edit and returns to the dialog. For a search no option names, core's "+ Create"
- * row makes the project or area (core's createBulkOrganizeDestination, on disk first) and returns to the dialog with it chosen; the
- * keyboard's Done runs core's `submit` (the match, or the create). A create that failed shows core's line; while its retry is owed,
- * the search is locked and the row sends that exact request again.
- */
+
 @Composable
 private fun OrganizePicker(model: InboxViewModel, open: JSONObject, kind: String) = with(model.menu) {
     val theme = LocalTheme.current

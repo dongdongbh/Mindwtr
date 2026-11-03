@@ -7,21 +7,18 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 
-/**
- * RN's openExternalLink (c2e30c2e5): one explicit attempt with the exact string; when nothing opens it, [failed] gets that string
- * to offer Copy link. Injected boundaries keep the original intact and test missing handlers.
- */
+
 internal fun attemptExternalLink(original: String, open: (String) -> Unit, failed: (String) -> Unit,
                                  logFailure: (Exception) -> Unit = {}): Boolean =
     try { open(original); true } catch (failure: Exception) { logFailure(failure); failed(original); false }
 
-/** An UpNote link's handoff attempt (#1331); null for any other link. */
+
 internal fun attemptUpNoteLink(original: String, open: (String) -> Unit, failed: (String) -> Unit): Boolean? =
     if (!isUpNoteLink(original)) null else attemptExternalLink(original, open, failed)
 
 private fun isUpNoteLink(original: String) = original.startsWith("upnote://", ignoreCase = true)
 
-/** RN's failed-link alert: "Could not open this link", Cancel and Copy link (the exact text), and a failed copy says so. */
+
 private fun offerLinkCopy(context: Context, exact: String, t: (String) -> String) {
     AlertDialog.Builder(context).setTitle(t("common.error")).setMessage(t("markdown.openLinkFailed"))
         .setPositiveButton(t("markdown.copyLink")) { _, _ ->
@@ -37,7 +34,7 @@ private fun offerLinkCopy(context: Context, exact: String, t: (String) -> String
 
 private fun viewLink(context: Context, link: String) = context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)))
 
-/** An external link of a description, project notes or an attachment (RN's openExternalLink): any scheme, Copy link when nothing opens it. */
+
 internal fun openExternalLink(context: Context, original: String, t: (String) -> String, logFailure: (Exception) -> Unit = {},
                               diagnostic: (String) -> Unit) {
     val opened = attemptExternalLink(original, open = { viewLink(context, it) }, failed = { offerLinkCopy(context, it, t) }, logFailure)

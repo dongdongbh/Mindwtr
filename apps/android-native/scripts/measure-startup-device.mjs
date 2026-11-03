@@ -1,21 +1,6 @@
-// Native Android startup measurement. Measures; changes nothing in the app.
-//
-//   node measure-startup-device.mjs fixture <tasks> <out.db>
-//       A synthetic database made by core's own SqliteAdapter from scripts/performance/fixture.mjs (needs host `bun`).
-//   node measure-startup-device.mjs seed <serial> <pkg> <seed.apk> <benchmark.apk> <db file | empty> [RKStorage file]
-//       Installs the debuggable twin (build type benchmarkSeed), puts the database (and RN's AsyncStorage file, when given:
-//       measure-merge-device.mjs's sync settings) in place with run-as, then installs the benchmark build over it (same id and
-//       key: the data stays). Only for the benchmark package: never the dev app's data.
-//   node measure-startup-device.mjs run <serial> <pkg> <label> <out dir> [runs=10] [modes=cold,warm,hot] [compile=keep]
-//       `runs` samples per mode after one discarded warm-up. cold = force-stop; warm = a new task on the live process (the
-//       Activity and its screen are made again, the host is reused); hot = HOME, then launch. Each sample: am start -W's
-//       LaunchState, TotalTime (time to first frame) and WaitTime, and the "Fully drawn" time the Inbox's first rows
-//       report (ReportDrawnWhen, InboxScreen.kt; cold and warm only). A sample whose LaunchState is not its mode, or that
-//       never reports Fully drawn, fails the run. compile=verify|speed-profile|speed recompiles the app first (ART).
-//   node measure-startup-device.mjs trace <serial> <pkg> <out.perfetto-trace>
-//       One cold start under Perfetto: app trace sections (atrace_apps), scheduler, and the system's startup slices.
-//
-// Every phone command runs inside the coordinator's lock: flock -w 14400 /home/dd/scratch/s23.lock node ...
+
+
+
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -70,8 +55,8 @@ if (command === 'fixture') {
     adb('install', '-r', seedApk);
     sh(`am force-stop ${pkg}`);
     const runAs = (c) => sh(`run-as ${pkg} ${c}`);
-    // The whole app state goes: database, its recovery checkpoint, the journal, device writes and screen state, and RN's
-    // RKStorage under databases/ (a sync backend left there ran sync cycles over the 5,000 tasks into the warm starts).
+
+
     runAs('rm -rf files no_backup shared_prefs cache databases');
     runAs('mkdir -p files');
     if (db !== 'empty') {
@@ -124,15 +109,15 @@ if (command === 'fixture') {
         if (mode === 'hot') { home(); await sleep(1000); }
         if (mode === 'warm') { home(); await sleep(1000); }
         const since = phoneTime();
-        // warm: NEW_TASK | CLEAR_TASK finishes the running Activity and makes a new one in the same process.
+
         const result = launch(mode === 'warm' ? '-f 0x10008000' : '');
         const drawn = mode === 'hot' ? null : await fullyDrawn(since);
-        await sleep(1500); // the screen's own reads after first content end before the next sample
+        await sleep(1500);
         const pid = sh(`pidof ${pkg}`);
         return { mode, ...result, fullyDrawn: drawn, pid };
     };
-    // An INVALID sample's screen (a cold start whose first content never drew): the screenshot, the UI tree and the top
-    // activity, next to the run's JSON, so a miss shows what was on screen.
+
+
     const evidence = (name) => {
         mkdirSync(outDir, { recursive: true });
         try {
@@ -149,7 +134,7 @@ if (command === 'fixture') {
     const modes = modesText.split(',');
     for (const mode of modes) {
         if (mode !== 'cold') { sh(`am force-stop ${pkg}`); launch(); await fullyDrawn(phoneTime()); await sleep(1500); }
-        await sample(mode); // discarded warm-up
+        await sample(mode);
         for (let i = 0; i < runs; i += 1) {
             const s = await sample(mode);
             const bad = s.state?.toUpperCase() !== mode.toUpperCase() || !(s.total > 0) || (mode !== 'hot' && s.fullyDrawn == null);

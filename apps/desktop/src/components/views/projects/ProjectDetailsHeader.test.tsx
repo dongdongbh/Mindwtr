@@ -303,9 +303,7 @@ describe('ProjectDetailsHeader', () => {
         expect(onReactivate).toHaveBeenCalledTimes(1);
     });
 
-    // A second 1.2.8 report (archived project, narrow window on macOS) showed the toolbar
-    // still painting over the menu with the z-30 lift in place: the header's own stacking
-    // context wins there. The menu therefore leaves the header entirely.
+
     it('renders the menu in a portal outside the header so no header stacking context can cover it', () => {
         render(
             <ProjectDetailsHeader
@@ -334,8 +332,7 @@ describe('ProjectDetailsHeader', () => {
         expect(screen.getByRole('menuitem', { name: 'Reactivate' })).toBeInTheDocument();
     });
 
-    // The header is a size container, so it is its own stacking context and the sticky task
-    // toolbar rendered after it would paint over an open menu (reported from a 1.2.8 build).
+
     it('lifts the header above the sticky toolbar only while the menu is open', () => {
         render(
             <ProjectDetailsHeader

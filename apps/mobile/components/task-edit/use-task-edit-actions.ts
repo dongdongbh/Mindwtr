@@ -166,7 +166,7 @@ export function useTaskEditActions({
     const handleResetChecklist = useCallback(async () => {
         const current = taskEditDraft?.checklist || [];
         if (current.length === 0 || !task) return;
-        // Items added in this editor are not saved yet: only the draft reopens them.
+
         const saved = useTaskStore.getState()._tasksById.get(task.id) ?? task;
         if (saved.checklist?.length) {
             const succeeded = await runStoreAction(
@@ -423,9 +423,7 @@ export function useTaskEditActions({
         void draftLifecycle.convertToReference();
     }, [canMutate, draftLifecycle]);
 
-    // The task is soft-deleted by the conversion, so the open draft is committed
-    // first (save closes the editor) and only then does the section get built —
-    // otherwise edits made in this session would be lost with the task (#1106).
+
     const handleConvertToSection = useCallback(async () => {
         if (!task || !convertTaskToSection || !canMutate()) return;
         const saved = await draftLifecycle.save();
@@ -442,7 +440,7 @@ export function useTaskEditActions({
         });
     }, [canMutate, convertTaskToSection, draftLifecycle, runStoreAction, showToast, t, task]);
 
-    // The key comes back too: a failure's text must never show it.
+
     const getAIProvider = useCallback(async () => {
         if (!aiEnabled) {
             Alert.alert(t('ai.disabledTitle'), t('ai.disabledBody'));

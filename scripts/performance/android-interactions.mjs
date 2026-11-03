@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
-// Intentionally no package/activity override and no install/reset/import command.
+
 const target = 'tech.dongdongbh.mindwtr.benchmark';
 const testPackage = 'tech.dongdongbh.mindwtr.macrobenchmark';
 const scenarios = ['coldStartup', 'inboxScroll', 'settingsNavigation', 'captureOpenClose', 'captureSave'];
@@ -64,8 +64,8 @@ const metadata = {
 const saveMetadata = () => writeFileSync(join(directory, 'metadata.json'), `${JSON.stringify(metadata, null, 2)}\n`);
 saveMetadata();
 if (scenario.startsWith('capture')) {
-  // Correctness is not a latency metric. Require an actual visible IME after
-  // cold and warm opens before compilation warm-ups or measured interactions.
+
+
   const coldLaunches = 10;
   metadata.readiness = { status: 'running', coldLaunches, expectedSamples: coldLaunches * 2,
     report: 'readiness/keyboard-readiness.json' };
@@ -80,8 +80,8 @@ if (scenario.startsWith('capture')) {
   const readinessLog = `${readiness.stdout ?? ''}\n${readiness.stderr ?? ''}`;
   writeFileSync(join(directory, 'readiness-instrumentation.txt'), readinessLog);
   try {
-    // Collect even a failing test's report/screenshot, but never accept JSON
-    // alone: Android instrumentation can return shell exit 0 for a failed test.
+
+
     adb('pull', `${remoteRoot}/readiness`, join(directory, 'readiness'));
     assert(!readiness.error && readiness.status === 0 && /OK \(1 test\)/.test(readinessLog),
       `Keyboard-readiness instrumentation failed: ${readiness.error?.message ?? readinessLog}`);
@@ -197,9 +197,8 @@ try {
     assert.equal(remainingIterations.size, 0, 'Missing Perfetto trace iteration');
   }
 } catch (error) { collectionError = String(error); }
-// A successful native report alone cannot establish build identity: another
-// build/install can replace either package after the initial check. Resolve the
-// currently installed paths again and retain collected evidence even on failure.
+
+
 metadata.finalBuildIdentity = { status: 'checking' };
 try {
   metadata.finalBuildIdentity.apkHash = installedApk(target);

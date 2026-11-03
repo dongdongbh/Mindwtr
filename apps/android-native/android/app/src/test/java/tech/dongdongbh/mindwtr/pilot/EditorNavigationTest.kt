@@ -6,12 +6,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** RN's close on navigation (#1410): a widget tap or link closes only an editor that holds nothing (review of 79ac32ea9). */
+
 class EditorNavigationTest {
     private val date = JSONObject().put("value", "null").put("label", "").put("hasTime", false).put("dateOnly", "null")
         .put("picker", JSONObject().put("date", "").put("time", "")).put("quickDates", JSONArray())
 
-    /** The smallest editor model core could send: one task with an empty checklist. */
+
     private fun model(readOnly: Boolean) = EditorModel.of(JSONObject().put("version", 1).put("id", "t").put("readOnly", readOnly)
         .put("focusStar", JSONObject()).put("draft", JSONObject().put("title", "Task"))
         .put("layout", JSONObject().put("sections", JSONArray()).put("showSomedaySection", false)
@@ -32,10 +32,10 @@ class EditorNavigationTest {
     }
 
     @Test fun anEditorHoldingWorkStaysOpen() {
-        // The Waiting prompt, open or with a typed name, though neither is an edit yet (review failure 2).
+
         assertFalse(opened.copy(waitingFor = "").closesOnNavigation(editsPending = false, covered = false))
         assertFalse(opened.copy(waitingFor = "Sam").closesOnNavigation(editsPending = false, covered = false))
-        // A sheet, picker, preview or AI request over it: the Add link sheet with a typed URL (review failure 1) and the rest.
+
         assertFalse(opened.closesOnNavigation(editsPending = false, covered = true))
         assertFalse(opened.closesOnNavigation(editsPending = true, covered = false))
         assertFalse(opened.copy(checklistAdd = "Buy milk").closesOnNavigation(editsPending = false, covered = false))

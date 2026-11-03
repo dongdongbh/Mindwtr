@@ -2,7 +2,7 @@ import { DOMParser } from '@xmldom/xmldom';
 import { describe, expect, it, vi } from 'vitest';
 import { createGmailCaptureTransport as createTransport, parseGmailMessage as parseMessage, type GmailAuthorization } from './gmail-capture-transport';
 import type { GmailReceiptConfig, GmailReceiptStore } from './gmail-receipt-store';
-// Moved from apps/mobile/lib/gmail-capture-service.test.ts as is: these two bind the parser RN passes, as RN's binding does.
+
 const createGmailCaptureTransport = (native: GmailAuthorization | null, getStore: () => GmailReceiptStore, newId = () => 'batch') => (
     createTransport(native, getStore, newId, DOMParser));
 const parseGmailMessage = (value: unknown) => parseMessage(value, DOMParser);
@@ -130,14 +130,14 @@ describe('bounded Gmail MIME parsing', () => {
     });
 });
 
-// Metro maps every core subpath to the barrel, so an XML parser imported here would ship in every bundle that uses core.
+
 describe('core Gmail transport imports', () => {
     it('imports no XML parser; each host passes its own', async () => {
         const { readdirSync, readFileSync } = await import('node:fs');
         const sources = readdirSync(__dirname, { recursive: true, encoding: 'utf8' })
             .filter((name) => /\.tsx?$/.test(name) && !name.includes('.test.'));
         expect(sources.filter((name) => name.includes('/')).length).toBeGreaterThan(10);
-        // Any import form: from, require( and import( all name the module in quotes.
+
         expect(sources.filter((name) => /['"`]@xmldom\//.test(readFileSync(`${__dirname}/${name}`, 'utf8')))).toEqual([]);
     });
 });

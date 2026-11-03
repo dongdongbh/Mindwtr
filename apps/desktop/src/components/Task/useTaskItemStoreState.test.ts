@@ -22,7 +22,7 @@ const seed = (project: Project) => {
     });
 };
 
-/** The same adapter TaskItem's quick-action star uses. */
+
 const canStar = (task: Task) => {
     const selected = selectTaskItemStoreState({ task, isEditing: false, hasQuickActionMenu: true })(useTaskStore.getState());
     return resolveFocusStarAction(task, {

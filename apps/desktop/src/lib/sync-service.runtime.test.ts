@@ -75,8 +75,8 @@ const buildResponse = (
         get: (name: string) => headers[name.toLowerCase()] ?? null,
     } as Headers,
     text: async () => body,
-    // A real Response always has this; the Dropbox document reader needs the raw bytes so it
-    // can tell MWENC1 ciphertext from genuinely invalid JSON before erroring (#1056).
+
+
     arrayBuffer: async () => {
         const bytes = new TextEncoder().encode(body);
         return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -93,8 +93,7 @@ const buildResponse = (
 const REMOTE_FENCE_NAME = '.mindwtr-sync-fence-v1.json';
 const REMOTE_FENCE_SERVER_DATE = 'Wed, 26 Aug 2026 12:00:00 GMT';
 
-/** Adds the compatible-client fence protocol to a provider fixture while
- * leaving ordinary document/attachment behavior with the focused test. */
+
 const withRemoteMutationFence = (
     delegate: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>,
 ) => {
@@ -252,13 +251,12 @@ const fsMocks = vi.hoisted(() => ({
     rename: vi.fn(),
     remove: vi.fn(),
     readDir: vi.fn(),
-    // #1057: check-on-touch content detection stats the local file; rejecting by
-    // default means these tests (which don't exercise that feature) see "no stat
-    // available", identical to omitting getLocalFileStat entirely.
+
+
     stat: vi.fn().mockRejectedValue(new Error('not stubbed')),
 }));
-// The sync folder's exists/mkdir/remove/rename go through async Rust commands,
-// not the fs plugin's main-thread ones (#1037).
+
+
 const syncFsMocks = vi.hoisted(() => ({
     abandonAttachmentGeneration: vi.fn(),
     exists: vi.fn(),
@@ -297,20 +295,15 @@ vi.mock('@tauri-apps/api/path', () => pathMocks);
 
 const syncServiceModulePromise = import('./sync-service');
 
-/** #1119 follow-up / #1138 added item A: the attachment presence stamp is the file backend's
- *  only durable "this device has completed a cycle against this location" fact, and without
- *  one the encryption posture gate treats a cycle as a fresh join and skips the attachment
- *  PREPARE phase. Every cycle test below models an established device, so the stamp is seeded
- *  in beforeEach; the fresh-join case has its own test at the end of this file. The scope is
- *  `desktopSyncLocationScope` for the file backend, i.e. the configured sync path verbatim. */
+
 const ESTABLISHED_FILE_LOCATION_SCOPE = JSON.stringify(['file', '/sync/data.json']);
 
 describe('desktop sync-service runtime', () => {
     beforeEach(async () => {
         const syncServiceModule = await syncServiceModulePromise;
         await syncServiceModule.SyncService.resetForTests();
-        // Runtime-cycle tests exercise established native configuration. Legacy
-        // renderer migration has dedicated coverage in sync-service.test.ts.
+
+
         (syncServiceModule.SyncService as any).didMigrate = true;
         vi.clearAllMocks();
         clearAttachmentPresenceStamp();
@@ -514,11 +507,7 @@ describe('desktop sync-service runtime', () => {
         expect(syncFsMocks.rename).not.toHaveBeenCalled();
     });
 
-    // #1138 added item A: desktop has NO pre-read no-key gate, so the attachment prepare
-    // phase (which runs BEFORE the document read) was the one path that could put plaintext
-    // attachment bytes into a folder this device has never read. The packet had to ship
-    // `file -> always established` because the file backend has no fast-sync record; the
-    // #1119 presence stamp is that missing per-location fact.
+
     describe('fresh join on the file backend (#1138 / #1119 stamp)', () => {
         it('skips the attachment prepare phase until a cycle has completed against this location', async () => {
             const syncServiceModule = await syncServiceModulePromise;
@@ -534,7 +523,7 @@ describe('desktop sync-service runtime', () => {
 
         it('runs the attachment prepare phase once the presence stamp names this location', async () => {
             const syncServiceModule = await syncServiceModulePromise;
-            // Seeded by beforeEach; restated here so the contrast with the test above is local.
+
             markAttachmentPresenceReconciled(ESTABLISHED_FILE_LOCATION_SCOPE);
 
             await syncServiceModule.SyncService.performSync();
@@ -689,8 +678,8 @@ describe('desktop sync-service runtime', () => {
                 updatedAt: '2026-01-01T00:01:00.000Z',
             }],
         };
-        // Unlike the local-only case above this edit really diverges, so the follow-up is
-        // not cleared and a second cycle runs — the hand-off this test is about.
+
+
         const editedDuringSync: AppData = {
             ...structuredClone(mergedData),
             tasks: [{
@@ -701,9 +690,7 @@ describe('desktop sync-service runtime', () => {
         };
         expect(computeSyncPayloadFingerprint(editedDuringSync)).not.toBe(computeSyncPayloadFingerprint(mergedData));
 
-        // React batches every status published in one tick, so the footer only ever renders
-        // the last of them. Sample the same way, otherwise the same-tick "queued dropped,
-        // busy published" pair reads as a frame the user never sees (#913).
+
         const renderedStatuses: Array<{ inFlight: boolean; queued: boolean }> = [];
         let pendingStatus: { inFlight: boolean; queued: boolean } | null = null;
         const unsubscribe = syncServiceModule.SyncService.subscribeSyncStatus((status) => {
@@ -789,8 +776,8 @@ describe('desktop sync-service runtime', () => {
             if (command === 'write_sync_file') return undefined;
             throw new Error(`Unexpected command: ${command} ${JSON.stringify(args)}`);
         });
-        // The activation log is the last forced write before the cycle's own idle publish,
-        // so a log sink that throws there leaves the cycle without one.
+
+
         logWarnMock.mockImplementation(() => {
             throw new Error('log sink offline');
         });
@@ -868,8 +855,7 @@ describe('desktop sync-service runtime', () => {
         const saveDataCalls = invokeMock.mock.calls.filter(([command]) => command === 'save_data');
         const savedData = saveDataCalls[saveDataCalls.length - 1]?.[1]?.data as AppData | undefined;
 
-        // The refused final write saves nothing: the marker stays for the follow-up cycle, and the
-        // edit is the store's own to save.
+
         expect(result).toEqual({ success: true, skipped: 'requeued' });
         expect(saveDataCalls).toHaveLength(1);
         expect(savedData?.settings.pendingRemoteWriteAt).toBe(pendingAt);
@@ -1633,12 +1619,8 @@ describe('desktop sync-service runtime', () => {
         expect(headFetchMock.mock.calls.some(([input, init]) =>
             init?.method === 'HEAD' || (typeof Request !== 'undefined' && input instanceof Request && input.method === 'HEAD')
         )).toBe(true);
-        // #1057 (review S1): the attachment prepare phase runs before the fast
-        // unchanged-check (desktop's `preSyncAttachmentsBeforeFastCheck: true`) so an
-        // attachment-only edit isn't skipped along with everything else. Because it
-        // runs every cycle, `shouldRunAttachmentPhase` gates it on a pure in-memory
-        // check first: this store has no file attachments, so the only request is the
-        // fast check's own HEAD — no WebDAV directory-ensure/rate-limit probe.
+
+
         expect(headFetchMock.mock.calls).toHaveLength(1);
         expect(invokeMock.mock.calls.some(([command]) => command === 'save_data')).toBe(false);
         expect(JSON.parse(localStorage.getItem('mindwtr-local-sync-status-v1') ?? '{}')).toMatchObject({

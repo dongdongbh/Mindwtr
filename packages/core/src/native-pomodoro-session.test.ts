@@ -26,7 +26,7 @@ const task = (extra = {}) => ({ id: 'task', row: taskToSqliteRow({ id: 'task', t
 const reconcile = (extra = {}, target = task()) => prepareNativePomodoroTransition({ request: { action: 'reconcile', requestId: NEXT,
     observedAtMs: AT, localDayKey: day, autoStart: { autoStartFocus: false, autoStartBreaks: false } },
     session: running(), target, deviceId: 'existing-device', ...extra });
-// The task row stored by accepted schema4 Pomodoro receipts, before reminderPolicy was appended in schema5.
+
 const SCHEMA4_TASK_COLUMNS = ['id', 'title', 'status', 'priority', 'energyLevel', 'assignedTo', 'taskMode', 'startTime',
     'relativeStartOffset', 'dueDate', 'recurrence', 'showFutureRecurrence', 'pushCount', 'repeatReminderMinutes', 'tags',
     'contexts', 'checklist', 'description', 'textDirection', 'attachments', 'location', 'projectId', 'sectionId', 'areaId',
@@ -243,20 +243,22 @@ describe('native Pomodoro explicit actions', () => {
             session: { raw: plan.sessionAfter, state: after }, target: null, deviceId: null })).toBeNull();
     });
     it('keeps original initialize/reconcile receipt bytes and accepts their unchanged plans', () => {
-        // Frozen independently from the accepted17e3d2411 model before action implementation.
-        expect(TASK_SQLITE_COLUMNS).toEqual([...SCHEMA4_TASK_COLUMNS, 'reminderPolicy', 'dueReminderLeadMinutes']);
+
+        expect(TASK_SQLITE_COLUMNS).toEqual([...SCHEMA4_TASK_COLUMNS, 'reminderPolicy', 'dueReminderLeadMinutes', 'startReminderLeadMinutes']);
         for (const [plan, digest] of [[initialize(), '9001a8d3126988bfdab00114e606ff7c2d8f88c8ae6585a790262db10a0a22f1'],
             [legacyReconcile(), '765d1dc0af0b8743c48884a4563c2975928b6849008e01140e7c4618fa2760b6']] as const) {
             expect(createHash('sha256').update(nativePomodoroReceiptPayload(plan)).digest('hex')).toBe(digest);
             expect(validatePreparedNativePomodoroTransition(JSON.parse(JSON.stringify(plan)))).toEqual(plan);
         }
         const current = reconcile()!;
-        expect(current.target!.row).toEqual([...legacyReconcile().target!.row!, null, null]);
-        const schema5 = structuredClone(current); schema5.target!.row = schema5.target!.row!.slice(0, -1);
+        expect(current.target!.row).toEqual([...legacyReconcile().target!.row!, null, null, null]);
+        const schema5 = structuredClone(current); schema5.target!.row = schema5.target!.row!.slice(0, SCHEMA4_TASK_COLUMNS.length + 1);
         expect(validatePreparedNativePomodoroTransition(schema5)).toEqual(schema5);
         expect(createHash('sha256').update(nativePomodoroReceiptPayload(schema5)).digest('hex'))
             .toBe('5efcd9dc58321034571513e31f2dd68207466f7fa27476df58ce842ec979e7dc');
-        expect(createHash('sha256').update(nativePomodoroReceiptPayload(current)).digest('hex'))
+        const schema6 = structuredClone(current); schema6.target!.row = schema6.target!.row!.slice(0, SCHEMA4_TASK_COLUMNS.length + 2);
+        expect(validatePreparedNativePomodoroTransition(schema6)).toEqual(schema6);
+        expect(createHash('sha256').update(nativePomodoroReceiptPayload(schema6)).digest('hex'))
             .toBe('aba75ebf597f20420c3cc0a61df92f6f4e9e9eabe11d98cafd56dd92bfaa4757');
         const policy = structuredClone(current); policy.target!.row = [...legacyReconcile().target!.row!, 'skip'];
         expect(validatePreparedNativePomodoroTransition(policy)).toEqual(policy);

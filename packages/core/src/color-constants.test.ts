@@ -3,8 +3,8 @@ import { AREA_PRESET_COLORS, DEFAULT_AREA_COLOR, DEFAULT_PROJECT_COLOR } from '.
 
 describe('AREA_PRESET_COLORS', () => {
     it('keeps the original six swatches first and in order', () => {
-        // These hexes are stored on areas and synced; changing one recolors
-        // every area already using it on every device.
+
+
         expect(AREA_PRESET_COLORS.slice(0, 6)).toEqual([
             '#3b82f6',
             '#10b981',

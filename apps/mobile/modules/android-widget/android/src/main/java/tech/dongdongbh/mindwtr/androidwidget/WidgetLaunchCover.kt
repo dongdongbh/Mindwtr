@@ -11,7 +11,7 @@ import android.view.WindowManager
 import android.view.Window
 import android.widget.FrameLayout
 
-/** Keeps the retained RN screen and its separate Modal window behind the widget's destination handoff. */
+
 object WidgetLaunchCover {
   const val EXTRA_DESTINATION = "tech.dongdongbh.mindwtr.widget.DESTINATION"
   private const val RECOVERY_MS = 5_000L
@@ -36,7 +36,7 @@ object WidgetLaunchCover {
     }
   }
 
-  /** Called before ReactActivity forwards the new intent to Linking. A non-widget intent cancels a held handoff. */
+
   fun receive(activity: Activity, intent: Intent?) {
     finish("cancelled")
     val path = destination(activity, intent) ?: return
@@ -54,7 +54,7 @@ object WidgetLaunchCover {
         window?.apply {
           setBackgroundDrawable(ColorDrawable(background))
           setWindowAnimations(0)
-          // RN Modal is another application window. Insert our application dialog after it, rather than a base-window subwindow.
+
           setType(WindowManager.LayoutParams.TYPE_APPLICATION)
           addFlags(WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
           clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
@@ -73,14 +73,14 @@ object WidgetLaunchCover {
 
   fun snapshot(): Map<String, Any>? = state
 
-  /** A clean RN Modal must disappear under the cover, rather than keep sliding after destination acknowledgement. */
+
   fun suppressExitAnimation(window: Window) {
     if (state?.get("stage") != "pending") return
     modalAnimations.putIfAbsent(window, window.attributes.windowAnimations)
     window.setWindowAnimations(0)
   }
 
-  /** ReactActivity's host resume may re-show a retained RN Modal after onNewIntent. Our cover must be last. */
+
   fun resume(activity: Activity) {
     if (owner !== activity || state?.get("stage") != "pending") return
     try {
@@ -100,7 +100,7 @@ object WidgetLaunchCover {
     return true
   }
 
-  /** Leaving or destroying this Activity must never leave a cover on an ordinary later resume. */
+
   fun cancel(activity: Activity) {
     if (owner === activity) finish("cancelled")
   }

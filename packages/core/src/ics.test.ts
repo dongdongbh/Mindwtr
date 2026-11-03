@@ -237,9 +237,8 @@ describe('ics', () => {
 });
 
 describe('ics recurrence overrides (#1249)', () => {
-    // January keeps every time zone clear of a DST switch, so the generated
-    // occurrences and the EXDATE/RECURRENCE-ID instants line up wherever the
-    // tests run. Europe/London is UTC+0 then, so 09:00 there is 09:00Z.
+
+
     const range = {
         rangeStart: new Date('2026-01-01T00:00:00Z'),
         rangeEnd: new Date('2026-02-01T00:00:00Z'),
@@ -252,7 +251,7 @@ describe('ics recurrence overrides (#1249)', () => {
         'END:VCALENDAR',
     ].join('\n');
 
-    /** Weekly Monday 09:00 London, starting 2026-01-05. */
+
     const weeklyMaster = (...extra: string[]) => [
         'UID:weekly-1',
         'SUMMARY:Standup',
@@ -325,7 +324,7 @@ describe('ics recurrence overrides (#1249)', () => {
     });
 
     it('drops an occurrence whose override is STATUS:CANCELLED', () => {
-        // Google's cancelled instances can carry nothing but UID, RECURRENCE-ID and STATUS.
+
         const events = parseIcs(buildIcs([
             weeklyMaster(),
             ['UID:weekly-1', 'RECURRENCE-ID;TZID=Europe/London:20260119T090000', 'STATUS:CANCELLED'],
@@ -428,7 +427,7 @@ describe('ics categories', () => {
             ['cal#Personal', 'Personal'],
             ['cal#Work', 'Work'],
         ]);
-        // Colour and visibility both key off the id, so nothing else has to change.
+
         expect(calendars.every((calendar) => calendar.color === undefined)).toBe(true);
     });
 
@@ -597,7 +596,7 @@ describe('ics colors', () => {
     });
 
     it('converts a signed 32-bit ARGB X-FOSSIFY-CATEGORY-COLOR to #RRGGBB', () => {
-        // -16776961 == 0xFF0000FF: full alpha, blue.
+
         const ics = [
             'BEGIN:VCALENDAR',
             'VERSION:2.0',
@@ -665,8 +664,7 @@ describe('ics colors', () => {
             splitByCategory: true,
         });
 
-        // The whole feed is scanned regardless of the requested range, so
-        // January's color (first seen) wins even though only February shows.
+
         expect(february.categoryInfo.colors).toEqual({ Work: '#0000FF' });
     });
 

@@ -93,8 +93,8 @@ const MONTH_DETAILS_HIDE_THRESHOLD = 0.2;
 const MONTH_DETAILS_MIN_HEIGHT = 176;
 const TIMED_BLOCK_COLUMN_GAP = 2;
 const WEEK_TIME_GUTTER_WIDTH = 56;
-// The gutter is pinned by counter-translating it against this scroller's offset, so it needs to
-// be animatable. Wrapping the gesture-handler ScrollView keeps the existing scroll behaviour.
+
+
 const AnimatedWeekScrollView = Animated.createAnimatedComponent(ScrollView);
 
 type CalendarNavigationMode = 'month' | 'day';
@@ -135,7 +135,7 @@ type ScheduledTaskBlockProps = {
   setTimelineScrollEnabled: (enabled: boolean) => void;
   task: Task;
   tc: ReturnType<typeof useCalendarViewController>['tc'];
-  /** The block's time line, with the projected label for an occurrence. */
+
   timeLabel: string;
   toRgba: (hex: string, alpha: number) => string;
   top: number;
@@ -324,7 +324,7 @@ function ScheduledTaskBlock({
   );
 }
 
-// Marker labels have a separate rail: they never obscure or reserve task time.
+
 const DEADLINE_ROW_MINUTES = 32;
 function DeadlineMarkerRail({ markers, dayStart, pixelsPerMinute, openTaskActions, tc, dueLabel, projectedLabel }: {
   markers: CalendarDeadlineMarker[];
@@ -463,18 +463,17 @@ export function CalendarView() {
   const scheduleScrollRef = useRef<any>(null);
   const lastWeekAutoScrollKeyRef = useRef<string | null>(null);
   const [weekDensityTrackWidth, setWeekDensityTrackWidth] = useState(0);
-  // The day view's all-day card past its "+N more" chip, kept across days as on desktop.
+
   const [allDayExpanded, setAllDayExpanded] = useState(false);
   const weekScrollX = useSharedValue(0);
   const weekHorizontalScrollHandler = useAnimatedScrollHandler((event) => {
     weekScrollX.value = event.contentOffset.x;
   });
-  // Zoomed-in weeks are wider than the screen, so without this the hour labels scroll away and
-  // the grid loses its only time reference. Day columns pass underneath instead.
+
+
   const weekGutterPinStyle = useAnimatedStyle(() => ({ transform: [{ translateX: weekScrollX.value }] }));
-  // The gutter is a column too: sizing days against the full screen width made the canvas
-  // overflow by exactly the gutter, so the last day was clipped and the hour labels could be
-  // scrolled off the left edge even at full-week zoom.
+
+
   const weekAvailableColumnWidth = Math.max(1, screenWidth - WEEK_TIME_GUTTER_WIDTH);
   const weekHasDeadlines = weekDays.some((day) => getCalendarTimedDeadlines(getDayLists(day).deadlines).length > 0);
   const weekColumnWidth = Math.max(weekHasDeadlines ? 260 : 0, getCalendarWeekColumnWidth(weekAvailableColumnWidth, calendarWeekVisibleDays));
@@ -551,7 +550,7 @@ export function CalendarView() {
       getCalendarWeekInitialScrollX({
         availableWidth: weekAvailableColumnWidth,
         columnWidth: weekColumnWidth,
-        // The gutter stays pinned now, so the first day column already starts beside it.
+
         leadingInset: 0,
         selectedDate,
         visibleDays: calendarWeekVisibleDays,
@@ -572,10 +571,7 @@ export function CalendarView() {
     });
   }, [calendarWeekVisibleDays, screenWidth, selectedDate, viewMode, weekAvailableColumnWidth, weekColumnWidth, weekDays]);
 
-  // Widening the columns from the density slider shrinks nothing, but narrowing
-  // the canvas (more visible days) leaves the old scroll offset beyond the last
-  // column and Android keeps it there, showing day headers and then blank space.
-  // Re-clamp whenever the canvas actually resizes.
+
   const handleWeekContentSizeChange = useCallback((contentWidth: number) => {
     const clampedX = getCalendarWeekContentClampX({
       contentWidth,
@@ -584,9 +580,7 @@ export function CalendarView() {
     });
     if (clampedX === null) return;
 
-    // Store the correction synchronously. Without this, a second content-size
-    // callback observes the stale out-of-range value and calls scrollTo again,
-    // creating a render/layout feedback loop before onScroll can catch up.
+
     weekScrollX.value = clampedX;
     weekHorizontalScrollRef.current?.scrollTo({ x: clampedX, animated: false });
   }, [screenWidth, weekScrollX]);
@@ -769,8 +763,8 @@ export function CalendarView() {
   const calendarToneColor = (tone: string) => (
     tone === 'tint' ? tc.tint : tone === 'danger' ? tc.danger : tone === 'secondary' ? tc.secondaryText : tc.text
   );
-  // An all-day chip, in the week lane and the day card: core's fill, left edge
-  // and title tones; a completed item is crossed out and muted.
+
+
   const allDayChipColors = (item: CalendarDayItem, tones: ReturnType<typeof getCalendarWeekAllDayTones>) => ({
     backgroundColor: tones.fill === 'secondary' ? toRgba(tc.secondaryText, isDark ? 0.28 : 0.14) : tc.inputBg,
     borderLeftColor: item.kind === 'event' ? sourceColorForId(item.event.sourceId) : calendarToneColor(tones.accent),
@@ -804,8 +798,7 @@ export function CalendarView() {
     </View>
   );
 
-  // Sits under the view-mode switcher in every calendar mode so the look-back
-  // can be turned on from wherever you are (#955).
+
   const renderShowCompletedToggle = () => (
     <Pressable
       onPress={toggleShowCompleted}
@@ -883,10 +876,10 @@ export function CalendarView() {
 
         <View style={styles.daySwipeArea} {...dayNavigationResponder.panHandlers}>
           <Animated.View style={[styles.calendarNavigationContent, calendarNavigationSwipeStyle]}>
-            {/* Pinned above the timeline, like the week view's all-day row. Inside
-                the timeline ScrollView it scrolled out of sight the moment the
-                view auto-scrolled to the current time, so all-day items looked
-                missing on today. */}
+            {
+
+
+                                    }
             {allDayItems.length > 0 && (
               <View style={[styles.allDayCard, styles.allDayPinned, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
                 <Text style={[styles.sectionLabel, { color: tc.secondaryText }]}>{text.allDay}</Text>
@@ -910,8 +903,8 @@ export function CalendarView() {
                   );
                 })}
                 </ScrollView>
-                {/* Outside the scroll so the toggle never hides: "+N more" says
-                    items are hidden, and "Less" folds them back. */}
+                {
+                                                                    }
                 {allDayLane.hiddenCount > 0 && (
                   <Pressable
                     accessibilityRole="button"
@@ -1118,7 +1111,7 @@ export function CalendarView() {
           onScroll={weekHorizontalScrollHandler}
           onContentSizeChange={handleWeekContentSizeChange}
           scrollEventThrottle={16}
-          // Land on whole days: a half-scrolled column hides its own header under the pinned gutter.
+
           snapToInterval={weekColumnWidth}
           snapToAlignment="start"
           decelerationRate="fast"
@@ -1179,7 +1172,7 @@ export function CalendarView() {
                       );
                     })}
                     {allDayLane.hiddenCount > 0 && (
-                      // Hidden items live in this day's own view, where its card expands.
+
                       <Pressable
                         accessibilityRole="button"
                         onPress={(pressEvent) => {
@@ -1444,8 +1437,8 @@ export function CalendarView() {
           style={styles.scheduleScroll}
           contentContainerStyle={styles.scheduleContent}
           keyExtractor={(section) => section.id}
-          // Scheduled days come first; the planning list sits below them like the
-          // desktop planning panel, so due tasks are never pushed off screen (#1240).
+
+
           ListFooterComponent={selectedDate && planningTasks.length > 0 ? (
             <PlanningTaskList
               getScheduleSlotLabel={getScheduleSlotLabel}

@@ -8,7 +8,7 @@ import { InboxSuggestionList } from './InboxSuggestionList';
 import type { ProcessInboxDateField } from '@mindwtr/core';
 import type { ThemeColors } from '@/hooks/use-theme-colors';
 
-/** The delegate detail step: who, follow-up date, and the hand-off message. */
+
 type Props = {
   t: (key: string) => string;
   tc: ThemeColors;

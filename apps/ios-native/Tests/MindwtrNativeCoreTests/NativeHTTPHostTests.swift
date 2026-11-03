@@ -3,8 +3,7 @@ import Foundation
 import Darwin
 @testable import MindwtrNativeCore
 
-/// All fixture sessions intercept every URL, including unexpected redirects.
-/// No URLProtocol request can fall through to the network.
+
 private final class HTTPFixtureProtocol: URLProtocol {
     private static let lock = NSLock()
     private static var handlers: [String: (HTTPFixtureProtocol) -> Void] = [:]
@@ -92,7 +91,7 @@ final class NativeHTTPHostTests: XCTestCase {
         result.configureHTTPJobs = { state.capture($0) }
         return result
     }
-    // Temporary production-bundle suffix only. Original cancel remains intact.
+
     private func probeBundle(_ expression: String) throws -> URL {
         let suffix = """
         ;(() => {
@@ -135,9 +134,8 @@ final class NativeHTTPHostTests: XCTestCase {
         var result: [String: String] = [:]
         for row in names { let name = try XCTUnwrap(row["name"] as? String), quoted = name.replacingOccurrences(of: "\"", with: "\"\"")
             let columns = try XCTUnwrap(NativeJSON.jsonObject(with: Data(sql.execute("PRAGMA table_info(\"\(quoted)\")").utf8)) as? [[String: Any]])
-            // SQLiteBridge intentionally refuses BLOB JSON cells. Capture every
-            // table (including FTS shadow BLOBs), with type and exact byte hex
-            // for both text/BLOB; scalar quote preserves NULL/integer/real.
+
+
             let projection = try columns.enumerated().map { index, column -> String in
                 let columnName = try XCTUnwrap(column["name"] as? String).replacingOccurrences(of: "\"", with: "\"\"")
                 let cell = "\"\(columnName)\""
@@ -312,7 +310,7 @@ final class NativeHTTPHostTests: XCTestCase {
         try await start(host); let result = try await probe(host); XCTAssertEqual(result["returned"] as? Bool, true)
         XCTAssertEqual(entered.wait(timeout: .now()+5), .success); XCTAssertEqual(state.slots, 1)
         try XCTUnwrap(state.getHeld()).reply(Data([7]), headers: ["Content-Length": "1"])
-        try await drained() // No subsequent CoreHost call drives the pump.
+        try await drained()
     }
 
     func testCloseAndSwiftCancellationDrainHeldDelegateBeforeUnlock() async throws {
@@ -362,15 +360,14 @@ final class NativeHTTPHostTests: XCTestCase {
         throw HostFailure("HTTP answer did not arrive")
     }
 
-    /// Core admits plain HTTP to loopback, private ranges and local names
-    /// (`isAllowedInsecureUrl` + `SYNC_LOCAL_INSECURE_URL_OPTIONS`); RN sets NSAllowsLocalNetworking.
+
     func testLocalNetworkHTTPIsAdmittedLikeCoreAndRedirectsStaySameOrigin() async throws {
         let served = HTTPFixtureState(), lan = ["192.168.1.10", "nas.local", "10.0.0.2"]
         for name in lan + ["example.com"] {
             HTTPFixtureProtocol.install(name) { transport in
                 served.record(transport.request)
                 guard transport.request.url?.path == "/hop" else { transport.reply(Data([7])); return }
-                // A refused redirect leaves the protocol to finish with the 3xx itself.
+
                 transport.redirect(URL(string: "http://10.0.0.2/x")!)
                 transport.reply(status: 302, headers: ["Location": "http://10.0.0.2/x"])
             }
@@ -397,7 +394,7 @@ final class NativeHTTPHostTests: XCTestCase {
                         "http://pi.localdomain/", "HTTP://NAS.LOCAL/", "https://example.com/"]
         let refused = ["http://example.com/", "http://8.8.8.8/", "http://172.32.0.1/", "http://100.128.0.1/", "http://192.169.1.1/",
                        "http://[2001:db8::1]/", "http://nas.example/", "http://u:p@192.168.1.10/", "ftp://192.168.1.10/", "http://300.1.1.1/",
-                       // Non-canonical IPv4 spellings that core renormalizes (010.0.0.2 is public 8.0.0.2).
+
                        "http://010.0.0.2/", "http://10.0.0.02/", "http://0x7f.0.0.1/", "http://0x7f000001/", "http://2130706433/",
                        "http://167772162/", "http://10.1/", "http://10.0.1/", "http://192.168.1.10./", "http://box.0x10/"]
         for raw in admitted { XCTAssertTrue(NativeHTTPJobs.allowedURL(URL(string: raw)!), raw) }

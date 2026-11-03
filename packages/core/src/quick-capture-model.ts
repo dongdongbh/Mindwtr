@@ -1,19 +1,6 @@
-/**
- * The capture popup as one module: React Native's quick capture sheet (the one
- * the tab bar's center + opens). It holds the popup's options, the edits its
- * controls make, the view it shows (live preview chips, option labels and
- * choices, notices) and its save path, including "Add another" and several
- * lines at once. React Native keeps only React state, refs, animation, the
- * keyboard and platform wiring; the native host contract serves the same view
- * (native-host-contract-quick-capture.ts).
- *
- * Parse options: the caller owns ONE QuickAddParseOptions bag per popup. The
- * preview and the save read that same object, so they cannot disagree. The
- * caller rebuilds it when the popup opens and after each capture that keeps the
- * popup open ("Add another"), never per keystroke (it scans every task) and
- * never once per open: capture 2 of a burst must know a context capture 1
- * created. A sync that lands mid-draft stays unknown until the next rebuild.
- */
+
+
+
 import {
     executeCaptureTransaction,
     filterCaptureAreas,
@@ -40,48 +27,48 @@ import { getQuickDateLabel } from './task-editor-schedule';
 import { getRetainedTaskContexts, getTaskContextMatches } from './task-token-usage';
 import type { AppSettings, Area, Project, Task, TaskPriority } from './types';
 
-/** What the popup's controls choose, besides the typed text. */
+
 export type QuickCaptureOptions = {
-    /** The More panel's Description; saved ahead of a /note: token. */
+
     note: string;
-    /** The chosen due date as an instant (Date.toISOString()), or null. */
+
     dueDate: string | null;
-    /** False: the due date saves as a date only, and the instant is local midnight. */
+
     dueDateHasTime: boolean;
-    /** A start instant from the opener's preset. The popup has no start control. */
+
     startTime: string | null;
-    /** Contexts chosen in the picker, each starting with @. */
+
     contexts: string[];
     projectId: string | null;
     areaId: string | null;
     priority: TaskPriority | null;
-    /** "Add to today's focus". */
+
     focus: boolean;
-    /** Keep the popup open for the next capture after a save. */
+
     addAnother: boolean;
 };
 
-/** Everything the popup reads from the store, settings and language. */
+
 export type QuickCaptureContext = {
     settings: AppSettings;
     projects: readonly Project[];
     areas: readonly Area[];
-    /** The popup's one parse-options bag (see the module comment). */
+
     parseOptions: QuickAddParseOptions;
-    /** The store's getFocusedCount(). */
+
     focusedCount: number;
-    /** From resolveQuickCaptureDefaultAreaId. */
+
     defaultAreaId: string | null;
-    /** The opener's preset props merged under every capture; the tab bar passes none. */
+
     initialProps?: Partial<Task>;
-    /** The context picker's choices (getQuickCaptureContextChoices); "Add" matches their spelling. */
+
     contextChoices?: readonly string[];
     t: TranslateFn;
     formatDate: DateFormatter;
     now: Date;
 };
 
-/** A message the popup shows as a toast. */
+
 export type QuickCaptureNotice = {
     tone: 'warning' | 'error';
     title: string;
@@ -90,16 +77,13 @@ export type QuickCaptureNotice = {
 };
 
 export const QUICK_CAPTURE_PRIORITY_OPTIONS: TaskPriority[] = ['low', 'medium', 'high', 'urgent'];
-/** Quick capture favors speed: only the most-reached due date presets show inline. */
+
 export const QUICK_CAPTURE_DATE_PRESETS = ['today', 'tomorrow', 'next_week'] as const;
 export type QuickCaptureDatePreset = typeof QUICK_CAPTURE_DATE_PRESETS[number];
-/** Lines the several-lines confirmation lists before "+N more". */
+
 export const QUICK_CAPTURE_BULK_PREVIEW_LINES = 5;
 
-// ---------------------------------------------------------------------------
-// Contexts
 
-/** One context as the picker stores it: trimmed, with exactly one leading @ (a full-width ＠ counts). */
 export const normalizeQuickCaptureContext = (token: string): string => {
     const trimmed = token.trim();
     if (!trimmed) return '';
@@ -108,7 +92,7 @@ export const normalizeQuickCaptureContext = (token: string): string => {
     return `@${stripped}`;
 };
 
-/** The context picker's query, split on commas, normalized, without case-insensitive repeats. */
+
 export const parseQuickCaptureContextQuery = (value: string): string[] => {
     const seen = new Set<string>();
     const tokens: string[] = [];
@@ -127,7 +111,7 @@ const normalizeInitialContexts = (contexts?: readonly string[]): string[] => Arr
     (contexts ?? []).map((item) => normalizeQuickCaptureContext(String(item || ''))).filter(Boolean),
 ));
 
-/** The context picker's choices: every context in use, then the opener's preset contexts. */
+
 export function getQuickCaptureContextChoices(tasks: readonly Task[], initialContexts?: readonly string[]): string[] {
     return Array.from(new Set(
         [...getRetainedTaskContexts(tasks as Task[]), ...normalizeInitialContexts(initialContexts)]
@@ -138,7 +122,7 @@ export function getQuickCaptureContextChoices(tasks: readonly Task[], initialCon
 
 const sameToken = (left: string, right: string) => left.toLowerCase() === right.toLowerCase();
 
-/** The context picker's list for its query, and whether "Add" would add anything. */
+
 export function getQuickCaptureContextPicker(choices: readonly string[], query: string, selected: readonly string[], history: readonly string[] = []): {
     items: string[];
     addable: boolean;
@@ -151,15 +135,7 @@ export function getQuickCaptureContextPicker(choices: readonly string[], query: 
     };
 }
 
-// ---------------------------------------------------------------------------
-// Options
 
-/**
- * The area a new capture starts in: the selected area filter in "active" mode,
- * otherwise the fixed default area. `selected.areaId` is mobile's
- * useMobileAreaFilter value (undefined for all areas, null for no area); leave
- * `selected` out to derive it from the stored area filter the same way.
- */
 export function resolveQuickCaptureDefaultAreaId(
     settings: AppSettings,
     areas: readonly Area[],
@@ -174,11 +150,7 @@ export function resolveQuickCaptureDefaultAreaId(
 
 const toInstant = (value: string | undefined | null): string | null => (value ? safeParseDate(value)?.toISOString() ?? null : null);
 
-/**
- * A fresh draft's options: the opener's preset, else the default area. The
- * popup starts from this on open and after each "Add another" capture (with
- * `addAnother: true`); closing it resets to this without a preset.
- */
+
 export function createQuickCaptureOptions(input: {
     initialProps?: Partial<Task>;
     projects: readonly Project[];
@@ -203,28 +175,25 @@ export function createQuickCaptureOptions(input: {
     };
 }
 
-// ---------------------------------------------------------------------------
-// Edits
 
-/** What the popup's controls change. Picker searches and "Create" rows write, so they are not edits. */
 export type QuickCaptureEdit =
     | { type: 'setNote'; value: string }
     | { type: 'selectProject'; projectId: string | null }
-    /** A long press on the project chip: no project, back to the default area. */
+
     | { type: 'resetProject' }
-    /** Also the long press on the area chip (null). */
+
     | { type: 'selectArea'; areaId: string | null }
     | { type: 'toggleContext'; value: string }
     | { type: 'removeContext'; value: string }
     | { type: 'clearContexts' }
-    /** The picker's query, split on commas; a choice's spelling wins over the typed one. */
+
     | { type: 'addContexts'; query: string }
     | { type: 'setPriority'; priority: TaskPriority | null }
     | { type: 'toggleFocus' }
     | { type: 'setAddAnother'; value: boolean }
-    /** A calendar day (yyyy-MM-dd). A chosen time of day is kept. */
+
     | { type: 'setDueDay'; day: string }
-    /** A time of day (HH:mm) on the due date, or on today without one. */
+
     | { type: 'setDueTime'; time: string }
     | { type: 'clearDueDate' }
     | { type: 'clearDueTime' };
@@ -256,11 +225,7 @@ const withDueDay = (options: QuickCaptureOptions, day: string): QuickCaptureOpti
     return { ...options, dueDate: next.toISOString() };
 };
 
-/**
- * Apply one control's edit. A refused edit (focus at the limit) returns the
- * options unchanged with the notice the popup shows. Returns null for an edit
- * that is not valid (an unknown type, a malformed day or time).
- */
+
 export function applyQuickCaptureEdit(
     options: QuickCaptureOptions,
     edit: QuickCaptureEdit,
@@ -299,7 +264,7 @@ export function applyQuickCaptureEdit(
         case 'setPriority':
             return done({ ...options, priority: edit.priority });
         case 'toggleFocus':
-            // Keep the hard focus cap, but explain the block instead of swallowing the tap.
+
             if (!options.focus && !canFocus(options, context)) {
                 return {
                     options,
@@ -331,10 +296,7 @@ export function applyQuickCaptureEdit(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Preview, labels and the view
 
-/** The due date the save writes: date-only unless a time was chosen. Preview and save both read this. */
 export function getQuickCapturePickedDueDate(
     options: Pick<QuickCaptureOptions, 'dueDate' | 'dueDateHasTime'>,
     formatDate: DateFormatter,
@@ -346,11 +308,7 @@ export function getQuickCapturePickedDueDate(
     return options.dueDateHasTime ? dueDate.toISOString() : dateOnly;
 }
 
-/**
- * The live chips under the title: what saving the text with these options
- * produces. By design (maintainer, 2026-09-24), a draft of several lines
- * previews as one line, while Save asks to create one task per line.
- */
+
 export function buildQuickCapturePreview(
     text: string,
     options: Pick<QuickCaptureOptions, 'projectId' | 'dueDate' | 'dueDateHasTime' | 'startTime'>,
@@ -365,7 +323,7 @@ export function buildQuickCapturePreview(
             projects: context.projects,
             areas: context.areas,
             rawInput: trimmed,
-            // Everything the popup's own controls force onto the saved task.
+
             overrides: {
                 projectId: options.projectId || undefined,
                 dueDate: getQuickCapturePickedDueDate(options, context.formatDate),
@@ -376,7 +334,7 @@ export function buildQuickCapturePreview(
     );
 }
 
-/** The labels on the popup's option chips. */
+
 export function getQuickCaptureLabels(
     options: QuickCaptureOptions,
     context: Pick<QuickCaptureContext, 'projects' | 'areas' | 'settings' | 'focusedCount' | 't' | 'formatDate'>,
@@ -402,14 +360,14 @@ export function getQuickCaptureLabels(
     };
 }
 
-/** The focus chip's accessibility label. */
+
 export function getQuickCaptureFocusLabel(t: TranslateFn, focus: { on: boolean; canFocus: boolean; disabledReason?: string }): string {
     const add = tFallback(t, 'agenda.addToFocus', "Add to today's focus");
     if (focus.on) return tFallback(t, 'agenda.removeFromFocus', 'Remove from focus');
     return !focus.canFocus ? (focus.disabledReason || add) : add;
 }
 
-/** The popup's fixed text. */
+
 export function getQuickCaptureText(t: TranslateFn, flags: { priorities: boolean; timeEstimates: boolean }) {
     return {
         title: t('nav.addTask'),
@@ -423,7 +381,7 @@ export function getQuickCaptureText(t: TranslateFn, flags: { priorities: boolean
         focusChip: tFallback(t, 'agenda.title', 'Focus'),
         syntaxHelp: t('quickAdd.syntaxHelp'),
         syntaxHelpText: formatQuickAddHelp(t('quickAdd.help'), flags),
-        // The shared "Custom…" without its trailing ellipsis, narrow enough for the chip row.
+
         customDate: t('recurrence.custom').replace(/[\s.…]+$/u, ''),
         addAnother: t('quickAdd.addAnother'),
         save: t('common.save'),
@@ -431,7 +389,7 @@ export function getQuickCaptureText(t: TranslateFn, flags: { priorities: boolean
     };
 }
 
-/** The toast after a write the store refused. */
+
 export const getQuickCaptureAddFailedNotice = (t: TranslateFn): QuickCaptureNotice => ({
     tone: 'error',
     title: t('common.notice'),
@@ -439,7 +397,7 @@ export const getQuickCaptureAddFailedNotice = (t: TranslateFn): QuickCaptureNoti
     durationMs: 4200,
 });
 
-/** The toast for date commands the parser could not read; nothing is written. */
+
 export const getQuickCaptureInvalidDateNotice = (t: TranslateFn, commands: readonly string[]): QuickCaptureNotice => ({
     tone: 'warning',
     title: t('common.notice'),
@@ -447,7 +405,7 @@ export const getQuickCaptureInvalidDateNotice = (t: TranslateFn, commands: reado
     durationMs: 4200,
 });
 
-/** The toast when several lines could not all be created. */
+
 export const getQuickCaptureBulkFailedNotice = (t: TranslateFn): QuickCaptureNotice => ({
     tone: 'warning',
     title: t('common.notice'),
@@ -455,7 +413,7 @@ export const getQuickCaptureBulkFailedNotice = (t: TranslateFn): QuickCaptureNot
     durationMs: 4200,
 });
 
-/** The question the popup asks before creating one task per line. */
+
 export function getQuickCaptureBulkConfirm(lines: readonly string[], t: TranslateFn) {
     const preview = lines.slice(0, QUICK_CAPTURE_BULK_PREVIEW_LINES).join('\n');
     const remaining = Math.max(0, lines.length - QUICK_CAPTURE_BULK_PREVIEW_LINES);
@@ -470,10 +428,7 @@ export function getQuickCaptureBulkConfirm(lines: readonly string[], t: Translat
     };
 }
 
-// ---------------------------------------------------------------------------
-// Saving
 
-/** What Save does with this text: nothing, save one task, or ask to create one task per line. */
 export function planQuickCaptureSave(text: string):
     | { kind: 'empty' }
     | { kind: 'single'; text: string }
@@ -483,13 +438,7 @@ export function planQuickCaptureSave(text: string):
     return lines.length > 1 ? { kind: 'bulk', lines } : { kind: 'single', text: text.trim() };
 }
 
-/**
- * The opener's preset as the save merges it: the popup's options own the
- * fields they show (project, area, section, priority, note, dates, contexts
- * and the focus star), so the preset only seeded them. What the popup shows is
- * what is saved: a preset project the popup dropped (archived, deleted) or one
- * the user cleared is not saved, and neither is a cleared or hidden priority.
- */
+
 const presetUnderOptions = (initialProps: Partial<Task> | undefined, options: QuickCaptureOptions): Partial<Task> | undefined => {
     if (!initialProps) return initialProps;
     const {
@@ -497,23 +446,20 @@ const presetUnderOptions = (initialProps: Partial<Task> | undefined, options: Qu
         dueDate: _dueDate, startTime: _startTime, contexts: _contexts, isFocusedToday: _isFocusedToday,
         ...rest
     } = initialProps;
-    // A preset section belongs to the preset project; it stays only with it.
+
     return sectionId && projectId && options.projectId === projectId ? { ...rest, sectionId } : rest;
 };
 
-/**
- * The capture transaction's input for one line: the typed text parsed with the
- * popup's one parse-options bag, with the chosen options applied on top.
- */
+
 export function buildQuickCaptureRequest(
     input: {
         text: string;
-        /** Last-resort title when the text parses empty. */
+
         fallbackTitle: string;
         options: QuickCaptureOptions;
-        /** Props an attachment or recording adds (audio capture). */
+
         extraProps?: Partial<Task>;
-        /** Projects this capture sees; a batch adds the ones its earlier lines created. */
+
         projects?: readonly Project[];
     },
     context: Pick<QuickCaptureContext, 'projects' | 'areas' | 'parseOptions' | 'settings' | 'focusedCount' | 'initialProps' | 'formatDate' | 'now'>,
@@ -536,14 +482,14 @@ export function buildQuickCaptureRequest(
             extraProps: input.extraProps,
             selectedAreaId: options.areaId,
             starNewTask: options.focus && canFocus(options, context),
-            // A due date chosen in the popup outranks a trailing natural-language date.
+
             suppressDetectedDate: Boolean(pickedDueDate),
         },
         options: {
             transformProps: (props) => {
                 const taskProps = { ...props };
-                // The typed field leads; a /note: token in the title is kept after it
-                // (the same merge as app/capture-modal.tsx).
+
+
                 const note = options.note.trim();
                 if (note) {
                     const parsedNote = typeof taskProps.description === 'string' ? taskProps.description.trim() : '';
@@ -562,7 +508,7 @@ export function buildQuickCaptureRequest(
     };
 }
 
-/** What saving one line would write, without writing (the project it would create included). */
+
 export function planQuickCaptureTask(
     input: { text: string; options: QuickCaptureOptions; projects?: readonly Project[] },
     context: Parameters<typeof buildQuickCaptureRequest>[1],
@@ -571,33 +517,29 @@ export function planQuickCaptureTask(
     return planCaptureTask(request.input, request.options);
 }
 
-/** After a saved capture: open the task (Save and edit), stay for the next one, or close. */
+
 export type QuickCaptureSaved = {
     kind: 'saved';
     taskId: string | null;
     projectId: string | undefined;
     next: 'open' | 'addAnother' | 'close';
-    /** Flash the new row once the popup closes: only for a capture preset with a project. */
+
     highlightTaskId: string | null;
 };
 
 export type QuickCaptureSaveOutcome =
     | QuickCaptureSaved
-    /** Nothing was written (a date command it could not read, or a write the store refused). */
+
     | { kind: 'refused'; reason: 'invalid-date-command' | 'write-failed'; notice: QuickCaptureNotice; error?: string };
 
-/**
- * Save one capture as React Native's Save does. The caller has already checked
- * the text (planQuickCaptureSave) and passes it trimmed; `context.now` is the
- * moment of the save.
- */
+
 export async function saveQuickCapture(input: {
     text: string;
     options: QuickCaptureOptions;
     context: QuickCaptureContext;
     actions: CaptureTransactionActions;
     openAfterSave?: boolean;
-    /** A recording's capture (RN's stopRecording buildTaskProps): the title when the text parses empty, and its attachment. */
+
     fallbackTitle?: string;
     extraProps?: Partial<Task>;
 }): Promise<QuickCaptureSaveOutcome> {
@@ -624,25 +566,21 @@ export async function saveQuickCapture(input: {
         taskId,
         projectId: result.props.projectId,
         next,
-        // "Add another" bursts never highlight mid-typing; only the final close does (#916).
+
         highlightTaskId: next === 'close' && context.initialProps?.projectId && taskId ? taskId : null,
     };
 }
 
 export type QuickCaptureBulkOutcome =
     | { kind: 'saved' }
-    /** A line's date command could not be read; nothing was written. */
+
     | { kind: 'refused'; notice: QuickCaptureNotice }
-    /** A line could not be prepared, or the store refused the batch. Nothing to show. */
+
     | { kind: 'failed' }
-    /** The popup closed while the batch was being prepared. */
+
     | { kind: 'stale' };
 
-/**
- * Create one task per line in one store write, as the several-lines
- * confirmation does. Projects a line names are created as lines are prepared,
- * and later lines see them. Throws when a store action throws.
- */
+
 export async function saveQuickCaptureBulk(input: {
     lines: readonly string[];
     options: QuickCaptureOptions;
@@ -650,12 +588,12 @@ export async function saveQuickCaptureBulk(input: {
     actions: Pick<CaptureTransactionActions, 'addProject'> & {
         addTasks: (items: { title: string; initialProps?: Partial<Task>; captureId?: string }[]) => Promise<StoreActionResult>;
     };
-    /** False once the popup this batch belongs to has closed. */
+
     isCurrent?: () => boolean;
-    /** One capture UUID per line, for exact retries. */
+
     captureIds?: readonly string[];
 }): Promise<QuickCaptureBulkOutcome> {
-    // Every line's date commands are checked before any project or task is written.
+
     for (const line of input.lines) {
         const plan = planQuickCaptureTask({ text: line, options: input.options }, input.context);
         if (!plan.success && plan.reason === 'invalid-date-command') {
@@ -680,40 +618,37 @@ export async function saveQuickCaptureBulk(input: {
     return result && typeof result === 'object' && result.success === false ? { kind: 'failed' } : { kind: 'saved' };
 }
 
-// ---------------------------------------------------------------------------
-// The whole view, for a native popup
 
-/** A control's action: the edit to send back. */
 type Choice = { label: string; selected: boolean; edit: QuickCaptureEdit };
 
 export type QuickCaptureView = {
-    /** The effective options; send them back with the next read, edit or save. */
+
     options: QuickCaptureOptions;
     text: ReturnType<typeof getQuickCaptureText>;
-    /** Save and Save and edit are enabled while the text is not blank. */
+
     canSave: boolean;
     preview: QuickAddPreviewEntry[];
     project: { label: string; selected: boolean; accessibilityLabel: string; reset: QuickCaptureEdit };
     area: { label: string; accessibilityLabel: string; reset: QuickCaptureEdit };
     contexts: { label: string; accessibilityLabel: string; reset: QuickCaptureEdit };
-    /** Null while the Priorities feature is off. */
+
     priority: { label: string; accessibilityLabel: string; value: TaskPriority | null; reset: QuickCaptureEdit } | null;
     focus: { selected: boolean; enabled: boolean; label: string; accessibilityLabel: string; edit: QuickCaptureEdit };
     due: {
         label: string;
-        /** The Custom chip: send setDueDay with the picked day; a long press sends `clear`. The picker opens on `startDay` (yyyy-MM-dd): the due date's day, or today, as mobile's picker does. */
+
         custom: { label: string; accessibilityLabel: string; startDay: string };
         clear: QuickCaptureEdit;
         quickDates: (Choice & { preset: QuickCaptureDatePreset })[];
-        /** Shown with a due date: send setDueTime with the picked time; a long press sends `clear`. The picker opens on `start` (HH:mm), the due date's clock time, as mobile's picker does. */
+
         time: { label: string; accessibilityLabel: string; clear: QuickCaptureEdit; start: string } | null;
     };
     addAnother: { label: string; value: boolean; edit: QuickCaptureEdit };
-    /** The toasts mobile shows when a save (`save`) or several lines (`lines`) could not be written. */
+
     failureNotices: { save: QuickCaptureNotice; lines: QuickCaptureNotice };
 };
 
-/** The popup for this text and these options, with the exact edit on every control. */
+
 export function buildQuickCaptureView(text: string, options: QuickCaptureOptions, context: QuickCaptureContext): QuickCaptureView {
     const { t } = context;
     const labels = getQuickCaptureLabels(options, context);
@@ -757,7 +692,7 @@ export function buildQuickCaptureView(text: string, options: QuickCaptureOptions
             clear: { type: 'clearDueDate' },
             quickDates: QUICK_CAPTURE_DATE_PRESETS.map((preset) => {
                 const selected = isQuickDatePresetSelected(preset, dueDate, context.now);
-                // Tapping the selected chip clears the date.
+
                 const day = getQuickDate(preset, context.now)!;
                 return {
                     preset,
@@ -780,7 +715,7 @@ export function buildQuickCaptureView(text: string, options: QuickCaptureOptions
     };
 }
 
-/** The project picker for its search text. */
+
 export function buildQuickCaptureProjectPicker(options: QuickCaptureOptions, context: Pick<QuickCaptureContext, 'projects' | 't'>, query: string) {
     const { t } = context;
     const trimmed = query.trim();
@@ -793,14 +728,14 @@ export function buildQuickCaptureProjectPicker(options: QuickCaptureOptions, con
             label: project.title,
             edit: { type: 'selectProject', projectId: project.id } as QuickCaptureEdit,
         })),
-        /** Submitting the search selects a project with this exact title, or creates it. */
+
         create: !hasExactCaptureProjectMatch(context.projects, query) && trimmed
             ? { label: `${t('projects.create')} "${trimmed}"`, accessibilityLabel: `${t('projects.create')}: ${trimmed}` }
             : null,
     };
 }
 
-/** The area picker for its search text. */
+
 export function buildQuickCaptureAreaPicker(options: QuickCaptureOptions, context: Pick<QuickCaptureContext, 'areas' | 't'>, query: string) {
     const { t } = context;
     const trimmed = query.trim();
@@ -814,14 +749,14 @@ export function buildQuickCaptureAreaPicker(options: QuickCaptureOptions, contex
             selected: options.areaId === area.id,
             edit: { type: 'selectArea', areaId: area.id } as QuickCaptureEdit,
         })),
-        /** Submitting the search selects an area with this exact name, or creates it. */
+
         create: !hasExactCaptureAreaMatch(context.areas, query) && trimmed
             ? { label: `${t('areas.create')} "${trimmed}"`, accessibilityLabel: `${t('areas.create')}: ${trimmed}` }
             : null,
     };
 }
 
-/** The context picker for its search text. */
+
 export function buildQuickCaptureContextPicker(options: QuickCaptureOptions, context: Pick<QuickCaptureContext, 't'>, query: string, choices: readonly string[], history: readonly string[] = []) {
     const { t } = context;
     const { items, addable } = getQuickCaptureContextPicker(choices, query, options.contexts, history);
@@ -831,7 +766,7 @@ export function buildQuickCaptureContextPicker(options: QuickCaptureOptions, con
         title: t('taskEdit.contextsLabel'),
         placeholder: t('taskEdit.contextsPlaceholder'),
         clear: { label: t('common.clear'), edit: { type: 'clearContexts' } as QuickCaptureEdit },
-        // Keyboard submit also clears a valid query whose tokens are already selected, as RN does.
+
         submit: parseQuickCaptureContextQuery(query).length > 0 ? { type: 'addContexts', query } as QuickCaptureEdit : null,
         add: addable && trimmed
             ? { label: trimmed, accessibilityLabel: `${t('common.add')}: ${trimmed}`, edit: { type: 'addContexts', query } as QuickCaptureEdit }
@@ -850,7 +785,7 @@ export function buildQuickCaptureContextPicker(options: QuickCaptureOptions, con
     };
 }
 
-/** The priority picker (only while the Priorities feature is on). */
+
 export function buildQuickCapturePriorityPicker(options: QuickCaptureOptions, context: Pick<QuickCaptureContext, 't'>) {
     const { t } = context;
     return {

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { ChevronDown, ChevronUp } from 'lucide-react-native';
+import { ChevronDown, ChevronUp, Check } from 'lucide-react-native';
 import { workspaceSessionStorage as AsyncStorage } from '@/lib/workspace-session-storage';
 import {
   type Task,
@@ -45,10 +45,8 @@ export function PomodoroPanel({
   );
   const pomodoro = useMobilePomodoroControllerState();
   const { durations, timerState, selectedTaskId, lastEvent, sessionHistory } = pomodoro;
-  // Presentation only, and deliberately device-local: a phone folding the card
-  // away should not fold it away on the desktop too, so this lives in
-  // AsyncStorage rather than synced settings (#946, matching desktop's #875).
-  // Starts expanded so an update never hides a timer someone was already using.
+
+
   const [collapsed, setCollapsed] = useState(false);
   const isHydratingSession = pomodoro.isHydrating;
   const [isTaskPickerOpen, setIsTaskPickerOpen] = useState(false);
@@ -159,8 +157,8 @@ export function PomodoroPanel({
   );
 
   if (collapsed) {
-    // The session state and its timers live above this branch, so folding the
-    // card away never stops the run — the clock here is the same one.
+
+
     return (
       <View style={[styles.card, styles.collapsedCard, { backgroundColor: tc.cardBg, borderColor: tc.border }]}>
         <View style={styles.collapsedRow}>
@@ -341,14 +339,19 @@ export function PomodoroPanel({
                 style={[
                   styles.taskPickerOption,
                   {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
                     borderColor: !selectedTaskId ? tc.tint : tc.border,
+                    borderWidth: !selectedTaskId ? 2 : 1,
                     backgroundColor: !selectedTaskId ? `${tc.tint}18` : tc.filterBg,
                   },
                 ]}
               >
-                <Text style={[styles.taskPickerOptionText, { color: !selectedTaskId ? tc.tint : tc.text }]}>
+                <Text style={[styles.taskPickerOptionText, { flex: 1, color: !selectedTaskId ? tc.tint : tc.text }]}>
                   {timerOnlyLabel}
                 </Text>
+                {!selectedTaskId && <Check size={16} color={tc.tint} strokeWidth={2.5} />}
               </Pressable>
               <FlatList
                 data={pickerTasks}
@@ -365,17 +368,22 @@ export function PomodoroPanel({
                       style={[
                         styles.taskPickerOption,
                         {
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
                           borderColor: selected ? tc.tint : tc.border,
+                          borderWidth: selected ? 2 : 1,
                           backgroundColor: selected ? `${tc.tint}18` : tc.filterBg,
                         },
                       ]}
                     >
                       <Text
-                        style={[styles.taskPickerOptionText, { color: selected ? tc.tint : tc.text }]}
+                        style={[styles.taskPickerOptionText, { flex: 1, color: selected ? tc.tint : tc.text }]}
                         numberOfLines={2}
                       >
                         {task.title}
                       </Text>
+                      {selected && <Check size={16} color={tc.tint} strokeWidth={2.5} />}
                     </Pressable>
                   );
                 }}

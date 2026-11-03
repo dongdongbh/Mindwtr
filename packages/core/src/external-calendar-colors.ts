@@ -30,41 +30,18 @@ export function getExternalCalendarColorForId(sourceId: string): ExternalCalenda
     return EXTERNAL_CALENDAR_COLORS[Math.abs(hash) % EXTERNAL_CALENDAR_COLORS.length] ?? EXTERNAL_CALENDAR_COLORS[0];
 }
 
-/**
- * Lenient hex validator for colors *derived* from a feed (ICS COLOR/
- * X-APPLE-CALENDAR-COLOR, an OS calendar's native color). Unlike
- * `normalizeExternalCalendarColor` this accepts any hex color, not just the
- * 8-swatch set a user can pick — these values are display-only and must
- * never be written into synced settings.
- */
+
 export function normalizeDerivedIcsColor(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined;
     const match = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(value.trim());
     if (!match) return undefined;
     let hex = match[1];
     if (hex.length === 3) hex = hex.split('').map((digit) => digit + digit).join('');
-    else if (hex.length === 8) hex = hex.slice(0, 6); // drop alpha
+    else if (hex.length === 8) hex = hex.slice(0, 6);
     return `#${hex.toUpperCase()}`;
 }
 
-/**
- * The one precedence resolver both desktop and mobile calendar views call —
- * never inline `??` per view. User pick beats a feed-provided hint beats the
- * deterministic hash fallback (#974).
- *
- * `explicitColor` is trusted as-is (callers already sanitize it through
- * `normalizeExternalCalendarColor` before it's stored); `feedColor` comes
- * from untrusted feed text, so it's re-validated here.
- *
- * Before this resolver existed, both platforms persisted the hash color into
- * `explicitColor` the moment a calendar was created, so every pre-existing
- * calendar looks "explicitly picked" and would permanently outrank a feed
- * hint with no migration. Treating a stored color equal to the hash default
- * as unset closes that gap for free. Accepted tradeoff: a user who
- * deliberately picked the one swatch (1 of 8) that happens to equal the hash
- * default loses that pick, but only once a feed color is actually available
- * to replace it — picking any other swatch still wins outright.
- */
+
 export function resolveExternalCalendarColor(
     sourceId: string,
     explicitColor?: string,
@@ -76,13 +53,7 @@ export function resolveExternalCalendarColor(
         ?? getExternalCalendarColorForId(sourceId || 'calendar');
 }
 
-/**
- * Per-theme stand-ins for the 8 pickable swatches (#974). Display only — the
- * maps are applied to the *output* of `resolveExternalCalendarColor`, never to
- * what gets stored, so a pick made under one of these themes is still the
- * canonical hex on every other theme. A feed-provided COLOR hint is arbitrary
- * hex, misses these maps, and passes through unchanged.
- */
+
 export const NORD_EXTERNAL_CALENDAR_COLOR_MAP: Record<string, string> = {
     '#2563eb': '#5e81ac',
     '#7c3aed': '#b48ead',
@@ -152,12 +123,7 @@ export function themeExternalCalendarDisplayColor(color: string, theme?: string)
     return map[color.toLowerCase()] ?? color;
 }
 
-/**
- * Whether a stored color counts as a deliberate pick for
- * `resolveExternalCalendarColor` — a stored color equal to the hash default is
- * treated as unset (see the resolver note above). The settings screens use
- * this to mark the Auto swatch as the active one.
- */
+
 export function hasExplicitExternalCalendarColor(sourceId: string, explicitColor?: string): boolean {
     return Boolean(explicitColor) && explicitColor !== getExternalCalendarColorForId(sourceId || 'calendar');
 }

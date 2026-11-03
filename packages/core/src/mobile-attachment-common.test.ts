@@ -325,8 +325,8 @@ describe('mobile attachment common: streamed uploads', () => {
     expectedEtag,
   );
   it('leaves a WebDAV overwrite to the buffered PUT, whose redirect core refuses', async () => {
-    // The native uploader follows a redirect by itself. A 303 (iOS) or 301-303 (Android)
-    // turns the PUT into a GET, and with If-Match that GET answers 200 from the old file.
+
+
     const task = { uploadAsync: vi.fn(async () => ({ status: 200 })), cancelAsync: vi.fn(async () => undefined) };
     const { common, createUploadTask } = setup({ createUploadTask: () => task });
 
@@ -418,7 +418,7 @@ describe('mobile attachment common: pre-passes', () => {
   it('never records a remote winner the merge took, but has not installed, as an own edit (bespoke prepare)', async () => {
     const { common, memory } = setup();
     const OLD = bytes(1, 2, 3);
-    // The merge took another device's content (its fileHash and contentRev; no recorded stat) and marked the bytes held here.
+
     const item = attachment({ cloudKey: 'attachments/att-1.txt', fileHash: 'b'.repeat(64), contentRev: 2,
       staleContentHash: (await computeSha256Hex(OLD))! });
     memory.put(item.uri!, OLD);

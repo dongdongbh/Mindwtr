@@ -10,7 +10,7 @@ import com.facebook.react.views.modal.ReactModalHostView
 
 class AndroidWidgetModule : Module() {
   companion object {
-    /** Runs in MainActivity before URL delivery and after RN host resume; no editor state or task data is read. */
+
     fun suppressWidgetModalExitAnimations(activity: Activity) {
       if (WidgetLaunchCover.snapshot()?.get("stage") != "pending") return
       fun visit(view: View) {
@@ -29,7 +29,7 @@ class AndroidWidgetModule : Module() {
 
     Function("setPayload") { json: String ->
       val context = appContext.reactContext ?: return@Function
-      // A payload that did not reach the disk fails the call, so widget-service.ts publishes it again.
+
       check(WidgetPayloadStore.write(context, json)) { "Widget payload not stored" }
     }
 

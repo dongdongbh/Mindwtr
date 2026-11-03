@@ -14,7 +14,7 @@ const nativeModule = Platform.OS === 'android'
   ? requireOptionalNativeModule<MindwtrAppSearchNativeModule>('MindwtrAppSearch')
   : null;
 
-/** True only on a real device build with the native module linked and API 31+. */
+
 export function isMindwtrAppSearchNativeSupported(): boolean {
   if (Platform.OS !== 'android') return false;
   try {

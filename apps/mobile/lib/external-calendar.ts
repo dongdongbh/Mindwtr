@@ -16,7 +16,7 @@ import * as FileSystem from './file-system';
 import { logInfo } from './app-log';
 import { getAllCalendarSyncEntries } from './storage-adapter';
 
-// The feeds and device calendar rules are core's (external-calendar-feeds.ts); this binds the device.
+
 export {
     EXTERNAL_CALENDARS_KEY,
     SYSTEM_CALENDAR_SETTINGS_KEY,

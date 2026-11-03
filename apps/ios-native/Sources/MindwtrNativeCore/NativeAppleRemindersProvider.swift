@@ -13,7 +13,7 @@ struct NativeAppleReminderListDTO: Sendable {
     let identity: NativeAppleReminderListIdentity
     let title: String
     let color: String?
-    // Private native job JSON retains source identity; a later public list facade projects it out.
+
     var value: [String: Any] {
         var result: [String: Any] = ["id": identity.id, "sourceId": identity.sourceID, "title": title]
         if let color { result["color"] = color }; return result
@@ -42,7 +42,7 @@ struct NativeAppleReminderReadDTO: Sendable {
     var value: [String: Any] { ["listId": list.id, "sourceId": list.sourceID, "sources": sources.map(\.providerValue)] }
 }
 
-/// SDK callback input stays on its stack; only validated immutable DTOs leave it.
+
 struct NativeAppleReminderSDKRow: Sendable {
     let list: NativeAppleReminderListIdentity
     let source: NativeAppleReminderSourceDTO
@@ -107,14 +107,14 @@ enum NativeAppleRemindersValidation {
             for value in [source.id, source.title, source.notes, source.creationDate, source.startDate, source.dueDate, source.revision] {
                 try text(value); minimumBytes += value?.utf8.count ?? 0
             }
-            // Bound raw payload before whole JSON encoding; jobs also check escapes/envelope bytes.
+
             guard minimumBytes <= NativeCalendarJobs.maximumReplyBytes else { throw NativeAppleRemindersError.tooLarge }
         }
         return NativeAppleReminderReadDTO(list: list, sources: rows.map(\.source))
     }
 }
 
-/// Expo's primitive fallback date bytes, not task dates or a new date policy.
+
 enum NativeAppleRemindersDates {
     static func date(_ value: Date?) -> String? {
         guard let value else { return nil }
@@ -128,7 +128,7 @@ enum NativeAppleRemindersDates {
     }
 }
 
-/// Created/used by one jobs worker. Callback gates alone may cross queues.
+
 final class NativeAppleRemindersProvider {
     private let status: () -> NativeAppleRemindersPermission
     private let sdkFactory: () -> any NativeAppleRemindersSDK
@@ -202,7 +202,7 @@ final class NativeAppleRemindersProvider {
         if let read { read.whenDrained(drained) } else { drained() }
     }
 
-    /// Cancellation acknowledgement is independent of EventKit's suppressed callback.
+
     private final class Read: @unchecked Sendable {
         private let lock = NSLock(), list: NativeAppleReminderListIdentity, cancellation: NativeAttachmentCancellation
         private let cancelSDK: (Any) -> Void
@@ -227,7 +227,7 @@ final class NativeAppleRemindersProvider {
             lock.lock()
             let callback = !cancelled && !cancellation.isCancelled ? completion : nil
             completion = nil; lock.unlock()
-            // Drain also owns the admitted publication, which can enqueue worker settlement.
+
             callback?(result)
             lock.lock(); converting = false; finished = true; lock.unlock(); retireIfReady()
         }
@@ -315,7 +315,7 @@ private final class NativeAppleRemindersSystemSDK: NativeAppleRemindersSDK {
         guard selected.count == 1 else { throw NativeAppleRemindersError.listChanged }
         let predicate = store.predicateForReminders(in: selected)
         return store.fetchReminders(matching: predicate) { reminders in
-            // This thunk is invoked synchronously only after the callback gate admits conversion.
+
             receive {
                 guard let reminders else { return nil }
                 guard reminders.count <= NativeAppleRemindersValidation.maximumRows else { throw NativeAppleRemindersError.tooLarge }
@@ -344,7 +344,7 @@ private final class NativeAppleRemindersSystemSDK: NativeAppleRemindersSDK {
         try NativeAppleRemindersValidation.unchanged(Self.source(reminder, calendar: .current), expected: source)
         guard Self.permission() == .granted else { throw NativeAppleRemindersError.denied }
         guard !cancellation.isCancelled else { throw NativeAppleRemindersError.cancelled }
-        // EventKit has no compare-and-delete; never retry an uncertain commit.
+
         try store.remove(reminder, commit: true)
     }
     func cancelFetch(_ token: Any) { store.cancelFetchRequest(token) }

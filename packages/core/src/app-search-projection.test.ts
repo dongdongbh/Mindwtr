@@ -1,5 +1,5 @@
-// Moved with the projection from React Native's lib/app-search-projection.test.ts (pass O2c); React Native keeps its copy, which now runs
-// against core through its re-export.
+
+
 import { describe, expect, it } from 'vitest';
 import type { Area, Project, Task } from './types';
 
@@ -179,13 +179,13 @@ describe('app-search-projection', () => {
     });
 });
 
-// Byte-identical to React Native's projection before the move (frozen from RN's lib/app-search-projection.ts, pass O2c).
+
 describe('AppSearch projection parity with React Native', () => {
     it('builds the same documents and delta React Native built', async () => {
         const frozen = (await import('./app-search-parity.fixtures.json')).default;
         const { tasks, projects, areas } = frozen.input as unknown as { tasks: Task[]; projects: Project[]; areas: Area[] };
         expect(buildFullAppSearchIndex({ tasks, projects, areas })).toEqual(frozen.full);
-        // The delta compares by reference: rebuild "next" the way the freeze did (t5 and p1 unchanged objects).
+
         const next = frozen.input as unknown as { nextTasks: Task[]; nextProjects: Project[]; nextAreas: Area[] };
         const nextTasks = [next.nextTasks[0], tasks[4], next.nextTasks[2], next.nextTasks[3]];
         const nextProjects = [projects[0], next.nextProjects[1]];

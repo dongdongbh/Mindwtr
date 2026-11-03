@@ -11,7 +11,7 @@ import { ensureDeviceId } from './store-helpers';
 import { useTaskStore } from './store';
 import { generateDeterministicUUID } from './uuid';
 
-/** The [index]th id a Duplicate under [requestId] allocates (its attachment copies first, then the project, sections and tasks). */
+
 export const projectDuplicateId = (requestId: string, index: number): string => generateDeterministicUUID(`project-duplicate:${requestId}:${index}`);
 import { projectDuplicateEffect } from './store-projects/project-actions';
 import type { PreparedProjectDuplicate } from './store-types';
@@ -164,7 +164,7 @@ export function createProjectDuplicateMethods(deps: {
             const device = ensureDeviceId(state.settings);
             const updateAt = new Date().toISOString();
             const ids: string[] = [];
-            // The copy's ids come from the request UUID, so a replay after a restart finds the copy it made (never a second one).
+
             const effect = projectDuplicateEffect(scope, device.deviceId, updateAt, () => {
                 const id = projectDuplicateId(request.requestId, ids.length);
                 ids.push(id);

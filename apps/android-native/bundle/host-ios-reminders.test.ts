@@ -61,7 +61,7 @@ describe('strict native iOS reminder ownership admission', () => {
             const signature = `native:${JSON.stringify({ ...JSON.parse(signed), repeatInterval, fireAt })}`;
             expect(() => readOwnedIosReminderMaps(JSON.stringify({ 'task:one': { id: 123, signature } }), '{}')).toThrow(unavailable);
         }
-        // The shared builder's repeating signature carries the device time zone; a once alarm or an empty zone does not.
+
         for (const repeatInterval of ['daily', 'weekly'] as const) {
             const signature = `native:${buildReminderAlarmSignature({ fireAt: new Date(now), title: 'Private', message: 'Private', repeatInterval }, 'America/New_York')}`;
             expect(signature).toContain('"timeZone":"America/New_York"');
@@ -163,6 +163,7 @@ beforeAll(async () => {
             tags:[], contexts:[], createdAt:new Date(${now}).toISOString(), updatedAt:new Date(${now}).toISOString(),
             dueDate:new Date(${now}+3600000).toISOString() }], settings:{ notificationsEnabled:true, dueDateNotificationsEnabled:true } }),
             advance:()=>useTaskStore.setState({_allTasks:useTaskStore.getState().tasks.map(task=>({...task,dueReminderLeadMinutes:15}))}),
+            startAdvance:()=>useTaskStore.setState({_allTasks:useTaskStore.getState().tasks.map(task=>({...task,dueDate:undefined,startTime:task.dueDate,startReminderLeadMinutes:15}))}),
             save:()=>useTaskStore.getState().addTask('PRIVATE_QUEUED'), flush:flushPendingSave,
             bookkeeping:()=>useTaskStore.setState({settings:{...useTaskStore.getState().settings,lastSyncAt:'synthetic'}}) };`,
         resolveDir: import.meta.dir, loader: 'ts' }, bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent' });
@@ -183,7 +184,7 @@ const fixture = () => {
             iosReminderAcknowledged(id: string, mode: string, scheduled: number, cancelled: number, collapsed?: number, rearmed?: number): string;
             iosReminderObserve(): string; iosReminderObservation(): string; iosReminderDisposeObservation(): string;
             language(stored: string, system: string): string },
-        fixture: undefined as unknown as { seed(): void; advance(): void; save(): void; flush(): Promise<void>; bookkeeping(): void },
+        fixture: undefined as unknown as { seed(): void; advance(): void; startAdvance(): void; save(): void; flush(): Promise<void>; bookkeeping(): void },
         __mindwtrNative: {
             sqlExec: (sql: string) => { writes.push('SQL'); database.exec(sql); return null; },
             sqlRun: (sql: string, params: string) => { writes.push('SQL'); database.query(sql).run(...JSON.parse(params)); return null; },
@@ -224,15 +225,15 @@ describe('actual iOS effects planning bridge with native-owned storage/effects',
         expect(entry.context).toEqual({ releaseCheck: 'v1.3.5/ios-reminder-apply', outcome: 'confirmed', mode: 'active', scheduled: '1', cancelled: '0' });
         expect(f.log()).not.toContain('PRIVATE'); expect(f.log()).not.toContain('task:one');
     });
-    it('records the advance marker only after native scheduling acknowledgment, without task content', async () => {
-        const f = fixture(); await f.boot(); f.state.fixture.advance(); await f.begin();
+    it.each(['due', 'start'] as const)('records the %s advance marker only after native scheduling acknowledgment, without task content', async (kind) => {
+        const f = fixture(); await f.boot(); if (kind === 'start') f.state.fixture.startAdvance(); else f.state.fixture.advance(); await f.begin();
         const result = await f.prepare();
         expect(result.value.plan.schedule).toHaveLength(2);
         expect(f.log()).toBe('');
         expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 2, 0))).toEqual({ ok: true, value: null });
         const lines = f.log().trim().split('\n').map((line) => JSON.parse(line));
-        expect(lines.some((entry) => entry.message === 'Advance reminder scheduled'
-            && entry.context.releaseCheck === 'v1.3.8/due-advance-reminder' && entry.context.outcome === 'scheduled')).toBe(true);
+        expect(lines.some((entry) => entry.message === (kind === 'start' ? 'Start advance reminder scheduled' : 'Advance reminder scheduled')
+            && entry.context.releaseCheck === `v1.3.8/${kind}-advance-reminder` && entry.context.outcome === 'scheduled')).toBe(true);
         expect(f.log()).not.toContain('PRIVATE'); expect(f.log()).not.toContain('task:one');
         await f.prepare(); f.failLog();
         expect(await f.poll(f.state.MindwtrHost.iosReminderAcknowledged(token, 'active', 2, 0))).toEqual({ ok: true, value: null });

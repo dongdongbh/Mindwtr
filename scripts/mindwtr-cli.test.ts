@@ -20,8 +20,7 @@ const makeTempDir = () => {
     return dir;
 };
 
-// Every test here spawns the script as a subprocess, which costs seconds on a
-// loaded runner. Bun's 5 s default is not enough now that CI runs this file.
+
 const SPAWN_TEST_TIMEOUT_MS = 60_000;
 
 const runCli = (dataPath: string, args: string[]): CliResult => {
@@ -142,7 +141,7 @@ describe('mindwtr-cli', () => {
 
         const deleted = runCli(dataPath, ['delete', taskId]);
         expect(deleted.exitCode).toBe(0);
-        // stdout is the machine-readable contract: core log lines must go to stderr.
+
         expect(deleted.stdout).toBe('ok\n');
 
         const listedDeleted = runCli(dataPath, ['list', '--all', '--deleted']);
@@ -174,8 +173,7 @@ describe('mindwtr-cli', () => {
         expect(completedTask.stdout).toContain('"status": "done"');
     }, SPAWN_TEST_TIMEOUT_MS);
 
-    // list --query used to route through core searchAll, which caps at SEARCH_RESULT_LIMIT
-    // (200) for the UI palette — so a CLI list silently stopped at 200 matches.
+
     test('lists every search match, past the 200-result UI cap', () => {
         const dir = makeTempDir();
         const dataPath = join(dir, 'data.json');

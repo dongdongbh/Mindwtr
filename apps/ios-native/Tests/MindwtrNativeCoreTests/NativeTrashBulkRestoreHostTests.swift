@@ -1,7 +1,7 @@
 import XCTest
 @testable import MindwtrNativeCore
 
-/// Actual JSC bundle, ordinary native journal, SQLite transaction and UUID receipt.
+
 final class NativeTrashBulkRestoreHostTests: XCTestCase {
     private var root: URL!
     private var bundle: URL!
@@ -44,7 +44,7 @@ final class NativeTrashBulkRestoreHostTests: XCTestCase {
     private func assertJournalContentUnchanged(_ saved: Data, file: StaticString = #filePath, line: UInt = #line) throws {
         let before = try object(String(decoding: saved, as: UTF8.self))
         let after = try object(String(contentsOf: journal, encoding: .utf8))
-        // Recovery can re-encode outer object order. The accepted arguments remain byte-exact.
+
         XCTAssertEqual(try json(after), try json(before), file: file, line: line)
         XCTAssertEqual(Data(try XCTUnwrap(after["argumentsJSON"] as? String).utf8),
                        Data(try XCTUnwrap(before["argumentsJSON"] as? String).utf8), file: file, line: line)
@@ -201,8 +201,8 @@ final class NativeTrashBulkRestoreHostTests: XCTestCase {
         try await seed(); let faults = HostIOFaults(), writer = host(faults); _ = try await writer.start()
         let request = try await request(writer)
         var committedReplies = 0
-        // The shared save retries a one-shot lost COMMIT reply. Keep every reply lost
-        // so the native command genuinely remains owed while its SQL receipt is durable.
+
+
         faults.afterSQL = { if $0 == "COMMIT" { committedReplies += 1; throw HostFailure("Injected committed ACK") } }
         await failure("SAVE_FAILED") { _ = try await self.write(writer, request) }
         XCTAssertGreaterThan(committedReplies, 1); try assertEffect()
@@ -437,7 +437,7 @@ final class NativeTrashBulkRestoreHostTests: XCTestCase {
             payloadJSON: checkpoint.payloadJSON)
         try await core.checkpointEditorDraft(independent)
         let owned = try Data(contentsOf: editor.url), request = try await request(core), before = try snapshot()
-        // Archive admission refuses to replace an independent saved editor.
+
         await failure("saved editor draft") { _ = try await self.write(core, request) }
         XCTAssertEqual(try Data(contentsOf: editor.url), owned); XCTAssertEqual(try snapshot(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
@@ -458,8 +458,8 @@ final class NativeTrashBulkRestoreHostTests: XCTestCase {
         root = originalRoot.appendingPathComponent("NativeUITests/" + identifier)
         defer { root = originalRoot }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        // The audited fixture requires this exact basename, canonical namespace
-        // and secret-service owner; every normal test remains on core.sqlite.
+
+
         let isolatedDatabase = root.appendingPathComponent("mindwtr.sqlite")
         let faults = HostIOFaults(); faults.secretService = "mindwtr.native-keychain.fixture." + identifier
         let boot = CoreHost(databaseURL: isolatedDatabase, bundleURL: bundle, faults: faults)

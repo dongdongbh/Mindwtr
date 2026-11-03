@@ -1,7 +1,6 @@
-// The native upgrade of an RN install, through the shipped host-entry over bun:sqlite: the
-// preflight (`legacyCheck`, before SQLite opens) and the boot's import of RN's JSON copy.
-// a108d6764: a copy SQLite always rejects is repaired, not refused at every start.
-// e93722f3d: the first move keeps the copy's device-local settings.
+
+
+
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import vm from 'node:vm';
@@ -26,9 +25,9 @@ const fixture = () => {
     const rnState: string[] = [];
     const state: Record<string, any> = {
         AbortController, URL, TextEncoder, TextDecoder, setTimeout, clearTimeout, WeakRef,
-        // Shared host-entry code; the iOS table needs the fewest bridge functions.
+
         __mindwtrHostPlatform: 'ios',
-        // Core's logger writes each line to the console first (logcat on the phone).
+
         console: Object.fromEntries(['info', 'warn', 'error', 'log', 'debug'].map((level) => [level, (...args: unknown[]) => {
             lines.push(args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '));
         }])),
@@ -57,8 +56,8 @@ const fixture = () => {
 };
 
 const AT = '2026-09-20T10:00:00.000Z';
-// RN's JSON copy as a broken older build left it: a null entry, rows without a title or name,
-// a section whose project is gone, and settings that belong to this device only.
+
+
 const brokenCopy = JSON.stringify({
     tasks: [null, { id: 't1', title: null, description: 'Private note', status: 'inbox', tags: [], contexts: [], sectionId: 's-orphan',
         rev: 2, revBy: 'rn', createdAt: AT, updatedAt: AT }],
@@ -93,7 +92,7 @@ describe('native upgrade of an RN JSON copy', () => {
         expect(f.rnState).toEqual([JSON.stringify({ clearJsonAhead: false, setReconciled: true })]);
 
         const repairLine = f.lines.find((line) => line.includes('v1.3.8/native-legacy-copy-repair'));
-        // The console line nests the context as JSON text, so a count reads as untitledTasks\\":\\"1.
+
         expect(repairLine).toMatch(/untitledTasks\W+1\b/);
         expect(repairLine).toMatch(/orphanSections\W+1\b/);
         expect(repairLine).not.toContain('Private note');

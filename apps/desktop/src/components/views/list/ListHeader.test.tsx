@@ -60,8 +60,7 @@ describe('ListHeader', () => {
         setPrioritiesEnabled(true);
     });
 
-    // #1107: the sort lives in the shared SortBySelect, so the Time estimates
-    // toggle has to reach it there rather than at each individual toolbar.
+
     it('offers the time-estimate sort only while the Time estimates feature is on', () => {
         const header = (sortBy: 'default' | 'timeEstimate') => (
             <ListHeader
@@ -93,9 +92,7 @@ describe('ListHeader', () => {
         expect(screen.queryByRole('option', { name: 'Time estimate' })).not.toBeInTheDocument();
         disabled.unmount();
 
-        // A sort stored as 'timeEstimate' now reaches the picker already resolved
-        // to 'default' (resolveNonDoneTaskSortBy), so the trigger shows Default
-        // and no escape hatch has to keep the disabled option listed (#1107).
+
         const resolved = resolveNonDoneTaskSortBy('timeEstimate', useTaskStore.getState().settings);
         expect(resolved).toBe('default');
         render(header(resolved as 'default'));
@@ -159,10 +156,8 @@ describe('ListHeader', () => {
         const title = screen.getByRole('heading', { level: 2, name: 'Aguardando' });
         expect(title).toHaveClass('break-words');
         expect(title).not.toHaveClass('truncate');
-        // The heading classes alone are not enough: the title column shares a flex
-        // row with the toolbar, so a zero minimum width let the toolbar squeeze a
-        // single long word until it broke mid-word ("Aguardand / o"). Keeping the
-        // column's content-based floor is what actually holds the word together.
+
+
         expect(title.parentElement).not.toHaveClass('min-w-0');
     });
 
@@ -227,7 +222,7 @@ describe('ListHeader', () => {
         renderHeader();
         openToolbarSelect('Group');
         expect(screen.queryByRole('option', { name: 'Priority' })).not.toBeInTheDocument();
-        // Energy has no feature flag and must survive.
+
         expect(screen.getByRole('option', { name: 'Energy' })).toBeInTheDocument();
     });
 
@@ -257,8 +252,7 @@ describe('ListHeader', () => {
         expect(screen.queryByRole('button', { name: 'Filters' })).not.toBeInTheDocument();
     });
 
-    // "Hide details, toggle button, pressed" told a screen-reader user the action
-    // and the state at once, and the two read as contradicting each other.
+
     it('names the details button by its action without also claiming a pressed state', () => {
         const { rerender } = render(
             <ListHeader

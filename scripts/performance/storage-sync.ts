@@ -11,8 +11,7 @@ import type { AppData } from '../../packages/core/src/types';
 import { fixture } from './fixture.mjs';
 import { summarize } from './report.mjs';
 
-// Never accepts an existing database. Keep synthetic databases beside reports,
-// on disk (not tmpfs), for inspecting query plans or reproducing a slow sample.
+
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const output = resolve(process.env.STORAGE_OUT_DIR ?? join(root, 'build/performance-storage', new Date().toISOString().replaceAll(':', '-')));
 const runs = Number(process.env.RUNS ?? 10);
@@ -37,14 +36,14 @@ for (const size of sizes) {
   const adapter = new SqliteAdapter(client);
   const samples: Array<Record<string, unknown>> = [];
   try {
-    // FULL acknowledgement is intentionally retained; do not trade durability
-    // for a lower write timing. This runner does not emulate the Tauri/RN bridge.
+
+
     db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
     const initialStart = performance.now();
     await adapter.saveData(seed.data as AppData);
     const initialWriteMs = performance.now() - initialStart;
     let canonical = await adapter.getData();
-    // Align the adapter fingerprint cache with the canonical hydrated shape.
+
     await adapter.saveData(canonical);
     for (let run = 0; run <= runs; run++) {
       const durations: Record<string, number> = {};
@@ -69,7 +68,7 @@ for (const size of sizes) {
       peer.tasks[0] = { ...peer.tasks[0], title: `Synthetic edit ${run}`, rev: (peer.tasks[0].rev ?? 0) + 1, updatedAt: '2020-01-02T00:00:00.000Z' };
       const merged = await time('syncOneTaskMerge', () => mergeAppData(canonical, peer, { nowIso: '2026-09-08T12:00:00.000Z' }));
       assert.equal(merged.tasks.find(task => task.id === peer.tasks[0].id)?.title, peer.tasks[0].title);
-      // Isolate a single changed row from merge normalization/settings changes.
+
       canonical = { ...canonical, tasks: canonical.tasks.map((task, index) => index === 0 ? peer.tasks[0] : task) };
       await time('sqliteOneTaskSnapshotSave', () => adapter.saveData(canonical));
       const changedStats = adapter.getLastSaveDataStats();
@@ -78,7 +77,7 @@ for (const size of sizes) {
       const targeted = { ...canonical.tasks[1], title: `Synthetic direct edit ${run}`, rev: (canonical.tasks[1].rev ?? 0) + 1 };
       await time('sqliteTargetedTaskSave', () => adapter.saveTask(targeted));
       canonical = { ...canonical, tasks: canonical.tasks.map((task, index) => index === 1 ? targeted : task) };
-      // A fresh connection validates committed readback, outside timed regions.
+
       const checkDb = new Database(path, { readonly: true });
       try {
         assert.equal((checkDb.query('SELECT title FROM tasks WHERE id = ?').get(targeted.id) as { title: string }).title, targeted.title);

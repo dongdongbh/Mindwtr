@@ -1,31 +1,6 @@
-// Replay and restart around a sliced sync's local saves (D9b design §7), without a phone: the real native bundle
-// (core-host.js) in Node VMs (sync-harness.mjs hostDevice, bound as the Android host binds it, booted as a journaling host)
-// on a database file, against a local WebDAV folder.
-//
-//   node apps/android-native/scripts/build-bundle.mjs
-//   node apps/android-native/scripts/check-merge-replay.mjs [scratch dir]       (ONLY=<case id> runs one case)
-//
-// First a clean cycle: the other device's edits reach the folder and A syncs with nothing else running. It must commit both
-// local saves with no requeue: nothing the save-1 publish starts writes through the adapter before save 2. A's store
-// subscribers are the phone's: the widget publisher and the reminder planner run on stand-ins for their native bridges.
-//
-// Then each case. Device A holds a 2,000-task library and a daily task. The other device's edits reach the folder (400 tasks
-// retitled, plus a project in an area that does not exist and a task in a project that does not exist: the merge repairs
-// both). A syncs, and the sync is held (no timer pumps) at one point: inside its first local save's sliced preparation,
-// between that save and the remote write, before its second local save, or after it. There the screens send three journaled
-// commands: Done on the daily task (with the revision the view showed), a quick capture (with its capture id), and a General
-// setting (with its request UUID; it answers changed:true once, and a replay answers that from its durable receipt, where
-// re-running it would answer changed:false). A fault hits the setting's own write:
-//   before-receipt  its receipt insert fails (the save rolls back; the store's next save carries it again, and an answer
-//                   changed:true must find its receipt on disk), then the journal re-sends it, live or after a restart;
-//   after-receipt   the process dies between its receipt insert and its COMMIT, and restarts;
-//   after-commit    the process dies right after its COMMIT, before it answers, and restarts;
-//   after-ack       it answered; the journal re-sends it anyway (an acknowledgment the journal lost), live, or after a restart.
-// A restart opens the same database file, key-value store, secrets and files, boots as StartOrder does, and the journal
-// re-sends all three commands before sync starts.
-// After A's follow-up cycles and device B's sync, A's database, B's database and the folder hold: every remote edit, the
-// capture once, the daily task done once with exactly one next occurrence, both repairs, the setting, no pending remote write;
-// the repaired rows keep their revisions over two more cycles (a repair writes once). Exit 0 = pass, 1 = fail.
+
+
+
 import { randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -40,7 +15,7 @@ const PORT = Number(process.env.MINDWTR_MERGE_WEBDAV_PORT ?? 18777);
 const USER = `replay${run}`;
 const PASSWORD = `pw${run}secret`;
 const DAY = 24 * 60 * 60 * 1000;
-// Relative to now, so the library never ages into a migration (auto-archive, tombstone purge) between runs.
+
 const AT = new Date(Date.now() - 3 * DAY).toISOString();
 
 const POINTS = [
@@ -76,7 +51,7 @@ dav.state.files.set('/dav', { dir: true });
 rmSync(scratch, { recursive: true, force: true });
 mkdirSync(scratch, { recursive: true });
 
-/** One folder and one device A on disk, joined to it, with B ready; [body] runs the case. */
+
 const withLibrary = async (id, body) => {
     const folder = `/dav/mindwtr-replay-${run}-${id}`;
     const webdav = { url: `http://127.0.0.1:${PORT}${folder}`, username: USER, password: PASSWORD, allowInsecureHttp: true };
@@ -92,7 +67,7 @@ const withLibrary = async (id, body) => {
         dueDate: new Date(Date.now() + DAY).toISOString(), createdAt: AT, updatedAt: AT, rev: 1, revBy: 'seed' });
     put({ tasks, projects: [], sections: [], areas: [], people: [], settings: {} });
 
-    // A's process: its database file, RKStorage, secrets and files outlive it.
+
     const disk = { database: resolve(scratch, `${id}.db`), filesRoot: resolve(scratch, `${id}-files`), keyValue: new Map(), secrets: new Map() };
     mkdirSync(disk.filesRoot, { recursive: true });
     const seen = { steps: [], lines: [], sections: [], prepareSlices: 0, watch: null, sql: null };
@@ -114,7 +89,7 @@ const withLibrary = async (id, body) => {
         });
         await device.call('boot', '', '', 'journaled');
         await beforeSync(device);
-        // The phone's StartOrder starts the reminder subscriber before sync; the widget publisher started at boot.
+
         await device.call('remindersStart');
         await device.call('language', 'en', 'en-US');
         await device.call('syncNetwork', JSON.stringify({ isConnected: true, isInternetReachable: true }));
@@ -130,12 +105,12 @@ const withLibrary = async (id, body) => {
     } catch (error) {
         check(false, `${id}: stopped: ${error.stack ?? error}`);
     } finally {
-        try { ctx.a.stop(); } catch { /* killed */ }
+        try { ctx.a.stop(); } catch {              }
         ctx.b.stop();
     }
 };
 
-/** The other device's edits, with two references the merge must repair. */
+
 const remoteEdits = (ctx) => {
     const doc = webdavDocument(dav, ctx.folder);
     for (const task of live(doc).filter((row) => row.id.startsWith('replay-')).slice(0, 400)) {
@@ -162,7 +137,7 @@ const cleanCycle = () => withLibrary('clean', async (ctx) => {
     check(cycle?.requeue === 'none' && /^prepared(,prepared)+$/.test(cycle?.storePublish ?? ''),
         `clean: both local saves committed with their prepared publish and no requeue: no store subscriber wrote through the adapter between them (${JSON.stringify(cycle)})`);
     check(Number(cycle?.slices) > 10, `clean: the cycle gave the engine back (${cycle?.slices} slices, longest ${cycle?.longestSliceMs} ms)`);
-    // The phone's store subscribers ran: the widget publisher and the reminder planner published from this cycle's store.
+
     const kinds = new Set(ctx.a.published.map(([kind]) => kind));
     check(kinds.has('widget') && kinds.has('alarms') && Number(cycle?.storeListeners) > 2,
         `clean: the widget and reminder subscribers were live (${[...kinds].join(', ')}; ${cycle?.storeListeners} store listeners)`);
@@ -183,7 +158,7 @@ const runCase = (point, fault) => withLibrary(caseId(point, fault), async (ctx) 
     const sendSetting = (device) => device.call('menuCommand', 'generalSetting', settingInput).then((value) => ({ value }), (error) => ({ error: String(error.message ?? error) }));
     const sendTasks = (device) => Promise.all([device.call('complete', `daily-${id}`, dailyRevision), device.call('captureSubmit', captureInput)]);
 
-    // A's sync, held at the point.
+
     let held = null;
     const reached = new Promise((done) => {
         const base = seen.steps.filter((s) => s === point.step).length;
@@ -202,12 +177,12 @@ const runCase = (point, fault) => withLibrary(caseId(point, fault), async (ctx) 
     await Promise.race([reached, syncing]);
     check(held !== null, `${label}: the sync reached the point (last step ${held ?? seen.steps.at(-1)})`);
     if (held === null) return;
-    // Not past it: before the remote write nothing is written to the folder; before save 2 the folder holds the write.
+
     const remoteWritten = documentWrites() - writesBefore;
     check(point.name.includes('remote write') || point.name.includes('preparation') ? remoteWritten === 0 : remoteWritten === 1,
         `${label}: the hold is where it should be (${remoteWritten} document writes)`);
     if (point.preparation) {
-        // Into the save's sliced preparation, one pump turn at a time: the commands land between its slices, before its gate.
+
         let inside = false;
         for (let turn = 0; turn < 2000; turn += 1) {
             if (seen.prepareSlices > 0 && !ctx.a.inTransaction()) { inside = true; break; }
@@ -218,7 +193,7 @@ const runCase = (point, fault) => withLibrary(caseId(point, fault), async (ctx) 
         check(inside && !gated, `${label}: the commands land inside the save's sliced preparation, before its gate (after ${seen.prepareSlices} slices)`);
     }
 
-    // The setting's own write meets the fault.
+
     let receiptSeen = false;
     let commitSeen = false;
     seen.sql = (sql, phase, json) => {
@@ -236,10 +211,10 @@ const runCase = (point, fault) => withLibrary(caseId(point, fault), async (ctx) 
     const firstSetting = await sendSetting(ctx.a);
     seen.sql = null;
     check(receiptSeen && (fault.name !== 'after-commit' || commitSeen), `${label}: the setting's write reached the fault`);
-    // A failed receipt insert rolls the save back; the store's next save carries the receipt again. Either way an answer
-    // changed:true comes only once its receipt is durable.
+
+
     if (!fault.restart || fault.name === 'after-ack') {
-        // The same connection: no transaction may be open, or the read could see uncommitted rows.
+
         const durable = !ctx.a.inTransaction()
             && ctx.a.query('SELECT request_id FROM native_request_receipts WHERE request_id = ?', settingRequest).length === 1;
         check(firstSetting.value?.changed === true ? durable : Boolean(firstSetting.error),
@@ -247,7 +222,7 @@ const runCase = (point, fault) => withLibrary(caseId(point, fault), async (ctx) 
     }
     if (fault.name === 'after-ack') check(firstSetting.value?.changed === true, `${label}: the setting answered changed:true`);
     if (!fault.restart) {
-        // A command whose save failed waits for the store's retry, which needs the timer pump.
+
         const heldAt = seen.lines.length;
         ctx.a.thaw();
         const firstTasks = await tasksFirst;
@@ -264,14 +239,14 @@ const runCase = (point, fault) => withLibrary(caseId(point, fault), async (ctx) 
     } else {
         ctx.a.kill();
         await syncing;
-        // StartOrder: load, then the journal's replay, then sync.
+
         ctx.a = await ctx.start(async (device) => {
             const replay = await sendSetting(device);
             check(replay.value?.changed === true, `${label}: after the restart the journal's re-sent setting answered changed:true (${JSON.stringify(replay)})`);
             check((await sendTasks(device)).every(Boolean), `${label}: after the restart the journal's re-sent Done and capture answered`);
         });
         await ctx.a.sync('openSyncSettings');
-        // The dead process's remote fence stays until its heartbeat is overdue; then the restarted A takes it over.
+
         const since = Date.now();
         let took = false;
         while (Date.now() - since < 180_000) {
@@ -282,7 +257,7 @@ const runCase = (point, fault) => withLibrary(caseId(point, fault), async (ctx) 
         check(took, `${label}: the restarted A took over the dead process's sync fence (${Math.round((Date.now() - since) / 1000)} s)`);
     }
 
-    // A's follow-up cycles (a requeue asks for another after a quiet period), then B, then A.
+
     for (let i = 0; i < 3; i += 1) {
         await ctx.a.syncNow('webdav', settings);
         await sleep(2_500);

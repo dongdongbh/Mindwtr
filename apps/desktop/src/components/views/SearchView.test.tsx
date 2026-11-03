@@ -58,7 +58,7 @@ describe('SearchView', () => {
         const view = renderSearchView();
         const sort = view.getByRole('combobox', { name: 'Sort' });
         expect(sort).toHaveTextContent('Use global setting (Default)');
-        // Opening the view writes nothing.
+
         expect(useTaskStore.getState().settings).toBe(before);
         const order = () => {
             const text = view.container.textContent ?? '';

@@ -1,6 +1,6 @@
 import type { Area, Project, ProjectFlowMode, Section, Task, TaskSortBy } from './types';
 import { isTaskActionable } from './task-status';
-// task-utils imports this file too; both only call across at run time, so the cycle is safe.
+
 import { compareAreasByOrder, compareProjectsByOrder, getProjectFlowMode, getSequentialFirstTaskIds, getTaskSequencing, getTaskSequenceKey, isSequentialChainStatus } from './task-utils';
 
 export function normalizeProjectSequentialScope(value: unknown): Project['sequentialScope'] {
@@ -8,32 +8,24 @@ export function normalizeProjectSequentialScope(value: unknown): Project['sequen
     return undefined;
 }
 
-/** Every task sort mode a project may store, including 'default' (= manual project order).
- *  Wire-level allowlist: the cloud server validates project taskSortBy against this, so it
- *  must stay a superset of what any client can persist on a project. 'priority' is left out
- *  on purpose: it is a shared-list sort only (settings.taskSortBy), because older clients
- *  normalize an unknown project sort to undefined and would erase it (#1415). */
+
 export const TASK_SORT_BY_VALUES = [
     'default', 'due', 'start', 'review', 'title', 'timeEstimate', 'created', 'created-desc', 'completed',
 ] as const;
 
-/** Task sorts a project never stores; see TASK_SORT_BY_VALUES. */
+
 type SharedListOnlyTaskSortBy = 'priority';
 
 export const TASK_SORT_BY_VALUE_SET: ReadonlySet<TaskSortBy> =
     new Set<TaskSortBy>(TASK_SORT_BY_VALUES);
 
-// Compile-time exhaustiveness assertion: adding a member to the TaskSortBy
-// union in types.ts without updating TASK_SORT_BY_VALUES (or naming it shared-list
-// only) is a typecheck error.
+
 type _TaskSortByValuesAreExhaustive =
     Exclude<TaskSortBy, (typeof TASK_SORT_BY_VALUES)[number] | SharedListOnlyTaskSortBy> extends never ? true : never;
 const _assertTaskSortByValuesAreExhaustive: _TaskSortByValuesAreExhaustive = true;
 void _assertTaskSortByValuesAreExhaustive;
 
-// 'default' means "no explicit sort" — normalizing it to undefined is what
-// keeps sync signatures stable between a client that writes 'default' and
-// one that omits the field (sync-signatures.ts:158).
+
 const PROJECT_TASK_SORT_BY_VALUES = new Set<TaskSortBy>(
     TASK_SORT_BY_VALUES.filter((value) => value !== 'default'),
 );
@@ -52,15 +44,7 @@ const compareProjectSections = (a: Section, b: Section): number => {
     return a.title.localeCompare(b.title);
 };
 
-/**
- * Sections shown inside one project workspace.
- *
- * Active projects use the normal visible projection. Archiving a project
- * intentionally tombstones its then-visible sections so sync and Reactivate
- * remain reversible; an archived historical workspace may read those marked
- * tombstones from the all-entity collection without changing their state.
- * Sections deleted before the project archive remain omitted.
- */
+
 export function getProjectSectionsForView(
     project: Pick<Project, 'id' | 'status'> | null | undefined,
     visibleSections: readonly Section[],
@@ -82,22 +66,11 @@ export function getProjectSectionsForView(
 
 export type ProjectFlowModeChange = {
     project: Pick<Project, 'isSequential'> & Partial<Pick<Project, 'perSectionFlow'>>;
-    /** Sections that get a stored choice now; every other section is left as it is. */
+
     sections: Array<{ id: string; isSequential: boolean }>;
 };
 
-/**
- * The writes that switch a project's Flow mode (#1429), or null when it is
- * already in that mode.
- * - Sequential keeps the stored within/across sections choice.
- * - Leaving Per section writes perSectionFlow false (never absent), so the
- *   old-client keep rule in sync cannot bring it back.
- * - Entering Per section gives every live section without a stored choice an
- *   explicit one: Sequential from "Sequential, within sections", Parallel from any
- *   other mode. Nothing changes for the user, and a later trip through "within
- *   sections" cannot flip those sections to Sequential.
- * - Stored section choices are never touched; they come back on return.
- */
+
 export function planProjectFlowModeChange(
     project: Pick<Project, 'id' | 'isSequential' | 'perSectionFlow' | 'sequentialScope'>,
     sections: readonly Section[],
@@ -123,18 +96,7 @@ export function planProjectFlowModeChange(
 
 export type ProjectSequenceTaskCue = 'available' | 'later';
 
-/**
- * The "available next" / "later in sequence" cue on a sequential project's
- * Next tasks: the task's turn in the sequence. The available task is the one
- * getSequentialFirstTaskIds picks (the Next list's rule, also used by Review:
- * manual order within section order, and a waiting step holds its slot), so
- * the cue never depends on the order the caller lists the tasks in. Pass the
- * project's sections so section order ranks as it does there.
- *
- * Focus is different on purpose: getFocusSequentialFirstTaskIds lets a task
- * due today or starred take the project's Focus slot out of turn, so Focus
- * may show a task this cue marks "later".
- */
+
 export function getSequentialProjectTaskCues(
     project: Pick<Project, 'id' | 'isSequential' | 'sequentialScope' | 'perSectionFlow'> | null | undefined,
     tasks: readonly Task[],
@@ -143,7 +105,7 @@ export function getSequentialProjectTaskCues(
     const cues = new Map<string, ProjectSequenceTaskCue>();
     if (!project || getProjectFlowMode(project) === 'parallel') return cues;
 
-    // Per section (#1429): only tasks in a Sequential section get a cue.
+
     const sequencing = getTaskSequencing([{ ...project, deletedAt: undefined,
         sequentialScope: normalizeProjectSequentialScope(project.sequentialScope) }], sections);
     const firstTaskIds = getSequentialFirstTaskIds(
@@ -209,14 +171,7 @@ export function isTaskInActiveProject(
     return project.status === 'active' || project.isFocused === true;
 }
 
-/**
- * Project visibility for the Calendar's completed look-back (#955).
- *
- * Historical tasks from an archived project still describe work that happened,
- * while tasks in deferred projects do not belong on the active calendar.
- * Missing projects retain the existing loose-task behavior; deleted projects
- * remain hidden.
- */
+
 export function isTaskInCalendarHistoryProject(
     task: Task,
     projectLookup: Map<string, Project> | Record<string, Project>
@@ -269,7 +224,7 @@ export function getProjectNextActionPromptData(
     completedTask: Task,
     tasks: Task[],
     projects: Project[],
-    /** Needed only for Per section projects; without it they prompt per project. */
+
     sections?: readonly Section[],
 ): { project: Project; candidates: Task[]; scope: 'project' | 'section' } | null {
     if (!completedTask.projectId || completedTask.deletedAt || completedTask.status !== 'done') {
@@ -289,10 +244,7 @@ export function getProjectNextActionPromptData(
         };
     }
 
-    // Section-scoped sequential projects run one sequence per section, so a
-    // section left without a next action is stalled even while other sections
-    // still have live next actions (#911).
-    // A Sequential section of a Per section project is its own sequence too (#1429).
+
     const completedSection = completedTask.sectionId
         ? sections?.find((section) => section.id === completedTask.sectionId && section.projectId === project.id)
         : undefined;
@@ -370,11 +322,7 @@ export function getProjectChoiceState(
     };
 }
 
-/**
- * A destination picker's two groups (#1467): active projects, then Someday / Waiting ones. Each group is in
- * the Projects view's order: areas in their order, projects without an area last, then each project's stored
- * order, so a picker shows the order the user dragged instead of A-Z.
- */
+
 type PickerProject = Pick<Project, 'title'> & Partial<Pick<Project, 'status' | 'areaId' | 'order'>>;
 
 export function groupProjectsForPicker<T extends PickerProject>(
@@ -392,7 +340,7 @@ export function groupProjectsForPicker<T extends PickerProject>(
     return { active, deferred };
 }
 
-/** {@link groupProjectsForPicker} as one list: the order a picker shows its project rows in. */
+
 export function sortProjectsForPicker<T extends PickerProject>(projects: readonly T[], areas: readonly Area[]): T[] {
     const { active, deferred } = groupProjectsForPicker(projects, areas);
     return [...active, ...deferred];

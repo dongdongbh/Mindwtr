@@ -36,16 +36,16 @@ const colorFor = (id: TaskRowSwipeActionId, statusColors: StatusPalette): string
 type Props = {
     actions: TaskRowSwipeAction[];
     side: 'left' | 'right';
-    /** False at a large text scale: icons only, labels kept for screen readers. */
+
     showLabels: boolean;
     statusColors: StatusPalette;
     t: (key: string) => string;
     onAction: (action: TaskRowSwipeAction) => void;
-    /** Long-press on Done: complete with a picked time. Omitted where that is not offered. */
+
     onLongPressDone?: () => void;
 };
 
-/** The buttons one swipe reveals (#1464). Each is at least 48dp on both axes. */
+
 export function SwipeableTaskItemTray({ actions, side, showLabels, statusColors, t, onAction, onLongPressDone }: Props) {
     return (
         <View style={side === 'left' ? styles.swipeTrayLeft : styles.swipeTrayRight}>

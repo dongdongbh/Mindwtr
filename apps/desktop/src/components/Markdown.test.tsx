@@ -9,8 +9,7 @@ const openShell = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('@tauri-apps/plugin-shell', () => ({ open: openShell }));
 
 describe('Markdown', () => {
-    it('renders explicit UpNote descriptions and preserves their URI through the opener', async () => {
-        const uri = 'upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true';
+    it.each(['upnote://x-callback-url/openNote?noteId=Note%2FCase%2520&new_window=true', 'obsidian://open?vault=Obsidian%20Vault&file=Folder%2FNote%2520&heading=Section%20One'])('preserves explicit app links through the opener: %s', async (uri) => {
         (window as any).__TAURI_INTERNALS__ = {};
         try {
             const { getByRole } = render(<LanguageProvider><Markdown markdown={`[Note](${uri})`} /></LanguageProvider>);

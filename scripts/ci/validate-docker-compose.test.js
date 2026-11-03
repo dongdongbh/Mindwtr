@@ -46,8 +46,7 @@ afterEach(() => {
   }
 });
 
-// `docker compose config` cold-starts the docker CLI on a CI runner, which can
-// exceed bun's default 5 s per-test timeout (CI run 33590479279 flaked on it).
+
 const COMPOSE_RENDER_TIMEOUT_MS = 60_000;
 
 describe("Docker Compose cloud authentication", () => {

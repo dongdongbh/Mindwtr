@@ -1,8 +1,6 @@
 import { configureDateFormatting } from './date';
 import { parseQuickAdd, parseQuickAddDateCommands } from './quick-add';
 
-// The inputs of quick-add-chrono-corpus.test.ts and its frozen JSON, shared with the native bundle's check of the lazy chrono
-// path (apps/android-native/bundle/lazy-chrono.test.ts). Run in UTC.
 
 export const QUICK_ADD_CORPUS_NOW = new Date('2026-08-04T10:00:00Z');
 

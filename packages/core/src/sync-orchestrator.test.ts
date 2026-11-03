@@ -239,18 +239,18 @@ describe('sync orchestrator', () => {
                 },
             });
 
-            // (a) run()'s returned promise rejects with the cause.
+
             await expect(orchestrator.run('first')).rejects.toThrow('cycle failed');
 
-            // Give the unhandled-rejection detector a couple of macrotask turns to fire.
+
             await new Promise((resolve) => setTimeout(resolve, 0));
             await new Promise((resolve) => setTimeout(resolve, 0));
 
-            // (b) the discarded derived `.finally()` promise did not surface as unhandled.
+
             expect(rejections).toHaveLength(0);
             expect(drainedCount).toBe(1);
 
-            // (d) drain proceeds after a failure — a later run still succeeds.
+
             await expect(orchestrator.run('second')).resolves.toBe(2);
         } finally {
             process.removeListener('unhandledRejection', onRejection);
@@ -264,7 +264,7 @@ describe('sync orchestrator', () => {
             runCycle: async () => {
                 calls += 1;
                 if (calls === 1) {
-                    // Queue a follow-up while the first cycle is still running.
+
                     return new Promise<number>((resolve) => {
                         setTimeout(() => resolve(calls), 10);
                     });

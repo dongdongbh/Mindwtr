@@ -4,9 +4,7 @@ import { applyImport, type ImportSource } from './import-apply';
 import { mockAppData } from './sync-test-utils';
 import type { Area, Project, Task } from './types';
 
-// Deterministic id scheme for the tests below — mirrors what TickTick/DGT's real idFor hooks do
-// (hash a namespaced sourceKey), without pulling in the real hash so a test failure points at
-// applyImport's own dedup/order/rev logic rather than the hash function.
+
 const idFor = (kind: 'area' | 'project' | 'section' | 'task', sourceKey: string): string => `${kind}::${sourceKey}`;
 
 const OPTS = {
@@ -16,10 +14,8 @@ const OPTS = {
 };
 
 describe('applyImport', () => {
-    // R-07: the identity is idFor('task', sourceKey), so a missing key collapsed every task
-    // onto one id and dropped all but the first as "already imported". sourceKey is required
-    // now — the compiler is that guard (see the OmniFocus callsite). This pins the behaviour
-    // the requirement exists to protect.
+
+
     it('dedupes repeated sourceKeys but keeps distinct ones apart', () => {
         const parsed = {
             areas: [],
@@ -39,9 +35,8 @@ describe('applyImport', () => {
     });
 
     it('renames on name collision, allocates order after existing siblings, and stamps a fresh rev', () => {
-        // This area was "already imported" in a prior run (its id already matches what idFor
-        // would produce), so this import must dedupe it rather than create a duplicate — and a
-        // project/task landing in that same area must continue after its existing siblings.
+
+
         const existingArea: Area = {
             id: idFor('area', 'src-area'),
             name: 'Work',
@@ -105,7 +100,7 @@ describe('applyImport', () => {
 
         const result = applyImport(currentData, parsed, { ...OPTS, now: '2026-06-17T12:00:00.000Z' });
 
-        // The area was deduped (id already existed), not recreated.
+
         expect(result.importedAreaCount).toBe(0);
         expect(result.data.areas).toHaveLength(1);
 
@@ -114,7 +109,7 @@ describe('applyImport', () => {
         expect(importedProject).toMatchObject({
             title: 'Launch (Test)',
             areaId: existingArea.id,
-            order: 1, // continues after siblingProject's order 0
+            order: 1,
             rev: 1,
             revBy: result.data.settings.deviceId,
         });
@@ -125,7 +120,7 @@ describe('applyImport', () => {
         const importedTask = result.data.tasks.find((task) => task.id === idFor('task', 'src-task'));
         expect(importedTask).toMatchObject({
             areaId: existingArea.id,
-            order: 1, // continues after siblingTask's order 0
+            order: 1,
             rev: 1,
             revBy: result.data.settings.deviceId,
         });
@@ -191,8 +186,7 @@ describe('applyImport', () => {
         const importedProject = first.data.projects.find((project) => project.id === importedProjectId);
         expect(importedProject).toBeDefined();
 
-        // Simulate the user deleting the imported project (soft delete / tombstone) before
-        // re-importing the exact same source file.
+
         const deletedAt = '2026-06-19T00:00:00.000Z';
         const dataWithTombstone: typeof first.data = {
             ...first.data,
@@ -208,7 +202,7 @@ describe('applyImport', () => {
         expect(second.importedProjectCount).toBe(0);
         const stillTombstoned = second.data.projects.find((project) => project.id === importedProjectId);
         expect(stillTombstoned?.deletedAt).toBe(deletedAt);
-        // No second, live "Launch" project was created alongside the tombstone.
+
         expect(second.data.projects.filter((project) => project.title === 'Launch' && !project.deletedAt)).toHaveLength(0);
     });
 
@@ -244,17 +238,13 @@ describe('applyImport', () => {
             reviewAt: '2026-07-01',
         });
 
-        // Re-import: the section's id is already taken, so it must be deduped, not recreated —
-        // this is the branch a plain empty-Section fixture never exercises.
+
         const second = applyImport(first.data, parsed, { ...OPTS, now: '2026-06-18T12:00:00.000Z' });
         expect(second.importedSectionCount).toBe(0);
         expect(second.data.sections).toHaveLength(1);
     });
 
-    // Importers do emit reference tasks carrying dates/recurrence/priority (OmniFocus
-    // "dropped", the CSV reader). Storing them unchanged left the task looking scheduled
-    // until the first edit silently wiped those fields, so clear them on the way in —
-    // same as addTasks does for a reference capture.
+
     it('clears scheduling fields on an imported reference task', () => {
         const parsed: ImportSource = {
             areas: [],

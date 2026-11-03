@@ -24,18 +24,15 @@ const purgedTask: Task = {
 };
 
 describe('purged tombstone compaction is stable across load cycles', () => {
-    // normalizeTaskForLoad no longer backfills pushCount: 0 onto purged
-    // tombstones (that oscillation rewrote every purged row each cycle — see
-    // the round-trip test below). Rows saved before that fix still carry a
-    // stored 0, so the compaction check keeps its neutral-zero carve-out and
-    // must accept BOTH shapes without flagging a rev-bumping repair (#766).
+
+
     it('does not flag a loaded compacted tombstone as uncompacted', () => {
         const compacted = compactPurgedTaskForLocalStorage(purgedTask);
         expect(hasUncompactedPurgedTaskTombstone(compacted, true)).toBe(false);
         const loaded = normalizeTaskForLoad(compacted, nowIso);
         expect(loaded.pushCount).toBeUndefined();
         expect(hasUncompactedPurgedTaskTombstone(loaded, true)).toBe(false);
-        // Legacy shape: a tombstone stored with pushCount 0 by an older build.
+
         expect(hasUncompactedPurgedTaskTombstone({ ...compacted, pushCount: 0 }, true)).toBe(false);
     });
 
@@ -70,13 +67,7 @@ describe('purged tombstone compaction is stable across load cycles', () => {
         expect(second.rev).toBe(6);
     });
 
-    // The rc.2 log shape from #766: 2,737 purged tombstones, tombstoneRepairs 0,
-    // yet every merge cycle rewrote every tombstone row and requeued sync. The
-    // rev stayed stable but the CONTENT oscillated: load backfilled
-    // pushCount: 0, merge stripped it, and the SQLite row fingerprint differed
-    // every cycle. A loaded compacted tombstone must round-trip through merge
-    // byte-identical — and produce the identical SQLite row — or sync never
-    // converges.
+
     it('a compacted tombstone round-trips load -> merge with an identical SQLite row', () => {
         const emptyData: AppData = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
         const compacted = compactPurgedTaskForLocalStorage(purgedTask);
@@ -95,14 +86,7 @@ describe('purged tombstone compaction is stable across load cycles', () => {
         expect(JSON.stringify(second.data.tasks[0])).toBe(JSON.stringify(merged));
     });
 
-    // The rc.3 log shape from #766/#784: 3,306 purged tombstones, tombstoneRepairs 0,
-    // yet every cycle rewrote every tombstone row with ONLY the rev column changed
-    // and requeued sync. The SQLite row codec rehydrates absent columns as explicit
-    // null/false (completedAtBeforeProjectArchive and friends), which re-flagged
-    // every SQL-loaded tombstone as uncompacted; the rev bump happened in
-    // readLocalDataForSyncCycle's stats-discarding pre-merge, so the counted
-    // tombstoneRepairs metric stayed 0. A tombstone loaded through the REAL row
-    // codec must not flag, and its rev must hold across full merge cycles.
+
     it('a tombstone loaded through the SQLite row codec keeps rev stable across merge cycles', () => {
         const emptyData: AppData = { tasks: [], projects: [], sections: [], areas: [], people: [], settings: {} };
         const sqlRoundTrip = (task: Task): Task => {
@@ -114,13 +98,12 @@ describe('purged tombstone compaction is stable across load cycles', () => {
 
         const compacted = compactPurgedTaskForLocalStorage(purgedTask);
         const loaded = sqlRoundTrip(compacted);
-        // The codec now reads a NULL project-archive column as absent (#1156).
+
         expect(loaded.completedAtBeforeProjectArchive).toBeUndefined();
         expect(hasUncompactedPurgedTaskTombstone(loaded, true)).toBe(false);
         expect(hasUncompactedPurgedTaskTombstone(loaded, false)).toBe(false);
 
-        // Full cycle: pre-merge (persisted vs store), then persist and reload
-        // through the codec again — rev must not move on any cycle.
+
         let persisted = loaded;
         for (const cycleNow of ['2026-08-13T20:00:00.000Z', '2026-08-13T20:01:00.000Z', '2026-08-13T20:02:00.000Z']) {
             const base: AppData = { ...emptyData, tasks: [persisted] };

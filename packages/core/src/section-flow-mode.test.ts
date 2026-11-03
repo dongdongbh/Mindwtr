@@ -18,7 +18,7 @@ import {
 } from './task-utils';
 import type { Project, Section, Task } from './types';
 
-// Reporter's example from #1429: one Sequential section and one Parallel section.
+
 const NOW = new Date('2026-10-21T09:00:00');
 const AT = '2026-10-01T09:00:00.000Z';
 
@@ -48,7 +48,7 @@ const focusNext = (tasks: Task[], projects: Project[] = [trip], sections: Sectio
         .nextActions.map((item) => item.id).sort();
 };
 
-/** The Next list's rule: manual order, waiting holds the slot. */
+
 const nextList = (tasks: Task[], projects: Project[] = [trip], sections: Section[] = [book, prep]) => {
     const sequencing = getTaskSequencing(projects, sections);
     const first = getSequentialFirstTaskIds(
@@ -80,7 +80,7 @@ describe('Per section Flow mode (#1429)', () => {
             'find-site': 'eligible', 'reserve-site': 'sequential', 'pay-deposit': 'sequential',
             'find-tent': 'eligible', 'buy-food': 'eligible',
         });
-        // Callers that pass no precomputed sets derive the same answer from projects + sections.
+
         expect(getTaskFocusEligibility(tasks[1], { tasks, projects: [trip], sections: [book, prep], now: NOW }).reason).toBe('sequential');
         expect(getCalendarPlanningCandidates(tasks, { projects: [trip], sections: [book, prep], now: NOW }).map((item) => item.id).sort())
             .toEqual(EXPECTED);
@@ -128,7 +128,7 @@ describe('Per section Flow mode (#1429)', () => {
         expect(['loose', 'ghost', 'old'].map((id) => getTaskSequenceKey(tasks.find((item) => item.id === id)!, sequencing)))
             .toEqual([null, null, null]);
         expect(nextList(tasks, [trip], [book, prep, gone])).toEqual([...EXPECTED, 'ghost', 'loose', 'old'].sort());
-        // Deleting the Sequential section itself opens its steps.
+
         expect(nextList(campingTasks(), [trip], [{ ...book, deletedAt: AT }, prep]))
             .toEqual(['buy-food', 'find-site', 'find-tent', 'pay-deposit', 'reserve-site']);
     });
@@ -162,8 +162,8 @@ describe('Per section Flow mode (#1429)', () => {
             now: NOW, sectionScopedProjectIds: sequencing.sectionScopedProjectIds,
             sequentialSectionKeys: sequencing.sequentialSectionKeys, sections: [book, prep],
         });
-        // Focus lets the due step take its section's slot; the Next list keeps manual order.
-        // Parallel tasks are in no sequence, so they never appear as a head.
+
+
         expect([...focusFirst]).toEqual(['pay-deposit']);
         expect(focusNext(tasks)).toEqual(['buy-food', 'find-tent']);
         expect(nextList(tasks)).toEqual(EXPECTED);
@@ -235,7 +235,7 @@ describe('planProjectFlowModeChange (#1429)', () => {
         expect(planProjectFlowModeChange(trip, [book, prep], 'parallel'))
             .toEqual({ project: { isSequential: false, perSectionFlow: false }, sections: [] });
         expect(planProjectFlowModeChange(trip, [book, prep], 'perSection')).toBeNull();
-        // A project that never used Per section keeps the field absent.
+
         expect(planProjectFlowModeChange({ ...trip, perSectionFlow: undefined }, [], 'sequential'))
             .toEqual({ project: { isSequential: true }, sections: [] });
     });

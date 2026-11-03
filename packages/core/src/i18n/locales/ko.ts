@@ -1,5 +1,6 @@
-// Split from i18n-translations.ts to make community translation contributions easier.
+
 export const koOverrides: Record<string, string> = {
+    "taskEdit.startAdvanceReminderLabel": "시작 전",
     'settings.importDiagnostics.unknownColumns': "알 수 없는 열 {{count}}개를 무시했습니다.",
     'settings.importDiagnostics.csvLocation': "{{row}}행, {{column}}열",
     'settings.importDiagnostics.csvArchiveLocation': "CSV 항목 {{entry}}, {{row}}행, {{column}}열",
@@ -173,7 +174,7 @@ export const koOverrides: Record<string, string> = {
         'settings.automationCaptureLoadFailed': '자동화 캡처 설정을 불러오지 못했습니다.',
         'settings.automationCaptureUpdateFailed': '자동화 캡처 설정을 업데이트하지 못했습니다.',
         'timeline.omittedItems': '{{count}}개 더 보기',
-        // Ratchet backfill (i18n-fallback-20260730-12): new en.ts keys
+
         'accessibility.skipToContent': '본문으로 건너뛰기',
         'accessibility.mainContent': '본문 콘텐츠',
         'quickAdd.pastedImageTitle': '스크린샷',
@@ -249,7 +250,7 @@ export const koOverrides: Record<string, string> = {
         'bulk.deleting': '선택한 할 일 삭제 중...',
         'taskEdit.aiAssistant': 'AI 어시스턴트',
         'task.dateIssue.startAfterDue': '마감일 이후에 시작',
-        // App
+
         'app.name': 'Mindwtr',
         'app.closeStillSavingTitle': 'Mindwtr는 아직 저장 중입니다',
         'app.closeStillSavingBody': 'Mindwtr가 최근 변경 사항을 아직 저장하지 않았습니다. 그래도 닫으시겠습니까? 저장되지 않은 변경 사항은 손실됩니다.',
@@ -264,7 +265,7 @@ export const koOverrides: Record<string, string> = {
         'markdown.openLinkFailed': "이 링크를 열 수 없습니다. 해당 앱이 설치되어 있는지 확인하세요. 링크를 복사하여 해당 앱에서 열 수 있습니다.",
         'markdown.copyLinkFailed': "이 링크를 복사할 수 없습니다.",
 
-        // Navigation
+
         'nav.main': '기본',
         'nav.inbox': '수집함',
         'nav.board': '보드',
@@ -287,7 +288,7 @@ export const koOverrides: Record<string, string> = {
         'nav.sectionOrganize': '정리',
         'nav.sectionArchive': '보관함',
 
-        // Quick Add
+
         'quickAdd.help': '빠른 추가 기능은 /start:<when>, /due:<when>, /review:<when>, /estimate:45m, /note:<text>, /link:<url>, /energy:<level>, /priority:<level>, /next, /* focus, /area:<name> 또는 !Area, @context, #tag, +Project, %Person (또는 %"Full Name") 문법을 지원합니다. 시간을 따로 지정하지 않으면 날짜만 마감일로 설정됩니다.',
         'quickAdd.example': '예: 엄마에게 전화 /due:tomorrow @전화',
         'quickAdd.inlineHint': '예: 엄마에게 전화 /due:tomorrow 5pm @전화 #가족',
@@ -322,10 +323,10 @@ export const koOverrides: Record<string, string> = {
         'quickAdd.bulkCreateError': '모든 할 일을 생성할 수 없습니다.',
         'quickAdd.saveAndEdit': '저장하고 편집',
 
-        // Checklist
+
         'checklist.progress': '체크리스트 진행상황',
 
-        // Keybindings (Desktop)
+
         'keybindings.helpTitle': '키보드 단축키',
         'keybindings.helpSubtitle': '닫으려면 Esc 누르기',
         'keybindings.styleLabel': '키바인딩 스타일',
@@ -376,7 +377,7 @@ export const koOverrides: Record<string, string> = {
         'keybindings.list.toggleDetails': '목록 세부정보 전환',
         'keybindings.list.toggleDensity': '보기 방식 전환',
 
-        // Tabs (Mobile)
+
         'tab.inbox': '수집함',
         'tab.next': '집중',
         'tab.board': '보드',
@@ -385,7 +386,7 @@ export const koOverrides: Record<string, string> = {
         'tab.calendar': '캘린더',
         'tab.review': '검토',
 
-        // List Views
+
         'list.inbox': '수집함',
         'list.todo': '할 일',
         'list.inProgress': '진행 중',
@@ -423,7 +424,7 @@ export const koOverrides: Record<string, string> = {
         'reference.empty': '아직 참조 항목이 없습니다.',
         'reference.emptyHint': '참조에는 나중에 필요할 수 있는 정보를 보관합니다 — 행동이 필요하지 않습니다.',
 
-        // Status Labels
+
         'status.inbox': '수집함',
         'status.todo': '할 일',
         'status.next': '다음',
@@ -435,7 +436,7 @@ export const koOverrides: Record<string, string> = {
         'status.archived': '보관됨',
         'status.active': '활성',
 
-        // Priority Labels
+
         'priority.low': '낮음',
         'priority.medium': '보통',
         'priority.high': '높음',
@@ -444,7 +445,7 @@ export const koOverrides: Record<string, string> = {
         'energyLevel.medium': '중간 에너지',
         'energyLevel.high': '높은 에너지',
 
-        // Task Edit
+
         'taskEdit.editTask': '할 일 편집',
         'taskEdit.checklist': '체크리스트',
         'taskEdit.dragChecklistItem': "드래그하여 순서 변경",
@@ -651,13 +652,13 @@ export const koOverrides: Record<string, string> = {
         'task.aria.dueTime': '마감 시간',
         'task.aria.location': '위치',
 
-        // Compact unit labels (time-estimate chips, calendar duration labels)
+
         'units.minutesShort': '{{minutes}}분',
         'units.hoursShort': '{{hours}}시간',
         'units.hoursMinutesShort': '{{hours}}시간 {{minutes}}분',
         'units.hoursPlusShort': '{{hours}}시간+',
 
-        // Recurrence Labels
+
         'recurrence.none': '없음',
         'recurrence.daily': '매일',
         'recurrence.weekly': '매주',
@@ -699,7 +700,7 @@ export const koOverrides: Record<string, string> = {
         'recurrence.showFutureInCalendar': '캘린더에 향후 반복 표시',
         'recurrence.showFutureInCalendarHint': '계획 전용 미리보기입니다. 이 할 일을 완료해야 다음 할 일이 생성됩니다.',
 
-        // Inbox (Mobile)
+
         'inbox.title': '수집함',
         'inbox.processButton': '수집함 처리',
         'inbox.projectHint': '여러 단계가 필요한 항목인가요? 처리하는 중에 「예, 프로젝트로 변환합니다」를 선택해 결과와 첫 번째 다음 행동의 이름을 정하세요.',
@@ -745,7 +746,7 @@ export const koOverrides: Record<string, string> = {
         'inbox.noProject': '프로젝트 없음',
         'inbox.skip': '건너뛰기',
 
-        // Next Actions (Mobile)
+
         'next.title': '다음 행동',
         'next.ready': '할 일 준비 완료',
         'next.current': '현재 할 일',
@@ -756,7 +757,7 @@ export const koOverrides: Record<string, string> = {
         'next.warningCount': '다음 행동의 항목',
         'next.warningHint': '더 적은 수의 프로젝트에 집중하는 것을 고려해보세요. GTD에서는 명확성을 위해 다음 행동을 10~15개 항목으로 유지할 것을 권장합니다.',
 
-        // Contact / Contexts (Mobile updates)
+
     'contexts.new': '새 상황',
     'tags.new': '새 태그',
         'contexts.title': '상황',
@@ -805,7 +806,7 @@ export const koOverrides: Record<string, string> = {
         'contexts.noContexts': '상황을 찾을 수 없습니다. 할 일에 @집, @회사, @computer와 같은 상황을 추가하세요.',
         'contexts.noTasks': '이 상황에 대한 활성 할 일이 없습니다.',
 
-        // Board
+
         'board.title': '보드',
         'board.next': '다음 행동',
         'board.todo': '할 일',
@@ -816,7 +817,7 @@ export const koOverrides: Record<string, string> = {
         'board.dragTask': '드래그 할 일',
         'board.delete': '삭제',
 
-        // Calendar
+
         'calendar.title': '캘린더',
         'calendar.tasksAndEvents': '할 일 및 일정',
         'calendar.today': '오늘',
@@ -896,7 +897,7 @@ export const koOverrides: Record<string, string> = {
         'shortcuts.captureUnavailable': '수집 바로가기를 사용할 수 없음',
         'shortcuts.missingTitle': 'Mindwtr가 해당 바로가기 링크에서 할 일 제목을 읽지 못했습니다.',
 
-        // Projects
+
         'projects.title': '프로젝트',
         'projects.statusLabel': '상태',
         'projects.activeSection': '활성 프로젝트',
@@ -1044,7 +1045,7 @@ export const koOverrides: Record<string, string> = {
         'projects.nextActionPromptAddButton': '다음 행동 추가',
         'projects.nextActionPromptComplete': '프로젝트 완료',
 
-        // Review Steps
+
         'review.title': '검토',
         'review.openTasks': '미완료 할 일',
         'review.intro': '머릿속을 정리하고, 현재 상태를 파악하고, 새로운 아이디어를 떠올리세요.',
@@ -1115,6 +1116,7 @@ export const koOverrides: Record<string, string> = {
         'review.projectsStepDesc': '모든 활성 프로젝트에 다음 행동이 있는지 확인하세요.',
         'review.projectsHint': '각 프로젝트를 검토하세요. 구체적인 다음 행동이 하나 이상 있습니까? 그렇지 않다면 지금 추가하세요. 완료된 프로젝트를 완료로 표시합니다.',
         'review.hasNextAction': '다음 행동 있음',
+    'review.projectDeferred': '예정됨',
         'review.needsAction': '행동 필요',
         'review.noActiveTasks': '활성 할 일 없음',
         'review.somedayStep': '언젠가',
@@ -1138,7 +1140,7 @@ export const koOverrides: Record<string, string> = {
         'review.nextStepBtn': '다음 단계',
         'review.stuckQuestion': '이 항목이 막혀 있나요?',
         'review.stuckPrompt': '실행 가능하게 내용을 변경하거나, 더 이상 관련이 없다면 삭제 또는 보류하세요.',
-        // Mobile Review keys
+
         'review.notSet': '설정되지 않음',
         'review.description': '설명',
         'review.startTime': '시작 예정',
@@ -1154,7 +1156,7 @@ export const koOverrides: Record<string, string> = {
         'review.noArea': '영역 없음',
         'review.singleActions': '단일 행동',
 
-        // Processing
+
         'process.title': '항목 처리',
         'process.refineTitle': '할 일 구체화',
         'process.refineDesc': '무엇을 할지 결정하기 전에 이것이 무엇인지 명확히 하십시오.',
@@ -1222,7 +1224,7 @@ export const koOverrides: Record<string, string> = {
         'process.quickApplyHint': '이 선택을 적용하고 수집함의 다음 항목으로 이동하세요.',
         'process.quickMoveHint': '이 항목을 옮기고 수집함의 다음 항목으로 이동하세요.',
 
-        // Settings
+
         'settings.title': '설정',
         'settings.subtitle': 'Mindwtr 경험을 맞춤화하세요',
         'settings.appearance': '모양',
@@ -1290,7 +1292,7 @@ export const koOverrides: Record<string, string> = {
         'settings.logCleared': '로그 파일이 지워졌습니다.',
         'settings.logClearFailed': '로그 파일을 지울 수 없습니다.',
         'settings.shareUnavailable': '이 기기에서는 공유를 사용할 수 없습니다.',
-        // Mobile Settings
+
         'settings.useSystem': '시스템 테마 사용',
         'settings.followDevice': '기기의 화면 설정을 따릅니다.',
         'settings.darkMode': '다크 모드',
@@ -1665,7 +1667,7 @@ export const koOverrides: Record<string, string> = {
         'digest.reviewDue': '검토 기한',
         'digest.noItems': '오늘은 급한 항목이 없습니다.',
 
-        // Common
+
         'common.tasks': '할 일',
         'common.day': '일',
         'common.days': '일',
@@ -1722,7 +1724,7 @@ export const koOverrides: Record<string, string> = {
         'attachments.transcriptionUnavailable': '음성 텍스트 변환이 준비되지 않았습니다. AI 설정을 확인하고 다시 시도하세요.',
         'attachments.transcriptionFailed': '변환에 실패했습니다. 다시 시도하세요.',
 
-        // Bulk Actions
+
         'bulk.select': '선택',
         'bulk.exitSelect': '완료',
         'bulk.selected': '선택된',
@@ -1740,7 +1742,7 @@ export const koOverrides: Record<string, string> = {
         'bulk.confirmDeleteTitle': '할 일 삭제',
         'bulk.confirmDeleteBody': '선택한 할 일을 삭제하시겠습니까?',
 
-        // Sorting
+
         'sort.label': '정렬',
         'sort.default': '기본',
         'sort.due': '마감일',
@@ -1758,7 +1760,7 @@ export const koOverrides: Record<string, string> = {
         'list.completedGroup.earlier': '이전',
         'list.completedGroup.notCompleted': '완료되지 않음',
 
-        // Agenda
+
         'agenda.title': '집중',
         'agenda.active': '활성 항목',
         'agenda.collapseOtherSections': '포커스만',
@@ -1805,7 +1807,7 @@ export const koOverrides: Record<string, string> = {
         'focus.group.noEnergy': '에너지 없음',
         'focus.group.noPriority': '우선순위 없음',
 
-        // Task Age
+
         'taskAge.day': '1일 경과',
         'taskAge.days': '일 경과',
         'taskAge.week': '1주 경과',
@@ -1813,13 +1815,13 @@ export const koOverrides: Record<string, string> = {
         'taskAge.month': '1개월 경과',
         'taskAge.months': '개월 경과',
 
-        // Energy Contexts
+
         'context.energy.focused': '집중',
         'context.energy.lowenergy': '낮은 에너지',
         'context.energy.creative': '창의적인',
         'context.energy.routine': '루틴',
 
-        // Waiting (Mobile)
+
         'waiting.title': '대기 중',
         'waiting.subtitle': '다른 사람을 기다리는 할 일이나 외부 이벤트',
         'waiting.count': '대기 중',
@@ -1829,7 +1831,7 @@ export const koOverrides: Record<string, string> = {
         'waiting.empty': '대기 할 일 없음',
         'waiting.emptyHint': '다른 사람이나 외부 이벤트에 의존하는 할 일에는 "대기 중" 상태를 사용하세요.',
 
-        // Someday (Mobile)
+
         'someday.title': '언젠가',
         'someday.subtitle': '앞으로 추구하고 싶은 아이디어와 목표',
         'someday.ideas': '아이디어',
@@ -1840,7 +1842,7 @@ export const koOverrides: Record<string, string> = {
         'someday.emptyHint': '앞으로 하고 싶은 아이디어, 목표, 프로젝트에 대해 "언젠가" 상태를 사용하세요.',
         'done.emptyHint': '완료된 할 일이 여기에 표시됩니다 — 완료한 항목의 누적 기록입니다.',
 
-        // Search
+
         'search.title': '검색',
         'search.placeholder': '할 일 및 프로젝트 검색...',
         'search.scopeHint': '할 일, 프로젝트, 인물',
@@ -1878,7 +1880,7 @@ export const koOverrides: Record<string, string> = {
         'search.due.nextWeek': '다음 주',
         'search.due.none': '마감일 없음',
 
-        // Archived
+
         'archived.tasksSegment': '할 일',
         'archived.title': '보관됨',
         'archived.searchPlaceholder': '보관된 할 일 검색...',
@@ -2082,7 +2084,7 @@ export const koOverrides: Record<string, string> = {
         'settings.linuxUpdateHint': 'Linux에서는 Mindwtr가 업데이트를 자동 설치할 수 없습니다. 다운로드 후 패키지 관리자(예: yay -S mindwtr 또는 paru -S mindwtr)를 통하거나 다운로드한 패키지로 설치하세요.',
         'settings.saved': '설정 저장됨',
         'settings.selectSyncFolderTitle': '동기화 폴더 선택',
-        // Mobile-only copy migrated from keyed helpers.
+
         'calendar.mobile.1Day': '1일',
         'calendar.mobile.day': '일',
         'calendar.mobile.dayDetailsPanelHandle': '일별 세부 정보 패널 핸들',
@@ -2363,7 +2365,7 @@ export const koOverrides: Record<string, string> = {
         'captureNotification.text': '탭하여 수집함에 수집',
         'captureNotification.channelName': '빠른 수집',
 
-        // Mind sweep (guided capture)
+
         'mindSweep.launchButton': '머릿속 비우기',
         'mindSweep.title': '머릿속 비우기',
         'mindSweep.intro': '몇 가지 힌트 목록을 살펴보며 떠오르는 것을 모두 적어 보세요. 필터링하거나 정리하지 마세요 — 모든 항목은 수집함에 담기며 나중에 정리할 수 있습니다.',
@@ -2447,7 +2449,7 @@ export const koOverrides: Record<string, string> = {
 		'obsidian.bringIntoMindwtrFailed': '할 일을 Mindwtr에 추가하지 못했습니다.',
         'obsidian.sourceAttachmentTitle': 'Obsidian 원본',
 
-        // First-run onboarding modal (both platforms).
+
         'onboarding.title': 'Mindwtr에 오신 것을 환영합니다',
         'onboarding.subtitle': '머릿속에 있는 것을 적어 두고, 정리는 나중에, 한 번에 몇 가지에만 집중하세요. 기존 데이터를 가져오거나 작은 시작하기 프로젝트로 시작할 수 있습니다.',
         'onboarding.skip': '소개 건너뛰기',
@@ -2467,7 +2469,7 @@ export const koOverrides: Record<string, string> = {
         'onboarding.toastReady': '시작하기 프로젝트가 준비되었습니다.',
         'onboarding.toastFailed': '시작하기 프로젝트를 생성하지 못했습니다.',
 
-        // Seeded Getting Started content (first-run tutorial data).
+
         'starter.projectTitle': '시작하기',
         'starter.projectNotes': '이 시작하기 할 일들은 선택 사항입니다. Mindwtr가 손에 익으면 이 프로젝트는 언제든 삭제하세요.',
         'starter.processInbox.title': '여기서 시작하세요: 첫 번째 수집함 항목 처리하기',
@@ -2508,7 +2510,7 @@ export const koOverrides: Record<string, string> = {
         'starter.sampleBuyMilk': '우유 사기',
         'starter.sampleReplySam': '샘에게 답장하기',
 
-        // Settings — moved from apps/desktop settings/labels.ts (settings-i18n-20260724-01)
+
         'settings.integrations': '연동',
         'settings.searchPlaceholder': '설정 검색…',
         'settings.lookAndFeel': '외관 및 느낌',

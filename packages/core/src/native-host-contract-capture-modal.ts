@@ -1,56 +1,6 @@
-/**
- * The native host contract for the capture confirmation screen: React Native's
- * capture modal (app/capture-modal.tsx), which capture links, shares, assistant
- * notes and a widget's quick capture (`capture-quick`) open. Kept in its own
- * file and spread into createNativeHostContract; every rule comes from
- * capture-modal-model.ts, the module React Native's screen calls.
- *
- * - openCaptureModal takes the route params an entry hands React Native's
- *   screen (`params`: initialValue, text, title, initialProps, project,
- *   returnTo, origin, URI-encoded as its router gives them). It returns the
- *   screen's first draft. Keep both, and send both with every call.
- * - Every control in the view carries its edit: the ? button, and the copilot
- *   chips. Typing sends setText or setDescription. editCaptureModal returns the
- *   next draft.
- * - Save and Save & edit are submitCaptureModal with a capture UUID; the new
- *   task takes that UUID as its ID. Several lines answer confirmLines: show the
- *   question, and send submitCaptureModalLines with one UUID per line on
- *   "Create tasks". Its Cancel, its backdrop and Android's back close it.
- * - Cancel is discardCaptureModal. React Native asks no discard question: Cancel
- *   drops the draft at once. Android's back with no question open is the
- *   host's own back.
- * - After a save or a discard, `close` says where to go: back to the screen
- *   behind; with nothing behind, to `returnTo` (an app path, React Native's
- *   route) or the Inbox. `returnToPreviousApp` then puts the app behind the one
- *   the user came from (#1169).
- * - A failed save: set `failed` in the draft; the card shows the failure until
- *   the next save starts (clear it when submitting).
- * - The AI: `view.copilot.request` is what React Native asks the AI now; send
- *   it to requestAICopilot, and the answer back as a setSuggestion edit. A host
- *   that binds AI (createNativeHostContract's `ai`) is asked for any provider:
- *   requestAICopilot loads the key itself and answers null without one, as
- *   React Native asks nothing with no key. A host without it is asked only for
- *   a provider that needs no key (an OpenAI-compatible endpoint).
- *
- * Shared files (initialProps.attachments, which prepareSharedFiles copies into
- * the managed attachments folder): the screen shows and saves only managed
- * copies, as React Native's saves only files in its attachments folder
- * (filterManagedAttachments). A host without its attachment IO takes none.
- *
- * A project a save creates (a +Project, or the link's project param) takes an id
- * from the capture UUID (a batch's first) and its name: a retry files the task
- * there, renamed since or not, and refuses one deleted or archived since
- * (STALE_REVISION).
- *
- * Saves retry exactly (native-request-receipts.ts): on the native host a
- * landed request's receipt is on disk, so a replay after a restart answers its
- * first reply, and the same UUID with another draft is refused. With no
- * receipt, the task a capture UUID created answers only when it is what the
- * draft writes (isTaskOfDraft).
- *
- * Only functions read this module's imports from native-host-contract.ts, so
- * the import cycle between the two files is safe.
- */
+
+
+
 import { executeCaptureTransaction, type CaptureTaskPlan } from './capture';
 import {
     buildCaptureModalRequest,
@@ -89,55 +39,48 @@ import type { NativeAttachmentsHost } from './native-host-contract-attachments';
 type CaptureModalDeps = {
     readiness: () => NativeHostResult<null>;
     save: () => Promise<NativeHostResult<null>>;
-    /** Data plus display revision: tasks, projects, settings, language and the minute. */
+
     revision: (now: Date) => string;
     t: () => TranslateFn;
-    /** The user's date formatting (createDateFormatter). */
+
     formatDate: () => DateFormatter;
     requestIdPattern: RegExp;
-    /** The host binds AI: requestAICopilot, which checks the key, answers the copilot's question. */
+
     aiBound: () => boolean;
-    /** The host's attachment IO (createNativeHostContract's `attachments`): which shared files are managed copies. */
+
     attachments: () => NativeAttachmentsHost | null;
 };
 
 export type NativeCaptureModalView = CaptureModalView & {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
-    /** Changes with the data, settings, language and minute. */
+
     revision: string;
 };
 
-/**
- * Where to go when the screen closes: back, else `returnTo`, else the Inbox; then maybe behind the previous app.
- * `returnToProjectId`: a project's + opened the screen (React Native's openProjectQuickAdd) and that project is still live;
- * React Native closes it while capturing and opens it again here.
- */
+
 export type NativeCaptureModalClose = { returnTo: string | null; returnToPreviousApp: boolean; returnToProjectId?: string };
 
 export type NativeCaptureModalSubmitResult =
-    /** A blank title: Save does nothing. */
+
     | { kind: 'nothing' }
-    /** Several lines: ask with this text, then send submitCaptureModalLines. Nothing was written. */
+
     | { kind: 'confirmLines'; confirm: ReturnType<typeof getCaptureModalBulkConfirm>; lineCount: number }
-    /** Show the toast and keep the draft. Nothing was written; the capture UUID stays free. */
+
     | { kind: 'refused'; notice: QuickCaptureNotice }
     | {
         kind: 'saved';
         taskId: string;
         projectId: string | null;
-        /**
-         * close: close the screen. open: replace it with the task's editor (#1029).
-         * openInProject: the project screen behind opens the task's editor; close
-         * the screen (#938).
-         */
+
+
         next: 'close' | 'open' | 'openInProject';
-        /** Null for `open`. */
+
         close: NativeCaptureModalClose | null;
     };
 
 export type NativeCaptureModalLinesResult =
     | { kind: 'saved'; taskIds: string[]; close: NativeCaptureModalClose }
-    /** A line's date command could not be read. Nothing was written; the UUIDs stay free. */
+
     | { kind: 'refused'; notice: QuickCaptureNotice };
 
 const TEXT_LIMIT = 100_000;
@@ -146,7 +89,7 @@ const PARAM_KEYS = new Set<string>(['initialProps', 'initialValue', 'origin', 'p
 const DRAFT_KEYS = ['text', 'description', 'showHelp', 'suggestion', 'applied', 'failed'];
 const PART_KINDS = new Set<string>(['context', 'timeEstimate', 'tag']);
 
-/** A route param, URI-encoded: at most the popup's note limit (a share's body rides initialProps). */
+
 export const CAPTURE_MODAL_PARAM_LIMIT = NOTE_LIMIT;
 const isParamValue = (value: unknown) => isText(value, CAPTURE_MODAL_PARAM_LIMIT)
     || (Array.isArray(value) && value.length <= 16 && value.every((entry) => isText(entry, CAPTURE_MODAL_PARAM_LIMIT)));
@@ -156,7 +99,7 @@ const readParams = (value: unknown): CaptureModalParams | null => (
         : null
 );
 const isTagList = (value: unknown) => Array.isArray(value) && value.length <= 100 && value.every((entry) => isText(entry) && entry.length > 0);
-/** A suggestion or the applied parts: only these keys, each valid. */
+
 const isCopilotRecord = (value: unknown, tagsRequired: boolean): boolean => {
     if (!isObjectRecord(value)) return false;
     if (Object.keys(value).some((key) => key !== 'context' && key !== 'timeEstimate' && key !== 'tags')) return false;
@@ -172,14 +115,11 @@ const readDraftValue = (value: unknown): CaptureModalDraft | null => {
         && isCopilotRecord(value.applied, true);
     return valid ? value as CaptureModalDraft : null;
 };
-/** The fields a draft sets that isTaskOfPlan leaves out. */
+
 const DRAFT_FIELDS = ['description', 'startTime', 'reviewAt', 'assignedTo', 'energyLevel', 'timeEstimate'] as const;
 const sameValue = (left: unknown, right: unknown) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-/**
- * Whether a stored task is what this draft writes: isTaskOfPlan, and the
- * description, dates, person, energy, estimate and links the draft sets. The
- * check for a capture UUID reused when no receipt answers it.
- */
+
+
 const isTaskOfDraft = (task: Task, plan: CaptureTaskPlan, requestId: string): boolean => (
     isTaskOfPlan(task, plan, requestId)
     && DRAFT_FIELDS.every((field) => sameValue(task[field], plan.props[field]))
@@ -207,7 +147,7 @@ const isEdit = (edit: unknown): edit is CaptureModalEdit => {
 };
 
 export function createCaptureModalMethods(deps: CaptureModalDeps) {
-    // The screen's parse options, rebuilt when the data they read changes, as React Native's memo is.
+
     let cachedParseOptions: { key: unknown[]; options: QuickAddParseOptions } | null = null;
     const parseOptions = () => {
         const state = useTaskStore.getState();
@@ -229,7 +169,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
     });
     const notApplied = (message: string | undefined): NativeHostResult<never> => fail('ACTION_FAILED', message ?? 'Failed to add task');
 
-    /** The screen's preset from its params, with only the shared files that are managed copies (see the module comment). */
+
     const presetOf = (params: CaptureModalParams): Partial<Task> => {
         const state = useTaskStore.getState();
         const { attachments: shared, ...preset } = readCaptureModalInitialProps(params.initialProps, state.projects, state.areas);
@@ -248,23 +188,19 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             projects,
             initialProps: presetOf(params),
             projectParam: readCaptureModalProjectParam(params),
-            // The active area filter too, as the in-app + does (#1460).
+
             defaultAreaId: resolveQuickCaptureDefaultAreaId(state.settings, state.areas) ?? undefined,
             description: draft.description,
             copilot: draft.applied,
             timeEstimatesEnabled: resolveFeatureFlags(state.settings).timeEstimates,
         });
     };
-    /**
-     * The store's projects, with each project this request made (captureProjectId of the
-     * project a text would create: its +Project, or the link's project param) matched first
-     * under the name the text gives it. A replay files its task there, renamed since or not,
-     * never in a project given that name since. Null when one is deleted or archived.
-     */
+
+
     const ownedProjects = (requestId: string, params: CaptureModalParams, draft: CaptureModalDraft, texts: readonly string[]): Project[] | null => {
         let projects: Project[] = [...useTaskStore.getState().projects];
         for (const text of texts) {
-            // The project the text would create with no project to match.
+
             const bare = planCaptureModalRequest(requestFor(params, draft, text, []));
             const title = bare.success ? bare.projectToCreate?.title : undefined;
             if (!title) continue;
@@ -280,7 +216,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
         return {
             aiEnabled: settings.ai?.enabled === true,
             keyRequired: isAIKeyRequired(settings),
-            // requestAICopilot loads the key; a host without AI holds none, so a provider that needs one is never asked.
+
             hasKey: deps.aiBound(),
             timeEstimatesEnabled: resolveFeatureFlags(settings).timeEstimates,
         };
@@ -312,7 +248,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
         return { returnTo, returnToPreviousApp, ...(live ? { returnToProjectId: projectId } : {}) };
     };
 
-    /** The shared input checks: readiness, params and draft. */
+
     const readScreen = (input: unknown): NativeHostResult<{ params: CaptureModalParams; draft: CaptureModalDraft }> => {
         const ready = deps.readiness();
         if (!ready.ok) return ready;
@@ -325,7 +261,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
     };
 
     return {
-        /** Open the screen for an entry's route params: its first draft (the entry's title and description) and view. */
+
         openCaptureModal(input: { params: CaptureModalParams }): NativeHostResult<{ draft: CaptureModalDraft; view: NativeCaptureModalView }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;
@@ -335,14 +271,14 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             return { ok: true, value: { draft, view: view(params, draft) } };
         },
 
-        /** The screen for these params and this draft. */
+
         getCaptureModalView(input: { params: CaptureModalParams; draft: CaptureModalDraft }): NativeHostResult<NativeCaptureModalView> {
             const read = readScreen(input);
             if (!read.ok) return read;
             return { ok: true, value: view(read.value.params, read.value.draft) };
         },
 
-        /** Apply an input's or a control's edit. Nothing is written. */
+
         editCaptureModal(input: {
             params: CaptureModalParams;
             draft: CaptureModalDraft;
@@ -356,11 +292,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             return { ok: true, value: { draft, view: view(read.value.params, draft) } };
         },
 
-        /**
-         * Save (`openAfterSave`: Save & edit), as React Native's Save does. On
-         * ACTION_FAILED or SAVE_FAILED set `failed`; reuse `captureId` to retry
-         * the same draft: it is written at most once.
-         */
+
         async submitCaptureModal(input: {
             params: CaptureModalParams;
             draft: CaptureModalDraft;
@@ -378,7 +310,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             if (lines.length > 1) {
                 return { ok: true, value: { kind: 'confirmLines', confirm: getCaptureModalBulkConfirm(lines, deps.t()), lineCount: lines.length } };
             }
-            // A refusal writes nothing, so it stays out of the receipts: the capture UUID stays free.
+
             const planned = planCaptureModalRequest(requestFor(params, draft, draft.text, useTaskStore.getState().projects));
             if (!planned.success) {
                 return planned.reason === 'invalid-date-command'
@@ -409,8 +341,8 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
                     const owned = ownedProjects(captureId, params, draft, [draft.text]);
                     if (!owned) return projectGone();
                     const request = requestFor(params, draft, draft.text, owned);
-                    // With no receipt to answer it, the task this capture UUID created answers the
-                    // retry, but only when it is what this draft writes.
+
+
                     const existing = useTaskStore.getState()._allTasks.find((task) => task.id === captureId.toLowerCase());
                     if (existing) {
                         const plan = planCaptureModalRequest(request);
@@ -434,13 +366,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             );
         },
 
-        /**
-         * "Create tasks" after confirmLines: one task per line in one store write,
-         * as React Native does; the screen then closes. Send one capture UUID per
-         * line and reuse the same list to retry. Every line is checked before
-         * anything is written: a date command it cannot read refuses the whole
-         * batch. A list that names only some tasks of a saved batch is refused.
-         */
+
         async submitCaptureModalLines(input: {
             params: CaptureModalParams;
             draft: CaptureModalDraft;
@@ -458,7 +384,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
                 return fail('INVALID_INPUT', 'Send one distinct capture UUID per line');
             }
             const buildRequest = async (line: string, projects: readonly Project[]) => requestFor(params, draft, line, projects);
-            // A refusal writes nothing, so it stays out of the receipts: the UUIDs stay free.
+
             const refusal = await checkCaptureModalLines({ lines, projects: useTaskStore.getState().projects, buildRequest });
             if (refusal?.kind === 'refused') {
                 return { ok: true, value: { kind: 'refused', notice: getQuickCaptureInvalidDateNotice(deps.t(), refusal.invalidDateCommands) } };
@@ -470,12 +396,11 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
                 JSON.stringify(['captureModalLines', params, draft.text, draft.description, draft.applied, ids]),
                 async () => {
                     const state = useTaskStore.getState();
-                    // The batch's projects take ids from its first capture UUID (the receipt's).
+
                     const owned = ownedProjects(ids[0], params, draft, lines);
                     if (!owned) return projectGone();
-                    // One store write makes every line, so a batch that landed holds all its UUIDs. A batch
-                    // saved before a restart answers from its tasks when each matches its line; a list that
-                    // names only some saved tasks is not that batch.
+
+
                     const existing = taskIds.map((id) => state._allTasks.find((task) => task.id === id));
                     if (existing.some(Boolean)) {
                         const matches = existing.every((task, index) => {
@@ -508,7 +433,7 @@ export function createCaptureModalMethods(deps: CaptureModalDeps) {
             );
         },
 
-        /** Cancel: the draft is dropped, nothing is written, and `close` says where to go. */
+
         discardCaptureModal(input: { params: CaptureModalParams }): NativeHostResult<{ close: NativeCaptureModalClose }> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

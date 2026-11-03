@@ -41,7 +41,7 @@ const readRequest = (value: unknown): NativePersonEditRequest | null => {
 };
 
 const taskKeys = new Set(TASK_SYNC_FIELD_SCHEMA.map((field) => field.name));
-/** Validate transport types while retaining complete legacy Task metadata unchanged. */
+
 const validTask = (value: unknown): value is Task => {
     if (!record(value) || Object.keys(value).some((key) => !taskKeys.has(key as keyof Task))
         || !id(value.id) || !text(value.title) || !stamp(value.createdAt) || !stamp(value.updatedAt)
@@ -77,7 +77,7 @@ const validTask = (value: unknown): value is Task => {
     try { taskToSqliteRow(value as unknown as Task); return true; } catch { return false; }
 };
 
-/** Pure validation and replanning, without readiness/store/SQLite access. */
+
 const readPrepared = (value: unknown): NativePreparedPersonEdit | null => {
     const envelope = detach<Record<string, unknown>>(value);
     if (!envelope || !exact(envelope, ['request', 'prepared']) || !record(envelope.prepared)) return null;
@@ -119,8 +119,8 @@ const readPrepared = (value: unknown): NativePreparedPersonEdit | null => {
 export function createPersonEditMethods(deps: {
     readiness: () => NativeHostResult<null>; save: () => Promise<NativeHostResult<null>>;
 }) {
-    // Only this method's exhausted save error can be settled by its observed durable after rows.
-    // This is not replay authority: the complete prepared effect still supplies that proof.
+
+
     let failedSave: { prepared: NativePreparedPersonEdit; adapter: ReturnType<typeof getStorageAdapter>;
         failure: NonNullable<ReturnType<typeof useTaskStore.getState>['persistenceFailure']>;
         generation: number; lastDataChangeAt: number; taskReference: Task[] } | null = null;
@@ -208,7 +208,7 @@ export function createPersonEditMethods(deps: {
             const ready = deps.readiness(); if (!ready.ok) return ready;
             const prepared = readPrepared(input);
             if (!prepared) return fail('INVALID_INPUT', 'Prepared Person edit request or journal does not match');
-            // Load persisted authority, not the normal loader's clock-dependent UI projection.
+
             const adapter = getStorageAdapter();
             if (!useTaskStore.getState().persistenceFailure) {
                 try { await flushPendingSave(); }
@@ -241,8 +241,8 @@ export function createPersonEditMethods(deps: {
                 useTaskStore.setState({ persistenceFailure: null });
                 failedSave = null;
             }
-            // The action queued the complete durable effect. Generic retryPersistence would
-            // replace it with persistSnapshot's normalized UI rows, so flush that queue directly.
+
+
             const saved = await deps.save();
             const afterSave = useTaskStore.getState();
             const afterStatus = getPersistenceStatus();

@@ -3,7 +3,7 @@ package tech.dongdongbh.mindwtr.pilot
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
-/** After a finished journal replay: the queue drain, then sync. Any drain that did not finish holds the rest back and retries. */
+
 class StartOrderTest {
     private val events = mutableListOf<String>()
 
@@ -38,7 +38,7 @@ class StartOrderTest {
     }
 
     @Test fun aDrainWhoseCheckOffSweepFailedStartsSyncKeepsTheScreensPublishesTheWidgetsAndRetries() {
-        // Its job retries, so no job end publishes the widgets: the drain does, whatever it stored.
+
         assertEquals(false, run(StartOrder.Drain.Unswept))
         assertEquals(listOf("drain", "sync", "widgets", "retry"), events)
     }
@@ -47,7 +47,7 @@ class StartOrderTest {
         assertEquals(true, StartOrder.queueEmpty(null, exists = false))
         assertEquals(true, StartOrder.queueEmpty(emptyArray(), exists = true))
         assertEquals(false, StartOrder.queueEmpty(arrayOf("a.json"), exists = true))
-        // A folder that cannot be listed (unreadable, or a file at its path): not "nothing queued".
+
         assertEquals(null, StartOrder.queueEmpty(null, exists = true))
     }
 }

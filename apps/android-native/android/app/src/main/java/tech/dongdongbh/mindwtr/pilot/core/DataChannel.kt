@@ -17,21 +17,15 @@ import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-/**
- * Settings › Data's files between Kotlin and core in chunks (pass D1c design §3.1): Kotlin never holds a whole backup, plan or
- * export. Kotlin registers one file per host call and hands core an opaque handle; core reads or writes it about 1 MiB at a
- * time through the bridge (`dataRead`, `dataWrite`, `dataClose`). A handle's kind and byte cap are Kotlin's, never core's.
- *
- * Errors are [Failure]s with fixed, content-free codes; no path, handle or file byte is ever in their text.
- */
+
 class DataChannel(private val chunkBytes: Int = CHUNK_BYTES, private val recoveryCapBytes: Long = RECOVERY_CAP_BYTES,
                   private val opener: (File) -> InputStream = ::FileInputStream) {
     enum class Kind { UTF8_READ, BASE64_READ, UTF8_WRITE, BASE64_WRITE }
 
-    /** A channel failure: [code] is the whole message (the bridge's error marker carries it to core). */
+
     class Failure(val code: String) : IOException(code)
 
-    /** A closed handle's bytes and their SHA-256 (hex). */
+
     data class Closed(val bytes: Long, val sha256: String)
 
     private abstract class Handle(val file: File, val kind: Kind) {
@@ -45,12 +39,12 @@ class DataChannel(private val chunkBytes: Int = CHUNK_BYTES, private val recover
         private val input: InputStream = opener(file)
         private val decoder: CharsetDecoder = Charsets.UTF_8.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT)
-        // A base64 chunk is a multiple of 3 bytes, so the pieces join to the whole file's base64; UTF-8 keeps a split
-        // character's first bytes here for the next chunk.
+
+
         private val buffer = ByteBuffer.allocate(if (kind == Kind.BASE64_READ) maxOf(chunkBytes / 3 * 3, 3) else maxOf(chunkBytes, 4))
         private var ended = false
 
-        /** The next piece of text, or null at the end. */
+
         fun next(): String? {
             if (ended) return null
             val eof = fill()
@@ -65,7 +59,7 @@ class DataChannel(private val chunkBytes: Int = CHUNK_BYTES, private val recover
             return if (text.isEmpty() && ended) null else text
         }
 
-        /** Reads until the buffer is full or the file ends (a short read continues); true at the end of the file. */
+
         private fun fill(): Boolean {
             while (buffer.hasRemaining()) {
                 val read = try { input.read(buffer.array(), buffer.arrayOffset() + buffer.position(), buffer.remaining()) }
@@ -81,7 +75,7 @@ class DataChannel(private val chunkBytes: Int = CHUNK_BYTES, private val recover
             val out = CharBuffer.allocate(buffer.remaining() + 1)
             var result: CoderResult = decoder.decode(buffer, out, eof)
             if (!result.isError && eof) result = decoder.flush(out)
-            // At the end of the file the decoder reports a character cut short as malformed: strict UTF-8 refuses it.
+
             if (result.isError) throw Failure(UTF8)
             val used = buffer.position() - start
             digest.update(buffer.array(), buffer.arrayOffset() + start, used); bytes += used
@@ -129,22 +123,22 @@ class DataChannel(private val chunkBytes: Int = CHUNK_BYTES, private val recover
 
     private val open = ConcurrentHashMap<String, Handle>()
 
-    /** A read handle over [file]; [expectedSha256] (hex), when given, must match what was served or [close] fails. */
+
     fun openRead(file: File, base64: Boolean = false, expectedSha256: String? = null): String {
         val reader = try { Reader(file, if (base64) Kind.BASE64_READ else Kind.UTF8_READ, expectedSha256) } catch (_: IOException) { throw Failure(IO) }
         return UUID.randomUUID().toString().also { open[it] = reader }
     }
 
-    /** A write handle that creates [file] and refuses past [capBytes]; any failure deletes the file. */
+
     fun openWrite(file: File, base64: Boolean = false, capBytes: Long = Long.MAX_VALUE): String {
         val writer = try { Writer(file, if (base64) Kind.BASE64_WRITE else Kind.UTF8_WRITE, capBytes) } catch (_: IOException) { throw Failure(IO) }
         return UUID.randomUUID().toString().also { open[it] = writer }
     }
 
-    /** A write handle for a recovery snapshot (an operation's or the capture popup's): capped at core's 128 MiB backup limit. */
+
     fun openRecoveryWrite(file: File): String = openWrite(file, capBytes = recoveryCapBytes)
 
-    /** The bridge's `dataRead`: "D" + the next chunk, or "E" at the end (a data chunk can never look like an error marker). */
+
     fun read(handle: String): String {
         val reader = open[handle] as? Reader ?: throw Failure(HANDLE)
         return try {
@@ -153,28 +147,28 @@ class DataChannel(private val chunkBytes: Int = CHUNK_BYTES, private val recover
         } catch (failure: Failure) { drop(handle); throw failure }
     }
 
-    /** Debug-only: the next read fails with [IO] once (check-data-device.mjs R1: a replay whose plan cannot be read). */
+
     @Volatile var failNextRead = false
 
-    /** The bridge's `dataWrite`. */
+
     fun write(handle: String, chunk: String) {
         val writer = open[handle] as? Writer ?: throw Failure(HANDLE)
         try { writer.write(chunk) } catch (failure: Failure) { drop(handle); throw failure }
     }
 
-    /** The bridge's `dataClose`: the handle ends; a write handle's file is synced, a read handle's hash checked. */
+
     fun close(handle: String): Closed {
         val entry = open.remove(handle) ?: throw Failure(HANDLE)
         return try { entry.close() } catch (failure: Failure) { entry.abandon(); throw failure }
     }
 
-    /** Ends [handle] without its result (the host call failed): a write handle's file goes. Unknown handles are ignored. */
+
     fun drop(handle: String) { open.remove(handle)?.abandon() }
 
     companion object {
-        /** About 1 MiB per bridge call. */
+
         const val CHUNK_BYTES = 1024 * 1024
-        /** Core's MAX_BACKUP_SOURCE_BYTES: a restore refuses a larger snapshot, so none is ever written. */
+
         const val RECOVERY_CAP_BYTES = 128L * 1024 * 1024
         const val IO = "DATA_IO"
         const val MISMATCH = "DATA_MISMATCH"

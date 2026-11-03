@@ -15,8 +15,6 @@ mod imp {
     const NOTIFICATION_INTERFACE: &str = "org.freedesktop.Notifications";
     const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
-    // Embed the pixels rather than relying on an installed icon theme or a resource path:
-    // an unintegrated AppImage must also have a logo. Decode this small PNG once.
     fn notification_logo() -> Option<&'static tauri::image::Image<'static>> {
         static LOGO: OnceLock<Option<tauri::image::Image<'static>>> = OnceLock::new();
         LOGO.get_or_init(|| {
@@ -42,12 +40,9 @@ mod imp {
         }
     }
 
-    /// Owns the direct session-bus connection for the app lifetime. A clone is used for each
-    /// method call, but every clone shares the same zbus connection and executor.
     pub(crate) struct LinuxNotificationState {
         connection: Mutex<Option<Connection>>,
-        /// The daemon's id for the last notification of each tag (one tag per task): passed back as
-        /// `replaces_id`, so a task's next reminder replaces the one shown instead of stacking.
+
         replaced_ids: Mutex<HashMap<String, u32>>,
         endpoint: NotificationEndpoint,
         delivery_timeout: Duration,
@@ -125,11 +120,10 @@ mod imp {
 
             let actions: Vec<&str> = Vec::new();
             let mut hints: HashMap<&str, Value<'_>> = HashMap::new();
-            // Tauri's visible Linux launcher is Mindwtr.desktop; its theme icon is lowercase.
+
             hints.insert("desktop-entry", Value::from("Mindwtr"));
             let logo = notification_logo();
             if let Some(logo) = logo {
-                // Freedesktop image-data: width, height, rowstride, alpha, bits, channels, RGBA.
                 hints.insert(
                     "image-data",
                     Value::from((
@@ -144,10 +138,7 @@ mod imp {
                 );
             }
             let body = body.unwrap_or_default();
-            // A daemon that no longer shows the replaced notification (closed, expired) shows this
-            // one as new, which is what a reminder wants too.
-            // ponytail: serialize tagged sends globally; use per-tag locks if reminder throughput
-            // matters. Keep lookup, Notify and update together so concurrent reminders cannot stack.
+
             let mut replaced_ids = match tag {
                 Some(_) => Some(self.replaced_ids.lock().await),
                 None => None,
@@ -434,7 +425,7 @@ mod imp {
                 .iter()
                 .map(|notification| notification.replaces_id)
                 .collect();
-            // The mock daemon answers every Notify with id 41.
+
             assert_eq!(replaced, vec![0, 41, 0, 0]);
         }
 

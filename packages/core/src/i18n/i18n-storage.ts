@@ -13,10 +13,7 @@ type KeyValueStorageAsync = {
 
 const WELL_SUPPORTED_DEFAULT_LANGUAGES = new Set<Language>(['en', 'zh', 'zh-Hant', 'es', 'ja', 'ko', 'uk']);
 
-/**
- * Resolve app language from a locale string.
- * Only auto-selects languages we consider well-supported; otherwise falls back to English.
- */
+
 export function resolveLanguageFromLocale(locale: string | null | undefined, fallback: Language = 'en'): Language {
     if (!locale) return fallback;
     const normalized = locale.trim().replace(/_/g, '-');

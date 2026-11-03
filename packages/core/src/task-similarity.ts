@@ -8,7 +8,7 @@ type IndexedTask = {
     readonly words: ReadonlySet<string>;
 };
 
-/** In-memory title index; consumers should treat its posting lists as opaque. */
+
 export interface TaskSimilarityIndex {
     readonly bigramPostings: ReadonlyMap<string, readonly IndexedTask[]>;
     readonly exactTitles: ReadonlyMap<string, readonly IndexedTask[]>;
@@ -20,8 +20,7 @@ const MARK_CHARACTER = /\p{M}/u;
 const COMPACT_SCRIPT_CHARACTER = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
 const OPERATOR_SENSITIVE_TITLE = /[\p{L}\p{N}][+&#|*=<>^~%]/u;
 
-// Fold familiar Latin accents for forgiving matching without erasing marks
-// that distinguish letters and vowels in other writing systems.
+
 const foldLatinDiacritics = (title: string): string => {
     let folded = '';
     let followsLatinCharacter = false;
@@ -68,7 +67,7 @@ const getUnicodeBigrams = (words: ReadonlySet<string>): Set<string> => {
     return bigrams;
 };
 
-/** Build a read-only snapshot index over the supplied task objects. */
+
 export function createTaskSimilarityIndex(tasks: readonly Task[]): TaskSimilarityIndex {
     const exactTitles = new Map<string, IndexedTask[]>();
     const wordPostings = new Map<string, IndexedTask[]>();
@@ -105,10 +104,7 @@ export function createTaskSimilarityIndex(tasks: readonly Task[]): TaskSimilarit
     return { bigramPostings, exactTitles, wordPostings };
 }
 
-/**
- * Return at most three conservative title matches, strongest first.
- * Matching is pure: it neither updates tasks nor refreshes the supplied index.
- */
+
 export function findSimilarTasks(
     index: TaskSimilarityIndex,
     title: string,
@@ -142,8 +138,8 @@ export function findSimilarTasks(
             }
             const maxWords = Math.max(queryWords.size, entry.words.size);
             const minWords = Math.min(queryWords.size, entry.words.size);
-            // Two coincidental words in a long title are noise; require most of
-            // the longer title to overlap before treating it as a near match.
+
+
             const wordScore = sharedWords >= 2 && sharedWords / maxWords >= 0.6
                 ? (sharedWords / maxWords) + ((sharedWords / minWords) * 0.1)
                 : 0;

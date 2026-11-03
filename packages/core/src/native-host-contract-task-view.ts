@@ -1,14 +1,6 @@
-/**
- * The task editor's View tab and checklist for a native host (task
- * core-editor-view-checklist). The View tab is read with getTaskView; checklist
- * edits change the host's unsaved checklist through editTaskChecklist, as the
- * React Native editor edits its draft, and saveTaskDraft saves it with the rest of
- * the draft in one write. Reset checklist writes at once, as in React Native; it
- * takes a `requestId`: a repeat after a failed save only finishes that save
- * (native-request-receipts.ts). It is target-state, so a replay that already
- * landed writes nothing, and compare-and-set on the View tab's `taskRevision`, so a
- * replay after a restart never undoes a later edit (STALE_REVISION).
- */
+
+
+
 import { isNativeJsonWithinBytes } from './native-json';
 import { checklistProjectBlockReason } from './checklist-project-conversion';
 export { isNativeJsonWithinBytes } from './native-json';
@@ -43,7 +35,7 @@ export type NativeTaskViewRow =
     | Extract<TaskViewRow, { type: 'title' | 'status' | 'field' | 'tokens' }>
     | { type: 'description'; label: string; blocks: ResolvedMarkdownBlock[] }
     | (Omit<Extract<TaskViewRow, { type: 'checklist' }>, 'items'> & {
-        /** All the checklist's items; `items` holds the requested window of them. */
+
         total: number;
         items: Array<Extract<TaskViewRow, { type: 'checklist' }>['items'][number] & { inline: MarkdownInline[] }>;
     })
@@ -55,34 +47,34 @@ export type NativeTaskViewRow =
 
 export type NativeTaskView = {
     version: typeof NATIVE_HOST_CONTRACT_VERSION;
-    /** Covers the task, the settings, the language, the day and minute, and the draft and checklist sent. */
+
     revision: string;
     id: string;
-    /** A task in an archived project: the saved task, nothing tappable, and `readOnlyHint` above the rows. */
+
     readOnly: boolean;
     readOnlyHint: string | null;
     rows: NativeTaskViewRow[];
-    /** The words a deleted reference adds ("deleted task") and the code block's copy button. */
+
     markdownLabels: { deletedTask: string; deletedProject: string; copyCode: string };
-    /** The saved checklist: where the editor's checklist starts, and saveTaskDraft's `checklist.base`. */
+
     checklistBase: ChecklistItem[];
-    /** Complete raw saved list from editor open, including hidden tombstones and file metadata. */
+
     attachmentsBase: Attachment[];
-    /** The saved task's revision: resetTaskChecklist sends it. */
+
     taskRevision: string;
 };
 
 export type NativeTaskChecklistEdit = TaskChecklistEdit;
 
 export type NativeTaskChecklistEditResult = {
-    /** The draft after the edit. A list task's status follows its items (getChecklistEditStatus). */
+
     draft: TaskDraft;
     checklist: ChecklistItem[];
-    /** False when the edit changes nothing; React Native then ends editing (insertAfter, append) or does nothing. */
+
     changed: boolean;
-    /** A new empty item to focus. */
+
     focusId: string | null;
-    /** The Form tab's checklist field for the edited checklist. */
+
     field: TaskChecklistFieldModel;
 };
 
@@ -92,9 +84,9 @@ type TaskViewDeps = {
     t: () => (key: string) => string;
     dateFormatting: () => DateFormattingConfig;
     revision: (now: Date) => string;
-    /** Mobile opens a task in an archived project read-only. */
+
     isReadOnly: (task: Task) => boolean;
-    /** A whole task draft from the host, or null when invalid (the editor contract's rule). */
+
     readDraft: (value: unknown) => TaskDraft | null;
 };
 
@@ -111,7 +103,7 @@ const isIndex = (value: unknown, length: number) => Number.isSafeInteger(value) 
 const isText = (value: unknown, native = false): value is string => typeof value === 'string'
     && value.length <= (native ? NATIVE_JSON_LIMIT_BYTES : TEXT_LIMIT);
 
-/** A checklist from the host: items with exactly an id, a title and isCompleted. */
+
 export const readChecklist = (value: unknown, native = false): ChecklistItem[] | null => {
     if (!Array.isArray(value) || value.length > (native ? NATIVE_JSON_LIMIT_BYTES : CHECKLIST_LIMIT)) return null;
     const valid = value.every((item) => isRecord(item)
@@ -145,7 +137,7 @@ const readEdit = (value: unknown, length: number): TaskChecklistEdit | null => {
 };
 
 export function createTaskViewMethods(deps: TaskViewDeps) {
-    // A retry finishes a failed save and never writes twice.
+
     const receipts = createNativeRequestReceipts({
         save: async () => {
             if (useTaskStore.getState().persistenceFailure) {
@@ -166,7 +158,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
     };
     const isTask = (value: Task | NativeHostResult<never>): value is Task => !('ok' in value);
 
-    /** The saved task the editor showed with its unsaved draft and checklist over it, as RN's `{ ...task, ...mergedTask }`. */
+
     type EditorForm = { id: string; taskRevision: string; draft: TaskDraft; checklist: ChecklistItem[] };
     const readEditorForm = (input: EditorForm, notFound: string): { task: Task; shown: Task; draft: TaskDraft } | NativeHostResult<never> => {
         const ready = deps.readiness();
@@ -189,7 +181,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
     };
 
     return {
-        /** Plain-text Share preview of the current unsaved editor form; no task write or receipt. */
+
         getTaskShare(input: EditorForm): NativeHostResult<{ title: string | null; message: string }> {
             const form = readEditorForm(input, 'Task is not shareable');
             if ('ok' in form) return form;
@@ -210,7 +202,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             return isNativeJsonWithinBytes(result) ? { ok: true, value: result }
                 : fail('INVALID_INPUT', 'Task Share exceeds the native response bound');
         },
-        /** Why Create project's "Expand checklist" is off for the editor form (RN's checklistProjectBlockReason), translated; null when allowed. */
+
         getTaskChecklistProjectBlock(input: EditorForm): NativeHostResult<{ blocked: string | null }> {
             const form = readEditorForm(input, 'Task not found');
             if ('ok' in form) return form;
@@ -218,12 +210,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             return { ok: true, value: { blocked: reason ? deps.t()(reason) : null } };
         },
 
-        /**
-         * The View tab. Send the editor's unsaved `draft` and `checklist` to show them, as
-         * the React Native editor does; without them it shows the saved task. A read-only
-         * task always shows the saved task. The checklist's items come in windows of at most
-         * 100 (`offset`, `limit`); a later window sends the first one's `revision`.
-         */
+
         getTaskView(input: {
             id: string;
             draft?: TaskDraft;
@@ -253,7 +240,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             const checklist = checklistInput ?? task.checklist;
             const attachmentsBase = readNativeAttachments(task.attachments ?? []);
             if (!attachmentsBase) return fail('INVALID_INPUT', 'Saved attachment list exceeds the native response');
-            // The editor's task with its draft applied (React Native's mergedTask).
+
             const shown: Task = readOnly ? task : {
                 ...task,
                 ...(taskDraftToUpdatePatch(draft, task, { attachments: task.attachments }) ?? {}),
@@ -351,7 +338,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             };
         },
 
-        /** Resolve only the saved target at the position the current View tab rendered. */
+
         getTaskViewReferenceTarget(input: {
             view: { id: string; draft?: TaskDraft; checklist?: ChecklistItem[]; attachments?: Attachment[] };
             revision: string;
@@ -429,12 +416,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             return { ok: true, value: { kind: run.target.kind, id: run.target.id } };
         },
 
-        /**
-         * One checklist edit on the host's unsaved draft and checklist, as the React Native
-         * editor makes it (task-checklist-model.ts). Without `edit`, the Form tab's field for
-         * the checklist as it is. Nothing is written; saveTaskDraft saves the draft and
-         * checklist together.
-         */
+
         editTaskChecklist(input: {
             id: string;
             draft: TaskDraft;
@@ -472,13 +454,7 @@ export function createTaskViewMethods(deps: TaskViewDeps) {
             };
         },
 
-        /**
-         * Reset checklist: every saved item open, and a Done task back to Next, written at
-         * once. Then apply the `uncheckAll` edit to the host's checklist and use `checklist`
-         * as the new checklist base for saveTaskDraft. A saved checklist already open writes nothing. A task with no
-         * saved checklist (items added in this editor only) writes nothing either: the host reopens its draft items.
-         * `taskRevision` is getTaskView's: a task changed since is not written (STALE_REVISION).
-         */
+
         async resetTaskChecklist(input: { id: string; requestId: string; taskRevision: string }): Promise<NativeHostResult<{ id: string; checklist: ChecklistItem[] }>> {
             const ready = deps.readiness();
             if (!ready.ok) return ready;

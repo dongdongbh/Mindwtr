@@ -1,7 +1,6 @@
 import Foundation
 
-/// The existing macOS WebDAV fixture's bounded durable synthetic secret port.
-/// No platform Security query, production namespace, or ordinary bundle change.
+
 enum NativeSyntheticSecretFixture {
     static let cacheFileName = "foreground-fixture-secrets.json"
     #if os(macOS)

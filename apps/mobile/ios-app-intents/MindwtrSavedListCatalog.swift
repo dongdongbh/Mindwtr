@@ -1,7 +1,6 @@
 import Foundation
 
-// Read the catalog already published for widget configuration; task contents are
-// resolved against live app state when the destination opens.
+
 enum MindwtrSavedListCatalog {
     struct List: Decodable, Equatable {
         let id: String

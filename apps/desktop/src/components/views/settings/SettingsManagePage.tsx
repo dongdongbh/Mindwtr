@@ -23,9 +23,6 @@ type SettingsManagePageProps = {
     requestConfirmation: (options: ConfirmationRequestOptions) => Promise<boolean>;
 };
 
-// ---------------------------------------------------------------------------
-// Sortable area row (reused from AreaManagerModal pattern)
-// ---------------------------------------------------------------------------
 
 function SortableAreaRow({
     area,
@@ -163,9 +160,6 @@ function SortableViewSectionRow({
     );
 }
 
-// ---------------------------------------------------------------------------
-// Token row for contexts and tags (inline rename + delete)
-// ---------------------------------------------------------------------------
 
 function NewTokenRow({ kind, onCreate, translate, disabled = false }: {
     kind: 'context' | 'tag';
@@ -405,9 +399,6 @@ function PersonRow({
     );
 }
 
-// ---------------------------------------------------------------------------
-// Collapsible section wrapper
-// ---------------------------------------------------------------------------
 
 function ManageSection({
     settingsKey,
@@ -441,9 +432,6 @@ function ManageSection({
     );
 }
 
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
 
 export function SettingsManagePage({ t: _t, translate, requestConfirmation }: SettingsManagePageProps) {
     const areas = useTaskStore((s) => s.areas);
@@ -468,7 +456,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
 
     const { allContexts, allTags } = getDerivedState();
 
-    // Optimistic inventory updates must not unmount a pending or failed token editor.
+
     const [tokenEditor, setTokenEditor] = useState<TokenEditorState | null>(null);
     const contextRows = tokenEditor?.kind === 'context' ? tokenEditor.values : allContexts;
     const tagRows = tokenEditor?.kind === 'tag' ? tokenEditor.values : allTags;
@@ -501,7 +489,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
         }
     };
 
-    // Sort areas by order
+
     const sortedAreas = [...areas].sort((a, b) => a.order - b.order);
     const sortedPeople = [...people].sort((a, b) => baseTextCollator.compare(a.name, b.name));
     const somedaySections = sortViewSectionDefinitions(settings?.gtd?.viewSections?.someday);
@@ -515,7 +503,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
         }));
     };
 
-    // New area form
+
     const [newAreaName, setNewAreaName] = useState('');
     const [newAreaColor, setNewAreaColor] = useState<string | undefined>(DEFAULT_AREA_COLOR);
     const [isCreatingArea, setIsCreatingArea] = useState(false);
@@ -524,8 +512,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
 
     const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
-    // One edit against the list stored when the write is admitted (a delete waits for its confirmation):
-    // core's edits change only the edited sections and keep every other stored entry.
+
     const persistSomedaySections = useCallback((edit: (stored: ViewSectionDefinition[] | undefined) => ViewSectionDefinition[] | null) => {
         void updateSettingsFromLatest((current) => {
             const next = edit(current?.gtd?.viewSections?.someday);
@@ -544,7 +531,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
         persistSomedaySections((stored) => orderSomedaySections(stored, ids));
     }, [persistSomedaySections, somedaySections]);
 
-    // A live area has this name: creating it would add nothing, so Create is off and the line says why.
+
     const newAreaNameTaken = isManageAreaNameTaken('newArea', newAreaName, areas);
     const handleCreateArea = useCallback(async () => {
         const name = newAreaName.trim();
@@ -608,7 +595,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
 
     return (
         <div className="space-y-6">
-            {/* Areas */}
+            {           }
             <ManageSection
                 settingsKey="manageAreas"
                 title={resolveText('areas.manage', 'Manage Areas')}
@@ -691,7 +678,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                 </div>
             </ManageSection>
 
-            {/* People */}
+            {            }
             <ManageSection
                 settingsKey="managePeople"
                 title={resolveText('people.title', 'People')}
@@ -746,7 +733,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                 </div>
             </ManageSection>
 
-            {/* Someday sections */}
+            {                      }
             <ManageSection
                 settingsKey="manageSomedaySections"
                 title={resolveText('viewSections.somedaySections', 'Someday sections')}
@@ -783,7 +770,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                 )}
             </ManageSection>
 
-            {/* Contexts */}
+            {              }
             <ManageSection
                 settingsKey="manageContexts"
                 title={resolveText('contexts.title', 'Contexts')}
@@ -811,7 +798,7 @@ export function SettingsManagePage({ t: _t, translate, requestConfirmation }: Se
                 <NewTokenRow kind="context" onCreate={addContext} translate={translate} disabled={tokenEditor !== null} />
             </ManageSection>
 
-            {/* Tags */}
+            {          }
             <ManageSection
                 settingsKey="manageTags"
                 title={resolveText('tags.title', 'Tags')}

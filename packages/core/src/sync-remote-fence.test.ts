@@ -79,8 +79,8 @@ describe('remote sync mutation fence', () => {
     });
 
     it('reclaims a lease whose holder stopped renewing, by CAS over its exact version', async () => {
-        // Holder advertised a 5s heartbeat and last renewed 60s ago (server time),
-        // yet its 5-minute expiry is still far away: dead, not busy.
+
+
         const remote = createPort({
             version: 'v1',
             bytes: new TextEncoder().encode(JSON.stringify({
@@ -149,7 +149,7 @@ describe('remote sync mutation fence', () => {
                 renewedAt: 940_000,
             })),
         });
-        // The paused holder wakes up and renews right after our read.
+
         const originalRead = remote.port.read;
         let reads = 0;
         remote.port.read = async () => {
@@ -188,8 +188,8 @@ describe('remote sync mutation fence', () => {
         const error = await acquire(remote.port).then(() => null, (value) => value);
         expect(error).toBeInstanceOf(SyncRemoteMutationFenceBusyError);
         expect((error as SyncRemoteMutationFenceBusyError).retryAfterMs).toBe(4_000);
-        // The holder rides along so a stall is attributable in the app log:
-        // seconds left means a dead lease, not a device actively syncing.
+
+
         expect((error as SyncRemoteMutationFenceBusyError).holder).toMatchObject({
             ownerId: expect.any(String),
             leaseId: expect.any(String),
@@ -654,9 +654,8 @@ describe('remote sync mutation fence', () => {
 
 describe('module load', () => {
     it('loads without a global TextDecoder', async () => {
-        // React Native installs TextDecoder from Expo's winter runtime, which runs
-        // after this module is first imported; a module-scope instance crashed the
-        // Android app before it could boot.
+
+
         const original = globalThis.TextDecoder;
         delete (globalThis as { TextDecoder?: unknown }).TextDecoder;
         try {

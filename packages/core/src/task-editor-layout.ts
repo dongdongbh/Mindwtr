@@ -7,7 +7,7 @@ export const DEFAULT_TASK_EDITOR_ORDER: TaskEditorFieldId[] = [
     'contexts',
     'dueDate',
     'section',
-    // Dates group together in Scheduling; the recurrence editor follows them.
+
     'startTime',
     'reviewAt',
     'recurrence',
@@ -84,8 +84,7 @@ const isTaskEditorSectionId = (value: unknown): value is TaskEditorSectionId =>
 export const isTaskEditorSectionableField = (fieldId: TaskEditorFieldId): boolean =>
     TASK_EDITOR_SECTIONABLE_FIELDS.includes(fieldId);
 
-// Creating a project's sections engages this optional field, even before the
-// first task is assigned. Explicit layout choices still win for empty fields.
+
 export function isTaskEditorSectionFieldVisible(
     taskEditor: TaskEditorSettings | undefined,
     { projectId, sectionId, hasProjectSections }: {
@@ -97,9 +96,8 @@ export function isTaskEditorSectionFieldVisible(
     if (!projectId) return false;
     if (sectionId) return true;
     const hidden = taskEditor?.hidden;
-    // Load migrations persist the lean defaults without an order. Both editors
-    // save an order when customizing field visibility, so do not mistake these
-    // migration-generated defaults for an explicit choice to hide sections.
+
+
     const hasPersistedDefaults = Boolean(taskEditor?.defaultsVersion)
         && !taskEditor?.order?.length
         && hidden?.length === DEFAULT_TASK_EDITOR_HIDDEN.length
@@ -139,12 +137,7 @@ export const getTaskEditorSectionOpenDefaults = (
     };
 };
 
-// Reconciles a saved field order against the current roster: unknown ids (a
-// field removed since the order was saved) are dropped, a field added to the
-// roster since is appended in roster order, and a field disabled by a
-// feature flag (priorities/timeEstimates off) is removed entirely. Desktop
-// and mobile computed this identically in their own memo bodies; this is the
-// one home now.
+
 export function normalizeTaskEditorOrder(
     savedOrder: TaskEditorFieldId[],
     disabledFields: ReadonlySet<TaskEditorFieldId>

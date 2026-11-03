@@ -23,9 +23,7 @@ import * as rnKeys from './sync-constants';
 // eslint-disable-next-line import/first
 import { base64ToBytes, bytesToBase64 } from './attachment-sync-utils';
 
-// sync-constants.ts keeps literal values because tests that replace @mindwtr/core as a whole
-// still read them. Core's sync-storage-keys.ts is what the native app reads, so the two must
-// never differ: a differing key reads as "not configured" after an upgrade.
+
 describe('sync support parity with core', () => {
   it('uses the same device storage keys as core', () => {
     const entries = Object.entries(rnKeys).filter(([name]) => name.endsWith('_KEY'));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-// Serialized into the isolated WebView by WebDriver, never bundled into the app.
+
 export function installCaptureRenderProbe(selector, title, sampleJS = false) {
   const input = document.querySelector(selector);
   if (!input) throw new Error('Capture input missing');
@@ -9,7 +9,7 @@ export function installCaptureRenderProbe(selector, title, sampleJS = false) {
   const result = window.__nativeCaptureRender = {};
   let samplingTimeout;
   if (sampleJS) {
-    // Start in this WebDriver entry so the next native event can be sampled.
+
     window.__enableSamplingProfiler();
     result.samplingStartMs = performance.now();
     samplingTimeout = setTimeout(() => {
@@ -29,7 +29,7 @@ export function installCaptureRenderProbe(selector, title, sampleJS = false) {
     result.domVisibleMs = performance.now();
     observer.disconnect();
     input.removeEventListener('keydown', onKeydown, true);
-    // A frame callback is a rendering opportunity, NOT proof of presented pixels.
+
     requestAnimationFrame(() => {
       result.frameMs = performance.now();
       if (sampleJS) {

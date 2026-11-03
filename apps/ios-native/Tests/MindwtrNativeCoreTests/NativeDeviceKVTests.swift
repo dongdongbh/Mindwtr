@@ -59,7 +59,7 @@ final class NativeDeviceKVTests: XCTestCase {
         try FileManager.default.createSymbolicLink(at: namespace.appendingPathComponent("foreign-link"), withDestinationURL: orphan)
         XCTAssertThrowsError(try store.captureAISummaryEvidence())
         try FileManager.default.removeItem(at: namespace.appendingPathComponent("foreign-link"))
-        // Refuse malformed UTF-8 rather than lossy replacement-name aliases or duplicate-key traps.
+
         let directoryFD = Darwin.open(namespace.path, O_RDONLY | O_DIRECTORY | O_CLOEXEC)
         XCTAssertGreaterThanOrEqual(directoryFD, 0)
         defer { Darwin.close(directoryFD) }
@@ -71,7 +71,7 @@ final class NativeDeviceKVTests: XCTestCase {
             XCTAssertThrowsError(try store.captureAISummaryEvidence())
             XCTAssertEqual(invalid.withUnsafeMutableBufferPointer { unlinkat(directoryFD, $0.baseAddress!, 0) }, 0)
         } else {
-            // APFS refuses malformed UTF-8 before a directory entry can exist.
+
             XCTAssertEqual(invalidErrno, EILSEQ, "Unexpected malformed filename errno: \(invalidErrno)")
             XCTAssertEqual(try store.captureAISummaryEvidence(), evidence)
             XCTAssertEqual(try bytes(), original)
@@ -144,11 +144,11 @@ final class NativeDeviceKVTests: XCTestCase {
         XCTAssertEqual(try inline.readAppleRemindersImportState().map { Data($0.utf8) }, Data(raw.utf8))
         XCTAssertEqual(try bytes(), beforeInline); inline.close(); current = nil
         try seed("{\"mindwtr-apple-reminders-import-v1\":null,\"unknown\":\"keep\"}")
-        // Exact RN MD5 filename for the fixed cell; raw file remains untouched.
+
         let external = namespace.appendingPathComponent("bef8d9511555677497b5b0f4b8076e57")
         let externalBytes = Data(raw.utf8); try externalBytes.write(to: external)
         let store = try open(), beforeExternal = try bytes(), originalInode = try inode(external)
-        // Existing RN external-file decoding consumes one encoding marker; inline content does not.
+
         let decodedExternal = String(raw.dropFirst())
         XCTAssertEqual(try store.readAppleRemindersImportState().map { Data($0.utf8) }, Data(decodedExternal.utf8))
         XCTAssertEqual(try bytes(), beforeExternal); XCTAssertEqual(try Data(contentsOf: external), externalBytes)
@@ -180,7 +180,7 @@ final class NativeDeviceKVTests: XCTestCase {
         let cold = try open()
         XCTAssertEqual(try cold.readAppleRemindersImportState().map { Data($0.utf8) }, Data(raw.utf8))
         XCTAssertEqual(try cold.get(path), "raw external path 🧠"); XCTAssertEqual(try Data(contentsOf: external), externalData)
-        // Matching bytes are only a baseline/no-op, never an importer receipt.
+
         cold.faults.beforePromotion = { throw Injected.failure }
         try cold.compareAndSetAppleRemindersImportState(expected: raw, next: raw)
         XCTAssertFalse(cold.hasPendingAppleRemindersImportMutation); XCTAssertEqual(try bytes(), after)
@@ -323,7 +323,7 @@ final class NativeDeviceKVTests: XCTestCase {
 
     func testAtomicSelectedBatchesKeepUnknownRecordsAndEveryExternalFile() throws {
         try seed("{\"@mindwtr_sync_backend\":\"off\",\"@mindwtr_sync_path\":null,\"mindwtr-data\":\"  opaque backup 🧠\\n\",\"mindwtr-data:json-ahead-of-sqlite\":\"\",\"unknown\":\"\\uFEFFsame\"}")
-        // RN's MD5 filename for @mindwtr_sync_path, plus an unreferenced old file.
+
         let externalName = "3841382bf18a349689a3256aa5be82e1"
         try Data("original external value".utf8).write(to: namespace.appendingPathComponent(externalName))
         let unicode = namespace.appendingPathComponent("old-provider-bytes")
@@ -431,7 +431,7 @@ final class NativeDeviceKVTests: XCTestCase {
         XCTAssertEqual(try bytes(), before)
         store.close(); current = nil
         try seed("{\"mindwtr-system-calendar-settings\":null,\"mindwtr:native:calendar-setting:v1\":null}")
-        // RN's exact MD5 filenames for the two fixed cells.
+
         let files = ["c1b1171d3d70d708dabbaa00e835028d", "2730d01cc73c83d46a0f156b83ff7f95"].map { namespace.appendingPathComponent($0) }
         let raw = [Data([0xEF, 0xBB, 0xBF]) + Data("raw external choice 🧠".utf8), Data("\u{FEFF}\u{FEFF}raw external proof".utf8)]
         for (url, data) in zip(files, raw) { try data.write(to: url) }
@@ -592,7 +592,7 @@ final class NativeDeviceKVTests: XCTestCase {
         XCTAssertEqual(try inline.readCalendarPushState().map { $0.map { Data($0.utf8) } }, values.map { $0.map { Data($0.utf8) } })
         XCTAssertEqual(try bytes(), before)
         inline.close(); current = nil
-        // RN's exact MD5 filename for mindwtr:calendar-push-sync:calendar-id.
+
         let externalName = "f93dfa2b75f064196d2cc4b087818736"
         let object = try XCTUnwrap(NativeJSON.jsonObject(with: Data(contentsOf: manifest), options: [.mutableContainers]) as? NSMutableDictionary)
         object.setObject(NSNull(), forKey: calendarPushNames[1] as NSString)

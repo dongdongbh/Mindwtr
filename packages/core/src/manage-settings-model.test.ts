@@ -31,7 +31,7 @@ describe('a new area with a name an area already has', () => {
         expect(isManageEditorSaveDisabled('newArea', 'home', areas)).toBe(true);
         expect(isManageEditorSaveDisabled('newArea', 'Garden', areas)).toBe(false);
         expect(isManageEditorSaveDisabled('newArea', '  ', areas)).toBe(true);
-        // Renaming an area into another one merges them, as before; only a new area is refused.
+
         expect(isManageEditorSaveDisabled('area', 'home', areas)).toBe(false);
         const text = (type: 'newArea' | 'area') => getManageEditorText((key) => key, type, {} as ManageUntranslatedText).nameTaken;
         expect(text('newArea')).toBe('An area with this name already exists.');

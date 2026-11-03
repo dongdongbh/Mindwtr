@@ -22,7 +22,7 @@ const task = (id: string, areaId: string, overrides: Partial<Task> = {}): Task =
     rev: 7, revBy: 'old-device', createdAt: NOW, updatedAt: NOW, ...overrides,
 });
 
-// These mutations model a saved sync/other-writer change, rather than a UI-only projection.
+
 let updateSavedData: (() => void) | undefined;
 const setSavedState: typeof useTaskStore.setState = (...args) => {
     useTaskStore.setState(...args); updateSavedData?.();
@@ -85,7 +85,7 @@ describe('prepared native Area rename', () => {
         const prepared = structuredClone(plan.value.prepared);
         prepared.version = version;
         if (version === 1) {
-            // Historical v1 retained the source compatibility color for a colorless destination.
+
             for (const pair of prepared.effect.projects) pair.after.color = pair.before.color;
         }
         const frozen = JSON.parse(JSON.stringify({ request: input, prepared }));
@@ -231,8 +231,8 @@ describe('prepared native Area rename', () => {
         const { methods, request, data } = await open({ areas: [source, destination, duplicate, tombstone],
             projects: [sourceLive, sourceDeleted, destinationStale, destinationExact],
             tasks: [direct, deleted, dual, unrelatedTask] });
-        // A mixed-version store can still contain duplicate live names even though
-        // a fresh load currently normalizes them; rename resolves the first raw row.
+
+
         setSavedState({ _allAreas: [source, destination, duplicate, tombstone],
             _allTasks: [direct, deleted, dual, unrelatedTask] });
         const input = request(source.id, ' HOME ');
@@ -412,7 +412,7 @@ describe('prepared native Area rename', () => {
     });
 });
 
-// Actual normal-load/recovery boundaries shared by the three concrete Area commands.
+
 type RecoveryMode = 'rename' | 'merge' | 'delete' | 'restore' | 'fresh';
 async function openAreaRecovery(mode: RecoveryMode) {
     await flushPendingSave(); resetForTests();
@@ -600,7 +600,7 @@ describe('Area durable recovery baselines', () => {
         const before = structuredClone(env.data()); const writes = env.writes();
         const other = structuredClone(frozen); other.request.requestId = '00000000-0000-4000-8000-000000000592';
         other.prepared.request.requestId = other.request.requestId;
-        // Fresh creation requires ID==UUID, so a different valid frozen payload is supplied by a second preparation below in ownership guards.
+
         if (mode !== 'fresh') expect(await env.commit(other)).toMatchObject({ ok: false, error: { code: 'SAVE_FAILED' } });
         expect(await env.commit(frozen)).toMatchObject({ ok: true });
         expect(env.data()).toEqual(before); expect(env.writes()).toBe(writes);

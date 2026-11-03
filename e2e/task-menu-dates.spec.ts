@@ -27,7 +27,7 @@ for (const [field, label] of [
             const calendar = page.getByRole('dialog', { name: `${label} Calendar`, exact: true });
             await expect(calendar).toBeVisible();
             await page.getByRole('button', { name: `${label} Calendar`, exact: true }).click();
-            // Let the pointer-release blur timer run before asserting persistence.
+
             await page.waitForTimeout(150);
             await expect(calendar).toBeVisible();
             await calendar.getByRole('button', { name: 'Calendar: Next month', exact: true }).click();

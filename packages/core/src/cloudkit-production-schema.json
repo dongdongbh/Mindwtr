@@ -50,7 +50,7 @@
     "archivedAt",
     "reminderPolicy"
    ],
-   "pendingProduction": ["dueReminderLeadMinutes"]
+   "pendingProduction": ["dueReminderLeadMinutes", "startReminderLeadMinutes"]
   },
   "MindwtrProject": {
    "deployed": [

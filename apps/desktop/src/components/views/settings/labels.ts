@@ -1,10 +1,6 @@
 import { resolveI18nText, type TranslateFn } from '@mindwtr/core';
 
-// The keys settings pages read through the `t` prop. Every key resolves to a
-// `settings.<key>` string in packages/core/src/i18n (or an explicit override
-// below) — this array is only the roster of keys, not their text. Localized
-// text lives entirely in packages/core/src/i18n/locales/*.ts so translators
-// and locale-parity.test.ts can see it.
+
 export const SETTINGS_LABEL_KEYS = [
     'title',
     'general',
@@ -761,9 +757,7 @@ export const SETTINGS_LABEL_KEYS = [
 
 export type SettingsLabels = Record<(typeof SETTINGS_LABEL_KEYS)[number], string>;
 
-// Maps a settings label key to its i18n key when it isn't simply
-// `settings.<key>` — either because the string is shared with another part
-// of the app (e.g. `back` -> `common.back`) or core spells it differently.
+
 export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = {
     cancel: 'common.cancel',
     sandboxWorkspace: 'sandbox.open',
@@ -775,8 +769,8 @@ export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = 
     sandboxEnter: 'sandbox.enter',
     workspacesICloudDefaultOnly: 'workspaces.iCloudDefaultOnly',
     back: 'common.back',
-    // Sidebar-view checkboxes reuse the sidebar's own labels so every locale
-    // is covered without new strings.
+
+
     navAgenda: 'nav.agenda',
     navSomeday: 'nav.someday',
     navWaiting: 'nav.waiting',
@@ -792,14 +786,14 @@ export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = 
     projects: 'projects.title',
     settingsSaveFailed: 'settings.feedback.saveFailed',
     pomodoroAutoStartNotice: 'settings.gtdMobile.pomodoroWillNowAdvancePhasesAutomatically',
-    // "Auto" is already translated for text direction; the feed color picker
-    // means the same thing (follow the source), so no new locale key.
+
+
     calendarColorAuto: 'taskEdit.textDirection.auto',
     close: 'common.close',
     inboxModeGuided: 'process.modeGuided',
     inboxModeQuick: 'process.modeQuick',
     keybindings: 'keybindings.helpTitle',
-    // The privacy lock (#1472) reuses mobile App Lock's wording.
+
     desktopAppLock: 'settings.mobile.appLock',
     desktopAppLockRelock: 'settings.mobile.appLockRelock',
     desktopAppLockRelockImmediately: 'settings.mobile.appLockRelockImmediately',
@@ -855,27 +849,18 @@ export const labelKeyOverrides: Partial<Record<keyof SettingsLabels, string>> = 
     taskEditorSectionDetails: 'taskEdit.details',
 } as const;
 
-// The `t` prop every settings page reads. One loop, so SettingsView and the
-// English-only variant below cannot drift apart on either the key mapping or
-// what happens when a locale is missing the key.
+
 export function buildSettingsLabels(translate: TranslateFn): SettingsLabels {
     const result = {} as SettingsLabels;
     SETTINGS_LABEL_KEYS.forEach((key) => {
-        // No explicit fallback: resolveI18nText already falls through to the
-        // English copy and then to the key itself.
+
+
         result[key] = resolveI18nText(translate, labelKeyOverrides[key] ?? `settings.${key}`);
     });
     return result;
 }
 
-// English settings labels. Used by settings page tests that need a real (not
-// mocked) SettingsLabels object; components should get `t` from SettingsView
-// instead. `t` returns the key on a miss, so an identity translate misses
-// every key and resolveI18nText falls through to the English copy.
+
 export function getEnglishSettingsLabels(): SettingsLabels {
     return buildSettingsLabels((key) => key);
 }
-
-// The settings search index itself lives in core
-// (packages/core/src/settings-search-keys.ts) and is consumed here through
-// ./settings-search — this module only owns the `t` vocabulary the pages read.

@@ -1,11 +1,9 @@
-// File Sync's folder lease on the phones (moved from React Native's lib/sync-file-lock.ts, S5):
-// the native lock's token kept for the cycle, its refusals normalized, and the release-time
-// identity loss told apart. React Native binds its SyncFileLock Expo module; native Android binds
-// SyncFileLockCore.kt over the host's lock channel.
+
+
 
 import { normalizeSyncFileLockError, SyncFileLockBusyError, SyncFileLockUnavailableError } from './sync-service-utils';
 
-/** The platform's lock: an opaque token per lease. Refusals reject with the lock's coded text. */
+
 export type SyncFileLockNativePort = {
     acquireAsync(uri: string): Promise<string>;
     revalidateAsync(token: string): Promise<void>;
@@ -19,9 +17,7 @@ export type MobileFileSyncLease = {
     native: boolean;
 };
 
-/** Release consumed the native token but its final pathname/inode check proved
- * the compatibility lock was replaced. Callers that have just committed local
- * encryption material must compensate, unlike an ordinary close failure. */
+
 export class SyncFileLockIdentityLostError extends SyncFileLockUnavailableError {
     constructor(cause: unknown) {
         super('Safe File Sync locking was lost because the lock identity changed.');
@@ -34,16 +30,10 @@ const isNativeLockIdentityLoss = (error: unknown): boolean =>
     String(error ?? '').includes(SYNC_FILE_LOCK_IDENTITY_LOST_CODE)
     || /SYNC_FILE_LOCK_UNAVAILABLE:[^\n]*(?:identity|root)[^\n]*changed/i.test(String(error ?? ''));
 
-/**
- * Android and iOS hold an unreplaceable platform authority first, then the
- * exact persistent `.mindwtr.lock` for old-client compatibility. Cross-device
- * and non-advisory providers remain protected by document CAS and transition
- * final inventory validation rather than pretending a kernel lock is distributed.
- * Elsewhere (web, tests) one in-process lease stands in.
- */
+
 export const createMobileFileSyncLeases = (host: {
     platform(): string;
-    /** The platform's lock, or null when this build lacks it (the lease then fails closed). */
+
     nativeModule(): SyncFileLockNativePort | null;
 }) => {
     let fallbackLeaseToken: string | null = null;
@@ -110,7 +100,7 @@ export const createMobileFileSyncLeases = (host: {
         fallbackLeaseToken = null;
     };
 
-    /** Tests: forget the in-process lease. */
+
     const reset = () => {
         fallbackLeaseToken = null;
     };

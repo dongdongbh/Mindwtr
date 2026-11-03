@@ -35,11 +35,11 @@ try {
       await expect(page.getByText('Help: Focus', { exact: true })).toHaveCount(0);
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await expect.poll(() => settingsRequested).toBe(true);
-      // Retain the current screen while the real Settings route is unavailable,
-      // including a first click before its background preload has completed.
+
+
       await expect(page.getByRole('heading', { name: 'Focus', exact: true })).toBeVisible();
       await page.screenshot({ path: join(output, `${width}-${theme}-route-pending.png`) });
-      // A later navigation wins over a still-pending Settings transition.
+
       await page.locator('[data-sidebar-item][data-view="inbox"]').click();
       const captureInput = page.getByPlaceholder(/add task/i);
       await expect(captureInput).toBeVisible();
@@ -68,8 +68,7 @@ try {
       await expect(input).toHaveValue('');
       await page.screenshot({ path: join(output, `${width}-${theme}-selected.png`) });
 
-      // A slow, previously unopened lazy page must not hide the current page.
-      // Hold the actual production chunk, not a component mock or fixed sleep.
+
       let releaseChunk;
       let chunkRequested = false;
       const chunkReady = new Promise(resolve => { releaseChunk = resolve; });

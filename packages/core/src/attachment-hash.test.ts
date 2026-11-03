@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computeSha256Hex, isSha256Hex, setSha256HexProvider } from './attachment-hash';
 
-// sha256("abc"), the canonical NIST vector.
+
 const ABC_SHA256 = 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
 const abcBytes = new Uint8Array([0x61, 0x62, 0x63]);
 

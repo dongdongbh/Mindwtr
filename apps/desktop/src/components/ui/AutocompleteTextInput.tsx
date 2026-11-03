@@ -8,17 +8,13 @@ type AutocompleteTextInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'v
     onChange: (value: string) => void;
     suggestions: readonly string[];
     maxSuggestions?: number;
-    /** Open the full list on focus with an empty value, so the field also works as a picker. */
+
     showAllWhenEmpty?: boolean;
     createLabel?: string;
     onCreate?: (value: string) => void | Promise<void>;
 };
 
-// Text input with an inline suggestion dropdown. By default, Enter only picks
-// a suggestion after the user arrows into the list, so host forms keep their
-// own Enter semantics. Supplying a create action opts into the task editor's
-// managed-field behavior: the first match is active and unmatched text offers
-// an explicit create row.
+
 export function AutocompleteTextInput({
     value,
     onChange,
@@ -66,9 +62,7 @@ export function AutocompleteTextInput({
         setActiveIndex(hasCreateAction ? 0 : -1);
     }, [hasCreateAction, query]);
 
-    // The list scrolls (max-h-64) and DOM focus stays on the input, so nothing
-    // else follows the highlight — the font picker's few hundred rows left it
-    // below the fold (#1244). scrollIntoView is missing in jsdom.
+
     useEffect(() => {
         if (activeIndex < 0) return;
         document.getElementById(`${listboxId}-option-${activeIndex}`)?.scrollIntoView?.({ block: 'nearest' });
@@ -97,7 +91,7 @@ export function AutocompleteTextInput({
             }
             if (event.key === 'ArrowUp') {
                 event.preventDefault();
-                // From the idle field (index -1) this lands on the last option.
+
                 setActiveIndex((index) => (index <= 0 ? optionCount - 1 : index - 1));
                 return;
             }
@@ -151,8 +145,8 @@ export function AutocompleteTextInput({
                 <div
                     id={listboxId}
                     role="listbox"
-                    // A press on the list's own scrollbar must not blur the input, or the
-                    // list closes before it can be scrolled (#1244).
+
+
                     onMouseDown={(event) => event.preventDefault()}
                     className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg"
                 >

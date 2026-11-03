@@ -39,10 +39,7 @@ function ColorPicker({ value, onChange, label }: { value: string | null; onChang
 
 type EditState = { id: string; name: string; color: string | null };
 
-/**
- * Settings > Data: the workspace list (#1473). Add, rename, switch and delete;
- * the sidebar switcher only appears once a second workspace exists.
- */
+
 export function SettingsWorkspacesSection() {
     const { t } = useLanguage();
     const { list, refresh, nameOf, requestSwitch, requestConfirmation, confirmModal, switching } = useWorkspaces();

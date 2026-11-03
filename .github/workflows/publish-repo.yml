@@ -34,9 +34,7 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
-# All repo publishes serialize on one group regardless of tag: every run pushes
-# to the same gh-pages branch, and two runs on different refs (an RC and a
-# hotfix, say) would otherwise race the push.
+
 concurrency:
   group: publish-repo-gh-pages
   cancel-in-progress: false
@@ -50,10 +48,10 @@ jobs:
       REPO_DIR_SUFFIX: ${{ (github.event_name == 'release' && github.event.release.prerelease || inputs.channel == 'beta') && '-beta' || '' }}
     steps:
       - name: Checkout Code
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
 
       - name: Import GPG Key
-        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
           passphrase: ${{ secrets.GPG_PASSPHRASE }}
@@ -65,7 +63,7 @@ jobs:
       - name: Set release tag (manual)
         if: github.event_name == 'workflow_dispatch'
         run: echo "RELEASE_TAG=${{ inputs.tag }}" >> $GITHUB_ENV
-      
+
       - name: Set release tag (workflow call)
         if: github.event_name == 'workflow_call'
         run: |
@@ -110,8 +108,8 @@ jobs:
       - name: Prepare Repo Directories
         run: |
           set -euo pipefail
-          # Beta packages live in sibling deb-beta/rpm-beta trees so RC installs
-          # are opt-in; the stable deb/rpm trees are never touched by RC runs.
+
+
           mkdir -p "build_repo/deb${REPO_DIR_SUFFIX}" "build_repo/rpm${REPO_DIR_SUFFIX}"
           shopt -s nullglob
           debs=( *.deb )
@@ -123,12 +121,12 @@ jobs:
       - name: Normalize prerelease package versions
         run: |
           set -euo pipefail
-          # RC packages carry the stable base version in their metadata (store
-          # rules keep tauri.conf.json pinned to e.g. 1.1.0), so an RC and its
-          # final stable advertise the same Version to apt/dnf and beta-repo
-          # users would never be offered the stable upgrade. Rewrite the
-          # packaging version to base~rc.N: the tilde sorts below the bare base
-          # version for both dpkg and rpm, so stable supersedes every RC.
+
+
+
+
+
+
           TAG="${RELEASE_TAG:-${GITHUB_REF_NAME}}"
           VERSION="${TAG#v}"
           case "$VERSION" in
@@ -230,11 +228,11 @@ jobs:
           git -C "$pages_dir" config user.email "actions@github.com"
 
           stage_repo() {
-            # Each publish regenerates its channel's index from scratch, so the
-            # channel dir must mirror this release exactly: --delete drops
-            # superseded pool packages and stale repodata that would otherwise
-            # accumulate unindexed forever. Other channels' dirs and root files
-            # (GPG key) are left untouched.
+
+
+
+
+
             local channel_dir name
             for channel_dir in ./build_repo/*/; do
               name="$(basename "$channel_dir")"
@@ -265,13 +263,13 @@ jobs:
               exit 0
             fi
 
-            # gh-pages holds generated output only, so it is published as a
-            # single parentless commit and force-pushed. Keeping history would
-            # retain every superseded .deb/.rpm forever (~35 MB per release,
-            # 1.5 GB by v1.1.5) in a branch every `git clone` fetches. The
-            # concurrency group serializes publishes, and the retry below
-            # re-fetches before restaging, so the force-push cannot clobber a
-            # concurrent one.
+
+
+
+
+
+
+
             commit="$(git -C "$pages_dir" commit-tree "$tree" \
               -m "Publish Linux ${REPO_CHANNEL} repos for ${RELEASE_TAG:-${GITHUB_REF_NAME}}")"
 

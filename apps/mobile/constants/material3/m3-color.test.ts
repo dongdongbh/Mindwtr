@@ -26,7 +26,7 @@ describe('M3Colors', () => {
     expect(M3Colors.dark.surface).toBe('#111318');
   });
   it('orders the tonal surface ladder from lowest to highest (light gets lighter)', () => {
-    // sanity: lowest is the brightest in light mode
+
     expect(M3Colors.light.surfaceContainerLowest).toBe('#FFFFFF');
   });
 });

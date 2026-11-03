@@ -74,7 +74,7 @@ struct InboxScreen: View {
                         } else {
                             header
                             if model.ready {
-                                // Bound opaque metadata after an observed iOS 17 stack overflow.
+
                                 if model.selectedSurface == .inbox {
                                     AnyView(inboxContent)
                                         .onAppear { Task { await model.recordInboxViewBoundaryRendered() } }
@@ -154,7 +154,7 @@ struct InboxScreen: View {
                 Color.clear.onAppear { bottomSafeInset = proxy.safeAreaInsets.bottom }
                     .onChange(of: proxy.safeAreaInsets.bottom) { bottomSafeInset = $0 }
             })
-            // More's content, dismissal backdrop and visible tabs share one modal boundary.
+
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(model.morePresented || model.inboxSortPresented || model.inboxGroupPresented ? .isModal : [])
             .disabled((model.inboxBulkTagPresented || model.inboxBulkRemovePresented || model.inboxBulkOrganizePresented) || model.referenceProjectNextActionPresented || model.savedSearchWritePresented || model.focusSavedFilterPresented || model.boardFiltersPresented || model.calendarItemPresented || model.calendarComposerPresented || model.mindSweepPresented || model.processInboxPresented || !model.focusPanel.isEmpty || (model.selectedSurface == .review
@@ -250,8 +250,8 @@ struct InboxScreen: View {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 60_000_000_000) } catch { return }
                 guard model.selectedSurface == .focus || model.selectedSurface == .review || model.selectedSurface == .calendar || model.selectedSurface == .board, scenePhase == .active else { return }
-                // Core decides which timed tasks have become available. The shared
-                // refresh path also guards capture, pending writes and in-flight work.
+
+
                 await model.refresh()
             }
         }
@@ -291,8 +291,8 @@ struct InboxScreen: View {
                 ScrollView { areaOptions }
             }
             if model.error != nil {
-                // The screen underneath is hidden from VoiceOver while this sheet
-                // is open. Keep uncertain-write recovery in the modal itself.
+
+
                 FailureBanner(model: model, palette: palette)
             }
         }
@@ -325,7 +325,7 @@ struct InboxScreen: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         if excluded { AppIcon(name: "x", size: 16) }
                         else if included {
-                            // Lucide Check, as in RN's area sheet.
+
                             Path { path in
                                 path.move(to: CGPoint(x: 20, y: 6))
                                 path.addLine(to: CGPoint(x: 9, y: 17))
@@ -360,7 +360,7 @@ struct InboxScreen: View {
             inboxFilterChips
             if model.inboxSelectionMode { AnyView(inboxBulkDeleteBar) }
             primaryAction.disabled(!model.inboxActionsEnabled || model.inboxSelectionMode)
-            // Selection uses the same row-local UIKit gesture host as Done and Reference.
+
             List {
                 Group {
                     Text(model.inbox.text("scopeLabel"))
@@ -574,9 +574,8 @@ struct InboxScreen: View {
                             let rows = section.objects("rows")
                             ForEach(rows.indices, id: \.self) { rowIndex in
                                 let row = rows[rowIndex]
-                                // Keep each occurrence's conditional headers in
-                                // its own container instead of flattening repeated
-                                // nested ForEach index 0 into the lazy stack.
+
+
                                 VStack(alignment: .leading, spacing: 0) {
                                     let groups = section.objects("groups").filter { $0.number("start") == rowIndex }
                                     ForEach(groups.indices, id: \.self) { groupIndex in
@@ -764,7 +763,7 @@ struct InboxScreen: View {
                 .accessibilityLabel(controls.object("filters").text("label"))
                 .accessibilityValue(controls.object("filters").text("badge")).accessibilityIdentifier("focus-filters-open")
                 Button { model.toggleOtherFocusSections() } label: {
-                    // Lucide ChevronsUp/Down, matching RN's control.
+
                     Path { path in
                         path.move(to: CGPoint(x: 17, y: 11)); path.addLine(to: CGPoint(x: 12, y: 6)); path.addLine(to: CGPoint(x: 7, y: 11))
                         path.move(to: CGPoint(x: 17, y: 18)); path.addLine(to: CGPoint(x: 12, y: 13)); path.addLine(to: CGPoint(x: 7, y: 18))
@@ -806,7 +805,7 @@ struct InboxScreen: View {
             if key == "focus" && !reorder.isEmpty {
                 Button { Task { await model.openFocusOrder() } } label: {
                     HStack(spacing: 4) {
-                        // Lucide GripVertical paths from RN.
+
                         Path { path in
                             for x in [9.0, 15.0] {
                                 for y in [5.0, 12.0, 19.0] {
@@ -1075,7 +1074,7 @@ struct InboxScreen: View {
                 } label: {
                     let selected = field == "filters" && model.inbox.object("toolbar").object(field).flag("selected")
                     let count = model.inbox.object("toolbar").object(field).text("countLabel")
-                    // RN TaskListHeader: the active-filter count sits beside the icon and the circle grows into a pill.
+
                     let counted = field == "filters" && !count.isEmpty
                     HStack(spacing: 5) {
                         AppIcon(name: icon, size: 16)
@@ -1225,7 +1224,7 @@ struct InboxScreen: View {
         }
         .frame(minHeight: 66)
         .disabled(model.unassignedAreaColorActive || model.settingsAreaCreatePresented)
-        // RN's iOS tab bar uses max(0, inset - 12): it moves at most 12pt into the bottom safe area.
+
         .padding(.bottom, -min(12, bottomSafeInset))
         .background(palette.card.ignoresSafeArea(edges: .bottom))
         .overlay(alignment: .top) { palette.border.frame(height: 0.5) }
@@ -1278,7 +1277,7 @@ struct InboxScreen: View {
         } else if model.quickAccessView == "board" {
             Image(systemName: "rectangle.split.3x1").font(.system(size: 24)).frame(width: 24, height: 24).accessibilityHidden(true)
         } else if model.quickAccessView == "calendar" || model.quickAccessView == "contexts" {
-            // Lucide Calendar/Circle paths used by RN's quick-access tab.
+
             Path { path in
                 if model.quickAccessView == "contexts" { path.addEllipse(in: CGRect(x: 2, y: 2, width: 20, height: 20)) }
                 else {
@@ -1359,8 +1358,8 @@ private struct TaskCardLongPressRegistrar: UIViewRepresentable {
 
         private func attach() {
             guard enabled, window != nil else { press.detach(); return }
-            // List provides a row-local UIKit host on both iOS 17 and newer
-            // systems. Never put a per-card recognizer on a shared scroll/window.
+
+
             var ancestor = superview
             var host: UIView?
             while let candidate = ancestor {
@@ -1401,8 +1400,8 @@ private struct TaskCardLongPressRegistrar: UIViewRepresentable {
         func configure(enabled: Bool, action: (() -> Void)?) {
             requestedEnabled = enabled && !retired
             self.action = requestedEnabled ? action : nil
-            // Keep an already recognized touch cancelled through its release,
-            // even if selection rerenders this card with a nil handler.
+
+
             if !requestedEnabled && !recognizing { detach() }
         }
         func attach(to host: UIView, scroll: UIScrollView) {
@@ -1599,7 +1598,7 @@ struct TaskCard: View {
         .environment(\.layoutDirection, meta.text("textDirection") == "rtl" ? .rightToLeft : .leftToRight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(meta.text("accessibilityLabel"))
-        // Observe the whole card without adding a hit-testing overlay or replacing taps.
+
         .modifier(TaskCardSelectionLongPress(identity: row.text("id"), enabled: onSelectionStart != nil, action: {
             onSelectionStart?(row)
         }))
@@ -1761,7 +1760,7 @@ struct FailureBanner: View {
     }
 }
 
-/// Local presentation ownership also works inside the task editor's existing sheet.
+
 struct DiagnosticsFailureAction: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -1812,7 +1811,7 @@ private struct FocusOrderItem: Identifiable {
     var id: String { row.text("id") }
 }
 
-// App-level ownership deliberately outlives the completed Reference row.
+
 private struct ReferenceProjectNextActionPrompt: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette
@@ -2252,8 +2251,8 @@ private struct InboxBulkRemoveTagDialog: View {
         GeometryReader { geometry in
             ZStack {
                 Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { if !model.busy && !model.retryNeeded { model.closeInboxBulkRemove() } }.accessibilityHidden(true)
-                // Keep one query field as keyboard height changes. Accessibility
-                // text or less than 500pt moves only informational copy into the scroll.
+
+
                 contents(scrollingHeading: dynamicTypeSize.isAccessibilitySize || geometry.size.height < 500)
                 .padding(16).frame(maxWidth: 420, maxHeight: max(0, geometry.size.height - 32))
                 .background(palette.card, in: RoundedRectangle(cornerRadius: 12))
@@ -2266,7 +2265,7 @@ private struct InboxBulkRemoveTagDialog: View {
     }
 }
 
-// Task743: rendering consumes core's Organize view/edit models; no draft/date/token rules here.
+
 private struct InboxBulkOrganizeDialog: View {
     @ObservedObject var model: CoreModel
     let palette: AppPalette

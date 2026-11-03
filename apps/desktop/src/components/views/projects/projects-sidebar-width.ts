@@ -82,6 +82,6 @@ export function saveProjectsSidebarWidth(width: number, storage?: StorageLike | 
             String(clampProjectsSidebarWidth(width)),
         );
     } catch {
-        // storage unavailable — fall back to in-memory only
+
     }
 }

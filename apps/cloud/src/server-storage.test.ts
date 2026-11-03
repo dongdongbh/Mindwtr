@@ -432,9 +432,7 @@ describe('ensureDurableDirectory', () => {
         ]);
     });
 
-    // S4: only first creation pays the durability barrier. A retry that finds the
-    // target already visible (mkdir succeeded, the earlier parent fsync did not)
-    // must not re-sync — see the fast-path comment on ensureDurableDirectory.
+
     test('does not re-sync an already-visible directory entry on retry after a prior parent fsync failure', () => {
         const harness = createDurableDirectoryFileSystem(['/cloud'], 'fsync-parent', 1);
 
@@ -456,9 +454,7 @@ describe('ensureDurableDirectory', () => {
         ]);
     });
 
-    // S4: every lock acquisition and every GET/HEAD /v1/data reaches this same
-    // already-durable-directory case. It must be free of filesystem durability
-    // calls entirely, not just cheaper than creation.
+
     test('does not touch the parent at all when the target directory already exists', () => {
         const harness = createDurableDirectoryFileSystem(['/cloud', '/cloud/data']);
 

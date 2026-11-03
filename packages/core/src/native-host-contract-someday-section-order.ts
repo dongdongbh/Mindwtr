@@ -29,8 +29,7 @@ const validId = (value: unknown): value is string =>
     typeof value === 'string' && Boolean(value.trim()) && value.length <= 500
     && !value.includes('\0') && !hasUnpairedSurrogate(value);
 
-// Every displayed ID must name exactly one raw row. The shared renumbering
-// uses an ID map, including for rows whose order number already matches.
+
 const visibleIds = (sections: readonly unknown[]): string[] | null => {
     const ids = sortViewSectionDefinitions(sections as ViewSectionDefinition[]).map((row) => row.id);
     const counts = new Map<string, number>();
@@ -64,7 +63,7 @@ const readRequest = (input: unknown): NativeSomedaySectionOrderRequest | null =>
     return request;
 };
 
-/** Pure journal validation, before SQLite opens. */
+
 export function validateSomedaySectionOrderWrite(input: unknown): NativeHostResult<NativeSomedaySectionOrderResult> {
     const request = readRequest(input);
     return request ? { ok: true, value: answer(request) }

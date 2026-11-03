@@ -73,30 +73,17 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 
-/*
- * RN's Process Inbox (components/inbox-processing-modal.tsx and inbox-processing/), drawn from core's
- * step view (getInboxProcessingStep): every label, choice, chip, date and suggestion is core's, and
- * each chip carries the exact edit core takes back. Kotlin keeps only what RN's screen keeps: the
- * typed text, the open note, and which date picker is up.
- */
 
-/** RN's INBOX_PROCESSING_MODE_STORAGE_KEY: guided or quick, per device, never synced. */
 const val PROCESSING_MODE_KEY = "mindwtr:view:inboxProcessingMode:v1"
 
-/** RN's readInboxProcessingMode: anything else is guided. */
+
 fun readProcessingMode(prefs: SharedPreferences): String =
     prefs.getString(PROCESSING_MODE_KEY, null)?.takeIf { it == "guided" || it == "quick" } ?: "guided"
 
-/** The two answer commands: a step's choice and Skip. */
+
 val STEP_KINDS = setOf("inboxCommit", "inboxSkip")
 
-/**
- * Process Inbox on screen: core's session, its step view, and an answer whose outcome is unknown
- * ([pending], its exact request). [edits] are control edits with core or waiting for it, sent one at
- * a time; [queued] is an answer tapped while they were. A [hidden] record has no screen: after process
- * death the app lands on the Inbox while the owed request is sent again, and the record stays on disk
- * until core acknowledges or refuses it.
- */
+
 data class InboxProcessing(
     val sessionId: String,
     val view: JSONObject,
@@ -113,7 +100,7 @@ data class InboxProcessing(
     } ?: JSONObject.NULL)
 
     companion object {
-        /** Core's startInboxProcessing reply; null when the queue is empty. */
+
         fun started(reply: JSONObject): InboxProcessing? =
             reply.optJSONObject("view")?.let { InboxProcessing(reply.getString("sessionId"), it) }
 
@@ -126,7 +113,7 @@ data class InboxProcessing(
     }
 }
 
-/** The screen state in the app's no-backup folder: each write is synced and renamed into place, like the editor's draft. */
+
 class ProcessingStore(private val dir: File) {
     private val file = File(dir, "processing")
     fun read(): InboxProcessing? = runCatching { InboxProcessing.restore(JSONObject(file.readText())) }.getOrNull()
@@ -143,18 +130,14 @@ private fun JSONObject.text(name: String): String? = if (!has(name) || isNull(na
 private fun JSONObject.items(name: String): List<JSONObject> = optJSONArray(name)?.let { list -> List(list.length()) { list.getJSONObject(it) } }.orEmpty()
 private fun JSONObject.child(name: String): JSONObject? = if (!has(name) || isNull(name)) null else getJSONObject(name)
 
-/** RN's CHOICE_ICONS (InboxStepFlow), keyed by core's choice icon. */
+
 private val CHOICE_ICONS = mapOf("done" to Lucide.CheckCircle2, "project" to Lucide.Folder, "later" to Lucide.Clock3,
     "delegate" to Lucide.UserRound, "someday" to Lucide.CircleArrowUp, "incubate" to Lucide.CalendarClock, "reference" to Lucide.Book)
 
-/** RN's step layout: the entry questions lay their choices out in two columns (InboxStepFlow renderPrompt). */
+
 private val GRID_STEPS = setOf("decisions", "actionable")
 
-/**
- * RN's full-screen Process Inbox: the progress header (Close, progress, the mode switch, Skip), the item's
- * card, the step, Back, RN's inline toast, and File it. While an answer's retry is owed only that answer
- * runs, the screen is locked, and Back is left to the system.
- */
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(model) {
@@ -169,10 +152,10 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
     }
     var pickDate by rememberSaveable { mutableStateOf<String?>(null) }
     BackHandler(enabled = !failed) { if (!busy) closeProcessing() }
-    // Edits and a queued answer wait while an action runs; they go on once none does.
+
     LaunchedEffect(busy, failed) { if (!busy && !failed) pumpStep() }
-    // Each new question or item starts at the top, as RN's scrollProcessingToTop after every answer (#1445). The question last
-    // shown survives a recreation (a rotation, a theme change), which keeps the user's place.
+
+
     val scroll = rememberScrollState()
     var shownTask by rememberSaveable { mutableStateOf<String?>(null) }
     var shownStep by rememberSaveable { mutableStateOf<String?>(null) }
@@ -201,7 +184,7 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
                     }
                 }
             }
-            // RN reserves the toast's room above the footer, so feedback never covers a decision.
+
             ToastCard(model, Modifier.padding(bottom = 8.dp))
             view.text("fileIt")?.let { label ->
                 Box(Modifier.fillMaxWidth().rnBorderTop(c.border).padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 10.dp)) {
@@ -214,40 +197,34 @@ fun ProcessInboxScreen(model: InboxViewModel, flow: InboxProcessing) = with(mode
     AIOverlays(model)
     pickDate?.let { field ->
         val row = dateRows(view).firstOrNull { it.getString("field") == field }
-        // The row's own picked-day edit (core's setPickedDate) with the picker's day; the row's clock picks a time.
+
         DayPickerDialog(row?.text("date"), { pickDate = null }) { day ->
             row?.let { send(JSONObject(it.getJSONObject("pick").toString()).put("day", day)) }
         }
     }
 }
 
-/** How Process Inbox's page scrolls when it shows a question: as it was, back to the top with RN's animation, or at once. */
+
 internal enum class StepScroll { Keep, Animate, Jump }
 
-/**
- * RN's scrollProcessingToTop (#1445): a new item jumps to the top, a new question on the same item scrolls there animated, and
- * the question already shown ([shownTask], [shownStep]: a recreated screen, after a rotation or a theme change) keeps its place.
- */
+
 internal fun stepScroll(shownTask: String?, shownStep: String?, taskId: String, step: String): StepScroll = when {
     shownTask == null || (shownTask == taskId && shownStep == step) -> StepScroll.Keep
     shownTask != taskId -> StepScroll.Jump
     else -> StepScroll.Animate
 }
 
-/**
- * RN's processingHeader top padding, max(status bar, 10), less the status bar this screen already sits below: RN's
- * statusBarTranslucent sheet starts at the screen's top.
- */
+
 internal fun headerTopPadding(statusBarDp: Float): Float = maxOf(0f, 10f - statusBarDp)
 
-/** RN's processingHeader minHeight 60, which counts its status bar padding (React Native sizes a box with its padding). */
+
 internal fun headerMinHeight(statusBarDp: Float): Float = maxOf(0f, 60f - statusBarDp)
 
-/** Every date row the view shows: the step's own, the delegate's follow-up, and More options' scheduling. */
+
 private fun dateRows(view: JSONObject): List<JSONObject> = listOfNotNull(view.child("dateRow"), view.child("delegate")?.child("followUp")) +
     (view.child("moreOptions")?.child("scheduling")?.items("rows") ?: emptyList())
 
-/** RN's progress header: Close at the left, core's progress label and bar, then the mode switch and Skip. */
+
 @Composable
 private fun ProgressHeader(model: InboxViewModel, flow: InboxProcessing, canSkip: Boolean, locked: Boolean) = with(model) {
     val c = LocalTheme.current.colors
@@ -270,7 +247,7 @@ private fun ProgressHeader(model: InboxViewModel, flow: InboxProcessing, canSkip
                 Box(Modifier.fillMaxWidth(done).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(c.tint))
             }
         }
-        // RN's Edit: the full task editor on this item (#1445); once it closes, the step shows what it saved.
+
         val edit = t("common.edit")
         Box(Modifier.size(44.dp).clickable(enabled = !locked, role = Role.Button) { openEditor(flow.taskId, "task") }
             .semantics { contentDescription = edit }, contentAlignment = Alignment.Center) {
@@ -290,21 +267,18 @@ private fun ProgressHeader(model: InboxViewModel, flow: InboxProcessing, canSkip
     }
 }
 
-/**
- * A text field whose value core's draft holds. The typed text stays as typed; core's value replaces it only
- * when it changes and no edit is still with core, so an older reply never resets newer typing.
- */
+
 @Composable
 private fun DraftInput(key: String, coreValue: String, pending: Boolean, placeholder: String?, description: String, enabled: Boolean,
                        modifier: Modifier, style: TextStyle, singleLine: Boolean = true, minLines: Int = 1,
                        onDone: (() -> Unit)? = null, send: (String) -> Unit) {
     val c = LocalTheme.current.colors
     var field by remember(key) { mutableStateOf(TextFieldValue(coreValue, TextRange(coreValue.length))) }
-    // While the field has focus the typing wins: `pending` is read from an older frame, so a reply to an earlier keystroke could
-    // reset the text mid-typing (the checklist field lost letters that way, S23 run 54).
+
+
     var typing by remember(key) { mutableStateOf(false) }
-    // Keyed on `pending` too: a value core set while a later edit still waited (AI Clarify's title, then its context) shows once
-    // that edit is answered, though the value itself did not change again.
+
+
     LaunchedEffect(key, coreValue, typing, pending) { if (!typing && !pending && field.text != coreValue) field = TextFieldValue(coreValue, TextRange(coreValue.length)) }
     BasicTextField(field, { typed -> val changed = typed.text != field.text; field = typed; if (changed) send(typed.text) },
         enabled = enabled, singleLine = singleLine, minLines = minLines, textStyle = style.copy(color = if (enabled) c.text else c.secondaryText),
@@ -320,12 +294,12 @@ private fun DraftInput(key: String, coreValue: String, pending: Boolean, placeho
         })
 }
 
-/** RN's bordered input (waitingInput, projectSearchInput, contextInput): radius 10, 10 by 8 padding. */
+
 private fun Modifier.inputBox(c: ThemeColors, filled: Boolean = false) =
     fillMaxWidth().clip(RoundedCornerShape(10.dp)).then(if (filled) Modifier.background(c.inputBg) else Modifier)
         .rnBorder(1.dp, c.border, RoundedCornerShape(10.dp)).padding(horizontal = 12.dp, vertical = 10.dp)
 
-/** RN's InboxCaptureCard: the returning mark, the editable title, similar tasks, the note preview, and the note toggle. */
+
 @Composable
 private fun InboxViewModel.CaptureCard(flow: InboxProcessing, locked: Boolean, send: (JSONObject) -> Unit) {
     val c = LocalTheme.current.colors
@@ -354,10 +328,10 @@ private fun InboxViewModel.CaptureCard(flow: InboxProcessing, locked: Boolean, s
         }
         val note = capture.getString("description")
         val preview = capture.getString("notePreview")
-        // Core's Markdown-free preview, as RN shows it.
+
         if (!notesOpen && preview.isNotEmpty()) Text(preview, style = rnText(13, 400, 18), color = c.secondaryText, maxLines = 2)
         val noteLabel = capture.getString("descriptionLabel")
-        // RN's anchorActionsRow: the notes toggle, and AI Clarify while AI is on (its spinner and "Working..." while it runs).
+
         val focus = LocalFocusManager.current
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.heightIn(min = 32.dp).clickable(role = Role.Button) { notesOpen = !notesOpen }
@@ -389,7 +363,7 @@ private fun InboxViewModel.CaptureCard(flow: InboxProcessing, locked: Boolean, s
     }
 }
 
-/** The step, in RN's order: its question and choices, the date row, the delegate section, project and contexts, Someday sections, More options. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StepBody(model: InboxViewModel, flow: InboxProcessing, locked: Boolean, send: (JSONObject) -> Unit,
@@ -449,18 +423,14 @@ private fun StepBody(model: InboxViewModel, flow: InboxProcessing, locked: Boole
     view.child("moreOptions")?.let { MoreOptions(flow, it, locked, send, pickDate) }
 }
 
-/**
- * One accessibility node per button: its label, role and state together. A `.clickable` followed by a separate
- * `.semantics { contentDescription }` splits into two nodes, and the labelled one reads enabled while the button is
- * locked (S23 run 50: "Yes" announced enabled during an owed retry).
- */
+
 private fun Modifier.button(label: String, enabled: Boolean, action: () -> Unit) = clearAndSetSemantics {
     contentDescription = label
     role = Role.Button
     if (enabled) onClick { action(); true } else disabled()
 }
 
-/** RN's ChoiceButton: a card-colored button with core's glyph and label. */
+
 @Composable
 private fun ChoiceButton(choice: JSONObject, compact: Boolean, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -475,7 +445,7 @@ private fun ChoiceButton(choice: JSONObject, compact: Boolean, enabled: Boolean,
     }
 }
 
-/** RN's filled call to action (File it, Create project, Create). */
+
 @Composable
 private fun FilledButton(label: String, enabled: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val theme = LocalTheme.current
@@ -486,7 +456,7 @@ private fun FilledButton(label: String, enabled: Boolean, modifier: Modifier = M
     }
 }
 
-/** A step section with RN's bottom rule (singleSection). */
+
 @Composable
 private fun Section(content: @Composable ColumnScope.() -> Unit) {
     val c = LocalTheme.current.colors
@@ -502,7 +472,7 @@ private fun SectionTitle(icon: ImageVector?, text: String) {
     }
 }
 
-/** RN's small outlined button (startDateButton, startDateClear). */
+
 @Composable
 private fun SmallOutlined(text: String, description: String, enabled: Boolean, filled: Boolean, icon: ImageVector? = null, onClick: () -> Unit) {
     val c = LocalTheme.current.colors
@@ -515,10 +485,7 @@ private fun SmallOutlined(text: String, description: String, enabled: Boolean, f
     }
 }
 
-/**
- * RN's InboxDateSelectorRow: the label, the date button (the system date picker), Clear, the clock (the system time picker, #1445),
- * the time mode, and core's quick dates.
- */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DateRow(row: JSONObject, locked: Boolean, send: (JSONObject) -> Unit, pickDate: (String) -> Unit) {
@@ -556,7 +523,7 @@ private fun DateRow(row: JSONObject, locked: Boolean, send: (JSONObject) -> Unit
     }
 }
 
-/** RN's InboxSuggestionList: core's suggestions; a tap sends the edit core put on each. */
+
 @Composable
 private fun Suggestions(options: List<JSONObject>, locked: Boolean, send: (JSONObject) -> Unit) {
     if (options.isEmpty()) return
@@ -571,7 +538,7 @@ private fun Suggestions(options: List<JSONObject>, locked: Boolean, send: (JSONO
     }
 }
 
-/** RN's InboxExecutionSection: who, core's people, the follow-up date, and the hand-off message through the system share sheet. */
+
 @Composable
 private fun DelegateSection(flow: InboxProcessing, delegate: JSONObject, locked: Boolean, send: (JSONObject) -> Unit, pickDate: (String) -> Unit) {
     val c = LocalTheme.current.colors
@@ -595,7 +562,7 @@ private fun DelegateSection(flow: InboxProcessing, delegate: JSONObject, locked:
     }
 }
 
-/** RN's projectChip: selected on the filter background with a tint border; an area or project dot, none for "No area" and "No project". */
+
 @Composable
 private fun OptionChip(option: JSONObject, prefix: String, locked: Boolean, send: (JSONObject) -> Unit) {
     val c = LocalTheme.current.colors
@@ -611,7 +578,7 @@ private fun OptionChip(option: JSONObject, prefix: String, locked: Boolean, send
     }
 }
 
-/** RN's InboxProjectSection: the current project, the area picker, the search with Create, and core's projects; or the project conversion card. */
+
 @Composable
 private fun InboxViewModel.ProjectSection(flow: InboxProcessing, project: JSONObject, locked: Boolean, send: (JSONObject) -> Unit,
                                           canAnswer: (String, String) -> Boolean) = Section {
@@ -621,7 +588,7 @@ private fun InboxViewModel.ProjectSection(flow: InboxProcessing, project: JSONOb
     val conversion = project.child("conversion")
     val projectLabel = t("taskEdit.projectLabel")
     if (conversion == null) project.child("current")?.let { OptionChip(it, projectLabel, locked, send) }
-    // RN's section picker under the chosen project, when it has sections (#1461).
+
     project.child("sections")?.let { sections ->
         val sectionLabel = sections.getString("label")
         Text(sectionLabel, style = rnText(12, 600), color = c.secondaryText, modifier = Modifier.padding(bottom = 6.dp))
@@ -675,7 +642,7 @@ private fun InboxViewModel.ProjectSection(flow: InboxProcessing, project: JSONOb
     for (option in project.items("projects")) OptionChip(option, projectLabel, locked, send)
 }
 
-/** RN's InboxContextSection for contexts (on the file step) or tags (in More options): the chosen tokens, the input with +, and core's suggestions. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TokenSection(flow: InboxProcessing, tokens: JSONObject, locked: Boolean, send: (JSONObject) -> Unit) = Section {
@@ -727,7 +694,7 @@ private fun TokenSection(flow: InboxProcessing, tokens: JSONObject, locked: Bool
     }
 }
 
-/** RN's More options disclosure: scheduling, organization, and (on the file step) tags. */
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MoreOptions(flow: InboxProcessing, more: JSONObject, locked: Boolean, send: (JSONObject) -> Unit, pickDate: (String) -> Unit) {

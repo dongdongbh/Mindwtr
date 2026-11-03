@@ -18,7 +18,7 @@ async function seedReferences(page: Page, large = false) {
     const data = {
         tasks: [
             task('active-reference', 'key1 key2 key3', { description: 'Research notes: winter garden 资料', projectId: 'Active project' }),
-            // Saved by the older load migration that completed Reference children (#1198).
+
             task('archived-reference', 'Historical reference', {
                 description: 'Previous project notes', projectId: 'Archived project',
                 status: 'done', completedAt: stamp, projectArchivedAt: stamp,
@@ -117,7 +117,7 @@ test('converting an action to Reference keeps an editable checklist and restores
     await expect(listItems.nth(1)).toHaveValue(retainedChecklist[1].title);
     await expect(editor.getByRole('button', { name: 'Checklist 1', exact: true })).toBeVisible();
 
-    // Change status while an item has an uncommitted edit.
+
     const updatedTitle = 'Keep all the garden notes';
     await listItems.nth(1).fill(updatedTitle);
     await editor.getByRole('button', { name: 'Reference', exact: true }).click();

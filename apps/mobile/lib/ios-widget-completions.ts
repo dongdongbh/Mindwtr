@@ -11,9 +11,7 @@ type CompletionDeps = Parameters<typeof applyPendingCompletion>[1] & {
     refreshWidgets: () => Promise<boolean>;
 };
 
-// The extension only owns an App Group outbox. The app claims it durably, then
-// applies the normal store command (including recurrence), flushes storage and
-// publishes a fresh read-only snapshot before removing the pending overlay.
+
 export async function ingestIosWidgetCompletions(deps: CompletionDeps): Promise<number> {
     if (Platform.OS !== 'ios' || isSandboxMode()) return 0;
     const pending = await claimPendingCompletions();
@@ -25,8 +23,8 @@ export async function ingestIosWidgetCompletions(deps: CompletionDeps): Promise<
             const stale = task && !task.deletedAt && !task.purgedAt
                 && task.status !== 'done' && task.status !== 'archived'
                 && buildWidgetCompletionToken(task) !== completion.token;
-            // The action carries the tap time; a garbage or future value is
-            // dropped here so the store falls back to "now".
+
+
             const tappedAt = completion.createdAt > 0 && completion.createdAt <= Date.now()
                 ? new Date(completion.createdAt).toISOString()
                 : undefined;
@@ -36,8 +34,8 @@ export async function ingestIosWidgetCompletions(deps: CompletionDeps): Promise<
             }, deps);
             if (!outcome) continue;
             if (isSandboxMode()) break;
-            // A retry may see an already-completed in-memory task after a failed
-            // save. Still flush before acknowledging; never re-run recurrence.
+
+
             await deps.flushPendingSave();
             if (isSandboxMode()) break;
             if (!await deps.refreshWidgets()) continue;
@@ -49,8 +47,8 @@ export async function ingestIosWidgetCompletions(deps: CompletionDeps): Promise<
                 extra: { releaseCheck: 'v1.3.0/ios-widget-checkoff', outcome },
             });
         } catch (error) {
-            // Keep the claimed record for a later lifecycle retry. Do not let a
-            // failed action discard this row or prevent independent rows draining.
+
+
             void logError(error, { scope: 'widget', extra: { message: 'iOS widget completion ingest failed' } });
         }
     }

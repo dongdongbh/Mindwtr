@@ -13,11 +13,7 @@ import { logError, logInfo, logWarn } from './app-log';
 import { settleWatchChecklist } from '../modules/watch-connectivity';
 import { deleteAsync, documentDirectory, getInfoAsync, readAsStringAsync, readDirectoryAsync } from './file-system';
 
-// Background Shortcuts captures (#845) and the Android quick-capture dialog
-// (#1169, modules/android-widget PendingCaptureWriter.kt): native code only
-// appends JSON files to this directory (with audio bytes in a sibling owned
-// directory); core's drainPendingCaptureQueue turns each into a store write.
-// This file binds it to expo-file-system, the app log and the recorded audio.
+
 export {
     ANDROID_CAPTURE_INTENT_SOURCE,
     ANDROID_QUICK_CAPTURE_SOURCE,
@@ -83,11 +79,7 @@ export function isSafeWatchAudioPath(audioPath: string, id: string): boolean {
     return resolveSafeWatchAudioPath(audioPath, id) !== null;
 }
 
-/**
- * Android's recorder and React Native share the current app files directory,
- * so unlike Watch delivery there is no container relocation to repair. Accept
- * only the canonical, current owned WAV URI for this capture UUID.
- */
+
 export function resolveSafeAndroidQuickCaptureAudioPath(audioPath: string, id: string): string | null {
     if (!documentDirectory || !UUID_PATTERN.test(id) || hasRawDotSegment(audioPath)) return null;
     try {
@@ -97,8 +89,8 @@ export function resolveSafeAndroidQuickCaptureAudioPath(audioPath: string, id: s
         if (
             candidate.protocol !== 'file:'
             || candidate.host !== ''
-            // React Native's URL implementation omits these optional fields
-            // for file URLs. Host and exact URI checks still reject authority.
+
+
             || Boolean(candidate.username)
             || Boolean(candidate.password)
             || candidate.search !== ''
@@ -119,8 +111,8 @@ function resolveSafePendingAudioPath(capture: PendingAudioCapture): string | nul
     if (capture.source === ANDROID_QUICK_CAPTURE_SOURCE) {
         return resolveSafeAndroidQuickCaptureAudioPath(capture.audioPath, capture.id);
     }
-    // Watch payloads predating the source field remain valid and keep their
-    // existing container-relocation behavior.
+
+
     if (!capture.source || capture.source === APPLE_WATCH_SOURCE) {
         return resolveSafeWatchAudioPath(capture.audioPath, capture.id);
     }
@@ -147,7 +139,7 @@ export async function ingestPendingCaptures({ transcribeAudio, ...deps }: Ingest
             warn: (message, context) => logWarn(message, context),
             error: (error, context) => logError(error, context),
         },
-        // Core removes a check-off whose record write failed and keeps an unsaved item queued; this line proves either ran.
+
         onUnfinished: (state) => logWarn('Pending capture left unfinished', {
             scope: 'capture',
             extra: { releaseCheck: 'v1.3.4/pending-capture-unfinished', state },

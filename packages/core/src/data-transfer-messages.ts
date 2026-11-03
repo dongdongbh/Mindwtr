@@ -1,21 +1,18 @@
-/**
- * Settings › Data's preview and result texts, the one home for both apps: React Native's backup actions hook
- * (use-sync-settings-backup-actions.ts) and the native apps' backup document (native-backup-document.ts) both build them here.
- * Each builder takes the caller's translator (RN's `tr`, the native host's template translator). Moved from the RN hook
- * byte-identical (its parity fixture: use-sync-settings-backup-actions.parity.fixtures.json).
- */
+
+
+
 import { createImportDiagnostics, formatImportDiagnostic, type ImportDiagnostic, type ImportDiagnosticTranslator } from './import-diagnostics';
 
 type Translate = ImportDiagnosticTranslator;
 type ProjectLine = { name: string; taskCount: number; areaName?: string };
 
-// A warning is RN's sentence, or a diagnostic the native backup document already built from its stored code and count.
+
 type Warning = string | ImportDiagnostic;
 const warningLines = (warnings: readonly Warning[], t: Translate): string[] => warnings
     .map((warning) => typeof warning === 'string' ? createImportDiagnostics([warning], 'warning')[0] : warning)
     .map((diagnostic) => formatImportDiagnostic(diagnostic, t));
 
-/** The first four projects (`• [area / ]name: count`), then how many more. */
+
 const projectLines = (projects: readonly ProjectLine[], t: Translate, withArea: boolean): string[] => {
     const lines = projects
         .slice(0, 4)
@@ -26,13 +23,10 @@ const projectLines = (projects: readonly ProjectLine[], t: Translate, withArea: 
     return lines;
 };
 
-// Drops the absent lines only: an '' is the blank line before a project list or the warnings (RN dropped it with filter(Boolean)).
+
 const join = (details: (string | null)[]): string => details.filter((line) => line !== null).join('\n');
 
-/**
- * Restore and merge preview the same file identically; only the sentence about what the action does to local data differs
- * ([effect]).
- */
+
 export function buildBackupPreviewSummary(validation: {
     metadata?: { backupAt?: string | null; fileName?: string | null; taskCount?: number; projectCount?: number } | null;
     diagnostics?: readonly ImportDiagnostic[];
@@ -133,7 +127,7 @@ export function buildMindwtrCsvPreviewSummary(preview: {
     ]);
 }
 
-/** Merge backup's result: what changed, then the snapshot its Undo restores. */
+
 export const buildMergeResultMessage = (merged: { added: number; updated: number }, snapshotName: string, t: Translate): string => [
     t('settings.mergeBackupSummary', { addedCount: merged.added, updatedCount: merged.updated }),
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
@@ -147,10 +141,7 @@ export const buildTodoistResultMessage = (result: { importedTaskCount: number; i
     t('settings.backupMobile.recoverySnapshotSaved', { snapshotName }),
 ]);
 
-// Import results list warnings before the snapshot line: the phone toast shows only the first
-// four lines, and a skip reason cut off below the snapshot name left "Imported 0" unexplained (#1447).
 
-/** TickTick's and DGT GTD's result (the same lines). */
 export const buildAreaImportResultMessage = (result: {
     importedTaskCount: number; importedProjectCount: number; importedAreaCount: number; importedChecklistItemCount: number; warnings: readonly Warning[];
 }, snapshotName: string, t: Translate): string => join([

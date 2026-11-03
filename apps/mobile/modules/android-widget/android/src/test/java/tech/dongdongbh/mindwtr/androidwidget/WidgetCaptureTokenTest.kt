@@ -38,7 +38,7 @@ class WidgetCaptureTokenTest {
   private fun widgetIntent(id: Int, kind: WidgetKind = WidgetKind.TASKS): Intent =
     shadowOf(WidgetRenderer.capturePendingIntent(context, id, kind)).savedIntent
 
-  // Each emitted form is pinned to round-trip through core parseQuickAdd in widget-capture-token.test.ts.
+
   @Test fun captureTextKeepsOnlyTokensQuickAddParsesUnaided() {
     for ((listId, expected) in listOf(
       "context:@Todd" to "@Todd ", "tag:#errand-1" to "#errand-1 ", "context:@Büro" to "@Büro ",
